@@ -2,6 +2,7 @@ const loginLinks = [...document.querySelectorAll("[data-login]")];
 const accountButton = document.querySelector("[data-account]");
 const logoutButton = document.querySelector("[data-logout]");
 const status = document.querySelector("[data-auth-status]");
+const isGitHubPages = window.location.hostname === "aniilogs.github.io";
 
 function showSignedOut(message = "Sign in to sync progress and prepare your future public profile.") {
   for (const link of loginLinks) link.hidden = false;
@@ -62,4 +63,14 @@ if (authResult) {
   history.replaceState({}, "", window.location.pathname);
 }
 
-refreshAccount();
+if (isGitHubPages) {
+  for (const link of loginLinks) {
+    link.href = "#profiles";
+    link.classList.add("is-disabled");
+    link.setAttribute("aria-disabled", "true");
+    link.textContent = "Discord sign-in soon";
+  }
+  status.textContent = "Account sync is coming later. The public map will remain available to everyone.";
+} else {
+  refreshAccount();
+}

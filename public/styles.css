@@ -102,6 +102,7 @@ nav a:hover { background: #fff8e7; color: var(--teal); }
 }
 .discord-button:hover, .primary-button:hover, .secondary-button:hover { transform: translateY(-2px); }
 .discord-button { background: #6674ee; color: #fff; box-shadow: 0 7px 18px rgba(88, 101, 242, 0.23); }
+.discord-button.is-disabled, .secondary-button.is-disabled { background: rgba(255, 250, 240, 0.58); color: var(--ink-soft); box-shadow: none; cursor: default; }
 .avatar-button { background: #dff8e8; color: var(--ink); }
 .quiet-button { background: transparent; color: var(--ink-soft); }
 
