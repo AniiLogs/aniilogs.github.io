@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { lstat, readFile, readdir } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { extname, relative, resolve, sep } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const publicRoot = resolve(root, "public");
@@ -21,10 +20,12 @@ async function collectFiles(directory, files = []) {
   return files;
 }
 
-async function sha256(path) {
-  const digest = createHash("sha256");
-  for await (const chunk of createReadStream(path)) digest.update(chunk);
-  return digest.digest("hex");
+const canonicalTextExtensions = new Set([".css", ".html", ".js", ".json", ".txt"]);
+
+async function canonicalBytes(path) {
+  const bytes = await readFile(path);
+  if (!canonicalTextExtensions.has(extname(path).toLowerCase())) return bytes;
+  return Buffer.from(bytes.toString("utf8").replaceAll("\r\n", "\n"), "utf8");
 }
 
 if (review.schemaVersion !== 1 || !Number.isInteger(review.packageVersion)) {
@@ -45,11 +46,11 @@ const paths = (await collectFiles(publicRoot)).sort((left, right) => {
 const tree = createHash("sha256");
 let totalBytes = 0;
 for (const path of paths) {
-  const metadata = await lstat(path);
   const name = relative(publicRoot, path).split(sep).join("/");
-  const digest = await sha256(path);
-  totalBytes += metadata.size;
-  tree.update(`${name}\0${metadata.size}\0${digest}\n`, "utf8");
+  const bytes = await canonicalBytes(path);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  totalBytes += bytes.length;
+  tree.update(`${name}\0${bytes.length}\0${digest}\n`, "utf8");
 }
 const actual = {
   publicFileCount: paths.length,
