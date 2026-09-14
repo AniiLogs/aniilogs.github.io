@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && node --check public/app.js",
+    "dev": "wrangler dev -c wrangler.worker-local.jsonc",
+    "deploy": "npm run api:deploy",
+    "check": "node --check src/index.js && node --check public/app.js && node --check public/explorer/app-config.js && node --check public/explorer/localization.js && node --check public/explorer/app.js && node --check scripts/validate-live-api.mjs && node --check scripts/validate-public-repository-boundary.mjs && node --check scripts/validate-reviewed-release.mjs",
     "test": "node --test test/*.test.js",
-    "db:migrate:local": "wrangler d1 migrations apply aniilogs-prod --local",
-    "db:migrate:remote": "wrangler d1 migrations apply aniilogs-prod --remote"
+    "repo:validate": "node scripts/validate-public-repository-boundary.mjs",
+    "release:validate": "node scripts/validate-reviewed-release.mjs",
+    "release:deploy-check": "npm run check && npm test && npm run repo:validate && node scripts/validate-reviewed-release.mjs --require-approved",
+    "db:migrate:local": "wrangler d1 migrations apply aniilogs-prod -c wrangler.worker-local.jsonc --local",
+    "db:migrate:remote": "wrangler d1 migrations apply aniilogs-prod --remote",
+    "api:build": "node scripts/build-pages-api.mjs",
+    "api:validate": "node scripts/validate-pages-api.mjs && npm run api:build",
+    "api:smoke": "node scripts/validate-live-api.mjs",
+    "api:dev": "npm run api:build && wrangler pages dev",
+    "api:deploy": "npm run api:validate && wrangler pages deploy .pages-api-dist --project-name aniilogs-api"
   },
   "devDependencies": {
     "wrangler": "4.131.1"

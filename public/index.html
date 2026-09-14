@@ -7,7 +7,8 @@
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Your Aniimo adventure journal</title>
     <link rel="stylesheet" href="/styles.css">
-    <script src="/app.js" defer></script>
+    <script src="/explorer/app-config.js?v=0.6.3" defer></script>
+    <script src="/app.js?v=0.2.2" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -17,14 +18,16 @@
         <span class="brand-name">Anii<span>Logs</span></span>
       </a>
       <nav aria-label="Main navigation">
-        <a href="#map">Map</a>
-        <a href="#item-log">Item-log</a>
+        <a href="/explorer/">Map</a>
+        <a href="/explorer/?view=itemlog">Item-log</a>
         <a href="#profiles">Profiles</a>
       </nav>
       <div class="account-actions">
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to light mode" title="Switch to light mode"><span aria-hidden="true">☾</span></button>
         <a class="discord-button" href="/api/auth/discord/start" data-login><span aria-hidden="true">✦</span> Sign in</a>
         <button class="avatar-button" type="button" data-account hidden></button>
         <button class="quiet-button" type="button" data-logout hidden>Log out</button>
+        <button class="danger-button" type="button" data-delete-account hidden>Delete account</button>
       </div>
     </header>
 
@@ -35,7 +38,7 @@
           <h1>Every trail tells <span>a story.</span></h1>
           <p class="hero-copy">Mark what you discover, fill your item journal, and keep your Aniimo adventure together in one bright little corner of the world.</p>
           <div class="hero-actions">
-            <a class="primary-button" href="#map">Explore the map <span aria-hidden="true">→</span></a>
+            <a class="primary-button" href="/explorer/">Explore the map <span aria-hidden="true">→</span></a>
             <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
           </div>
           <p class="status" data-auth-status>Checking account status…</p>
@@ -85,21 +88,21 @@
             <p class="card-kicker">First destination</p>
             <h3>Interactive map</h3>
             <p>Find landmarks, filter discoveries, and remember where your wandering took you.</p>
-            <span class="coming-soon"><i></i> Release data refresh pending</span>
+            <a class="coming-soon" href="/explorer/"><i></i> Open the map</a>
             <div class="card-scenery" aria-hidden="true"><span class="scenery-hill hill-back"></span><span class="scenery-hill hill-front"></span><span class="scenery-pin">✦</span></div>
           </article>
           <article id="item-log" class="feature-card item-feature">
             <div class="card-icon item-icon" aria-hidden="true"><span>◇</span></div>
             <p class="card-kicker">Collector's corner</p>
             <h3>Item-log</h3>
-            <p>Browse reviewed items, carried treasures, Rune details, and known sources.</p>
-            <span class="coming-soon"><i></i> Coming next</span>
+            <p>Browse reviewed current-build items, carried treasures, and known sources.</p>
+            <a class="coming-soon" href="/explorer/?view=itemlog"><i></i> Browse the Item-log</a>
           </article>
           <article id="profiles" class="feature-card profile-feature">
             <div class="card-icon profile-icon" aria-hidden="true"><span>☺</span></div>
             <p class="card-kicker">Make it yours</p>
             <h3>Explorer profiles</h3>
-            <p>Sign in with Discord and choose what achievements you want to show the community.</p>
+            <p>Sign in with Discord to sync your progress. Profiles stay private until sharing controls are ready.</p>
             <span class="coming-soon"><i></i> Private by default</span>
           </article>
         </div>
@@ -108,8 +111,8 @@
 
     <footer>
       <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
-      <span>An independent community project made for Aniimo explorers.</span>
-      <a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
     </footer>
   </body>
 </html>

@@ -6,6 +6,11 @@ node_modules/
 !.env.example
 coverage/
 dist/
+.pages-api-dist/
 *.log
 .DS_Store
 Thumbs.db
+
+# Reviewed game-derived content is stored in private Cloudflare R2, never GitHub.
+public/explorer/data/
+public/explorer/assets/

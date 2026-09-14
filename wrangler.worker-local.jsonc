@@ -1,8 +1,15 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "aniilogs-api",
-  "pages_build_output_dir": "./.pages-api-dist",
+  "name": "aniilogs-web-local",
+  "main": "src/index.js",
   "compatibility_date": "2026-09-14",
+  "workers_dev": false,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -11,14 +18,11 @@
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [
-    {
-      "binding": "CONTENT",
-      "bucket_name": "aniilogs-data-prod"
-    }
-  ],
   "vars": {
-    "PUBLIC_SITE_ORIGIN": "https://aniilogs.github.io",
+    "PUBLIC_SITE_ORIGIN": "http://127.0.0.1:8787",
     "DISCORD_CLIENT_ID": "1548899251655020634"
+  },
+  "observability": {
+    "enabled": true
   }
 }
