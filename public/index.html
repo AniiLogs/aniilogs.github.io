@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AniiLogs — interactive maps, Item-log, profiles, and community tools for Aniimo.">
+    <title>AniiLogs</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="AniiLogs home">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span>AniiLogs</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#map">Map</a>
+        <a href="#item-log">Item-log</a>
+        <a href="#profiles">Profiles</a>
+      </nav>
+      <div class="account-actions">
+        <a class="discord-button" href="/api/auth/discord/start" data-login>Log in with Discord</a>
+        <button class="avatar-button" type="button" data-account hidden></button>
+        <button class="quiet-button" type="button" data-logout hidden>Log out</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Built for Aniimo explorers</p>
+        <h1>Your journey,<br><span>mapped and remembered.</span></h1>
+        <p class="hero-copy">
+          Explore the world, complete your Item-log, and eventually turn verified
+          adventures into a public profile worth showing off.
+        </p>
+        <div class="hero-actions">
+          <a class="primary-button" href="#map">Explore the map</a>
+          <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
+        </div>
+        <p class="status" data-auth-status>Checking account status…</p>
+      </section>
+
+      <section class="feature-grid" aria-label="AniiLogs features">
+        <article id="map" class="feature-card feature-card-large">
+          <p class="card-number">01</p>
+          <h2>Interactive map</h2>
+          <p>Discover locations, filter markers, and keep completion progress synced across devices.</p>
+          <span class="coming-soon">Release data refresh pending</span>
+        </article>
+        <article id="item-log" class="feature-card">
+          <p class="card-number">02</p>
+          <h2>Item-log</h2>
+          <p>Search reviewed item data, acquisition sources, carried items, and Rune information.</p>
+          <span class="coming-soon">Coming next</span>
+        </article>
+        <article id="profiles" class="feature-card">
+          <p class="card-number">03</p>
+          <h2>Player profiles</h2>
+          <p>Discord-backed accounts with opt-in public achievements and verified game milestones.</p>
+          <span class="coming-soon">Account foundation ready</span>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <span>AniiLogs is an independent community project.</span>
+      <a href="https://github.com/AniiLogs/aniilogs.github.io">Source on GitHub</a>
+    </footer>
+  </body>
+</html>
+
