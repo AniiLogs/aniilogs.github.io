@@ -5,9 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#1a1f22">
     <title>AniiLogs Explorer — Interactive Aniimo map and logs</title>
-    <link rel="stylesheet" href="./styles.css?v=0.9.3">
+    <link rel="stylesheet" href="./styles.css?v=0.9.4-shell-contrast">
   </head>
   <body>
+    <header class="app-topbar">
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">Anii<span>Logs</span></a>
+      <nav aria-label="Main navigation">
+        <a id="topNavMap" href="/explorer/">Map</a>
+        <a id="topNavItemlog" href="/explorer/?view=itemlog">Item-log</a>
+        <a id="topNavProfiles" href="/#profiles">Profiles</a>
+      </nav>
+      <span id="topbarContext" class="app-topbar-context">Map</span>
+    </header>
     <main id="appShell" class="app-shell">
       <aside id="sidebar" class="sidebar" aria-label="Map and tracking controls">
         <header class="brand">
@@ -187,6 +196,6 @@
 
   <script defer src="./app-config.js?v=0.6.3"></script>
   <script defer src="./localization.js?v=0.5.37"></script>
-  <script defer src="./app.js?v=0.9.4-r2.1"></script>
+  <script defer src="./app.js?v=0.9.4-r2.2"></script>
   </body>
 </html>

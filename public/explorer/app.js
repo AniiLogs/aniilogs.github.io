@@ -275,7 +275,7 @@ const THEME_PRESETS = Object.freeze({
       surfaceRaised: "#f3edd8",
       border: "#b7d2c7",
       text: "#24473f",
-      muted: "#5c756d",
+      muted: "#506a62",
       primary: "#4fcda5",
       secondary: "#258c76",
       highlight: "#f4bd4f",
@@ -482,6 +482,10 @@ const state = {
 
 const els = {
   appShell: document.querySelector("#appShell"),
+  topNavMap: document.querySelector("#topNavMap"),
+  topNavItemlog: document.querySelector("#topNavItemlog"),
+  topNavProfiles: document.querySelector("#topNavProfiles"),
+  topbarContext: document.querySelector("#topbarContext"),
   sidebar: document.querySelector("#sidebar"),
   mapMeta: document.querySelector("#mapMeta"),
   cloudSyncLink: document.querySelector("#cloudSyncLink"),
@@ -6720,6 +6724,25 @@ function updateWorkspaceTabs() {
   els.teamPanel.hidden = state.sidebarView !== "team";
   els.mapPanel.classList.toggle("catalog-active", fullPanelView);
   document.body.classList.toggle("catalog-view-active", fullPanelView);
+  const itemlogActive = state.sidebarView === "itemlog";
+  if (itemlogActive) {
+    els.topNavMap?.removeAttribute("aria-current");
+    els.topNavItemlog?.setAttribute("aria-current", "page");
+  } else {
+    els.topNavMap?.setAttribute("aria-current", "page");
+    els.topNavItemlog?.removeAttribute("aria-current");
+  }
+  els.topNavProfiles?.removeAttribute("aria-current");
+  if (els.topbarContext) {
+    els.topbarContext.textContent = {
+      map: "Map",
+      tracking: "Map · Tracking",
+      checklist: "Map · Checklist",
+      aniilog: "Aniilog",
+      itemlog: "Item-log",
+      team: "Team",
+    }[state.sidebarView] || "Map";
+  }
   if (catalogView) {
     renderCatalogPreview();
   } else if (state.sidebarView === "team") {

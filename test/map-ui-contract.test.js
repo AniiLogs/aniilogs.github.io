@@ -42,6 +42,30 @@ test("dark mode is the default and can be switched site-wide", () => {
   assert.match(explorer, /label: "AniiLogs Night"/u);
 });
 
+test("the shared shell keeps primary navigation visible and transitions fluidly", () => {
+  assert.match(explorerHtml, /class="app-topbar"/u);
+  assert.match(explorerHtml, /id="topNavMap"/u);
+  assert.match(explorerHtml, /id="topNavItemlog"/u);
+  assert.match(explorerStyles, /view-transition-name: aniilogs-topbar/u);
+  assert.match(explorerStyles, /@view-transition\s*\{\s*navigation: auto/u);
+  assert.match(landingStyles, /view-transition-name: aniilogs-topbar/u);
+  assert.match(landingStyles, /\.site-header nav\s*\{[^}]*display: flex/u);
+  assert.doesNotMatch(landingStyles, /@media \(max-width: 720px\)[\s\S]*?\bnav\s*\{\s*display: none/u);
+});
+
+test("light and dark themes avoid whole-control opacity and dark-only text colors", () => {
+  assert.match(landingStyles, /:root\[data-color-mode="light"\] \.site-header/u);
+  assert.match(landingStyles, /:root:not\(\[data-color-mode="light"\]\) \.primary-button/u);
+  assert.doesNotMatch(explorerStyles, /\.workspace-tab:disabled\s*\{[^}]*opacity:/u);
+  assert.doesNotMatch(
+    explorerStyles,
+    /\.item-row:not\(\.enabled\):not\(\.partially-enabled\)\s*\{\s*opacity:\s*0\.45/u,
+  );
+  assert.match(explorerStyles, /\.checklist-category-tab\s*\{[\s\S]*?rgba\(var\(--background-rgb\), 0\.82\)/u);
+  assert.match(explorerStyles, /\.catalog-description\s*\{[\s\S]*?color-mix\(in srgb, var\(--muted\)/u);
+  assert.match(explorerStyles, /\.catalog-index-row--tiered \.catalog-index-copy small\s*\{[\s\S]*?var\(--text\)/u);
+});
+
 test("the local private-content bridge is scoped and contains no machine-specific path", () => {
   assert.match(localContentServer, /http:\/\/127\.0\.0\.1:8787/u);
   assert.match(localContentServer, /access-control-allow-origin/u);

@@ -18,17 +18,34 @@
   --shadow: 0 22px 60px rgba(0, 0, 0, 0.38);
 }
 
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation-duration: 1ms; }
+}
+
 :root[data-color-mode="light"] {
   color-scheme: light;
   color: #264740;
   background: #f8f2d7;
   --ink: #24473f;
-  --ink-soft: #5c756d;
+  --ink-soft: #506a62;
   --cream: #fffaf0;
   --paper: #f8f2d7;
   --mint: #4fcda5;
-  --mint-dark: #258c76;
+  --mint-dark: #176b5b;
   --teal: #1c756b;
+  --gold: #8a620c;
+  --coral: #b84c3b;
   --line: rgba(36, 71, 63, 0.14);
   --shadow: 0 22px 60px rgba(51, 92, 80, 0.15);
 }
@@ -76,15 +93,22 @@ button, a { -webkit-tap-highlight-color: transparent; }
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 1.5rem;
-  width: min(1180px, calc(100% - 2rem));
-  min-height: 68px;
-  margin: 1rem auto 0;
-  padding: 0.55rem 0.7rem 0.55rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 24px;
+  width: 100%;
+  min-height: 58px;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
   background: rgba(18, 29, 33, 0.88);
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(18px);
+  view-transition-name: aniilogs-topbar;
+}
+
+:root[data-color-mode="light"] .site-header {
+  background: rgba(255, 250, 240, 0.92);
+  box-shadow: 0 12px 34px rgba(51, 92, 80, 0.15);
 }
 
 .brand { display: inline-flex; align-items: center; gap: 0.65rem; width: fit-content; text-decoration: none; }
@@ -125,7 +149,7 @@ nav a:hover { background: #fff8e7; color: var(--teal); }
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 .discord-button:hover, .primary-button:hover, .secondary-button:hover { transform: translateY(-2px); }
-.discord-button { background: #6674ee; color: #fff; box-shadow: 0 7px 18px rgba(88, 101, 242, 0.23); }
+.discord-button { background: #4f5bd5; color: #fff; box-shadow: 0 7px 18px rgba(79, 91, 213, 0.26); }
 .discord-button.is-disabled, .secondary-button.is-disabled { background: rgba(255, 250, 240, 0.58); color: var(--ink-soft); box-shadow: none; cursor: default; }
 .avatar-button { background: rgba(98, 217, 179, 0.18); color: var(--ink); }
 .quiet-button { background: transparent; color: var(--ink-soft); }
@@ -240,6 +264,16 @@ footer a { font-weight: 800; text-decoration: none; }
   color: var(--ink);
 }
 
+:root:not([data-color-mode="light"]) .primary-button {
+  background: var(--mint);
+  color: #0b211c;
+}
+
+:root[data-color-mode="light"] .trail-tags li,
+:root[data-color-mode="light"] .map-progress {
+  color: var(--ink-soft);
+}
+
 :root:not([data-color-mode="light"]) .world-window {
   border-color: rgba(98, 217, 179, 0.22);
   background: linear-gradient(165deg, #153b41, #17312d 68%, #3f3420 69%);
@@ -279,8 +313,11 @@ footer a { font-weight: 800; text-decoration: none; }
   .world-window { width: min(590px, 100%); min-height: 470px; margin: 0 auto; }
 }
 @media (max-width: 720px) {
-  .site-header { grid-template-columns: 1fr auto; width: calc(100% - 1rem); margin-top: 0.5rem; border-radius: 20px; }
-  nav { display: none; }
+  .site-header { grid-template-areas: "brand account" "nav nav"; grid-template-columns: minmax(0, 1fr) auto; width: 100%; margin: 0; border-radius: 0; }
+  .site-header .brand { grid-area: brand; }
+  .site-header nav { grid-area: nav; display: flex; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .site-header .account-actions { grid-area: account; }
+  .site-header nav::-webkit-scrollbar { display: none; }
   .discord-button { padding-inline: 0.78rem; }
   .hero { min-height: 0; padding: 4rem 0; }
   h1 { font-size: clamp(3.6rem, 18vw, 5.7rem); }
