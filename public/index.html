@@ -3,16 +3,18 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="AniiLogs — interactive maps, Item-log, profiles, and community tools for Aniimo.">
-    <title>AniiLogs</title>
+    <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo explorers.">
+    <meta name="theme-color" content="#f5eecb">
+    <title>AniiLogs — Your Aniimo adventure journal</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
   <body>
+    <div class="sky-speckles" aria-hidden="true"></div>
     <header class="site-header">
       <a class="brand" href="/" aria-label="AniiLogs home">
-        <span class="brand-mark" aria-hidden="true">A</span>
-        <span>AniiLogs</span>
+        <span class="brand-mark" aria-hidden="true"><span class="brand-spark">✦</span><span class="brand-letter">A</span></span>
+        <span class="brand-name">Anii<span>Logs</span></span>
       </a>
       <nav aria-label="Main navigation">
         <a href="#map">Map</a>
@@ -20,7 +22,7 @@
         <a href="#profiles">Profiles</a>
       </nav>
       <div class="account-actions">
-        <a class="discord-button" href="/api/auth/discord/start" data-login>Log in with Discord</a>
+        <a class="discord-button" href="/api/auth/discord/start" data-login><span aria-hidden="true">✦</span> Sign in</a>
         <button class="avatar-button" type="button" data-account hidden></button>
         <button class="quiet-button" type="button" data-logout hidden>Log out</button>
       </div>
@@ -28,44 +30,86 @@
 
     <main>
       <section class="hero">
-        <p class="eyebrow">Built for Aniimo explorers</p>
-        <h1>Your journey,<br><span>mapped and remembered.</span></h1>
-        <p class="hero-copy">
-          Explore the world, complete your Item-log, and eventually turn verified
-          adventures into a public profile worth showing off.
-        </p>
-        <div class="hero-actions">
-          <a class="primary-button" href="#map">Explore the map</a>
-          <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
+        <div class="hero-copy-block">
+          <p class="eyebrow"><span aria-hidden="true">✦</span> An adventure log for Aniimo</p>
+          <h1>Every trail tells <span>a story.</span></h1>
+          <p class="hero-copy">Mark what you discover, fill your item journal, and keep your Aniimo adventure together in one bright little corner of the world.</p>
+          <div class="hero-actions">
+            <a class="primary-button" href="#map">Explore the map <span aria-hidden="true">→</span></a>
+            <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
+          </div>
+          <p class="status" data-auth-status>Checking account status…</p>
+          <ul class="trail-tags" aria-label="Planned AniiLogs tools">
+            <li><span class="tag-dot tag-dot-mint"></span> World map</li>
+            <li><span class="tag-dot tag-dot-gold"></span> Item-log</li>
+            <li><span class="tag-dot tag-dot-coral"></span> Player profiles</li>
+          </ul>
         </div>
-        <p class="status" data-auth-status>Checking account status…</p>
+
+        <div class="world-window" aria-label="A playful preview of the future interactive map">
+          <div class="sun" aria-hidden="true"></div>
+          <div class="cloud cloud-one" aria-hidden="true"></div>
+          <div class="cloud cloud-two" aria-hidden="true"></div>
+          <div class="floating-leaf leaf-one" aria-hidden="true"></div>
+          <div class="floating-leaf leaf-two" aria-hidden="true"></div>
+          <div class="map-card">
+            <div class="map-toolbar"><span><i></i> Meadow Reach</span><span class="map-progress">3 / 12 found</span></div>
+            <div class="mini-map" aria-hidden="true">
+              <div class="river"></div>
+              <div class="land land-one"></div>
+              <div class="land land-two"></div>
+              <div class="trail"></div>
+              <span class="map-pin pin-one">✦</span>
+              <span class="map-pin pin-two">●</span>
+              <span class="map-pin pin-three">◆</span>
+              <div class="companion">
+                <span class="ear ear-left"></span><span class="ear ear-right"></span>
+                <span class="eye eye-left"></span><span class="eye eye-right"></span>
+                <span class="companion-spark">✦</span>
+              </div>
+            </div>
+          </div>
+          <div class="found-bubble"><span>✦</span> New discovery!</div>
+        </div>
       </section>
 
-      <section class="feature-grid" aria-label="AniiLogs features">
-        <article id="map" class="feature-card feature-card-large">
-          <p class="card-number">01</p>
-          <h2>Interactive map</h2>
-          <p>Discover locations, filter markers, and keep completion progress synced across devices.</p>
-          <span class="coming-soon">Release data refresh pending</span>
-        </article>
-        <article id="item-log" class="feature-card">
-          <p class="card-number">02</p>
-          <h2>Item-log</h2>
-          <p>Search reviewed item data, acquisition sources, carried items, and Rune information.</p>
-          <span class="coming-soon">Coming next</span>
-        </article>
-        <article id="profiles" class="feature-card">
-          <p class="card-number">03</p>
-          <h2>Player profiles</h2>
-          <p>Discord-backed accounts with opt-in public achievements and verified game milestones.</p>
-          <span class="coming-soon">Account foundation ready</span>
-        </article>
+      <section class="journey-section" aria-labelledby="journey-title">
+        <div class="section-heading">
+          <p class="eyebrow">Your journey, your way</p>
+          <h2 id="journey-title">Pack light. Remember everything.</h2>
+          <p>AniiLogs is starting small, with the tools every explorer reaches for first.</p>
+        </div>
+        <div class="feature-grid" aria-label="AniiLogs features">
+          <article id="map" class="feature-card map-feature">
+            <div class="card-icon map-icon" aria-hidden="true"><span>⌖</span></div>
+            <p class="card-kicker">First destination</p>
+            <h3>Interactive map</h3>
+            <p>Find landmarks, filter discoveries, and remember where your wandering took you.</p>
+            <span class="coming-soon"><i></i> Release data refresh pending</span>
+            <div class="card-scenery" aria-hidden="true"><span class="scenery-hill hill-back"></span><span class="scenery-hill hill-front"></span><span class="scenery-pin">✦</span></div>
+          </article>
+          <article id="item-log" class="feature-card item-feature">
+            <div class="card-icon item-icon" aria-hidden="true"><span>◇</span></div>
+            <p class="card-kicker">Collector's corner</p>
+            <h3>Item-log</h3>
+            <p>Browse reviewed items, carried treasures, Rune details, and known sources.</p>
+            <span class="coming-soon"><i></i> Coming next</span>
+          </article>
+          <article id="profiles" class="feature-card profile-feature">
+            <div class="card-icon profile-icon" aria-hidden="true"><span>☺</span></div>
+            <p class="card-kicker">Make it yours</p>
+            <h3>Explorer profiles</h3>
+            <p>Sign in with Discord and choose what achievements you want to show the community.</p>
+            <span class="coming-soon"><i></i> Private by default</span>
+          </article>
+        </div>
       </section>
     </main>
 
     <footer>
-      <span>AniiLogs is an independent community project.</span>
-      <a href="https://github.com/AniiLogs/aniilogs.github.io">Source on GitHub</a>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An independent community project made for Aniimo explorers.</span>
+      <a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a>
     </footer>
   </body>
 </html>
