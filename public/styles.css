@@ -5,7 +5,6 @@
   color: #f6f4ed;
   font-synthesis: none;
 }
-
 * { box-sizing: border-box; }
 
 html { scroll-behavior: smooth; }
@@ -173,4 +172,3 @@ footer {
   .feature-card-large { grid-row: auto; min-height: 380px; }
   footer { flex-direction: column; }
 }
-

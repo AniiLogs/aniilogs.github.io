@@ -63,4 +63,3 @@ if (authResult) {
 }
 
 refreshAccount();
-

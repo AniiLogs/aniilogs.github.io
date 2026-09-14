@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;
-
 CREATE TABLE IF NOT EXISTS sessions (
   session_hash TEXT PRIMARY KEY,
   discord_id TEXT NOT NULL REFERENCES users(discord_id) ON DELETE CASCADE,
@@ -27,4 +26,3 @@ CREATE TABLE IF NOT EXISTS profiles (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;
-
