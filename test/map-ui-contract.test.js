@@ -338,3 +338,18 @@ test("the local private-content bridge is scoped and contains no machine-specifi
   assert.match(localContentServer, /no-store/u);
   assert.doesNotMatch(localContentServer, /[A-Z]:\\Users\\/u);
 });
+
+test("collectable tracking remains usable without verified respawn timing", () => {
+  assert.match(explorer, /return Boolean\(spawn && item && spawn\.marker_type === "collect_item"\)/u);
+  assert.doesNotMatch(explorer, /if \(!id \|\| !itemId \|\| !mapId \|\| !respawnSeconds\) return null/u);
+  assert.match(explorer, /"Save to Tracking"/u);
+  assert.match(explorer, /"Respawn timing unavailable"/u);
+  assert.match(explorer, /"Choose an item on the map"/u);
+});
+
+test("signed-in settings present cloud progress instead of browser-storage controls", () => {
+  assert.match(explorer, /if \(!state\.cloudSyncAuthenticated\) \{[\s\S]*?name\.textContent = "This browser"/u);
+  assert.match(explorer, /if \(state\.cloudSyncAuthenticated\) cloudAccount\.append\(cloudIdentity, stats\)/u);
+  assert.match(explorer, /if \(!state\.cloudSyncAuthenticated\) appendSettingsStorageError\(settingsPanel\)/u);
+  assert.match(explorer, /tracking and checklist progress sync across devices/u);
+});

@@ -2336,6 +2336,11 @@ button[aria-pressed="true"] {
   padding: 10px 0;
 }
 
+.tracking-empty span {
+  display: block;
+  margin-bottom: 10px;
+}
+
 .sync-callout,
 .settings-card {
   display: grid;

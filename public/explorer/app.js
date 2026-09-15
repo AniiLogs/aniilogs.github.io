@@ -638,12 +638,7 @@ function respawnEvidenceTitle(value) {
 }
 
 function isTrackableOverworldItem(spawn, item) {
-  return Boolean(
-    spawn
-    && spawn.marker_type === "collect_item"
-    && respawnSourceForSpawn(spawn)
-    && respawnSecondsForSpawn(spawn, item),
-  );
+  return Boolean(spawn && item && spawn.marker_type === "collect_item");
 }
 
 function timestampFor(value) {
@@ -660,7 +655,7 @@ function normalizeTrackingEntry(value) {
   const itemId = String(value.item_id || "").trim();
   const mapId = String(value.map_id || "").trim();
   const respawnSeconds = positiveInteger(value.respawn_seconds);
-  if (!id || !itemId || !mapId || !respawnSeconds) return null;
+  if (!id || !itemId || !mapId) return null;
 
   const startedAt = timestampFor(value.started_at);
   return {
@@ -677,9 +672,9 @@ function normalizeTrackingEntry(value) {
     area_name: String(value.area_name || "").trim(),
     respawn_seconds: respawnSeconds,
     respawn_label: String(value.respawn_label || "").trim(),
-    respawn_source: String(value.respawn_source || "static_spawner_config").trim(),
-    respawn_confidence: String(value.respawn_confidence || "config_backed").trim(),
-    started_at: startedAt && startedAt > 0 ? new Date(startedAt).toISOString() : null,
+    respawn_source: String(value.respawn_source || "").trim(),
+    respawn_confidence: String(value.respawn_confidence || "").trim(),
+    started_at: respawnSeconds && startedAt && startedAt > 0 ? new Date(startedAt).toISOString() : null,
   };
 }
 
@@ -1365,6 +1360,7 @@ function persistLocalTracking({ sync = true } = {}) {
     return true;
   } catch (error) {
     updateLocalStorageError(error);
+    if (sync) scheduleCloudProgressUpload();
     return false;
   }
 }
@@ -1749,16 +1745,27 @@ function renderTracking() {
   els.trackingList.textContent = "";
 
   if (state.localStorageError) {
-    els.trackingList.append(renderSyncCallout(
-      "Browser storage is unavailable",
-      "Tracking changes will remain open only until this page is closed.",
-      { label: "Retry browser storage", onClick: () => { loadLocalTracking(); refreshAccountViews(); }, danger: true },
-    ));
+    els.trackingList.append(state.cloudSyncAuthenticated
+      ? renderSyncCallout(
+        "Offline cache is unavailable",
+        "Tracking changes will still be sent to your signed-in cloud account while this page remains open.",
+      )
+      : renderSyncCallout(
+        "Browser storage is unavailable",
+        "Tracking changes will remain open only until this page is closed.",
+        { label: "Retry browser storage", onClick: () => { loadLocalTracking(); refreshAccountViews(); }, danger: true },
+      ));
   }
   if (!entries.length) {
     const empty = document.createElement("div");
     empty.className = "tracking-empty";
-    empty.textContent = "No items tracked";
+    const emptyLabel = document.createElement("span");
+    emptyLabel.textContent = "No items tracked";
+    const add = document.createElement("button");
+    add.type = "button";
+    add.textContent = "Choose an item on the map";
+    add.addEventListener("click", () => setSidebarView("map"));
+    empty.append(emptyLabel, add);
     els.trackingList.append(empty);
     return;
   }
@@ -1813,23 +1820,29 @@ function renderTracking() {
       statusLabel.textContent = `${respawnEvidenceLabel(entry)}: ready at ${formatLocalReadyTime(readyAt)}`;
       statusLabel.title = `${respawnEvidenceTitle(entry)} ${readyDate.toLocaleString()}`;
       countdown.textContent = remaining ? `Respawns in ${formatCountdown(remaining / 1000)}` : "Ready now";
-    } else {
+    } else if (entry.respawn_seconds) {
       statusLabel.textContent = `${respawnEvidenceLabel(entry)} respawn: ${entry.respawn_label || formatRespawnDuration(entry.respawn_seconds)}`;
       statusLabel.title = respawnEvidenceTitle(entry);
       countdown.textContent = "Not tracking";
+    } else {
+      statusLabel.textContent = "Saved collectable location";
+      statusLabel.title = "This location can sync across your devices, but the current game data does not provide a verified respawn duration.";
+      countdown.textContent = "Respawn timing unavailable";
     }
     status.append(statusLabel, countdown);
 
     const actions = document.createElement("div");
     actions.className = "tracking-actions";
-    const action = document.createElement("button");
-    action.type = "button";
-    action.textContent = readyAt ? "Reset" : "Start Tracking";
-    action.disabled = pending;
-    action.addEventListener("click", () => {
-      updateTrackingStarted(entry.id, readyAt ? null : new Date().toISOString());
-    });
-    actions.append(action);
+    if (entry.respawn_seconds) {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.textContent = readyAt ? "Reset" : "Start Tracking";
+      action.disabled = pending;
+      action.addEventListener("click", () => {
+        updateTrackingStarted(entry.id, readyAt ? null : new Date().toISOString());
+      });
+      actions.append(action);
+    }
 
     card.append(header, status, actions);
     fragment.append(card);
@@ -2371,16 +2384,6 @@ function renderSettings() {
   );
   settingsPanel.append(selectionPlacementCard);
 
-  const account = document.createElement("div");
-  account.className = "settings-card";
-  const identity = document.createElement("div");
-  identity.className = "settings-account";
-  const name = document.createElement("strong");
-  name.textContent = "This browser";
-  const detail = document.createElement("small");
-  detail.textContent = "Local tracking and checklist data";
-  identity.append(name, detail);
-
   const stats = document.createElement("div");
   stats.className = "settings-stats";
   const timerStat = document.createElement("div");
@@ -2399,17 +2402,28 @@ function renderSettings() {
   completeStat.append(completeValue, completeLabel);
   stats.append(timerStat, completeStat);
 
-  const actions = document.createElement("div");
-  actions.className = "settings-actions";
-  const reset = document.createElement("button");
-  reset.type = "button";
-  reset.className = "settings-danger";
-  reset.textContent = state.pendingReset ? "Resetting..." : "Reset browser data";
-  reset.disabled = state.pendingReset;
-  reset.addEventListener("click", resetLocalData);
-  actions.append(reset);
-  account.append(identity, stats, actions);
-  settingsPanel.append(account);
+  if (!state.cloudSyncAuthenticated) {
+    const account = document.createElement("div");
+    account.className = "settings-card";
+    const identity = document.createElement("div");
+    identity.className = "settings-account";
+    const name = document.createElement("strong");
+    name.textContent = "This browser";
+    const detail = document.createElement("small");
+    detail.textContent = "Local tracking and checklist data";
+    identity.append(name, detail);
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "settings-danger";
+    reset.textContent = state.pendingReset ? "Resetting..." : "Reset browser data";
+    reset.disabled = state.pendingReset;
+    reset.addEventListener("click", resetLocalData);
+    actions.append(reset);
+    account.append(identity, stats, actions);
+    settingsPanel.append(account);
+  }
 
   const cloudAccount = document.createElement("div");
   cloudAccount.className = "settings-card";
@@ -2419,11 +2433,12 @@ function renderSettings() {
   cloudTitle.textContent = "Cloud account";
   const cloudDetail = document.createElement("small");
   cloudDetail.textContent = state.cloudSyncAuthenticated
-    ? "Signed in with Discord · profile private by default"
+    ? "Signed in with Discord · tracking and checklist progress sync across devices"
     : CLOUD_SYNC_ENABLED
       ? "Not signed in · browser progress remains local"
       : "Account sync is not configured in this preview";
   cloudIdentity.append(cloudTitle, cloudDetail);
+  if (state.cloudSyncAuthenticated) cloudAccount.append(cloudIdentity, stats);
   const cloudActions = document.createElement("div");
   cloudActions.className = "settings-actions";
   const privacyLink = document.createElement("a");
@@ -2449,7 +2464,8 @@ function renderSettings() {
     signIn.textContent = "Sign in with Discord";
     cloudActions.append(signIn);
   }
-  cloudAccount.append(cloudIdentity, cloudActions);
+  if (!state.cloudSyncAuthenticated) cloudAccount.append(cloudIdentity);
+  cloudAccount.append(cloudActions);
   settingsPanel.append(cloudAccount);
 
   const aniilogDisplay = document.createElement("section");
@@ -2485,7 +2501,7 @@ function renderSettings() {
   magicAttackToggle.append(magicAttackInput, magicAttackCopy);
   aniilogDisplay.append(displayCopy, magicAttackToggle);
   settingsPanel.append(aniilogDisplay);
-  appendSettingsStorageError(settingsPanel);
+  if (!state.cloudSyncAuthenticated) appendSettingsStorageError(settingsPanel);
 }
 
 function openSettings() {
@@ -9684,7 +9700,7 @@ function renderSelectionDetail(detail, spawn, item) {
       track.textContent = "Open Tracking";
       track.addEventListener("click", () => setSidebarView("tracking"));
     } else {
-      track.textContent = "Track Respawn";
+      track.textContent = respawnSecondsForSpawn(spawn, item) ? "Track Respawn" : "Save to Tracking";
       track.addEventListener("click", () => {
         addTrackingForSpawn(spawn, item);
       });
