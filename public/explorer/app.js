@@ -85,9 +85,6 @@ const MOBILE_LAYOUT_QUERY = window.matchMedia(
   "(max-width: 820px), (max-height: 540px) and (pointer: coarse)",
 );
 const DESKTOP_SIDEBAR_QUERY = window.matchMedia("(min-width: 821px) and (pointer: fine)");
-// Legacy hand-authored overlays are intentionally disabled. Current interiors
-// are navigated from package-backed map sections and the map selector.
-const UNDERGROUND_MAP_LAYERS = Object.freeze({});
 // Reserved for temporarily suppressing incomplete physical reward sources.
 const TEMPORARILY_HIDDEN_ITEM_IDS = new Set();
 const ANIILOG_STAT_CONFIG = Object.freeze([
@@ -7221,35 +7218,55 @@ function renderMapSections() {
 }
 
 function undergroundLayerForCurrentMap() {
-  return UNDERGROUND_MAP_LAYERS[state.activeMapId] || null;
+  const map = currentMap();
+  const sourceCrop = map?.transform?.source_crop;
+  const sections = Array.isArray(map?.map_sections) ? map.map_sections : [];
+  if (!sourceCrop || !sections.length) return null;
+  const plans = sections.flatMap((section) => {
+    const target = state.data?.mapsById?.get(section.target_map_id);
+    const crop = target?.atlas_crop;
+    if (!target?.image || !crop) return [];
+    const layerNumber = Number(target.layer?.layer ?? section.layer);
+    const duplicateLabel = sections.some((candidate) => (
+      candidate !== section && candidate.label === section.label
+    ));
+    const label = duplicateLabel && Number.isFinite(layerNumber)
+      ? `${section.label} · Layer ${layerNumber}`
+      : section.label;
+    return [{
+      id: section.target_map_id,
+      label,
+      image: target.image,
+      left: Number(crop.left) - Number(sourceCrop.left),
+      top: Number(crop.top) - Number(sourceCrop.top),
+      width: Number(target.width),
+      height: Number(target.height),
+    }];
+  });
+  return plans.length ? { defaultPlanId: plans[0].id, plans } : null;
 }
 
 function selectedUndergroundPlanIndex(layer = undergroundLayerForCurrentMap()) {
   if (!layer?.plans?.length) return -1;
   const selectedId = state.undergroundForegroundPlans.get(state.activeMapId) || layer.defaultPlanId;
-  const modes = [{ id: "all", label: "All underground areas" }, ...layer.plans];
-  const selectedIndex = modes.findIndex((plan) => plan.id === selectedId);
+  const selectedIndex = layer.plans.findIndex((plan) => plan.id === selectedId);
   return selectedIndex >= 0 ? selectedIndex : 0;
 }
 
 function updateUndergroundPlanOrdering() {
   const layer = undergroundLayerForCurrentMap();
-  const modes = layer?.plans?.length
-    ? [{ id: "all", label: "All underground areas" }, ...layer.plans]
-    : [];
+  const modes = layer?.plans || [];
   const selectedIndex = selectedUndergroundPlanIndex(layer);
   const selectedMode = modes[selectedIndex];
-  const showAll = selectedMode?.id === "all";
   els.mapUndergroundLayer.querySelectorAll(".map-underground-plan").forEach((planElement) => {
-    const visible = showAll || planElement.dataset.planId === selectedMode?.id;
+    const visible = planElement.dataset.planId === selectedMode?.id;
     planElement.classList.toggle("is-foreground", visible);
     planElement.hidden = !visible;
-    planElement.style.zIndex = visible ? "1" : "0";
   });
 
   if (!selectedMode) return;
   state.undergroundForegroundPlans.set(state.activeMapId, selectedMode.id);
-  els.undergroundPlanToggleLabel.textContent = selectedMode.id === "all" ? "All" : selectedMode.label;
+  els.undergroundPlanToggleLabel.textContent = selectedMode.label;
   const nextIndex = (selectedIndex + 1) % modes.length;
   const label = `Showing ${selectedMode.label}. Switch to ${modes[nextIndex].label}`;
   els.undergroundPlanToggle.setAttribute("aria-label", label);
@@ -7263,7 +7280,7 @@ function updateUndergroundMapLayerVisibility() {
   els.undergroundLayerToggle.hidden = !layer;
   els.undergroundPlanToggle.hidden = !visible || (layer?.plans?.length || 0) < 2;
   els.undergroundLayerToggle.setAttribute("aria-pressed", String(visible));
-  const label = visible ? "Hide underground map" : "Show underground map";
+  const label = visible ? "Hide interior maps" : "Show interior maps";
   els.undergroundLayerToggle.setAttribute("aria-label", label);
   els.undergroundLayerToggle.title = label;
   if (layer) {
@@ -7282,19 +7299,17 @@ function renderUndergroundMapLayer() {
       const planElement = document.createElement("div");
       planElement.className = "map-underground-plan";
       planElement.dataset.planId = plan.id;
-      plan.tiles.forEach((tile) => {
-        const image = document.createElement("img");
-        image.className = "map-underground-tile";
-        image.src = contentUrl(tile.src);
-        image.alt = "";
-        image.draggable = false;
-        image.setAttribute("aria-hidden", "true");
-        image.style.left = `${tile.left}px`;
-        image.style.top = `${tile.top}px`;
-        image.style.width = `${tile.width}px`;
-        image.style.height = `${tile.height}px`;
-        planElement.append(image);
-      });
+      const image = document.createElement("img");
+      image.className = "map-underground-tile";
+      image.src = contentUrl(plan.image);
+      image.alt = "";
+      image.draggable = false;
+      image.setAttribute("aria-hidden", "true");
+      image.style.left = `${plan.left}px`;
+      image.style.top = `${plan.top}px`;
+      image.style.width = `${plan.width}px`;
+      image.style.height = `${plan.height}px`;
+      planElement.append(image);
       fragment.append(planElement);
     });
     els.mapUndergroundLayer.append(fragment);
@@ -10136,7 +10151,10 @@ function bindEvents() {
     if (!undergroundLayerForCurrentMap()) return;
     state.undergroundLayerVisible = !state.undergroundLayerVisible;
     if (state.undergroundLayerVisible) {
-      state.undergroundForegroundPlans.set(state.activeMapId, "all");
+      const layer = undergroundLayerForCurrentMap();
+      if (!state.undergroundForegroundPlans.has(state.activeMapId)) {
+        state.undergroundForegroundPlans.set(state.activeMapId, layer.defaultPlanId);
+      }
       updateUndergroundPlanOrdering();
     }
     updateUndergroundMapLayerVisibility();
@@ -10144,7 +10162,7 @@ function bindEvents() {
   els.undergroundPlanToggle.addEventListener("click", () => {
     const layer = undergroundLayerForCurrentMap();
     if (!layer?.plans?.length) return;
-    const modes = [{ id: "all", label: "All underground areas" }, ...layer.plans];
+    const modes = layer.plans;
     const nextIndex = (selectedUndergroundPlanIndex(layer) + 1) % modes.length;
     state.undergroundForegroundPlans.set(state.activeMapId, modes[nextIndex].id);
     updateUndergroundPlanOrdering();

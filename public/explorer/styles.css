@@ -7656,7 +7656,14 @@ button.catalog-item-reference {
   right: 16px;
   top: 16px;
   z-index: 4;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.map-layer-controls {
   display: flex;
+  justify-content: flex-end;
   align-items: stretch;
   gap: 8px;
 }
@@ -7801,7 +7808,7 @@ button.catalog-item-reference {
   z-index: 2;
   overflow: hidden;
   pointer-events: none;
-  background: rgb(5 9 13 / 56%);
+  background: transparent;
 }
 
 .map-underground-layer[hidden] {
@@ -7824,6 +7831,7 @@ button.catalog-item-reference {
   max-width: none;
   user-select: none;
   -webkit-user-drag: none;
+  filter: drop-shadow(0 0 3px rgb(0 0 0 / 72%));
 }
 
 .pin-layer {

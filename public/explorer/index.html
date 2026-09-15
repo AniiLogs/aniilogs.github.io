@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#1a1f22">
     <title>AniiLogs Explorer — Interactive Aniimo map and logs</title>
-    <link rel="stylesheet" href="./styles.css?v=0.14.6-lumin-details">
+    <link rel="stylesheet" href="./styles.css?v=0.14.7-current-interiors">
   </head>
   <body>
     <header class="app-topbar">
@@ -175,14 +175,16 @@
             <button id="fitButton" type="button">Fit</button>
           </div>
           <div class="map-readout-cluster">
-            <button id="undergroundPlanToggle" class="map-underground-plan-toggle" type="button" aria-label="Switch underground area" title="Switch underground area" hidden>
-              <span>Area</span>
-              <strong id="undergroundPlanToggleLabel">All</strong>
-            </button>
-            <button id="undergroundLayerToggle" class="map-layer-toggle" type="button" aria-pressed="false" aria-label="Show underground map" title="Show underground map" hidden>
-              <img id="undergroundLayerToggleIcon" alt="">
-            </button>
             <div id="coordinateReadout" class="coordinate-readout">X 0, Y 0</div>
+            <div class="map-layer-controls">
+              <button id="undergroundPlanToggle" class="map-underground-plan-toggle" type="button" aria-label="Switch interior map" title="Switch interior map" hidden>
+                <span>Interior</span>
+                <strong id="undergroundPlanToggleLabel"></strong>
+              </button>
+              <button id="undergroundLayerToggle" class="map-layer-toggle" type="button" aria-pressed="false" aria-label="Show interior maps" title="Show interior maps" hidden>
+                <img id="undergroundLayerToggleIcon" alt="">
+              </button>
+            </div>
           </div>
           <div id="mapViewport" class="map-viewport">
             <div id="contentUnavailable" class="content-unavailable" role="status" hidden>
@@ -242,6 +244,6 @@
   <script defer src="../theme-shell.js?v=0.2.0-account-menu"></script>
   <script defer src="./localization.js?v=0.5.37"></script>
   <script defer src="./progress-storage.js?v=0.1.0"></script>
-  <script defer src="./app.js?v=0.13.5-lumin-details"></script>
+  <script defer src="./app.js?v=0.13.6-current-interiors"></script>
   </body>
 </html>
