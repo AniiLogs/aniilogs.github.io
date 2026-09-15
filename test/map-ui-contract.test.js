@@ -160,8 +160,10 @@ test("the shared shell uses the compact typography scale from the approved map U
   for (const styles of [landingStyles, explorerStyles]) {
     assert.match(styles, /\.theme-picker-label\s*\{[^}]*align-items: center/u);
     assert.match(styles, /\.theme-picker-label\s*\{[^}]*flex-direction: column/u);
-    assert.match(styles, /\.theme-picker\s*\{[^}]*width: 6\.25rem/u);
-    assert.match(styles, /\.theme-picker\s*\{[^}]*min-height: 28px/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*width: 5\.25rem/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*min-height: 24px/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*text-align: center/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*text-align-last: center/u);
     assert.match(styles, /\.account-sign-in\s*\{[^}]*width: 36px/u);
   }
   assert.match(landingStyles, /clamp\(2\.5rem, 5vw, 4\.4rem\)/u);
