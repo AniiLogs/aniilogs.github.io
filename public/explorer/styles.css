@@ -5773,6 +5773,11 @@ button.catalog-item-reference {
   }
 }
 
+.game-rich-text--hint-bgl {
+  color: var(--accent-2, #f0c768);
+  font-weight: 700;
+}
+
 @media (max-width: 1100px) {
   .catalog-rune-slots {
     grid-template-columns: repeat(3, minmax(104px, 1fr));
@@ -7774,6 +7779,23 @@ button.catalog-item-reference {
   overflow: hidden;
   transform-origin: 0 0;
   will-change: transform;
+}
+
+.map-world--unavailable {
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(126, 198, 179, 0.45);
+  background: radial-gradient(circle at center, rgba(126, 198, 179, 0.12), transparent 62%), var(--background);
+}
+
+.map-world--unavailable::before {
+  content: attr(data-unavailable-message);
+  max-width: 560px;
+  padding: 32px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .map-tiles,

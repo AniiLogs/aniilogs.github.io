@@ -4521,7 +4521,7 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
       }
       if (displayed.description) {
         const description = document.createElement("p");
-        description.textContent = displayed.description;
+        appendGameRichText(description, displayed.description);
         copy.append(description);
       }
       if (displayed.objective) {
@@ -5231,7 +5231,7 @@ function renderAniilogCatalogRecord(entry) {
   if (entry.description) {
     const description = document.createElement("p");
     description.className = "catalog-description";
-    description.textContent = entry.description;
+    appendGameRichText(description, entry.description);
     record.append(description);
   }
 
@@ -6023,7 +6023,7 @@ function renderItemLogCatalogRecord(entry) {
   if (entry.description) {
     const description = document.createElement("p");
     description.className = "catalog-description";
-    description.textContent = entry.description;
+    appendGameRichText(description, entry.description);
     record.append(description);
   }
 
@@ -7140,6 +7140,16 @@ function renderMapBase() {
   els.mapTiles.hidden = true;
   els.mapTiles.dataset.signature = "";
   state.tileMapId = map.id;
+  const unavailable = map.availability === "awaiting_current_asset";
+  els.mapWorld.classList.toggle("map-world--unavailable", unavailable);
+  els.mapWorld.dataset.unavailableMessage = unavailable
+    ? `${map.region_label || map.label} is listed, but the current game build does not include a verified map image yet.`
+    : "";
+  if (unavailable) {
+    els.mapImage.hidden = true;
+    els.mapImage.removeAttribute("src");
+    return;
+  }
   els.mapImage.hidden = false;
   els.mapImage.alt = `${map.label} map`;
   delete els.mapImage.dataset.usedFallback;
@@ -9715,13 +9725,14 @@ function prepareData(data) {
     map.id = map.id || (index === 0 ? "country-of-time" : `map-${index + 1}`);
     map.label = map.label || map.id;
     map.group = map.group || "Current maps";
+    if (map.availability === "awaiting_current_asset") {
+      map.width = Number(map.width) || 1200;
+      map.height = Number(map.height) || 800;
+    }
   });
   data.mapsById = new Map(data.maps.map((map) => [map.id, map]));
   data.map = data.maps[0];
-  if (
-    !data.mapsById.has(state.activeMapId)
-    || data.mapsById.get(state.activeMapId)?.availability === "awaiting_current_asset"
-  ) {
+  if (!data.mapsById.has(state.activeMapId)) {
     state.activeMapId = data.maps.find((map) => map.availability !== "awaiting_current_asset")?.id || data.maps[0].id;
   }
   data.itemsById = new Map();
@@ -9875,7 +9886,6 @@ function renderMapTabs() {
       option.value = map.id;
       option.textContent = map.label;
       option.title = map.source_evidence || map.label;
-      option.disabled = map.availability === "awaiting_current_asset";
       group.append(option);
     });
     select.append(group);
@@ -9986,10 +9996,11 @@ function scheduleMapDataLoad(mapId, token) {
 function switchMap(mapId, preserveSharedPins = false) {
   if (!state.data.mapsById.has(mapId)) return;
   const loadToken = ++state.mapLoadToken;
+  const targetMap = state.data.mapsById.get(mapId);
   state.activeMapId = mapId;
   state.mapLoadError = null;
   const dataset = datasetForMap(mapId);
-  state.loadingMapId = dataset ? null : mapId;
+  state.loadingMapId = dataset || !targetMap?.data_url ? null : mapId;
   state.data = prepareData({
     ...state.bootstrap,
     items: dataset?.items || [],
@@ -10285,6 +10296,26 @@ function bindEvents() {
   } else if (typeof MOBILE_LAYOUT_QUERY.addListener === "function") {
     MOBILE_LAYOUT_QUERY.addListener(refreshPinGeometry);
   }
+}
+
+function appendGameRichText(element, value) {
+  const source = String(value || "");
+  const tokenPattern = /<style=([A-Za-z0-9_]+)>|<\/style>/gu;
+  const stack = [element];
+  let cursor = 0;
+  for (const match of source.matchAll(tokenPattern)) {
+    stack.at(-1).append(document.createTextNode(source.slice(cursor, match.index)));
+    if (match[1]) {
+      const span = document.createElement("span");
+      span.className = `game-rich-text game-rich-text--${match[1].toLowerCase().replaceAll("_", "-")}`;
+      stack.at(-1).append(span);
+      stack.push(span);
+    } else if (stack.length > 1) {
+      stack.pop();
+    }
+    cursor = match.index + match[0].length;
+  }
+  stack.at(-1).append(document.createTextNode(source.slice(cursor)));
 }
 
 async function init() {

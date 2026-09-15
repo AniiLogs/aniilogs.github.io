@@ -348,6 +348,31 @@ test("release video content receives a safe MP4 type when R2 metadata is absent"
   assert.match(response.headers.get("content-security-policy") || "", /media-src/u);
 });
 
+test("release map shards fall back to the reviewed asset release", async () => {
+  const bytes = new TextEncoder().encode('{"items":[1],"spawns":[2]}');
+  const requestedKeys = [];
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(key);
+        return key === "releases/3509129/data/maps/country-of-time.json"
+          ? { body: bytes, size: bytes.byteLength }
+          : null;
+      },
+    },
+  };
+  const response = await worker.fetch(new Request(
+    "https://api.aniilogs.example/api/content/releases/3528012/data/maps/country-of-time.json",
+  ), env);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), '{"items":[1],"spawns":[2]}');
+  assert.deepEqual(requestedKeys, [
+    "releases/3528012/data/maps/country-of-time.json",
+    "releases/3509129/data/maps/country-of-time.json",
+  ]);
+});
+
 test("release content fails closed until an audited snapshot is explicitly enabled", async () => {
   let reads = 0;
   const response = await worker.fetch(new Request(

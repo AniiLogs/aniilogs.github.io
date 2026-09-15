@@ -192,8 +192,15 @@ async function getReleaseContent(request, env) {
   if (!key) return json({ error: "Not found" }, 404);
   const read = (objectKey) => request.method === "HEAD" ? env.CONTENT.head(objectKey) : env.CONTENT.get(objectKey);
   let object = await read(key);
-  if (!object && request.method !== "HEAD" && key.startsWith(`releases/${CONTENT_RELEASE}/data/`) && key.endsWith(".json")) {
+  const rootReleaseData = new RegExp(`^releases/${CONTENT_RELEASE}/data/[^/]+\\.json$`, "u");
+  if (!object && request.method !== "HEAD" && rootReleaseData.test(key)) {
     object = await materializeReleaseData(key, env);
+  }
+  if (!object && key.startsWith(`releases/${CONTENT_RELEASE}/data/`)) {
+    object = await read(key.replace(
+      `releases/${CONTENT_RELEASE}/data/`,
+      `releases/${ASSET_FALLBACK_RELEASE}/data/`,
+    ));
   }
   if (!object && key.startsWith(`releases/${CONTENT_RELEASE}/assets/`)) {
     object = await read(key.replace(
@@ -251,6 +258,9 @@ async function materializeReleaseData(key, env) {
       if (Object.hasOwn(patch.item_descriptions || {}, entry.item_id)) {
         entry.description = patch.item_descriptions[entry.item_id];
       }
+      if (Object.hasOwn(patch.item_icons || {}, entry.item_id)) {
+        entry.icon = patch.item_icons[entry.item_id];
+      }
     }
     payload.generated_at_utc = patch.generated_at;
     payload.source_policy = "Current game files; every added description is resolved from the build 3528012 English localization archive.";
@@ -258,6 +268,8 @@ async function materializeReleaseData(key, env) {
     payload.totals.items_with_descriptions = (payload.entries || []).filter((entry) => Boolean(entry.description)).length;
     payload.totals.items_without_descriptions = (payload.entries || []).length - payload.totals.items_with_descriptions;
     payload.totals.descriptions_added_in_3528012 = Object.keys(patch.item_descriptions || {}).length;
+    payload.totals.icons_added_in_3528012 = Object.keys(patch.item_icons || {}).length;
+    payload.totals.items_without_icons = (payload.entries || []).filter((entry) => !entry.icon).length;
   }
   if (filename === "aniilog_data.json") {
     const byFormId = new Map((payload.entries || []).map((entry) => [String(entry.form_id), entry]));
@@ -265,6 +277,12 @@ async function materializeReleaseData(key, env) {
     payload.entries = [...byFormId.values()];
     for (const entry of payload.entries || []) {
       if (Object.hasOwn(patch.aniimo_traits || {}, entry.form_id)) entry.traits = patch.aniimo_traits[entry.form_id];
+      if (Object.hasOwn(patch.aniimo_abilities || {}, entry.form_id)) {
+        const abilities = patch.aniimo_abilities[entry.form_id];
+        entry.skills = abilities.skills || [];
+        entry.ultimates = abilities.ultimates || [];
+        entry.mobility_skills = abilities.mobility_skills || [];
+      }
     }
     payload.generated_at = patch.generated_at;
     payload.publication_status = "private_reviewed";
@@ -272,6 +290,12 @@ async function materializeReleaseData(key, env) {
       ...(payload.data_quality || {}),
       trait_policy: "Per-form gameplay traits use stable form and trait IDs resolved against build 3528012.",
       traits_added_in_3528012: Object.keys(patch.aniimo_traits || {}).length,
+      ability_descriptions_added_in_3528012: Object.keys(patch.aniimo_abilities || {}).length,
+      abilities_without_descriptions: (payload.entries || []).flatMap((entry) => [
+        ...(entry.skills || []).map((ability) => ({ form_id: entry.form_id, field: "skills", ability })),
+        ...(entry.ultimates || []).map((ability) => ({ form_id: entry.form_id, field: "ultimates", ability })),
+        ...(entry.mobility_skills || []).map((ability) => ({ form_id: entry.form_id, field: "mobility_skills", ability })),
+      ].filter(({ ability }) => !ability.description).map(({ form_id, field, ability }) => ({ form_id, field, name: ability.name }))),
       entries_without_traits: (payload.entries || []).filter((entry) => !entry.traits?.length).map((entry) => entry.form_id),
       special_roster_policy: "Lunara, Fennelun, Helion, and Soleon are current-client special forms outside the ordinary country roster and are joined by stable form ID.",
     };

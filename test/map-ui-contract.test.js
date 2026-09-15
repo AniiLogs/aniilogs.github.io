@@ -140,6 +140,13 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
   assert.match(explorerStyles, /\.app-topbar\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
 });
 
+test("listed regions without a verified surface remain selectable and explain their status", () => {
+  assert.doesNotMatch(explorer, /option\.disabled = map\.availability === "awaiting_current_asset"/u);
+  assert.match(explorer, /map-world--unavailable/u);
+  assert.match(explorer, /the current game build does not include a verified map image yet/u);
+  assert.match(explorerStyles, /\.map-world--unavailable::before/u);
+});
+
 test("the page background stays viewport-fixed while mobile content scrolls", () => {
   assert.match(explorerStyles, /body::before\s*\{[\s\S]*?position: fixed;[\s\S]*?inset: 0;/u);
   assert.match(explorerStyles, /body\s*\{[\s\S]*?isolation: isolate;[\s\S]*?background: var\(--background\);/u);
@@ -300,7 +307,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-trait-icons-r3"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-map-content-r5"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
@@ -309,6 +316,15 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorer, /`Game build \$\{CONTENT_PACKAGE_VERSION\}`/u);
   assert.doesNotMatch(explorer, /v0\.9\.4-private-content/u);
   assert.match(explorerStyles, /\.content-unavailable\[hidden\]\s*\{\s*display: none/u);
+});
+
+test("game rich text is rendered with safe DOM nodes", () => {
+  assert.match(explorer, /function appendGameRichText\(element, value\)/u);
+  assert.match(explorer, /<style=\(\[A-Za-z0-9_\]\+\)>\|<\\\/style>/u);
+  assert.match(explorer, /document\.createTextNode/u);
+  assert.match(explorer, /appendGameRichText\(description, displayed\.description\)/u);
+  assert.match(explorer, /appendGameRichText\(description, entry\.description\)/u);
+  assert.match(explorerStyles, /\.game-rich-text--hint-bgl/u);
 });
 
 test("the local private-content bridge is scoped and contains no machine-specific path", () => {
