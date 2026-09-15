@@ -1,9 +1,14 @@
 (() => {
   "use strict";
 
-  const ASSET_VERSION = "20260914-build3509129-r2-v1";
+  const ASSET_VERSION = String(window.ANIILOGS_CONFIG?.contentRevision || "20260915-build3509129-eggs-traits-video-r3");
   const CONTENT_BASE_URL = String(window.ANIILOGS_CONFIG?.contentBaseUrl || ".").replace(/\/+$/u, "");
-  const contentUrl = (value) => `${CONTENT_BASE_URL}/${String(value || "").replace(/^\.\//u, "")}`;
+  const contentUrl = (value) => {
+    const resolved = `${CONTENT_BASE_URL}/${String(value || "").replace(/^\.\//u, "")}`;
+    const url = new URL(resolved, window.location.href);
+    url.searchParams.set("v", ASSET_VERSION);
+    return url.toString();
+  };
   const SUPPORTED_LANGUAGES = Object.freeze({
     en: { label: "English", htmlLang: "en" },
     "zh-CN": { label: "简体中文", htmlLang: "zh-CN" },

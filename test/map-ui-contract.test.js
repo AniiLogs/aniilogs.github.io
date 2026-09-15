@@ -57,7 +57,14 @@ test("mixed current Aniimo art families share one circular portrait treatment", 
   assert.match(explorerStyles, /\.item-row\.aniimo-row \.item-icon,[\s\S]*?border-radius:\s*50%/s);
 });
 
+test("every Aniimo map marker uses a circular portrait frame", () => {
+  assert.match(explorerStyles, /\.pin\.pin-aniimo-spawn \.pin-icon\s*\{[^}]*border-radius:\s*50%/s);
+  assert.match(explorerStyles, /\.pin\.pin-aniimo-spawn \.pin-icon\s*\{[^}]*object-fit:\s*contain/s);
+});
+
 test("packed PetManual videos use their lower grayscale plane as transparency", () => {
+  assert.match(explorer, /ANIILOG_MEDIA_URL = contentUrl\("\.\/data\/aniilog_media\.json"\)/u);
+  assert.match(explorer, /mediaByForm\.size !== payload\.entries\.length/u);
   assert.match(explorer, /function attachPackedAniimoBackdrop\(record, entry\)/u);
   assert.match(explorer, /video\.crossOrigin = "anonymous"/u);
   assert.match(explorer, /vec3 color = texture2D\(u_video, vec2\(v_uv\.x, 0\.5 \+ v_uv\.y \* 0\.5\)\)\.rgb/u);
@@ -227,6 +234,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-eggs-traits-video-r3"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

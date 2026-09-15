@@ -1,17 +1,25 @@
 const SITE_CONFIG = window.ANIILOGS_CONFIG || window.ANIIPEDIA_CONFIG || {};
 const CONTENT_AVAILABLE = SITE_CONFIG.contentAvailable !== false;
 const CONTENT_BASE_URL = String(SITE_CONFIG.contentBaseUrl || ".").replace(/\/+$/u, "");
+const CONTENT_REVISION = String(SITE_CONFIG.contentRevision || "");
 function contentUrl(value) {
   const source = String(value || "");
-  if (!source || /^(?:https?:|data:|blob:)/iu.test(source)) return source;
-  return `${CONTENT_BASE_URL}/${source.replace(/^\.\//u, "")}`;
+  if (!source || /^(?:data:|blob:)/iu.test(source)) return source;
+  const resolved = /^(?:https?:)/iu.test(source)
+    ? source
+    : `${CONTENT_BASE_URL}/${source.replace(/^\.\//u, "")}`;
+  if (!CONTENT_REVISION) return resolved;
+  const url = new URL(resolved, window.location.href);
+  url.searchParams.set("v", CONTENT_REVISION);
+  return url.toString();
 }
-const DATA_URL = contentUrl("./data/map_site_data.json?v=20260914-build3509129-r2-v1");
-const CHECKLIST_URL = contentUrl("./data/checklist_data.json?v=20260914-build3509129-r2-v1");
+const DATA_URL = contentUrl("./data/map_site_data.json");
+const CHECKLIST_URL = contentUrl("./data/checklist_data.json");
 const ITEMLOG_DATA_URL =
   SITE_CONFIG.itemDataUrl ||
-  contentUrl("./data/itemlog_data.json?v=20260914-build3509129-r2-v1");
-const ANIILOG_DATA_URL = contentUrl("./data/aniilog_data.json?v=20260914-build3509129-r2-v1");
+  contentUrl("./data/itemlog_data.json");
+const ANIILOG_DATA_URL = contentUrl("./data/aniilog_data.json");
+const ANIILOG_MEDIA_URL = contentUrl("./data/aniilog_media.json");
 const APP_VERSION = "v0.9.4-private-content";
 const GITHUB_COMMITS_URL = "https://api.github.com/repos/AniiLogs/aniilogs.github.io/commits?sha=main&per_page=30";
 const CHANGELOG_INTERNAL_MARKER_RE = /\[(?:skip changelog|internal)\]/i;
@@ -2702,12 +2710,27 @@ function ensureAniilogData() {
   if (state.aniilogData) return Promise.resolve(state.aniilogData);
   if (state.aniilogLoadPromise) return state.aniilogLoadPromise;
 
-  state.aniilogLoadPromise = fetch(ANIILOG_DATA_URL)
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`Could not load ${ANIILOG_DATA_URL}`);
-      const payload = await response.json();
+  state.aniilogLoadPromise = Promise.all([fetch(ANIILOG_DATA_URL), fetch(ANIILOG_MEDIA_URL)])
+    .then(async ([dataResponse, mediaResponse]) => {
+      if (!dataResponse.ok) throw new Error(`Could not load ${ANIILOG_DATA_URL}`);
+      if (!mediaResponse.ok) throw new Error(`Could not load ${ANIILOG_MEDIA_URL}`);
+      const payload = await dataResponse.json();
+      const media = await mediaResponse.json();
       if (!Array.isArray(payload?.entries) || !payload?.totals) {
         throw new Error("Aniilog data has an invalid format");
+      }
+      if (!Array.isArray(media?.entries) || media.package_version !== payload.package_version) {
+        throw new Error("Aniilog media has an invalid package identity");
+      }
+      const mediaByForm = new Map(media.entries.map((entry) => [String(entry.form_id || ""), entry]));
+      if (mediaByForm.size !== payload.entries.length) {
+        throw new Error("Aniilog media does not exactly cover the visible forms");
+      }
+      for (const entry of payload.entries) {
+        const mediaEntry = mediaByForm.get(String(entry.form_id || ""));
+        if (!mediaEntry?.video) throw new Error(`Aniilog media is missing form ${entry.form_id}`);
+        entry.video = mediaEntry.video;
+        entry.video_layout = mediaEntry.video_layout;
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
       state.aniilogData = payload;

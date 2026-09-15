@@ -304,7 +304,7 @@ test("release content is served from the private R2 binding without directory li
   ), env);
   assert.equal(getResponse.status, 200);
   assert.equal(await getResponse.text(), '{"release":3509129}');
-  assert.equal(getResponse.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  assert.equal(getResponse.headers.get("cache-control"), "public, max-age=60, must-revalidate");
   assert.equal(getResponse.headers.get("access-control-allow-origin"), "*");
   assert.deepEqual(requestedKeys[0], ["get", "releases/3509129/data/map_site_data.json"]);
 
@@ -344,6 +344,7 @@ test("release video content receives a safe MP4 type when R2 metadata is absent"
   ), env);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "video/mp4");
+  assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable");
   assert.match(response.headers.get("content-security-policy") || "", /media-src/u);
 });
 

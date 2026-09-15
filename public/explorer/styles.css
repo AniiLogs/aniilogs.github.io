@@ -7939,6 +7939,18 @@ button.catalog-item-reference {
     drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55));
 }
 
+/* Aniimo art mixes circular head portraits and transparent full-body renders.
+   Give every Aniimo map marker the same circular portrait frame without
+   changing the silhouette of travel, item, entrance, or egg symbols. */
+.pin.pin-aniimo-spawn .pin-icon {
+  box-sizing: border-box;
+  border: 1px solid rgba(235, 255, 248, 0.92);
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 34%, #ffffff 0 50%, #e8eeef 76%, #cbd5d7 100%);
+  object-fit: contain;
+  overflow: hidden;
+}
+
 .pin-icon-selected {
   position: absolute;
   inset: 0;

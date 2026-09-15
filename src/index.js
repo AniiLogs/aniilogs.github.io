@@ -204,7 +204,12 @@ async function getReleaseContent(request, env) {
   }
   if (object.httpEtag) headers.set("etag", object.httpEtag);
   if (Number.isFinite(object.size)) headers.set("content-length", String(object.size));
-  headers.set("cache-control", "public, max-age=31536000, immutable");
+  headers.set(
+    "cache-control",
+    key.endsWith(".json")
+      ? "public, max-age=60, must-revalidate"
+      : "public, max-age=31536000, immutable",
+  );
   return new Response(request.method === "HEAD" ? null : object.body, { status: 200, headers });
 }
 
