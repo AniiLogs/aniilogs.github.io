@@ -144,7 +144,7 @@ nav .nav-disabled, nav .nav-disabled:hover { background: transparent; color: col
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important; white-space: nowrap !important; }
 .theme-picker-label { display: inline-flex; min-width: 0; align-items: center; flex-direction: column; gap: 2px; color: var(--ink-soft); font-size: 9px; font-weight: 700; line-height: 1; }
 .theme-picker-copy { white-space: nowrap; }
-.theme-picker { width: 5.25rem; min-height: 24px; max-width: 5.25rem; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 88%, var(--mint)); color: var(--ink); padding: 2px 18px 2px 8px; font: inherit; font-size: 10px; font-weight: 650; text-align: center; text-align-last: center; cursor: pointer; }
+.theme-picker { width: 7rem; min-height: 24px; max-width: 7rem; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 88%, var(--mint)); color: var(--ink); padding: 2px 24px 2px 10px; font: inherit; font-size: 10px; font-weight: 650; text-align: center; text-align-last: center; cursor: pointer; }
 .theme-picker:hover, .theme-picker:focus-visible { border-color: var(--mint); outline: 2px solid color-mix(in srgb, var(--mint) 35%, transparent); outline-offset: 2px; }
 .account-menu { position: relative; color: var(--ink); }
 .account-menu > summary { list-style: none; }
@@ -441,7 +441,7 @@ footer a { font-weight: 800; text-decoration: none; }
   .site-header .brand { grid-area: brand; }
   .site-header nav { grid-area: nav; display: flex; width: 100%; overflow-x: auto; scrollbar-width: none; }
   .site-header .account-actions { grid-area: account; }
-  .theme-picker { width: 5.25rem; max-width: 5.25rem; }
+  .theme-picker { width: 6.75rem; max-width: 6.75rem; }
   .account-menu-trigger > span:not(.account-menu-chevron) { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; }
   .account-sign-in { width: 36px; min-height: 36px; justify-content: center; padding: 0; font-size: 0; }
   .site-header nav::-webkit-scrollbar { display: none; }

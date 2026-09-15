@@ -263,7 +263,7 @@ test("the shared shell uses the compact typography scale from the approved map U
   for (const styles of [landingStyles, explorerStyles]) {
     assert.match(styles, /\.theme-picker-label\s*\{[^}]*align-items: center/u);
     assert.match(styles, /\.theme-picker-label\s*\{[^}]*flex-direction: column/u);
-    assert.match(styles, /\.theme-picker\s*\{[^}]*width: 5\.25rem/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*width: 7rem/u);
     assert.match(styles, /\.theme-picker\s*\{[^}]*min-height: 24px/u);
     assert.match(styles, /\.theme-picker\s*\{[^}]*text-align: center/u);
     assert.match(styles, /\.theme-picker\s*\{[^}]*text-align-last: center/u);
@@ -327,7 +327,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-respawn-r6"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-rv-i18n-r7"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
@@ -361,11 +361,41 @@ test("internal test items are available only to entitled developer mode", () => 
 
 test("game rich text is rendered with safe DOM nodes", () => {
   assert.match(explorer, /function appendGameRichText\(element, value\)/u);
-  assert.match(explorer, /<style=\(\[A-Za-z0-9_\]\+\)>\|<\\\/style>/u);
+  assert.match(explorer, /const tokenPattern = \/<style=/u);
+  assert.ok(explorer.includes('<link="[^"]*">'));
   assert.match(explorer, /document\.createTextNode/u);
   assert.match(explorer, /appendGameRichText\(description, displayed\.description\)/u);
   assert.match(explorer, /appendGameRichText\(description, entry\.description\)/u);
   assert.match(explorerStyles, /\.game-rich-text--hint-bgl/u);
+});
+
+test("current-build RV progression is applied and rendered on item details", async () => {
+  const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  assert.match(worker, /patch\.item_rv_details/u);
+  assert.match(worker, /entry\.rv_details = patch\.item_rv_details\[entry\.item_id\]/u);
+  assert.match(explorer, /function renderRvProgression\(details\)/u);
+  assert.match(explorer, /createCatalogSection\("RV progression"\)/u);
+  assert.match(explorer, /renderRvProgression\(entry\.rv_details\)/u);
+  assert.match(explorerStyles, /\.catalog-rv-upgrade-grid/u);
+});
+
+test("all current Aniimo client languages are available across the site", async () => {
+  const localization = await readFile(new URL("../public/explorer/localization.js", import.meta.url), "utf8");
+  const landing = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  const privacy = await readFile(new URL("../public/privacy.html", import.meta.url), "utf8");
+  for (const locale of ["en", "de-DE", "es-ES", "fr-FR", "id-ID", "ja", "ko", "pt-PT", "ru-RU", "th-TH", "vi-VN", "zh-CN", "zh-TW"]) {
+    assert.ok(localization.includes(`${locale}:`) || localization.includes(`"${locale}"`));
+  }
+  assert.match(localization, /const AUTO_START = document\.currentScript\?\.dataset\.autoStart === "true"/u);
+  assert.match(landing, /localization\.js[^>]+data-auto-start="true"/u);
+  assert.match(privacy, /localization\.js[^>]+data-auto-start="true"/u);
+});
+
+test("the compact theme selector leaves room for full theme names", async () => {
+  const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(explorerStyles, /\.theme-picker\s*\{[^}]*width: 7rem;[^}]*max-width: 7rem;/su);
+  assert.match(explorerStyles, /\.app-topbar-actions \.theme-picker\s*\{[^}]*width: 6\.75rem;/su);
+  assert.match(landingStyles, /\.theme-picker\s*\{[^}]*width: 7rem;[^}]*max-width: 7rem;/su);
 });
 
 test("the local private-content bridge is scoped and contains no machine-specific path", () => {

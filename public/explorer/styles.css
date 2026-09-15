@@ -249,14 +249,14 @@ button[aria-pressed="true"] {
 }
 
 .theme-picker {
-  width: 5.25rem;
+  width: 7rem;
   min-height: 24px;
-  max-width: 5.25rem;
+  max-width: 7rem;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: color-mix(in srgb, var(--panel-2) 88%, var(--accent));
   color: var(--text);
-  padding: 2px 18px 2px 8px;
+  padding: 2px 24px 2px 10px;
   font: inherit;
   font-size: 10px;
   font-weight: 650;
@@ -5336,6 +5336,85 @@ button.catalog-item-reference {
   margin-top: 6px;
 }
 
+.catalog-rv-section {
+  border-color: rgba(var(--accent-2-rgb), 0.34);
+  background: linear-gradient(145deg, rgba(var(--accent-2-rgb), 0.07), rgba(var(--panel-rgb), 0.52));
+}
+
+.catalog-rv-unlocks {
+  display: grid;
+  gap: 5px;
+  border-left: 3px solid rgba(var(--accent-2-rgb), 0.72);
+  padding: 8px 10px;
+}
+
+.catalog-rv-unlocks > strong,
+.catalog-rv-upgrades > summary {
+  color: var(--accent-2);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.catalog-rv-unlocks > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.catalog-rv-upgrades > summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.catalog-rv-upgrade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 9px;
+}
+
+.catalog-rv-upgrade-card {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  border-radius: 8px;
+  background: rgba(var(--background-rgb), 0.45);
+  padding: 10px;
+}
+
+.catalog-rv-upgrade-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.catalog-rv-upgrade-card header > span {
+  border: 1px solid rgba(var(--accent-rgb), 0.42);
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.1);
+  padding: 3px 7px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.catalog-rv-upgrade-card p,
+.catalog-rv-upgrade-card small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.catalog-rv-upgrade-card .catalog-rv-upgrade-effect {
+  color: var(--text);
+}
+
+.catalog-rv-upgrade-costs {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+}
+
 .catalog-carried-effect-heading {
   display: flex;
   align-items: baseline;
@@ -8283,8 +8362,8 @@ button.catalog-item-reference {
   }
 
   .app-topbar-actions .theme-picker {
-    width: 5.25rem;
-    max-width: 5.25rem;
+    width: 6.75rem;
+    max-width: 6.75rem;
   }
 
   .app-topbar-actions .theme-picker-copy {

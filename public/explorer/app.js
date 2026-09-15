@@ -5642,6 +5642,93 @@ function renderItemLogProgressionUses(progressionUses) {
   return section;
 }
 
+function renderRvProgression(details) {
+  if (!details || typeof details !== "object") return null;
+  const unlock = details.unlock_requirement;
+  const productionUnlocks = Array.isArray(details.production_unlocks) ? details.production_unlocks : [];
+  const component = details.component;
+  if (!unlock && !productionUnlocks.length && !component) return null;
+
+  const section = createCatalogSection("RV progression");
+  section.classList.add("catalog-rv-section");
+  const summary = document.createElement("dl");
+  summary.className = "catalog-facts catalog-rv-summary";
+  if (unlock?.text) appendCatalogFact(summary, "Item unlock", unlock.text);
+  if (component?.available_at_rv_level) {
+    appendCatalogFact(summary, "Component available", `RV Level ${component.available_at_rv_level}`);
+  }
+  if (component?.floor) appendCatalogFact(summary, "RV floor", formatNumber(component.floor));
+  if (summary.childElementCount) section.append(summary);
+
+  if (productionUnlocks.length) {
+    const production = document.createElement("div");
+    production.className = "catalog-rv-unlocks";
+    const title = document.createElement("strong");
+    title.textContent = "Production unlocks";
+    production.append(title);
+    productionUnlocks.forEach((entry) => {
+      const row = document.createElement("span");
+      row.textContent = entry?.text || "Configured production unlock";
+      production.append(row);
+    });
+    section.append(production);
+  }
+
+  const upgrades = Array.isArray(component?.upgrades) ? component.upgrades : [];
+  if (upgrades.length) {
+    const detailsElement = document.createElement("details");
+    detailsElement.className = "catalog-rv-upgrades";
+    detailsElement.open = true;
+    const detailsSummary = document.createElement("summary");
+    detailsSummary.textContent = `${component.name || "RV component"} upgrade levels (${upgrades.length})`;
+    const grid = document.createElement("div");
+    grid.className = "catalog-rv-upgrade-grid";
+    upgrades.forEach((upgrade) => {
+      const card = document.createElement("article");
+      card.className = "catalog-rv-upgrade-card";
+      const header = document.createElement("header");
+      const level = document.createElement("strong");
+      level.textContent = `Level ${formatNumber(upgrade?.level || 0)}`;
+      header.append(level);
+      const rvRequirement = (upgrade?.requirements || []).find((value) => /RV\s+(?:Lv\.?|Level|level)/u.test(value));
+      if (rvRequirement) {
+        const badge = document.createElement("span");
+        badge.textContent = rvRequirement.replace(/\.$/u, "");
+        header.append(badge);
+      }
+      card.append(header);
+      if (upgrade?.description) {
+        const description = document.createElement("p");
+        appendGameRichText(description, upgrade.description);
+        card.append(description);
+      }
+      if (upgrade?.effect) {
+        const effect = document.createElement("p");
+        effect.className = "catalog-rv-upgrade-effect";
+        appendGameRichText(effect, upgrade.effect);
+        card.append(effect);
+      }
+      const remainingRequirements = (upgrade?.requirements || []).filter((value) => value !== rvRequirement);
+      if (remainingRequirements.length) {
+        const requirements = document.createElement("small");
+        requirements.textContent = remainingRequirements.join(" · ");
+        card.append(requirements);
+      }
+      const costs = Array.isArray(upgrade?.costs) ? upgrade.costs.filter(Boolean) : [];
+      if (costs.length) {
+        const costList = document.createElement("div");
+        costList.className = "catalog-item-reference-grid catalog-rv-upgrade-costs";
+        costs.forEach((cost) => costList.append(renderItemlogReference(cost)));
+        card.append(costList);
+      }
+      grid.append(card);
+    });
+    detailsElement.append(detailsSummary, grid);
+    section.append(detailsElement);
+  }
+  return section;
+}
+
 function visibleRvExpeditionSources(entry) {
   const sources = itemlogExpeditionSources(entry);
   if (state.itemlogFilters.source !== "rv-expedition") return sources;
@@ -6108,6 +6195,8 @@ function renderItemLogCatalogRecord(entry) {
   if (crafting) record.append(crafting);
   const progressionUses = renderItemLogProgressionUses(entry.progression_uses);
   if (progressionUses) record.append(progressionUses);
+  const rvProgression = renderRvProgression(entry.rv_details);
+  if (rvProgression) record.append(rvProgression);
   const requirements = renderItemLogRequirements(entry.requirements);
   if (requirements) record.append(requirements);
   const expeditionSources = renderRvExpeditionSources(entry);
@@ -10432,7 +10521,7 @@ function bindEvents() {
 
 function appendGameRichText(element, value) {
   const source = String(value || "");
-  const tokenPattern = /<style=([A-Za-z0-9_]+)>|<\/style>/gu;
+  const tokenPattern = /<style=([A-Za-z0-9_]+)>|<\/style>|<link="[^"]*">|<\/link>/gu;
   const stack = [element];
   let cursor = 0;
   for (const match of source.matchAll(tokenPattern)) {
@@ -10442,7 +10531,7 @@ function appendGameRichText(element, value) {
       span.className = `game-rich-text game-rich-text--${match[1].toLowerCase().replaceAll("_", "-")}`;
       stack.at(-1).append(span);
       stack.push(span);
-    } else if (stack.length > 1) {
+    } else if (match[0] === "</style>" && stack.length > 1) {
       stack.pop();
     }
     cursor = match.index + match[0].length;

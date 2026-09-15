@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const AUTO_START = document.currentScript?.dataset.autoStart === "true";
+
   const ASSET_VERSION = String(window.ANIILOGS_CONFIG?.contentRevision || "20260915-build3509129-eggs-traits-video-r3");
   const CONTENT_BASE_URL = String(window.ANIILOGS_CONFIG?.contentBaseUrl || ".").replace(/\/+$/u, "");
   const contentUrl = (value) => {
@@ -11,9 +13,30 @@
   };
   const SUPPORTED_LANGUAGES = Object.freeze({
     en: { label: "English", htmlLang: "en" },
+    "de-DE": { label: "Deutsch", htmlLang: "de" },
+    "es-ES": { label: "Español", htmlLang: "es" },
+    "fr-FR": { label: "Français", htmlLang: "fr" },
+    "id-ID": { label: "Bahasa Indonesia", htmlLang: "id" },
     "zh-CN": { label: "简体中文", htmlLang: "zh-CN" },
+    "zh-TW": { label: "繁體中文", htmlLang: "zh-TW" },
     ja: { label: "日本語", htmlLang: "ja" },
     ko: { label: "한국어", htmlLang: "ko" },
+    "pt-PT": { label: "Português", htmlLang: "pt" },
+    "ru-RU": { label: "Русский", htmlLang: "ru" },
+    "th-TH": { label: "ไทย", htmlLang: "th" },
+    "vi-VN": { label: "Tiếng Việt", htmlLang: "vi" },
+  });
+
+  const CORE_UI_TRANSLATIONS = Object.freeze({
+    "de-DE": { "Theme": "Design", "Map": "Karte", "Item-log": "Gegenstandslog", "Team Builder": "Teamplaner", "Profiles": "Profile", "Settings": "Einstellungen", "My Profile": "Mein Profil", "Log out": "Abmelden", "Sign in": "Anmelden", "Search": "Suchen", "All": "Alle", "Reset": "Zurücksetzen", "Share": "Teilen", "Tracking": "Verfolgung", "Checklist": "Checkliste", "Selection": "Auswahl", "No marker selected": "Keine Markierung ausgewählt", "Language": "Sprache", "Display language": "Anzeigesprache", "Game data and website interface": "Spieldaten und Website-Oberfläche", "RV progression": "RV-Fortschritt", "Item unlock": "Gegenstand freigeschaltet", "Component available": "Komponente verfügbar", "RV floor": "RV-Etage", "Production unlocks": "Produktionsfreischaltungen", "Pathfinder": "Pfadfinder" },
+    "es-ES": { "Theme": "Tema", "Map": "Mapa", "Item-log": "Registro de objetos", "Team Builder": "Creador de equipos", "Profiles": "Perfiles", "Settings": "Ajustes", "My Profile": "Mi perfil", "Log out": "Cerrar sesión", "Sign in": "Iniciar sesión", "Search": "Buscar", "All": "Todo", "Reset": "Restablecer", "Share": "Compartir", "Tracking": "Seguimiento", "Checklist": "Lista de control", "Selection": "Selección", "No marker selected": "No hay marcador seleccionado", "Language": "Idioma", "Display language": "Idioma de visualización", "Game data and website interface": "Datos del juego e interfaz del sitio", "RV progression": "Progreso del RV", "Item unlock": "Desbloqueo del objeto", "Component available": "Componente disponible", "RV floor": "Planta del RV", "Production unlocks": "Desbloqueos de producción", "Pathfinder": "Pathfinder" },
+    "fr-FR": { "Theme": "Thème", "Map": "Carte", "Item-log": "Journal d’objets", "Team Builder": "Créateur d’équipe", "Profiles": "Profils", "Settings": "Paramètres", "My Profile": "Mon profil", "Log out": "Se déconnecter", "Sign in": "Se connecter", "Search": "Rechercher", "All": "Tout", "Reset": "Réinitialiser", "Share": "Partager", "Tracking": "Suivi", "Checklist": "Liste de contrôle", "Selection": "Sélection", "No marker selected": "Aucun marqueur sélectionné", "Language": "Langue", "Display language": "Langue d’affichage", "Game data and website interface": "Données du jeu et interface du site", "RV progression": "Progression du RV", "Item unlock": "Déblocage de l’objet", "Component available": "Composant disponible", "RV floor": "Étage du RV", "Production unlocks": "Déblocages de production", "Pathfinder": "Pathfinder" },
+    "id-ID": { "Theme": "Tema", "Map": "Peta", "Item-log": "Catatan item", "Team Builder": "Penyusun tim", "Profiles": "Profil", "Settings": "Pengaturan", "My Profile": "Profil saya", "Log out": "Keluar", "Sign in": "Masuk", "Search": "Cari", "All": "Semua", "Reset": "Atur ulang", "Share": "Bagikan", "Tracking": "Pelacakan", "Checklist": "Daftar periksa", "Selection": "Pilihan", "No marker selected": "Belum ada penanda yang dipilih", "Language": "Bahasa", "Display language": "Bahasa tampilan", "Game data and website interface": "Data game dan antarmuka situs", "RV progression": "Progres RV", "Item unlock": "Syarat membuka item", "Component available": "Komponen tersedia", "RV floor": "Lantai RV", "Production unlocks": "Produksi yang terbuka", "Pathfinder": "Pathfinder" },
+    "pt-PT": { "Theme": "Tema", "Map": "Mapa", "Item-log": "Registo de itens", "Team Builder": "Criador de equipa", "Profiles": "Perfis", "Settings": "Definições", "My Profile": "O meu perfil", "Log out": "Terminar sessão", "Sign in": "Iniciar sessão", "Search": "Pesquisar", "All": "Tudo", "Reset": "Repor", "Share": "Partilhar", "Tracking": "Rastreio", "Checklist": "Lista de verificação", "Selection": "Seleção", "No marker selected": "Nenhum marcador selecionado", "Language": "Idioma", "Display language": "Idioma de apresentação", "Game data and website interface": "Dados do jogo e interface do site", "RV progression": "Progressão do RV", "Item unlock": "Desbloqueio do item", "Component available": "Componente disponível", "RV floor": "Piso do RV", "Production unlocks": "Desbloqueios de produção", "Pathfinder": "Pathfinder" },
+    "ru-RU": { "Theme": "Тема", "Map": "Карта", "Item-log": "Журнал предметов", "Team Builder": "Сборщик команды", "Profiles": "Профили", "Settings": "Настройки", "My Profile": "Мой профиль", "Log out": "Выйти", "Sign in": "Войти", "Search": "Поиск", "All": "Все", "Reset": "Сбросить", "Share": "Поделиться", "Tracking": "Отслеживание", "Checklist": "Список", "Selection": "Выбор", "No marker selected": "Маркер не выбран", "Language": "Язык", "Display language": "Язык интерфейса", "Game data and website interface": "Данные игры и интерфейс сайта", "RV progression": "Прогресс RV", "Item unlock": "Открытие предмета", "Component available": "Компонент доступен", "RV floor": "Этаж RV", "Production unlocks": "Открытие производства", "Pathfinder": "Следопыт" },
+    "th-TH": { "Theme": "ธีม", "Map": "แผนที่", "Item-log": "บันทึกไอเทม", "Team Builder": "จัดทีม", "Profiles": "โปรไฟล์", "Settings": "การตั้งค่า", "My Profile": "โปรไฟล์ของฉัน", "Log out": "ออกจากระบบ", "Sign in": "เข้าสู่ระบบ", "Search": "ค้นหา", "All": "ทั้งหมด", "Reset": "รีเซ็ต", "Share": "แชร์", "Tracking": "การติดตาม", "Checklist": "รายการตรวจสอบ", "Selection": "รายการที่เลือก", "No marker selected": "ยังไม่ได้เลือกหมุด", "Language": "ภาษา", "Display language": "ภาษาที่แสดง", "Game data and website interface": "ข้อมูลเกมและหน้าตาเว็บไซต์", "RV progression": "ความคืบหน้า RV", "Item unlock": "การปลดล็อกไอเทม", "Component available": "ชิ้นส่วนพร้อมใช้งาน", "RV floor": "ชั้นของ RV", "Production unlocks": "การปลดล็อกการผลิต", "Pathfinder": "Pathfinder" },
+    "vi-VN": { "Theme": "Chủ đề", "Map": "Bản đồ", "Item-log": "Nhật ký vật phẩm", "Team Builder": "Xây dựng đội", "Profiles": "Hồ sơ", "Settings": "Cài đặt", "My Profile": "Hồ sơ của tôi", "Log out": "Đăng xuất", "Sign in": "Đăng nhập", "Search": "Tìm kiếm", "All": "Tất cả", "Reset": "Đặt lại", "Share": "Chia sẻ", "Tracking": "Theo dõi", "Checklist": "Danh sách kiểm tra", "Selection": "Lựa chọn", "No marker selected": "Chưa chọn điểm đánh dấu", "Language": "Ngôn ngữ", "Display language": "Ngôn ngữ hiển thị", "Game data and website interface": "Dữ liệu trò chơi và giao diện trang", "RV progression": "Tiến trình RV", "Item unlock": "Mở khóa vật phẩm", "Component available": "Linh kiện khả dụng", "RV floor": "Tầng RV", "Production unlocks": "Mở khóa sản xuất", "Pathfinder": "Pathfinder" },
+    "zh-TW": { "Theme": "主題", "Map": "地圖", "Item-log": "物品日誌", "Team Builder": "隊伍建立器", "Profiles": "個人檔案", "Settings": "設定", "My Profile": "我的個人檔案", "Log out": "登出", "Sign in": "登入", "Search": "搜尋", "All": "全部", "Reset": "重設", "Share": "分享", "Tracking": "追蹤", "Checklist": "檢查清單", "Selection": "選取項目", "No marker selected": "尚未選取標記", "Language": "語言", "Display language": "顯示語言", "Game data and website interface": "遊戲資料與網站介面", "RV progression": "RV 進度", "Item unlock": "物品解鎖", "Component available": "可用組件", "RV floor": "RV 樓層", "Production unlocks": "生產解鎖", "Pathfinder": "開拓者" },
   });
 
   // Website-owned interface copy. Game-owned names and descriptions come from
@@ -474,6 +497,13 @@
     ["Special", "特殊", "特殊", "특수"],
     ["Thunderstorm", "雷暴", "雷雨", "뇌우"],
     ["Towerwood", "塔林", "塔の森", "탑의 숲"],
+    ["RV progression", "房车进度", "RV進行状況", "RV 진행도"],
+    ["Item unlock", "物品解锁", "アイテム解放", "아이템 해금"],
+    ["Component available", "组件可用", "モジュール解放", "모듈 사용 가능"],
+    ["RV floor", "房车楼层", "RVフロア", "RV 층"],
+    ["Production unlocks", "生产解锁", "生産レシピ解放", "생산 해금"],
+    ["Configured production unlock", "已配置的生产解锁", "設定済みの生産解放", "설정된 생산 해금"],
+    ["RV component", "房车组件", "RVモジュール", "RV 모듈"],
   );
 
   const UI_TRANSLATIONS = Object.fromEntries(Object.keys(SUPPORTED_LANGUAGES).map((locale) => [locale, new Map()]));
@@ -482,6 +512,9 @@
     UI_TRANSLATIONS["zh-CN"].set(english, chinese);
     UI_TRANSLATIONS.ja.set(english, japanese);
     UI_TRANSLATIONS.ko.set(english, korean);
+  });
+  Object.entries(CORE_UI_TRANSLATIONS).forEach(([locale, translations]) => {
+    Object.entries(translations).forEach(([english, localized]) => UI_TRANSLATIONS[locale].set(english, localized));
   });
 
   let activeLocale = "en";
@@ -518,7 +551,15 @@
 
   function normalizeLocale(value) {
     const locale = String(value || "").trim();
-    return Object.hasOwn(SUPPORTED_LANGUAGES, locale) ? locale : "en";
+    if (Object.hasOwn(SUPPORTED_LANGUAGES, locale)) return locale;
+    const normalized = locale.replaceAll("_", "-").toLowerCase();
+    const aliases = {
+      de: "de-DE", es: "es-ES", fr: "fr-FR", id: "id-ID", ja: "ja", ko: "ko",
+      pt: "pt-PT", ru: "ru-RU", th: "th-TH", vi: "vi-VN", zh: "zh-CN",
+      "ja-jp": "ja", "ko-kr": "ko", "zh-cn": "zh-CN", "zh-hans": "zh-CN",
+      "zh-tw": "zh-TW", "zh-hant": "zh-TW",
+    };
+    return aliases[normalized] || "en";
   }
 
   function translatePattern(text) {
@@ -870,4 +911,20 @@
     translateTree,
     get locale() { return activeLocale; },
   });
+
+  if (AUTO_START) {
+    let preferred = "";
+    try {
+      const preferences = JSON.parse(localStorage.getItem("aniilogs:explorer:preferences:v1") || "{}");
+      preferred = preferences.language || "";
+    } catch {
+      preferred = "";
+    }
+    void load(preferred || navigator.language || "en")
+      .catch((error) => {
+        console.error(error);
+        return load("en");
+      })
+      .then(start);
+  }
 })();
