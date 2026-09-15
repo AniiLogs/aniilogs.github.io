@@ -7243,30 +7243,34 @@ function undergroundLayerForCurrentMap() {
       height: Number(target.height),
     }];
   });
-  return plans.length ? { defaultPlanId: plans[0].id, plans } : null;
+  return plans.length ? { defaultPlanId: "all", plans } : null;
 }
 
 function selectedUndergroundPlanIndex(layer = undergroundLayerForCurrentMap()) {
   if (!layer?.plans?.length) return -1;
   const selectedId = state.undergroundForegroundPlans.get(state.activeMapId) || layer.defaultPlanId;
-  const selectedIndex = layer.plans.findIndex((plan) => plan.id === selectedId);
+  const modes = [{ id: "all", label: "All current interiors" }, ...layer.plans];
+  const selectedIndex = modes.findIndex((plan) => plan.id === selectedId);
   return selectedIndex >= 0 ? selectedIndex : 0;
 }
 
 function updateUndergroundPlanOrdering() {
   const layer = undergroundLayerForCurrentMap();
-  const modes = layer?.plans || [];
+  const modes = layer?.plans?.length
+    ? [{ id: "all", label: "All current interiors" }, ...layer.plans]
+    : [];
   const selectedIndex = selectedUndergroundPlanIndex(layer);
   const selectedMode = modes[selectedIndex];
+  const showAll = selectedMode?.id === "all";
   els.mapUndergroundLayer.querySelectorAll(".map-underground-plan").forEach((planElement) => {
-    const visible = planElement.dataset.planId === selectedMode?.id;
+    const visible = showAll || planElement.dataset.planId === selectedMode?.id;
     planElement.classList.toggle("is-foreground", visible);
     planElement.hidden = !visible;
   });
 
   if (!selectedMode) return;
   state.undergroundForegroundPlans.set(state.activeMapId, selectedMode.id);
-  els.undergroundPlanToggleLabel.textContent = selectedMode.label;
+  els.undergroundPlanToggleLabel.textContent = selectedMode.id === "all" ? "All" : selectedMode.label;
   const nextIndex = (selectedIndex + 1) % modes.length;
   const label = `Showing ${selectedMode.label}. Switch to ${modes[nextIndex].label}`;
   els.undergroundPlanToggle.setAttribute("aria-label", label);
@@ -10162,7 +10166,7 @@ function bindEvents() {
   els.undergroundPlanToggle.addEventListener("click", () => {
     const layer = undergroundLayerForCurrentMap();
     if (!layer?.plans?.length) return;
-    const modes = layer.plans;
+    const modes = [{ id: "all", label: "All current interiors" }, ...layer.plans];
     const nextIndex = (selectedUndergroundPlanIndex(layer) + 1) % modes.length;
     state.undergroundForegroundPlans.set(state.activeMapId, modes[nextIndex].id);
     updateUndergroundPlanOrdering();
