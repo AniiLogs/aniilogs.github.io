@@ -30,6 +30,8 @@ test("current section overlays and cave entrances expose interior navigation", (
   assert.match(explorer, /Array\.isArray\(map\?\.map_sections\)/u);
   assert.match(explorer, /link\.style\.clipPath = `polygon/u);
   assert.match(explorer, /label\.textContent = section\.label/u);
+  assert.match(explorer, /map\.parent_map_id === activeParentId/u);
+  assert.match(explorer, /areas\.label = `\$\{parent\.label\} areas \(\$\{childMaps\.length\}\)`/u);
   assert.match(explorer, /closest\("\.map-section-link"\)\) return;/u);
   assert.match(explorer, /spawn\.hover_icon \|\| item\.hover_icon/u);
   assert.match(explorerStyles, /\.pin:hover \.pin-icon-selected/u);
@@ -266,7 +268,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-map-overlays-r5"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-layer-filters-r6"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

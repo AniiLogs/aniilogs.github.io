@@ -9906,6 +9906,25 @@ function renderMapTabs() {
     });
     select.append(group);
   });
+  const activeMap = currentMap();
+  const activeParentId = activeMap?.parent_map_id || activeMap?.id;
+  const parent = state.data.mapsById.get(activeParentId);
+  const childMaps = state.data.maps.filter((map) => (
+    map.parent_map_id === activeParentId
+    && map.availability !== "awaiting_current_asset"
+  ));
+  if (parent && childMaps.length) {
+    const areas = document.createElement("optgroup");
+    areas.label = `${parent.label} areas (${childMaps.length})`;
+    childMaps.forEach((map) => {
+      const option = document.createElement("option");
+      option.value = map.id;
+      option.textContent = map.label;
+      option.title = map.source_evidence || map.label;
+      areas.append(option);
+    });
+    select.append(areas);
+  }
   select.addEventListener("change", () => switchMap(select.value));
   field.append(label, select);
   els.mapTabs.replaceChildren(field);

@@ -5,7 +5,7 @@
   const contentBaseUrl = isLocalPreview
     ? "http://127.0.0.1:8788/releases/3509129"
     : "https://aniilogs-api.pages.dev/api/content/releases/3509129";
-  const contentRevision = "20260915-build3509129-map-overlays-r5";
+  const contentRevision = "20260915-build3509129-layer-filters-r6";
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
