@@ -332,6 +332,18 @@ test("desktop map selections open beside the selected marker and remain draggabl
   assert.match(explorerStyles, /#desktopSelectionPanel\.is-floating-placement \.panel-heading\s*\{[^}]*cursor: grab;/su);
 });
 
+test("internal test items are available only to entitled developer mode", () => {
+  assert.match(explorer, /const DEVELOPER_ONLY_ITEM_NAME_PATTERNS/u);
+  assert.match(explorer, /Test Furniture No/u);
+  assert.match(explorer, /Avatar Frame Test/u);
+  assert.match(explorer, /Test Held Item/u);
+  assert.match(explorer, /Test Invitation Letter/u);
+  assert.match(explorer, /View All Items/u);
+  assert.match(explorer, /return developerModeEnabled\(\) \? entries : entries\.filter/u);
+  assert.match(explorer, /function developerModeEnabled\(\) \{\s*return Boolean\(state\.developerModeAvailable && state\.preferences\.developerMode\);/su);
+  assert.match(explorer, /if \(state\.sidebarView === "itemlog"\) renderCatalogPreview\(\);/u);
+});
+
 test("game rich text is rendered with safe DOM nodes", () => {
   assert.match(explorer, /function appendGameRichText\(element, value\)/u);
   assert.match(explorer, /<style=\(\[A-Za-z0-9_\]\+\)>\|<\\\/style>/u);

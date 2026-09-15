@@ -1482,8 +1482,12 @@ function configureCloudSyncLink() {
   applyDeveloperVisibility();
 }
 
+function developerModeEnabled() {
+  return Boolean(state.developerModeAvailable && state.preferences.developerMode);
+}
+
 function applyDeveloperVisibility() {
-  const enabled = Boolean(state.developerModeAvailable && state.preferences.developerMode);
+  const enabled = developerModeEnabled();
   if (els.mapMeta) els.mapMeta.hidden = !enabled;
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
 }
@@ -2216,6 +2220,7 @@ function renderDeveloperSettings(container) {
     state.preferences.developerMode = input.checked;
     persistLocalTracking();
     applyDeveloperVisibility();
+    if (state.sidebarView === "itemlog") renderCatalogPreview();
   });
   const toggleCopy = document.createElement("span");
   const toggleTitle = document.createElement("strong");
@@ -2689,6 +2694,19 @@ function preloadAniilogData() {
   void ensureAniilogData().catch(() => {});
 }
 
+const DEVELOPER_ONLY_ITEM_NAME_PATTERNS = Object.freeze([
+  /^Test Furniture No\.\s*\d+$/iu,
+  /^Avatar Frame Test$/iu,
+  /^Test Held Item\s*#?\s*\d+$/iu,
+  /^Test Invitation Letter$/iu,
+  /^View All Items$/iu,
+]);
+
+function isDeveloperOnlyItemlogEntry(entry) {
+  const name = String(entry?.name || "").trim();
+  return DEVELOPER_ONLY_ITEM_NAME_PATTERNS.some((pattern) => pattern.test(name));
+}
+
 function ensureItemlogData() {
   if (state.itemlogData) return Promise.resolve(state.itemlogData);
   if (state.itemlogLoadPromise) return state.itemlogLoadPromise;
@@ -2723,7 +2741,8 @@ function allCatalogEntriesForView(view = state.sidebarView) {
     return Array.isArray(state.aniilogData?.entries) ? state.aniilogData.entries : [];
   }
   if (view === "itemlog") {
-    return Array.isArray(state.itemlogData?.entries) ? state.itemlogData.entries : [];
+    const entries = Array.isArray(state.itemlogData?.entries) ? state.itemlogData.entries : [];
+    return developerModeEnabled() ? entries : entries.filter((entry) => !isDeveloperOnlyItemlogEntry(entry));
   }
   return [];
 }
@@ -4035,14 +4054,13 @@ function renderCatalogCategoryToolbar(view) {
     const select = document.createElement("select");
     select.className = "catalog-category-select";
     select.setAttribute("aria-label", "Item categories");
-    const counts = new Map((state.itemlogData?.categories || []).map((category) => [category?.id, category?.count]));
     const allEntries = allCatalogEntriesForView(view);
     const categoryEntries = itemlogEntriesForCategory(activeCategory, allEntries);
     normalizeItemlogFilterForEntries(categoryEntries);
     const appendCategoryOption = (parent, category, optionLabel = category) => {
       const rawCount = category === "all"
         ? allEntries.length
-        : (itemlogCategoryCollection(category) ? itemlogCategoryCount(category, allEntries) : counts.get(category));
+        : itemlogCategoryCount(category, allEntries);
       const count = Number(rawCount);
       if (category !== "all" && (!Number.isFinite(count) || count <= 0)) return false;
       const option = document.createElement("option");
@@ -6406,8 +6424,7 @@ function renderCatalogPreview(options = {}) {
       : "";
     subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
   } else if (view === "itemlog" && allEntries.length) {
-    const totals = state.itemlogData?.totals;
-    subtitle.textContent = `${formatNumber(entries.length)} of ${formatNumber(totals?.named_items || allEntries.length)} packaged item definitions`;
+    subtitle.textContent = `${formatNumber(entries.length)} of ${formatNumber(allEntries.length)} packaged item definitions`;
   }
   if (!entries.length) {
     const entryLabel = view === "aniilog" ? "Aniimo" : "Item";
