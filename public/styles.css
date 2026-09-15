@@ -16,6 +16,8 @@
   --lavender: #9d91dc;
   --line: rgba(148, 205, 194, 0.17);
   --shadow: 0 22px 60px rgba(0, 0, 0, 0.38);
+  --background-rgb: 11, 18, 21;
+  --panel-rgb: 18, 29, 33;
 }
 
 @view-transition {
@@ -101,15 +103,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
-  background: rgba(18, 29, 33, 0.88);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28);
+  background: rgba(var(--panel-rgb), 0.97);
+  box-shadow: 0 12px 34px rgba(var(--background-rgb), 0.3);
   backdrop-filter: blur(18px);
   view-transition-name: aniilogs-topbar;
 }
 
 :root[data-color-mode="light"] .site-header {
-  background: rgba(255, 250, 240, 0.92);
-  box-shadow: 0 12px 34px rgba(51, 92, 80, 0.15);
+  background: rgba(var(--panel-rgb), 0.97);
+  box-shadow: 0 12px 34px rgba(var(--background-rgb), 0.15);
 }
 
 .brand { display: inline-flex; align-items: center; gap: 0.65rem; width: fit-content; text-decoration: none; }
@@ -133,7 +135,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 nav { display: flex; align-items: center; gap: 0.35rem; }
 nav a { padding: 0.55rem 0.8rem; border-radius: 999px; color: var(--ink-soft); font-size: 0.8rem; font-weight: 650; text-decoration: none; }
-nav a:hover { background: #fff8e7; color: var(--teal); }
+nav a:hover { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--teal); }
 nav .nav-disabled, nav .nav-disabled:hover { background: transparent; color: color-mix(in srgb, var(--ink-soft) 62%, var(--paper)); cursor: not-allowed; }
 
 .account-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }

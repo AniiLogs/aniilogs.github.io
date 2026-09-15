@@ -138,6 +138,8 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
   assert.match(explorerStyles, /\.app-topbar-context\s*\{\s*display: none/u);
   assert.match(landingStyles, /\.site-header\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
   assert.match(explorerStyles, /\.app-topbar\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
+  assert.match(landingStyles, /\.site-header\s*\{[^}]*background: rgba\(var\(--panel-rgb\), 0\.97\)/u);
+  assert.doesNotMatch(landingStyles, /\.site-header\s*\{[^}]*background: rgba\(18, 29, 33/u);
 });
 
 test("listed regions without a verified surface remain selectable and explain their status", () => {
