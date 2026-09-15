@@ -391,6 +391,23 @@ test("all current Aniimo client languages are available across the site", async 
   assert.match(privacy, /localization\.js[^>]+data-auto-start="true"/u);
 });
 
+test("the flag-only header language control shares the Settings preference", async () => {
+  const localization = await readFile(new URL("../public/explorer/localization.js", import.meta.url), "utf8");
+  const landing = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  for (const html of [landing, explorerHtml]) {
+    assert.match(html, /class="language-picker" data-site-language-select/u);
+    assert.match(html, /<option value="en">🇺🇸<\/option>/u);
+    assert.match(html, /<option value="zh-TW">🇹🇼<\/option>/u);
+    assert.doesNotMatch(html, /class="language-picker-label"/u);
+  }
+  assert.match(localization, /function setPreferredLocale\(locale, \{ reload = true \} = \{\}\)/u);
+  assert.match(localization, /language: normalized/u);
+  assert.match(localization, /querySelectorAll\("\[data-site-language-select\]"\)/u);
+  assert.match(explorer, /languageSelect\.dataset\.siteLanguageSelect = ""/u);
+  assert.match(explorer, /AniipediaI18n\.setPreferredLocale\(languageSelect\.value, \{ reload: false \}\)/u);
+  assert.match(explorerStyles, /\.language-picker\s*\{[^}]*width: 38px;[^}]*appearance: none;/su);
+});
+
 test("the compact theme selector leaves room for full theme names", async () => {
   const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(explorerStyles, /\.theme-picker\s*\{[^}]*width: 7rem;[^}]*max-width: 7rem;/su);

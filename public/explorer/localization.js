@@ -562,6 +562,48 @@
     return aliases[normalized] || "en";
   }
 
+  function readPreferredLocale() {
+    try {
+      const preferences = JSON.parse(localStorage.getItem("aniilogs:explorer:preferences:v1") || "{}");
+      return normalizeLocale(preferences.language || navigator.language || "en");
+    } catch {
+      return normalizeLocale(navigator.language || "en");
+    }
+  }
+
+  function syncLanguageControls(locale = readPreferredLocale()) {
+    const normalized = normalizeLocale(locale);
+    const label = SUPPORTED_LANGUAGES[normalized].label;
+    document.querySelectorAll("[data-site-language-select]").forEach((select) => {
+      select.value = normalized;
+      select.setAttribute("aria-label", `Display language: ${label}`);
+      select.title = `Display language: ${label}`;
+    });
+  }
+
+  function setPreferredLocale(locale, { reload = true } = {}) {
+    const normalized = normalizeLocale(locale);
+    try {
+      const preferences = JSON.parse(localStorage.getItem("aniilogs:explorer:preferences:v1") || "{}");
+      localStorage.setItem("aniilogs:explorer:preferences:v1", JSON.stringify({ ...preferences, language: normalized }));
+    } catch {
+      // The current page can still use the selection when storage is unavailable.
+    }
+    syncLanguageControls(normalized);
+    window.dispatchEvent(new CustomEvent("aniilogs:languagechange", { detail: { locale: normalized } }));
+    if (reload) window.location.reload();
+    return normalized;
+  }
+
+  function bindLanguageControls() {
+    document.querySelectorAll("[data-site-language-select]").forEach((select) => {
+      if (select.dataset.languageBound === "true") return;
+      select.dataset.languageBound = "true";
+      select.addEventListener("change", () => setPreferredLocale(select.value));
+    });
+    syncLanguageControls();
+  }
+
   function translatePattern(text) {
     const templated = translateTemplate(text);
     if (templated) return templated;
@@ -903,24 +945,23 @@
     languages: SUPPORTED_LANGUAGES,
     load,
     normalizeLocale,
+    readPreferredLocale,
     registerDisplay,
     searchAlias,
     start,
+    setPreferredLocale,
+    syncLanguageControls,
     translate,
     translateUid,
     translateTree,
     get locale() { return activeLocale; },
   });
 
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindLanguageControls, { once: true });
+  else bindLanguageControls();
+
   if (AUTO_START) {
-    let preferred = "";
-    try {
-      const preferences = JSON.parse(localStorage.getItem("aniilogs:explorer:preferences:v1") || "{}");
-      preferred = preferences.language || "";
-    } catch {
-      preferred = "";
-    }
-    void load(preferred || navigator.language || "en")
+    void load(readPreferredLocale())
       .catch((error) => {
         console.error(error);
         return load("en");

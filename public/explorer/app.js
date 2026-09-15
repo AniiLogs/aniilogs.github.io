@@ -2318,6 +2318,7 @@ function renderSettings() {
   const languageLabelText = document.createElement("span");
   languageLabelText.textContent = "Display language";
   const languageSelect = document.createElement("select");
+  languageSelect.dataset.siteLanguageSelect = "";
   Object.entries(window.AniipediaI18n.languages).forEach(([locale, metadata]) => {
     const option = document.createElement("option");
     option.value = locale;
@@ -2327,7 +2328,7 @@ function renderSettings() {
   });
   languageSelect.value = state.preferences.language;
   languageSelect.addEventListener("change", () => {
-    state.preferences.language = window.AniipediaI18n.normalizeLocale(languageSelect.value);
+    state.preferences.language = window.AniipediaI18n.setPreferredLocale(languageSelect.value, { reload: false });
     persistLocalTracking();
     window.location.reload();
   });

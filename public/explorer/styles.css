@@ -2254,6 +2254,32 @@ button[aria-pressed="true"] {
   background: rgba(0, 0, 0, 0.24);
 }
 
+.language-picker {
+  width: 38px;
+  height: 34px;
+  flex: 0 0 38px;
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-2) 88%, var(--accent));
+  color: var(--text);
+  padding: 0;
+  font: inherit;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+  text-align-last: center;
+  cursor: pointer;
+}
+
+.language-picker:hover,
+.language-picker:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 2px;
+}
+
 .checklist-aniimo-portrait {
   box-sizing: border-box;
   border: 2px solid rgba(var(--accent-rgb), 0.7);

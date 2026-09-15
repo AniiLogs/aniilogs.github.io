@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#1a1f22">
     <title>AniiLogs Pathfinder — Interactive Aniimo map and logs</title>
-    <link rel="stylesheet" href="./styles.css?v=0.15.0-rv-i18n">
+    <link rel="stylesheet" href="./styles.css?v=0.15.1-header-language">
   </head>
   <body>
     <header class="app-topbar">
@@ -30,6 +30,21 @@
             <option value="pawney">Pawney</option>
           </select>
         </label>
+        <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
+          <option value="en">🇺🇸</option>
+          <option value="de-DE">🇩🇪</option>
+          <option value="es-ES">🇪🇸</option>
+          <option value="fr-FR">🇫🇷</option>
+          <option value="id-ID">🇮🇩</option>
+          <option value="ja">🇯🇵</option>
+          <option value="ko">🇰🇷</option>
+          <option value="pt-PT">🇵🇹</option>
+          <option value="ru-RU">🇷🇺</option>
+          <option value="th-TH">🇹🇭</option>
+          <option value="vi-VN">🇻🇳</option>
+          <option value="zh-CN">🇨🇳</option>
+          <option value="zh-TW">🇹🇼</option>
+        </select>
         <button id="settingsButton" class="settings-gear-button" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" aria-expanded="false" aria-label="Open settings" title="Settings">
           <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
             <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
@@ -242,8 +257,8 @@
 
   <script defer src="./app-config.js?v=0.8.0-rv-i18n"></script>
   <script defer src="../theme-shell.js?v=0.2.0-account-menu"></script>
-  <script defer src="./localization.js?v=0.6.0-all-languages"></script>
+  <script defer src="./localization.js?v=0.6.1-header-language"></script>
   <script defer src="./progress-storage.js?v=0.1.0"></script>
-  <script defer src="./app.js?v=0.14.0-rv-i18n"></script>
+  <script defer src="./app.js?v=0.14.1-header-language"></script>
   </body>
 </html>

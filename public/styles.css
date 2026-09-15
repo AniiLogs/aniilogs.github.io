@@ -146,6 +146,8 @@ nav .nav-disabled, nav .nav-disabled:hover { background: transparent; color: col
 .theme-picker-copy { white-space: nowrap; }
 .theme-picker { width: 7rem; min-height: 24px; max-width: 7rem; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 88%, var(--mint)); color: var(--ink); padding: 2px 24px 2px 10px; font: inherit; font-size: 10px; font-weight: 650; text-align: center; text-align-last: center; cursor: pointer; }
 .theme-picker:hover, .theme-picker:focus-visible { border-color: var(--mint); outline: 2px solid color-mix(in srgb, var(--mint) 35%, transparent); outline-offset: 2px; }
+.language-picker { width: 38px; height: 34px; flex: 0 0 38px; appearance: none; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 88%, var(--mint)); color: var(--ink); padding: 0; font: inherit; font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif; font-size: 18px; line-height: 1; text-align: center; text-align-last: center; cursor: pointer; }
+.language-picker:hover, .language-picker:focus-visible { border-color: var(--mint); outline: 2px solid color-mix(in srgb, var(--mint) 35%, transparent); outline-offset: 2px; }
 .account-menu { position: relative; color: var(--ink); }
 .account-menu > summary { list-style: none; }
 .account-menu > summary::-webkit-details-marker { display: none; }
