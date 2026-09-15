@@ -130,11 +130,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .brand-letter { font-size: 1.1rem; font-weight: 950; }
 .brand-spark { position: absolute; top: -8px; right: -5px; color: var(--on-primary, #174d44); font-size: 0.9rem; }
-.brand-name { color: var(--ink); font-size: 1rem; font-weight: 700; letter-spacing: -0.02em; }
+.brand-name { color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
 .brand-name span { color: var(--coral); }
 
 nav { display: flex; align-items: center; gap: 0.35rem; }
-nav a { padding: 0.55rem 0.8rem; border-radius: 999px; color: var(--ink-soft); font-size: 0.8rem; font-weight: 650; text-decoration: none; }
+nav a { min-height: 36px; padding: 8px 13px; border: 1px solid transparent; border-radius: 999px; color: var(--ink-soft); font-size: 12px; font-weight: 650; text-decoration: none; }
 nav a:hover { background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--teal); }
 nav .nav-disabled, nav .nav-disabled:hover { background: transparent; color: color-mix(in srgb, var(--ink-soft) 62%, var(--paper)); cursor: not-allowed; }
 
@@ -151,15 +151,15 @@ nav .nav-disabled, nav .nav-disabled:hover { background: transparent; color: col
 .account-menu > summary::-webkit-details-marker { display: none; }
 .account-menu-trigger {
   display: inline-flex;
-  min-height: 42px;
+  min-height: 36px;
   align-items: center;
-  gap: 0.5rem;
+  gap: 7px;
   border: 1px solid color-mix(in srgb, #5865f2 62%, var(--line));
   border-radius: 999px;
   background: #5865f2;
   color: #fff;
-  padding: 0.55rem 0.72rem;
-  font-size: 0.82rem;
+  padding: 6px 10px;
+  font-size: 12px;
   font-weight: 850;
   cursor: pointer;
   box-shadow: 0 7px 18px rgba(79, 91, 213, 0.26);
@@ -168,7 +168,7 @@ nav .nav-disabled, nav .nav-disabled:hover { background: transparent; color: col
 .account-menu-trigger:hover,
 .account-menu-trigger:focus-visible,
 .account-menu[open] .account-menu-trigger { background: #4752c4; outline: 2px solid color-mix(in srgb, #5865f2 42%, transparent); outline-offset: 2px; }
-.discord-icon { width: 20px; height: 20px; flex: 0 0 auto; }
+.discord-icon { width: 19px; height: 19px; flex: 0 0 auto; }
 .account-menu-chevron { font-size: 0.86rem; transition: transform 140ms ease; }
 .account-menu[open] .account-menu-chevron { transform: rotate(180deg); }
 .account-menu-popover {

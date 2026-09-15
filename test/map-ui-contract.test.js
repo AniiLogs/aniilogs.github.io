@@ -204,6 +204,9 @@ test("the top-right Discord control becomes an accessible account menu", () => {
   assert.match(explorer, /REQUESTED_SETTINGS_OPEN/u);
   assert.match(landingStyles, /\.account-menu-popover/u);
   assert.match(explorerStyles, /\.account-menu-popover/u);
+  assert.match(landingStyles, /\.account-menu-trigger\s*\{[^}]*min-height: 36px/u);
+  assert.match(landingStyles, /\.account-menu-trigger\s*\{[^}]*font-size: 12px/u);
+  assert.match(landingStyles, /\.discord-icon\s*\{ width: 19px; height: 19px/u);
   assert.match(explorerStyles, /\[hidden\]\s*\{\s*display: none !important;/u);
 });
 
