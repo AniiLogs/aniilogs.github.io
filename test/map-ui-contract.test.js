@@ -124,6 +124,14 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
+test("the shared shell uses the selected accent and Pathfinder terminology", () => {
+  assert.match(landingStyles, /:root:not\(\[data-color-mode="light"\]\) nav a:hover,[\s\S]*?rgba\(var\(--accent-rgb\), 0\.13\)/u);
+  assert.match(landingHtml, /tools every Pathfinder reaches for first/u);
+  assert.match(landingHtml, /Pathfinder profiles/u);
+  assert.match(explorerHtml, /AniiLogs Pathfinder/u);
+  assert.doesNotMatch(landingHtml, /Aniimo explorers|tools every explorer|Explorer profiles/iu);
+});
+
 test("the shared shell keeps primary navigation visible and transitions fluidly", () => {
   assert.match(explorerHtml, /class="app-topbar"/u);
   assert.match(explorerHtml, /id="topNavMap"/u);
@@ -140,6 +148,13 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
   assert.match(explorerStyles, /\.app-topbar\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
   assert.match(landingStyles, /\.site-header\s*\{[^}]*background: rgba\(var\(--panel-rgb\), 0\.97\)/u);
   assert.doesNotMatch(landingStyles, /\.site-header\s*\{[^}]*background: rgba\(18, 29, 33/u);
+});
+
+test("checklist Aniimo portraits are circular and current-build Lumin guides render when supplied", () => {
+  assert.match(explorer, /checklist-aniimo-portrait/u);
+  assert.match(explorerStyles, /\.checklist-aniimo-portrait\s*\{[^}]*border-radius:\s*50%/su);
+  assert.match(explorer, /function renderLuminGuide\(\)/u);
+  assert.match(explorer, /state\.checklistData\?\.lumin_guides/u);
 });
 
 test("listed regions without a verified surface remain selectable and explain their status", () => {
@@ -312,7 +327,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-map-content-r5"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-respawn-r6"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

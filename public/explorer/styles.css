@@ -2254,6 +2254,50 @@ button[aria-pressed="true"] {
   background: rgba(0, 0, 0, 0.24);
 }
 
+.checklist-aniimo-portrait {
+  box-sizing: border-box;
+  border: 2px solid rgba(var(--accent-rgb), 0.7);
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 34%, #ffffff 0 50%, #e8eeef 76%, #cbd5d7 100%);
+  padding: 2px;
+}
+
+.lumin-guide {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 4px;
+  border: 1px solid rgba(var(--accent-2-rgb), 0.38);
+  border-radius: 8px;
+  background: rgba(var(--accent-2-rgb), 0.055);
+  padding: 8px;
+}
+
+.lumin-guide-list {
+  display: grid;
+  gap: 6px;
+}
+
+.lumin-guide-card {
+  border-left: 2px solid rgba(var(--accent-2-rgb), 0.72);
+  padding-left: 7px;
+}
+
+.lumin-guide-card strong,
+.lumin-guide-card p {
+  margin: 0;
+}
+
+.lumin-guide-card strong {
+  font-size: 11px;
+}
+
+.lumin-guide-card p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .checklist-text {
   min-width: 0;
 }

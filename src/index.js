@@ -310,6 +310,7 @@ async function materializeReleaseData(key, env) {
   }
   if (filename === "checklist_data.json") {
     payload.special_entries = patch.checklist_special_entries || [];
+    payload.lumin_guides = patch.lumin_guides || [];
     payload.totals.special_entries = payload.special_entries.length;
   }
 

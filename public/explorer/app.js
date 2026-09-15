@@ -6815,7 +6815,11 @@ function renderChecklistRow(entry) {
   if (isLuminChecklistEntry(entry)) row.classList.add("checklist-lumin-row");
   row.dataset.checklistEntryId = entry.id;
 
-  row.append(makeIcon("checklist-icon", entry.icon));
+  const iconClasses = ["checklist-icon"];
+  if (entry?.kind === "aniimo_form" || entry?.kind === "aniimo_special") {
+    iconClasses.push("checklist-aniimo-portrait");
+  }
+  row.append(makeIcon(iconClasses.join(" "), entry.icon));
   const content = document.createElement("div");
   content.className = "checklist-text";
   const name = document.createElement("strong");
@@ -6856,6 +6860,39 @@ function renderChecklistRow(entry) {
   }
   row.append(states);
   return row;
+}
+
+function renderLuminGuide() {
+  const guides = Array.isArray(state.checklistData?.lumin_guides)
+    ? state.checklistData.lumin_guides
+    : [];
+  if (!guides.length) return null;
+
+  const section = document.createElement("section");
+  section.className = "lumin-guide";
+  const heading = document.createElement("div");
+  heading.className = "checklist-section-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Lumin Amber guide";
+  const note = document.createElement("span");
+  note.textContent = "Descriptions verified from the current game build";
+  heading.append(title, note);
+  section.append(heading);
+
+  const list = document.createElement("div");
+  list.className = "lumin-guide-list";
+  guides.forEach((guide) => {
+    const card = document.createElement("article");
+    card.className = "lumin-guide-card";
+    const name = document.createElement("strong");
+    name.textContent = guide.name || "Lumin Amber";
+    const description = document.createElement("p");
+    description.textContent = guide.description || "";
+    card.append(name, description);
+    list.append(card);
+  });
+  section.append(list);
+  return section;
 }
 
 function renderChecklistSpecialSection() {
@@ -6971,6 +7008,13 @@ function renderChecklist() {
   const visibleEntries = entries.filter(checklistEntryMatches);
   const fragment = document.createDocumentFragment();
   let renderedSections = 0;
+  if (state.checklistCategory === "ambers") {
+    const guide = renderLuminGuide();
+    if (guide) {
+      fragment.append(guide);
+      renderedSections += 1;
+    }
+  }
   if (state.checklistCategory === "aniimo") {
     const specialSection = renderChecklistSpecialSection();
     if (specialSection) {

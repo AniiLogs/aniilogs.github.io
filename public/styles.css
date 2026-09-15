@@ -376,8 +376,8 @@ footer a { font-weight: 800; text-decoration: none; }
 :root:not([data-color-mode="light"]) nav a:hover,
 :root:not([data-color-mode="light"]) .secondary-button,
 :root:not([data-color-mode="light"]) .coming-soon {
-  background: rgba(98, 217, 179, 0.1);
-  color: var(--ink);
+  background: rgba(var(--accent-rgb), 0.13);
+  color: color-mix(in srgb, var(--accent) 34%, var(--ink));
 }
 
 :root:not([data-color-mode="light"]) .primary-button {

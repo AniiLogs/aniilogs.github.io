@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#1a1f22">
-    <title>AniiLogs Explorer — Interactive Aniimo map and logs</title>
-    <link rel="stylesheet" href="./styles.css?v=0.14.9-cloud-tracking">
+    <title>AniiLogs Pathfinder — Interactive Aniimo map and logs</title>
+    <link rel="stylesheet" href="./styles.css?v=0.14.10-checklist-guides">
   </head>
   <body>
     <header class="app-topbar">
@@ -60,7 +60,7 @@
       <aside id="sidebar" class="sidebar" aria-label="Map and tracking controls">
         <header class="brand">
           <div class="brand-copy">
-            <h1>AniiLogs Explorer</h1>
+            <h1>AniiLogs Pathfinder</h1>
             <button id="appVersion" class="app-version app-version-button" type="button" aria-haspopup="dialog" aria-controls="changelogOverlay" aria-expanded="false">Version loading</button>
             <p id="mapMeta" class="database-meta" hidden>Database loading</p>
             <a id="cloudSyncLink" class="app-version" href="/api/auth/discord/start?return_to=/explorer/" hidden>Sign in for cloud sync</a>
@@ -188,7 +188,7 @@
           </div>
           <div id="mapViewport" class="map-viewport">
             <div id="contentUnavailable" class="content-unavailable" role="status" hidden>
-              <strong>Explorer data is being updated</strong>
+              <strong>Pathfinder data is being updated</strong>
               <span>The new UI is live, but maps and game catalogs will remain unavailable until the current snapshot passes review.</span>
             </div>
             <div id="mapWorld" class="map-world">
@@ -240,10 +240,10 @@
       </section>
     </div>
 
-  <script defer src="./app-config.js?v=0.7.1-layer-filters"></script>
+  <script defer src="./app-config.js?v=0.7.2-respawn"></script>
   <script defer src="../theme-shell.js?v=0.2.0-account-menu"></script>
   <script defer src="./localization.js?v=0.5.37"></script>
   <script defer src="./progress-storage.js?v=0.1.0"></script>
-  <script defer src="./app.js?v=0.13.10-dev-items"></script>
+  <script defer src="./app.js?v=0.13.11-checklist-guides"></script>
   </body>
 </html>
