@@ -382,6 +382,43 @@ button[aria-pressed="true"] {
 }
 
 /* Team Builder */
+.team-construction {
+  display: grid;
+  width: min(560px, calc(100% - 40px));
+  min-height: 320px;
+  margin: auto;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 36px;
+  text-align: center;
+}
+
+.team-construction h1,
+.team-construction p,
+.team-construction-sidebar h2,
+.team-construction-sidebar p {
+  margin: 0;
+}
+
+.team-construction-mark {
+  color: var(--accent-2);
+  font-size: 44px;
+}
+
+.team-construction-kicker {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.team-construction-sidebar {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
 .team-workspace {
   overflow: hidden;
 }
@@ -1458,9 +1495,7 @@ button[aria-pressed="true"] {
 }
 
 .settings-gear-button {
-  position: absolute;
-  top: 0;
-  right: -8px;
+  position: static;
   display: inline-grid;
   width: 38px;
   min-width: 38px;
@@ -1674,6 +1709,26 @@ button[aria-pressed="true"] {
 .map-tabs {
   display: block;
   margin: 0;
+}
+
+.settings-gear-label {
+  display: none;
+}
+
+.account-menu-popover .settings-gear-button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.account-menu-popover .settings-gear-label {
+  display: inline;
 }
 
 .map-navigation-panel {
@@ -7850,14 +7905,14 @@ button.catalog-item-reference {
   height: 100%;
   padding: 0;
   border: 0;
-  background: rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--accent-rgb), 0.04);
   cursor: pointer;
   pointer-events: auto;
   transition: background 150ms ease, filter 150ms ease;
 }
 
 .map-section-link--underground {
-  background: rgba(var(--accent-2-rgb), 0.22);
+  background: rgba(var(--accent-2-rgb), 0.04);
 }
 
 .map-section-link:hover,
@@ -7883,34 +7938,31 @@ button.catalog-item-reference {
   display: none;
 }
 
-.map-section-shortcut {
+.map-section-label {
   position: absolute;
-  width: 36px;
-  height: 36px;
+  width: max-content;
+  max-width: 190px;
   transform: translate(-50%, -50%);
-  padding: 0;
-  border: 2px solid rgba(235, 255, 248, 0.94);
-  border-radius: 50%;
-  background: rgba(var(--panel-rgb), 0.94);
-  color: var(--accent);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.58), 0 0 0 3px rgba(var(--accent-rgb), 0.34);
-  font: 800 18px/1 var(--font-ui);
-  cursor: pointer;
-  pointer-events: auto;
-  transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: rgba(var(--panel-rgb), 0.97);
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.62);
+  font: 700 11px/1.2 var(--font-ui);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
-.map-section-shortcut--underground {
-  color: color-mix(in srgb, var(--accent-2) 32%, var(--text));
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.58), 0 0 0 3px rgba(var(--accent-2-rgb), 0.34);
+.map-section-label--underground {
+  border-color: rgba(var(--accent-2-rgb), 0.72);
 }
 
-.map-section-shortcut:hover,
-.map-section-shortcut:focus-visible {
-  transform: translate(-50%, -50%) scale(1.14);
-  background: var(--panel-raised);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.68), 0 0 0 4px rgba(var(--accent-rgb), 0.58);
-  outline: none;
+.map-section-label.is-visible {
+  opacity: 1;
+  transform: translate(-50%, calc(-50% - 5px));
 }
 
 .pin.pin-aniimo-spawn.pin-no-icon {
@@ -7939,16 +7991,28 @@ button.catalog-item-reference {
     drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55));
 }
 
-/* Aniimo art mixes circular head portraits and transparent full-body renders.
-   Give every Aniimo map marker the same circular portrait frame without
-   changing the silhouette of travel, item, entrance, or egg symbols. */
-.pin.pin-aniimo-spawn .pin-icon {
+/* A circle identifies a specific species/form portrait. Generic Aniimo
+   category symbols (for example Alpha Aniimo) keep their native silhouette. */
+.pin.pin-specific-aniimo .pin-icon {
   box-sizing: border-box;
   border: 1px solid rgba(235, 255, 248, 0.92);
   border-radius: 50%;
   background: radial-gradient(circle at 42% 34%, #ffffff 0 50%, #e8eeef 76%, #cbd5d7 100%);
   object-fit: contain;
   overflow: hidden;
+}
+
+/* Special Aniimo status art is always a small, unframed top-right badge. */
+.aniimo-special-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  object-fit: contain;
 }
 
 .pin-icon-selected {

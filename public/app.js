@@ -4,6 +4,7 @@ const profileLink = document.querySelector("[data-profile-link]");
 const accountMenu = document.querySelector("[data-account-menu]");
 const logoutButton = document.querySelector("[data-logout]");
 const deleteAccountButton = document.querySelector("[data-delete-account]");
+const settingsShortcut = document.querySelector("[data-settings-shortcut]");
 const status = document.querySelector("[data-auth-status]");
 const profileEditor = document.querySelector("[data-profile-editor]");
 const profileDisplayName = document.querySelector("[data-profile-display-name]");
@@ -87,6 +88,7 @@ function showSignedOut(message = "Sign in to sync progress. Profiles remain priv
   profileLink.hidden = true;
   logoutButton.hidden = true;
   deleteAccountButton.hidden = true;
+  settingsShortcut.hidden = false;
   profileEditor.hidden = true;
   profileEditor.reset();
   profileStatus.textContent = "";
@@ -103,6 +105,7 @@ function showSignedIn(account) {
   profileLink.hidden = false;
   logoutButton.hidden = false;
   deleteAccountButton.hidden = false;
+  settingsShortcut.hidden = true;
   status.textContent = `Signed in as ${name}. Your profile is private by default.`;
   void loadPrivateProfile(name);
 }

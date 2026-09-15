@@ -20,18 +20,28 @@ test("procedural and withheld maps stay out of the public map navigator", () => 
   assert.doesNotMatch(explorer, /current atlas views/u);
 });
 
-test("only proven entrance pins are prepared for future interior and vertical-layer navigation", () => {
+test("current section overlays and cave entrances expose interior navigation", () => {
   assert.match(explorerHtml, /id="mapSectionShortcutLayer"/u);
   assert.match(explorerHtml, /id="mapOverlayBackButton"/u);
   assert.match(explorer, /function openMapOverlay\(mapId\)/u);
   assert.match(explorer, /map\?\.parent_map_id/u);
   assert.match(explorer, /switchMap\(parentMapId\)/u);
   assert.match(explorerStyles, /\.map-surface\.has-map-overlay \.map-viewport/u);
-  assert.match(explorer, /map transitions are exposed only through proven entrance markers/u);
-  assert.doesNotMatch(explorer, /shortcut\.textContent = section\.kind/u);
+  assert.match(explorer, /Array\.isArray\(map\?\.map_sections\)/u);
+  assert.match(explorer, /link\.style\.clipPath = `polygon/u);
+  assert.match(explorer, /label\.textContent = section\.label/u);
+  assert.match(explorer, /closest\("\.map-section-link"\)\) return;/u);
   assert.match(explorer, /spawn\.hover_icon \|\| item\.hover_icon/u);
   assert.match(explorerStyles, /\.pin:hover \.pin-icon-selected/u);
   assert.match(explorerStyles, /\.pin\.pin-underground \{[\s\S]*--pin-size: 22px/u);
+});
+
+test("cave navigation uses the current in-game marker art rather than legacy custom arrows", () => {
+  assert.match(explorer, /itemsById\?\.get\("current-poi-10600"\)\?\.icon/);
+  assert.match(explorer, /map-section-label/);
+  assert.match(explorer, /renderMapSections\(\);\s*updateUndergroundMapLayerVisibility\(\);\s*applyPendingSharedPinSelection/);
+  assert.doesNotMatch(explorer, /map-layer-underground-(?:off|on)\.png/);
+  assert.match(explorerStyles, /\.map-section-label\.is-visible\s*\{/);
 });
 
 test("Aniilog forms remain nested under one expandable species row", () => {
@@ -47,7 +57,12 @@ test("gameplay traits and Pet Manual objectives use separate catalog sections", 
   assert.match(explorer, /catalogAbilitySearchTerms\(entry\?\.traits\)/);
   assert.match(explorer, /catalogAbilitySearchTerms\(entry\?\.aniilog_research\)/);
   assert.match(explorer, /renderCatalogAbilitySection\("Traits", entry\.traits/);
-  assert.match(explorer, /renderCatalogAbilitySection\("Aniilog Research", entry\.aniilog_research/);
+  assert.match(explorer, /renderCatalogAbilitySection\(\s*"Aniilog Research",\s*entry\.aniilog_research/s);
+  assert.ok(
+    explorer.lastIndexOf('"Aniilog Research"')
+      > explorer.indexOf('record.append(lowerGrid)'),
+    "Aniilog Research should render after the desktop lower detail grid",
+  );
 });
 
 test("mixed current Aniimo art families share one circular portrait treatment", () => {
@@ -57,9 +72,8 @@ test("mixed current Aniimo art families share one circular portrait treatment", 
   assert.match(explorerStyles, /\.item-row\.aniimo-row \.item-icon,[\s\S]*?border-radius:\s*50%/s);
 });
 
-test("every Aniimo map marker uses a circular portrait frame", () => {
-  assert.match(explorerStyles, /\.pin\.pin-aniimo-spawn \.pin-icon\s*\{[^}]*border-radius:\s*50%/s);
-  assert.match(explorerStyles, /\.pin\.pin-aniimo-spawn \.pin-icon\s*\{[^}]*object-fit:\s*contain/s);
+test("Prismana markers expose their Nurture trigger separately from their type", () => {
+  assert.match(explorer, /spawn\.spawn_mechanism \? \["Trigger", spawn\.spawn_mechanism\] : null/u);
 });
 
 test("packed PetManual videos use their lower grayscale plane as transparency", () => {
@@ -116,15 +130,22 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
 });
 
 test("logs are top-level sections while the Map sidebar contains only map tools", () => {
-  assert.match(landingHtml, /class="nav-disabled"[^>]*>Aniilog</u);
+  assert.match(landingHtml, /href="\/explorer\/\?view=aniilog"[^>]*>Aniilog</u);
   assert.match(explorerHtml, /id="topNavAniilog"[^>]*>Aniilog</u);
   assert.match(explorerHtml, /id="topNavItemlog"/u);
-  assert.match(explorerHtml, /id="topNavTeam"[^>]*hidden>Team Builder</u);
+  assert.match(explorerHtml, /id="topNavTeam"[^>]*>Team Builder</u);
   assert.match(explorerHtml, /id="aniilogWorkspaceTab"[^>]*hidden/u);
   assert.match(explorerHtml, /id="itemlogWorkspaceTab"[^>]*hidden/u);
   assert.match(explorer, /els\.workspaceTabs\.hidden = isFullPanelView\(\)/u);
   assert.match(explorer, /state\.sidebarView === "itemlog"\) els\.topNavItemlog/u);
   assert.match(explorer, /state\.sidebarView === "team"\) els\.topNavTeam/u);
+});
+
+test("Team Builder is a fluid top-level under-construction workspace", () => {
+  assert.match(explorer, /ENABLED_WORKSPACE_VIEWS = new Set\(\["map", "tracking", "checklist", "itemlog", "team"\]\)/u);
+  assert.match(explorer, /function renderTeamUnderConstruction\(\)/u);
+  assert.match(explorer, /Under construction/u);
+  assert.match(explorerHtml, /id="topNavTeam"[^>]*>Team Builder<\/a>/u);
 });
 
 test("the desktop sidebar handle stays narrow and unobtrusive", () => {
@@ -151,7 +172,8 @@ test("the top-right Discord control becomes an accessible account menu", () => {
   assert.match(landingApp, /const label = link\.querySelector\("span"\)/u);
   assert.doesNotMatch(landingApp, /link\.textContent = link\.classList\.contains/u);
   assert.match(explorer, /function configureTopbarAccount\(account = null\)/u);
-  assert.match(explorer, /els\.topbarSettingsButton\.addEventListener/u);
+  assert.match(explorer, /popover\.insertBefore\(els\.settingsButton, els\.topbarLogoutButton\)/u);
+  assert.match(explorer, /actions\.insertBefore\(els\.settingsButton, els\.topbarSignInLink\)/u);
   assert.match(explorer, /REQUESTED_SETTINGS_OPEN/u);
   assert.match(landingStyles, /\.account-menu-popover/u);
   assert.match(explorerStyles, /\.account-menu-popover/u);
@@ -230,11 +252,21 @@ test("map hover keeps the normal icon unless a selected-state replacement exists
   assert.doesNotMatch(explorerStyles, /(?:^|\n)\.pin:hover \.pin-icon:not\(\.pin-icon-selected\)/u);
 });
 
+test("only species-specific Aniimo map portraits receive the circular frame", () => {
+  assert.match(explorer, /spawn\.marker_type === "aniimo_spawn" && spawn\.aniimo_id \? "pin-specific-aniimo"/u);
+  assert.match(explorerStyles, /\.pin\.pin-specific-aniimo \.pin-icon/u);
+  assert.doesNotMatch(explorerStyles, /\.pin\.pin-aniimo-spawn \.pin-icon\s*\{/u);
+});
+
+test("special Aniimo badges are unframed and anchored at the portrait top right", () => {
+  assert.match(explorerStyles, /\.aniimo-special-badge\s*\{[^}]*top: -3px;[^}]*right: -3px;[^}]*border-radius: 0;[^}]*background: transparent;/su);
+});
+
 test("the live UI loads only the package-pinned reviewed private content route", async () => {
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-eggs-traits-video-r3"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-map-overlays-r5"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

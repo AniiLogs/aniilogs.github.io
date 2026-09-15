@@ -67,7 +67,7 @@ const CLOUD_SYNC_ENABLED = Boolean(API_URL);
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
 const INITIAL_URL_PARAMS = new URLSearchParams(window.location.search);
 const REQUESTED_SETTINGS_OPEN = INITIAL_URL_PARAMS.get("settings") === "1";
-const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog"]);
+const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog", "team"]);
 if (SITE_CONFIG.aniilogAvailable) ENABLED_WORKSPACE_VIEWS.add("aniilog");
 const HIDDEN_MAP_IDS = new Set(["egg-heist", "egg-heist-team"]);
 const REQUESTED_WORKSPACE_VIEW = ENABLED_WORKSPACE_VIEWS.has(INITIAL_URL_PARAMS.get("view"))
@@ -87,8 +87,6 @@ const MOBILE_LAYOUT_QUERY = window.matchMedia(
 const DESKTOP_SIDEBAR_QUERY = window.matchMedia("(min-width: 821px) and (pointer: fine)");
 const UNDERGROUND_MAP_LAYERS = Object.freeze({
   "country-of-time": Object.freeze({
-    offIcon: contentUrl("./assets/icons/map-layer-underground-off.png"),
-    onIcon: contentUrl("./assets/icons/map-layer-underground-on.png"),
     defaultPlanId: "all",
     plans: Object.freeze([
       Object.freeze({
@@ -519,7 +517,6 @@ const els = {
   topbarAccountLabel: document.querySelector("#topbarAccountLabel"),
   topbarProfileLink: document.querySelector("#topbarProfileLink"),
   topbarDeveloperButton: document.querySelector("#topbarDeveloperButton"),
-  topbarSettingsButton: document.querySelector("#topbarSettingsButton"),
   topbarSignInLink: document.querySelector("#topbarSignInLink"),
   topbarLogoutButton: document.querySelector("#topbarLogoutButton"),
   sidebar: document.querySelector("#sidebar"),
@@ -1547,6 +1544,10 @@ function configureTopbarAccount(account = null) {
   els.topbarDeveloperButton.hidden = !(authenticated && state.developerModeAvailable);
   els.topbarSignInLink.hidden = authenticated;
   els.topbarLogoutButton.hidden = !authenticated;
+  const actions = document.querySelector(".app-topbar-actions");
+  const popover = els.topbarAccountMenu.querySelector(".account-menu-popover");
+  if (authenticated) popover.insertBefore(els.settingsButton, els.topbarLogoutButton);
+  else actions.insertBefore(els.settingsButton, els.topbarSignInLink);
   els.topbarAccountMenu.querySelector("summary").setAttribute(
     "aria-label",
     authenticated ? `Signed in as ${name}; open account menu` : "Sign in with Discord",
@@ -5342,7 +5343,6 @@ function renderAniilogCatalogRecord(entry) {
   utilityGrid.append(
     renderCatalogAbilitySection("Ultimate", entry.ultimates, "No Ultimate ability is currently listed for this form."),
     renderCatalogAbilitySection("Traits", entry.traits, "No gameplay trait is currently listed for this form."),
-    renderCatalogAbilitySection("Aniilog Research", entry.aniilog_research, "No Aniilog Research entry is currently listed for this form."),
     renderCatalogAbilitySection("Mobility skills", entry.mobility_skills, "No Mobility skill is currently listed for this form."),
     renderCatalogLevels("Exploration", entry.exploration, "None", { compact: true }),
     renderCatalogHomelandLevels(entry.homeland),
@@ -5376,6 +5376,11 @@ function renderAniilogCatalogRecord(entry) {
     if (research) lowerGrid.append(research);
     record.append(lowerGrid);
   }
+  record.append(renderCatalogAbilitySection(
+    "Aniilog Research",
+    entry.aniilog_research,
+    "No Aniilog Research entry is currently listed for this form.",
+  ));
   return record;
 }
 
@@ -7089,7 +7094,7 @@ function updateWorkspaceTabs() {
   if (catalogView) {
     renderCatalogPreview();
   } else if (state.sidebarView === "team") {
-    window.AniipediaTeamBuilder?.show();
+    renderTeamUnderConstruction();
     removeMobileCatalogStickyIdentity();
   } else {
     removeMobileCatalogStickyIdentity();
@@ -7241,6 +7246,22 @@ function renderMapBase() {
   scheduleMapTileDetail();
 }
 
+function renderTeamUnderConstruction() {
+  els.teamSidebarContent.innerHTML = `
+    <section class="team-construction-sidebar">
+      <span class="team-construction-kicker">Coming later</span>
+      <h2>Team Builder</h2>
+      <p>The page shell is ready. Build-specific team data and automation remain withheld until their own audit is complete.</p>
+    </section>`;
+  els.teamPanel.innerHTML = `
+    <div class="team-construction">
+      <span class="team-construction-mark" aria-hidden="true">✦</span>
+      <p class="team-construction-kicker">Under construction</p>
+      <h1>Team Builder is on the way</h1>
+      <p>This area will open after its data model and current-build inputs are reviewed independently.</p>
+    </div>`;
+}
+
 function openWorkspaceFromNavigation(event, view) {
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   if (!ENABLED_WORKSPACE_VIEWS.has(view)) return;
@@ -7255,16 +7276,49 @@ function openWorkspaceFromNavigation(event, view) {
 function renderMapSections() {
   els.mapSectionLayer.replaceChildren();
   els.mapSectionShortcutLayer.replaceChildren();
-  // Current-build overlay geometry remains in private data for validation, but
-  // map transitions are exposed only through proven entrance markers.
-  els.mapSectionLayer.hidden = true;
-  els.mapSectionShortcutLayer.hidden = true;
+  const map = currentMap();
+  const sections = Array.isArray(map?.map_sections) ? map.map_sections : [];
+  const usableSections = sections.filter((section) => (
+    Array.isArray(section?.polygon)
+    && section.polygon.length >= 3
+    && state.data.mapsById.has(section.target_map_id)
+  ));
+  usableSections.forEach((section) => {
+    const points = section.polygon
+      .map((point) => `${clamp(Number(point.x) * 100, 0, 100)}% ${clamp(Number(point.y) * 100, 0, 100)}%`);
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = `map-section-link${section.kind === "underground" ? " map-section-link--underground" : ""}`;
+    link.style.clipPath = `polygon(${points.join(", ")})`;
+    link.setAttribute("aria-label", `Open ${section.label}`);
+    link.title = section.label;
+    const centroid = section.polygon.reduce(
+      (total, point) => ({ x: total.x + Number(point.x), y: total.y + Number(point.y) }),
+      { x: 0, y: 0 },
+    );
+    centroid.x /= section.polygon.length;
+    centroid.y /= section.polygon.length;
+    const label = document.createElement("span");
+    label.className = `map-section-label${section.kind === "underground" ? " map-section-label--underground" : ""}`;
+    label.dataset.normalizedX = String(clamp(centroid.x, 0, 1));
+    label.dataset.normalizedY = String(clamp(centroid.y, 0, 1));
+    label.textContent = section.label;
+    const showLabel = () => label.classList.add("is-visible");
+    const hideLabel = () => label.classList.remove("is-visible");
+    link.addEventListener("pointerenter", showLabel);
+    link.addEventListener("pointerleave", hideLabel);
+    link.addEventListener("focus", showLabel);
+    link.addEventListener("blur", hideLabel);
+    link.addEventListener("click", () => switchMap(section.target_map_id));
+    els.mapSectionLayer.append(link);
+    els.mapSectionShortcutLayer.append(label);
+  });
+  els.mapSectionLayer.hidden = !usableSections.length;
+  els.mapSectionShortcutLayer.hidden = !usableSections.length;
+  syncMapSectionPositions();
 }
 
 function undergroundLayerForCurrentMap() {
-  if (state.bootstrap?.data_quality?.provisional) {
-    return null;
-  }
   return UNDERGROUND_MAP_LAYERS[state.activeMapId] || null;
 }
 
@@ -7311,7 +7365,9 @@ function updateUndergroundMapLayerVisibility() {
   els.undergroundLayerToggle.setAttribute("aria-label", label);
   els.undergroundLayerToggle.title = label;
   if (layer) {
-    els.undergroundLayerToggleIcon.src = contentUrl(visible ? layer.onIcon : layer.offIcon);
+    const caveIcon = state.data?.itemsById?.get("current-poi-10600")?.icon;
+    if (caveIcon) els.undergroundLayerToggleIcon.src = contentUrl(caveIcon);
+    else els.undergroundLayerToggleIcon.removeAttribute("src");
   }
 }
 
@@ -7766,12 +7822,12 @@ function syncDomPinPositions() {
 function syncMapSectionPositions() {
   const map = currentMap();
   if (!map) return;
-  els.mapSectionShortcutLayer.querySelectorAll(".map-section-shortcut").forEach((shortcut) => {
-    const normalizedX = Number(shortcut.dataset.normalizedX);
-    const normalizedY = Number(shortcut.dataset.normalizedY);
+  els.mapSectionShortcutLayer.querySelectorAll(".map-section-label").forEach((label) => {
+    const normalizedX = Number(label.dataset.normalizedX);
+    const normalizedY = Number(label.dataset.normalizedY);
     if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) return;
-    shortcut.style.left = `${Math.round(normalizedX * map.width * state.scale + state.panX)}px`;
-    shortcut.style.top = `${Math.round(normalizedY * map.height * state.scale + state.panY)}px`;
+    label.style.left = `${Math.round(normalizedX * map.width * state.scale + state.panX)}px`;
+    label.style.top = `${Math.round(normalizedY * map.height * state.scale + state.panY)}px`;
   });
 }
 
@@ -7842,7 +7898,7 @@ function zoomAt(clientX, clientY, nextScale) {
 }
 
 function eventTargetsPin(event) {
-  return event.target instanceof Element && Boolean(event.target.closest(".pin, .map-section-link, .map-section-shortcut"));
+  return event.target instanceof Element && Boolean(event.target.closest(".pin, .map-section-link"));
 }
 
 function rememberActivePointer(event, fromPin = false) {
@@ -9152,6 +9208,7 @@ function pinClassName(spawn) {
     spawn.marker_type === "elite_egg" ? "pin-elite-egg" : "",
     spawn.marker_type === "alpha_egg" ? "pin-alpha-egg" : "",
     spawn.marker_type === "aniimo_spawn" ? "pin-aniimo-spawn" : "",
+    spawn.marker_type === "aniimo_spawn" && spawn.aniimo_id ? "pin-specific-aniimo" : "",
     spawn.layer_id === "teleports" ? "pin-teleport" : "",
     spawn.layer_id === "ambers" ? "pin-amber" : "",
     spawn.marker_type === "underground_entrance" ? "pin-underground" : "",
@@ -9596,6 +9653,7 @@ function renderSelectionDetail(detail, spawn, item) {
     spawn.document_group ? ["Series", spawn.document_group] : null,
     spawn.collectible_group ? ["Series", spawn.collectible_group] : null,
     formValue ? ["Form", formValue] : null,
+    spawn.spawn_mechanism ? ["Trigger", spawn.spawn_mechanism] : null,
     ["X", formatCoordinate(spawn.x), formatCoordinate(spawn.x)],
     ["Y", formatCoordinate(spawn.y), formatCoordinate(spawn.y)],
     ["Height", formatNumber(spawn.height_y, 2)],
@@ -9746,6 +9804,11 @@ function useMapDataset(mapId, dataset) {
     items: dataset?.items || [],
     spawns: dataset?.spawns || [],
   });
+  // Section and underground controls can now resolve marker artwork from the
+  // loaded map shard. Re-render them after the async dataset replaces the
+  // bootstrap-only shell.
+  renderMapSections();
+  updateUndergroundMapLayerVisibility();
   applyPendingSharedPinSelection();
   renderItems();
   refreshVisibility();
@@ -10036,10 +10099,6 @@ function bindEvents() {
     if (state.settingsOpen) renderSettings();
     else openSettings();
   });
-  els.topbarSettingsButton.addEventListener("click", () => {
-    els.topbarAccountMenu.open = false;
-    openSettings();
-  });
   els.topbarLogoutButton.addEventListener("click", () => void logoutCloudAccount());
   els.settingsCloseButton.addEventListener("click", closeSettings);
   els.settingsOverlay.addEventListener("click", (event) => {
@@ -10142,6 +10201,9 @@ function bindEvents() {
   });
   els.mapViewport.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    // Linked area polygons are ordinary controls. Pointer capture would move
+    // the matching pointerup onto the viewport and swallow their click.
+    if (event.target instanceof Element && event.target.closest(".map-section-link")) return;
     const pointer = rememberActivePointer(event, eventTargetsPin(event));
     els.mapViewport.setPointerCapture(event.pointerId);
 
@@ -10242,10 +10304,6 @@ async function init() {
     await window.AniipediaI18n.load("en");
   }
   window.AniipediaI18n.start();
-  window.AniipediaTeamBuilder?.mount({
-    sidebar: els.teamSidebarContent,
-    panel: els.teamPanel,
-  });
   if (ENABLED_WORKSPACE_VIEWS.has("aniilog")) {
     els.topNavAniilog.href = "/explorer/?view=aniilog";
     els.topNavAniilog.classList.remove("nav-disabled");

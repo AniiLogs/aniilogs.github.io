@@ -6,10 +6,10 @@
     <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo explorers.">
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Your Aniimo adventure journal</title>
-    <link rel="stylesheet" href="/styles.css?v=0.8.0-private-profile">
+    <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
     <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
-    <script src="/app.js?v=0.6.0-private-profile" defer></script>
+    <script src="/app.js?v=0.6.1-account-settings" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -20,8 +20,9 @@
       </a>
       <nav aria-label="Main navigation">
         <a href="/explorer/">Map</a>
-        <a class="nav-disabled" aria-disabled="true" title="Withheld until current-build numbering is verified">Aniilog</a>
+        <a href="/explorer/?view=aniilog">Aniilog</a>
         <a href="/explorer/?view=itemlog">Item-log</a>
+        <a href="/explorer/?view=team">Team Builder</a>
         <a href="#profiles">Profiles</a>
       </nav>
       <div class="account-actions">
@@ -34,6 +35,7 @@
             <option value="pawney">Pawney</option>
           </select>
         </label>
+        <a class="account-settings-shortcut" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">⚙</a>
         <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
           <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
           <span>Sign in</span>
