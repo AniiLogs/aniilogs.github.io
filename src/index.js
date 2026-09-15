@@ -181,6 +181,9 @@ function validContentKey(pathname) {
 }
 
 async function getReleaseContent(request, env) {
+  if (String(env.CONTENT_RELEASE_ENABLED || "").toLowerCase() !== "true") {
+    return json({ error: "Release content is unavailable pending review." }, 404);
+  }
   if (!env.CONTENT) return json({ error: "Content storage is unavailable." }, 503);
   const key = validContentKey(new URL(request.url).pathname);
   if (!key) return json({ error: "Not found" }, 404);
@@ -331,6 +334,22 @@ async function completeDiscordLogin(request, env) {
   }
 }
 
+export function developerAccountAllowed(discordId, env) {
+  const allowedIds = String(env.DEVELOPER_DISCORD_IDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^\d{15,22}$/u.test(value));
+  return allowedIds.includes(String(discordId || "")) || administratorAccountAllowed(discordId, env);
+}
+
+export function administratorAccountAllowed(discordId, env) {
+  const allowedIds = String(env.ADMIN_DISCORD_IDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^\d{15,22}$/u.test(value));
+  return allowedIds.includes(String(discordId || ""));
+}
+
 async function currentAccount(request, env) {
   if (!env.DB) return null;
   const authorization = request.headers.get("authorization") || "";
@@ -355,6 +374,17 @@ async function currentAccount(request, env) {
     LIMIT 1`,
   ).bind(sessionHash, now).first();
   if (!row) return null;
+  const administrator = administratorAccountAllowed(row.discordId, env);
+  let developer = developerAccountAllowed(row.discordId, env);
+  if (!developer) {
+    try {
+      developer = Boolean(await env.DB.prepare(
+        "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
+      ).bind(String(row.discordId)).first());
+    } catch (error) {
+      console.error("Could not read developer role", error);
+    }
+  }
   return {
     discordId: String(row.discordId),
     username: String(row.discordUsername),
@@ -363,7 +393,27 @@ async function currentAccount(request, env) {
     displayName: row.displayName ? String(row.displayName) : null,
     profilePublic: Number(row.isPublic) === 1,
     sessionExpiresAt: Number(row.expiresAt),
+    developerModeAvailable: developer,
+    developerAdminAvailable: administrator,
   };
+}
+
+async function updateDeveloperRole(request, env, discordId, enabled) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account?.developerAdminAvailable) return json({ error: "Developer administrator access required." }, 403);
+  if (!/^\d{15,22}$/u.test(discordId)) return json({ error: "A valid Discord user ID is required." }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  if (enabled) {
+    await env.DB.prepare(
+      `INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(discord_id) DO UPDATE SET granted_by_discord_id = excluded.granted_by_discord_id`,
+    ).bind(discordId, account.discordId, now).run();
+  } else {
+    await env.DB.prepare("DELETE FROM developer_roles WHERE discord_id = ?").bind(discordId).run();
+  }
+  return json({ ok: true, discordId, developer: enabled });
 }
 
 export function sameOriginWrite(request) {
@@ -665,6 +715,13 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);
+  const developerRoleMatch = url.pathname.match(/^\/api\/admin\/developers\/(\d{15,22})$/u);
+  if (developerRoleMatch && request.method === "PUT") {
+    return updateDeveloperRole(request, env, developerRoleMatch[1], true);
+  }
+  if (developerRoleMatch && request.method === "DELETE") {
+    return updateDeveloperRole(request, env, developerRoleMatch[1], false);
+  }
   if (url.pathname === "/api/v1/shares" && request.method === "POST") return createMapShare(request, env);
   const shareMatch = url.pathname.match(/^\/api\/v1\/shares\/([^/]+)$/u);
   if (shareMatch && request.method === "GET") return getMapShare(shareMatch[1], env);

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  administratorAccountAllowed,
   browserWriteAllowed,
+  developerAccountAllowed,
   parseCookies,
   progressPayload,
   safeClientReturnTo,
@@ -31,6 +33,7 @@ async function authenticatedTestDatabase() {
   const progress = new Map();
   const shares = new Map();
   const handoffs = new Set([discordIds.owner, discordIds.other]);
+  const developers = new Set();
   const accounts = new Map([
     [discordIds.owner, { discordId: discordIds.owner, discordUsername: "owner", discordGlobalName: "Owner", discordAvatarHash: null }],
     [discordIds.other, { discordId: discordIds.other, discordUsername: "other", discordGlobalName: "Other", discordAvatarHash: null }],
@@ -57,6 +60,7 @@ async function authenticatedTestDatabase() {
                 return row ? { revision: row.revision, updatedAt: row.updatedAt } : null;
               }
               if (sql.startsWith("SELECT display_name")) return profiles.get(values[0]) || null;
+              if (sql.includes("FROM developer_roles")) return developers.has(values[0]) ? { discordId: values[0] } : null;
               if (sql.startsWith("SELECT selection_json")) {
                 const row = shares.get(values[0]);
                 return row ? { selectionJson: row.selectionJson, expiresAt: row.expiresAt } : null;
@@ -68,6 +72,14 @@ async function authenticatedTestDatabase() {
                 const prior = progress.get(values[0]);
                 progress.set(values[0], { revision: (prior?.revision || 0) + 1, dataJson: values[1], updatedAt: values[3] });
                 return { meta: { changes: 1 } };
+              }
+              if (sql.startsWith("INSERT INTO developer_roles")) {
+                developers.add(values[0]);
+                return { meta: { changes: 1 } };
+              }
+              if (sql === "DELETE FROM developer_roles WHERE discord_id = ?") {
+                const changed = developers.delete(values[0]);
+                return { meta: { changes: changed ? 1 : 0 } };
               }
               if (sql.startsWith("UPDATE profiles SET")) {
                 profiles.set(values[3], { displayName: values[0], bio: values[1], isPublic: 0, updatedAt: values[2] });
@@ -132,7 +144,7 @@ async function authenticatedTestDatabase() {
       return Promise.all(statements.map((statement) => statement.run()));
     },
   };
-  return { DB, tokens, discordIds, accounts, sessions, profiles, progress, shares, handoffs };
+  return { DB, tokens, discordIds, accounts, sessions, profiles, progress, shares, handoffs, developers };
 }
 
 function apiRequest(path, token, options = {}) {
@@ -172,6 +184,18 @@ test("parseCookies preserves values containing equals signs", () => {
   });
 });
 
+test("developer and administrator bootstrap allowlists are exact Discord IDs", () => {
+  const env = {
+    DEVELOPER_DISCORD_IDS: "111111111111111111, 222222222222222222",
+    ADMIN_DISCORD_IDS: "333333333333333333",
+  };
+  assert.equal(developerAccountAllowed("111111111111111111", env), true);
+  assert.equal(developerAccountAllowed("333333333333333333", env), true);
+  assert.equal(administratorAccountAllowed("333333333333333333", env), true);
+  assert.equal(administratorAccountAllowed("111111111111111111", env), false);
+  assert.equal(developerAccountAllowed("111", env), false);
+});
+
 test("state-changing requests require an explicit same-origin browser origin", () => {
   assert.equal(sameOriginWrite(new Request("https://aniilogs.example/api/progress", {
     method: "PUT",
@@ -196,6 +220,39 @@ test("cross-origin writes allow only the configured GitHub Pages origin", () => 
     method: "PUT",
     headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
   }), env), false);
+});
+
+test("only private administrators can grant and revoke developer access", async () => {
+  const state = await authenticatedTestDatabase();
+  const env = {
+    DB: state.DB,
+    PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io",
+    ADMIN_DISCORD_IDS: state.discordIds.owner,
+  };
+  const grant = await worker.fetch(apiRequest(`/api/admin/developers/${state.discordIds.other}`, state.tokens.owner, {
+    method: "PUT",
+    body: "{}",
+  }), env);
+  assert.equal(grant.status, 200);
+  assert.equal(state.developers.has(state.discordIds.other), true);
+
+  const otherAccount = await worker.fetch(apiRequest("/api/auth/me", state.tokens.other), env);
+  const otherPayload = await otherAccount.json();
+  assert.equal(otherPayload.account.developerModeAvailable, true);
+  assert.equal(otherPayload.account.developerAdminAvailable, false);
+
+  const denied = await worker.fetch(apiRequest(`/api/admin/developers/${state.discordIds.owner}`, state.tokens.other, {
+    method: "PUT",
+    body: "{}",
+  }), env);
+  assert.equal(denied.status, 403);
+
+  const revoke = await worker.fetch(apiRequest(`/api/admin/developers/${state.discordIds.other}`, state.tokens.owner, {
+    method: "DELETE",
+    body: "{}",
+  }), env);
+  assert.equal(revoke.status, 200);
+  assert.equal(state.developers.has(state.discordIds.other), false);
 });
 
 test("API preflights expose CORS only to the exact configured site", async () => {
@@ -228,6 +285,7 @@ test("release content is served from the private R2 binding without directory li
   });
   const env = {
     PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io",
+    CONTENT_RELEASE_ENABLED: "true",
     CONTENT: {
       async get(key) {
         requestedKeys.push(["get", key]);
@@ -266,6 +324,23 @@ test("release content is served from the private R2 binding without directory li
     "https://api.aniilogs.example/api/content/releases/3509129/data%5Csecret.json",
   ), env);
   assert.equal(traversalResponse.status, 404);
+});
+
+test("release content fails closed until an audited snapshot is explicitly enabled", async () => {
+  let reads = 0;
+  const response = await worker.fetch(new Request(
+    "https://api.aniilogs.example/api/content/releases/3509129/data/map_site_data.json",
+  ), {
+    CONTENT: {
+      async get() {
+        reads += 1;
+        return null;
+      },
+    },
+  });
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "Release content is unavailable pending review." });
+  assert.equal(reads, 0);
 });
 
 test("Discord handoffs are one-time and mint an owner session", async () => {

@@ -5,17 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#1a1f22">
     <title>AniiLogs Explorer — Interactive Aniimo map and logs</title>
-    <link rel="stylesheet" href="./styles.css?v=0.9.4-shell-contrast">
+    <link rel="stylesheet" href="./styles.css?v=0.14.0-map-controls">
   </head>
   <body>
     <header class="app-topbar">
-      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">Anii<span>Logs</span></a>
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <span class="app-topbar-brand-mark" aria-hidden="true"><span class="app-topbar-brand-spark">✦</span><span class="app-topbar-brand-letter">A</span></span>
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
+      </a>
       <nav aria-label="Main navigation">
         <a id="topNavMap" href="/explorer/">Map</a>
+        <a id="topNavAniilog" class="nav-disabled" aria-disabled="true" title="Withheld until current-build numbering is verified">Aniilog</a>
         <a id="topNavItemlog" href="/explorer/?view=itemlog">Item-log</a>
+        <a id="topNavTeam" href="/explorer/?view=team" hidden>Team Builder</a>
         <a id="topNavProfiles" href="/#profiles">Profiles</a>
       </nav>
-      <span id="topbarContext" class="app-topbar-context">Map</span>
+      <div class="app-topbar-actions">
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+        <a id="topbarSignInLink" class="account-menu-trigger account-sign-in" href="/api/auth/discord/start?return_to=/explorer/" aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details id="topbarAccountMenu" class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span id="topbarAccountLabel" hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <a id="topbarProfileLink" href="/#profiles" hidden>My Profile</a>
+            <button id="topbarDeveloperButton" type="button" hidden>Developer</button>
+            <button id="topbarSettingsButton" type="button">Settings</button>
+            <button id="topbarLogoutButton" type="button" hidden>Log out</button>
+          </div>
+        </details>
+        <span id="topbarContext" class="app-topbar-context">Map</span>
+      </div>
     </header>
     <main id="appShell" class="app-shell">
       <aside id="sidebar" class="sidebar" aria-label="Map and tracking controls">
@@ -23,7 +56,7 @@
           <div class="brand-copy">
             <h1>AniiLogs Explorer</h1>
             <button id="appVersion" class="app-version app-version-button" type="button" aria-haspopup="dialog" aria-controls="changelogOverlay" aria-expanded="false">Version loading</button>
-            <p id="mapMeta" class="database-meta">Database loading</p>
+            <p id="mapMeta" class="database-meta" hidden>Database loading</p>
             <a id="cloudSyncLink" class="app-version" href="/api/auth/discord/start?return_to=/explorer/" hidden>Sign in for cloud sync</a>
           </div>
           <button id="settingsButton" class="settings-gear-button" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" aria-expanded="false" aria-label="Open settings" title="Settings">
@@ -38,23 +71,14 @@
           <button id="mapWorkspaceTab" class="workspace-tab" data-workspace-view="map" type="button" role="tab" aria-controls="mapWorkspace" aria-selected="true">Map</button>
           <button id="trackingWorkspaceTab" class="workspace-tab" data-workspace-view="tracking" type="button" role="tab" aria-controls="trackingWorkspace" aria-selected="false">Tracking</button>
           <button id="checklistWorkspaceTab" class="workspace-tab" data-workspace-view="checklist" type="button" role="tab" aria-controls="checklistWorkspace" aria-selected="false" title="Current build local preview">Checklist</button>
-          <button id="aniilogWorkspaceTab" class="workspace-tab" data-workspace-view="aniilog" type="button" role="tab" aria-controls="catalogWorkspace" aria-selected="false" title="Withheld until current-build numbering is verified" disabled>Aniilog · audit</button>
-          <button id="itemlogWorkspaceTab" class="workspace-tab" data-workspace-view="itemlog" type="button" role="tab" aria-controls="catalogWorkspace" aria-selected="false">Item-log</button>
+          <button id="aniilogWorkspaceTab" class="workspace-tab" data-workspace-view="aniilog" type="button" role="tab" aria-controls="catalogWorkspace" aria-selected="false" title="Withheld until current-build numbering is verified" disabled hidden>Aniilog · audit</button>
+          <button id="itemlogWorkspaceTab" class="workspace-tab" data-workspace-view="itemlog" type="button" role="tab" aria-controls="catalogWorkspace" aria-selected="false" hidden>Item-log</button>
           <button id="teamWorkspaceTab" class="workspace-tab" data-workspace-view="team" type="button" role="tab" aria-controls="teamWorkspace" aria-selected="false" hidden>Team</button>
         </div>
 
         <div id="mapWorkspace" class="sidebar-workspace" role="tabpanel" aria-labelledby="mapWorkspaceTab">
-          <section class="panel">
-            <div id="mapTabs" class="map-tabs" role="tablist" aria-label="Maps"></div>
-            <label class="search-label" for="searchInput">Search</label>
-            <input id="searchInput" class="search" type="search" autocomplete="off" placeholder="Name, area, coordinate">
-            <div class="toolbar" aria-label="Filters">
-              <button id="selectAllButton" type="button">All</button>
-              <button id="selectNoneButton" type="button">Reset</button>
-            </div>
-            <button id="sharePinsButton" class="share-pins-button" type="button" disabled>Share current pins</button>
-            <span id="sharePinsStatus" class="visually-hidden" role="status" aria-live="polite"></span>
-            <p id="sharePinsNotice" class="share-pins-notice" role="status" aria-live="polite" hidden></p>
+          <section class="panel map-navigation-panel">
+            <div id="mapTabs" class="map-tabs" aria-label="Map selection"></div>
           </section>
 
           <section class="panel item-panel">
@@ -69,6 +93,22 @@
                 </div>
               </div>
               <span id="filterCount" class="filter-count" aria-live="polite">0 / 0</span>
+            </div>
+            <div class="filter-search-controls">
+              <label class="search-label" for="searchInput">Search</label>
+              <input id="searchInput" class="search" type="search" autocomplete="off" placeholder="Name, area, coordinate">
+              <div class="map-filter-actions">
+                <div class="toolbar" aria-label="Filters">
+                  <button id="selectAllButton" type="button">All</button>
+                  <button id="selectNoneButton" type="button">Reset</button>
+                </div>
+                <button id="sharePinsButton" class="share-pins-button" type="button" disabled>
+                  <span>Share</span>
+                  <svg class="share-pins-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M12 22s7-6.1 7-13A7 7 0 1 0 5 9c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                </button>
+              </div>
+              <span id="sharePinsStatus" class="visually-hidden" role="status" aria-live="polite"></span>
+              <p id="sharePinsNotice" class="share-pins-notice" role="status" aria-live="polite" hidden></p>
             </div>
             <div id="layerTabs" class="layer-tabs" role="tablist" aria-label="Marker layers"></div>
             <div id="itemList" class="item-list"></div>
@@ -140,11 +180,15 @@
               <strong id="undergroundPlanToggleLabel">All</strong>
             </button>
             <button id="undergroundLayerToggle" class="map-layer-toggle" type="button" aria-pressed="false" aria-label="Show underground map" title="Show underground map" hidden>
-              <img id="undergroundLayerToggleIcon" src="https://aniilogs-api.pages.dev/api/content/releases/3509129/assets/icons/map-layer-underground-off.png" alt="">
+              <img id="undergroundLayerToggleIcon" alt="">
             </button>
             <div id="coordinateReadout" class="coordinate-readout">X 0, Y 0</div>
           </div>
           <div id="mapViewport" class="map-viewport">
+            <div id="contentUnavailable" class="content-unavailable" role="status" hidden>
+              <strong>Explorer data is being updated</strong>
+              <span>The new UI is live, but maps and game catalogs will remain unavailable until the current snapshot passes review.</span>
+            </div>
             <div id="mapWorld" class="map-world">
               <div id="mapTiles" class="map-tiles" aria-hidden="true"></div>
               <img id="mapImage" class="map-image" alt="">
@@ -194,8 +238,9 @@
       </section>
     </div>
 
-  <script defer src="./app-config.js?v=0.6.3"></script>
+  <script defer src="./app-config.js?v=0.7.0-live-shell"></script>
+  <script defer src="../theme-shell.js?v=0.2.0-account-menu"></script>
   <script defer src="./localization.js?v=0.5.37"></script>
-  <script defer src="./app.js?v=0.9.4-r2.2"></script>
+  <script defer src="./app.js?v=0.13.0-live-shell"></script>
   </body>
 </html>

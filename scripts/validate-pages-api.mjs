@@ -46,8 +46,14 @@ if (!workerSource.includes('body.confirmation !== "DELETE"')) {
 if (!workerSource.includes('CONTENT_PATH_PREFIX = `/api/content/releases/${CONTENT_RELEASE}/`')) {
   throw new Error("Package-pinned R2 content gateway is missing.");
 }
-if (!explorerConfig.includes('https://aniilogs-api.pages.dev/api/content/releases/3509129')) {
-  throw new Error("Explorer content origin is not pinned to the reviewed R2 release.");
+if (!explorerConfig.includes("contentAvailable: isLocalPreview")) {
+  throw new Error("Explorer production content is not fail-closed behind the localhost preview gate.");
+}
+if (explorerConfig.includes("aniilogs-api.pages.dev/api/content/releases/")) {
+  throw new Error("Explorer production config exposes an unreviewed release-content route.");
+}
+if (!workerSource.includes('env.CONTENT_RELEASE_ENABLED || ""')) {
+  throw new Error("R2 content gateway is not fail-closed behind explicit release approval.");
 }
 if (!privacy.includes("Profiles are private by default") || !privacy.includes("Deleting your account")) {
   throw new Error("Public privacy and deletion disclosure is missing.");

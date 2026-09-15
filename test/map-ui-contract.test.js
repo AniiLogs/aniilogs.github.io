@@ -8,6 +8,7 @@ const explorerStyles = await readFile(new URL("../public/explorer/styles.css", i
 const landingApp = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
 const landingHtml = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
 const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+const themeShell = await readFile(new URL("../public/theme-shell.js", import.meta.url), "utf8");
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
 
 test("procedural and withheld maps stay out of the public map navigator", () => {
@@ -33,13 +34,33 @@ test("only proven entrance pins are prepared for future interior and vertical-la
   assert.match(explorerStyles, /\.pin\.pin-underground \{[\s\S]*--pin-size: 22px/u);
 });
 
-test("dark mode is the default and can be switched site-wide", () => {
-  assert.match(landingHtml, /data-theme-toggle/u);
-  assert.match(landingApp, /aniilogs:color-mode:v1/u);
-  assert.match(landingApp, /const normalized = mode === "light" \? "light" : "dark"/u);
-  assert.match(landingApp, /getItem\(COLOR_MODE_STORAGE_KEY\) \|\| "dark"/u);
+test("Aniilog forms remain nested under one expandable species row", () => {
+  assert.match(explorer, /function getAniilogGroupKey\(entry\)/u);
+  assert.match(explorer, /function renderAniilogGroupedIndex\(entries, selectedId\)/u);
+  assert.match(explorer, /const baseEntry = groupEntries\.find\(isAniilogBasicForm\) \|\| groupEntries\[0\]/u);
+  assert.match(explorer, /className = "catalog-form-children"/u);
+  assert.match(explorer, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/u);
+  assert.match(explorer, /persistAniilogExpandedGroups\(expandedGroups\)/u);
+});
+
+test("named and custom themes share one site-wide preference", () => {
+  assert.match(landingHtml, /data-site-theme-select/u);
+  assert.match(explorerHtml, /data-site-theme-select/u);
+  assert.match(landingHtml, /class="theme-picker-copy">Theme</u);
+  assert.match(explorerHtml, /class="theme-picker-copy">Theme</u);
+  assert.match(landingHtml, /theme-shell\.js/u);
+  assert.match(explorerHtml, /theme-shell\.js/u);
+  assert.match(themeShell, /aniilogs:explorer:preferences:v1/u);
+  assert.match(themeShell, /label: "AniiLogs Night"/u);
+  assert.match(themeShell, /label: "AniiLogs Meadow"/u);
+  assert.match(themeShell, /label: "Emberpup"/u);
+  assert.match(themeShell, /label: "Pawney"/u);
+  assert.match(themeShell, /theme === "custom"/u);
+  assert.match(themeShell, /aniilogs:themechange/u);
   assert.match(landingStyles, /:root\[data-color-mode="light"\]/u);
-  assert.match(explorer, /label: "AniiLogs Night"/u);
+  assert.match(explorer, /window\.AniiLogsTheme\?\.syncControls\(id\)/u);
+  assert.doesNotMatch(explorer, /\{ id: "themes", label: "Themes" \}/u);
+  assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
 test("the shared shell keeps primary navigation visible and transitions fluidly", () => {
@@ -51,6 +72,63 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
   assert.match(landingStyles, /view-transition-name: aniilogs-topbar/u);
   assert.match(landingStyles, /\.site-header nav\s*\{[^}]*display: flex/u);
   assert.doesNotMatch(landingStyles, /@media \(max-width: 720px\)[\s\S]*?\bnav\s*\{\s*display: none/u);
+  assert.match(landingStyles, /@media \(max-width: 820px\)/u);
+  assert.match(explorerHtml, /class="app-topbar-brand-mark"/u);
+  assert.match(explorerStyles, /\.app-topbar-context\s*\{\s*display: none/u);
+  assert.match(landingStyles, /\.site-header\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
+  assert.match(explorerStyles, /\.app-topbar\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
+});
+
+test("logs are top-level sections while the Map sidebar contains only map tools", () => {
+  assert.match(landingHtml, /class="nav-disabled"[^>]*>Aniilog</u);
+  assert.match(explorerHtml, /id="topNavAniilog"[^>]*>Aniilog</u);
+  assert.match(explorerHtml, /id="topNavItemlog"/u);
+  assert.match(explorerHtml, /id="topNavTeam"[^>]*hidden>Team Builder</u);
+  assert.match(explorerHtml, /id="aniilogWorkspaceTab"[^>]*hidden/u);
+  assert.match(explorerHtml, /id="itemlogWorkspaceTab"[^>]*hidden/u);
+  assert.match(explorer, /els\.workspaceTabs\.hidden = isFullPanelView\(\)/u);
+  assert.match(explorer, /state\.sidebarView === "itemlog"\) els\.topNavItemlog/u);
+  assert.match(explorer, /state\.sidebarView === "team"\) els\.topNavTeam/u);
+});
+
+test("the desktop sidebar handle stays narrow and unobtrusive", () => {
+  assert.match(explorerStyles, /\.sidebar-collapse-button\s*\{[\s\S]*?width: 26px/u);
+  assert.match(explorerStyles, /\.sidebar-collapse-button\s*\{[\s\S]*?min-height: 56px/u);
+  assert.match(explorerStyles, /\.sidebar-restore-button\s*\{[\s\S]*?width: 26px/u);
+  assert.doesNotMatch(explorerStyles, /\.sidebar-collapse-button\s*\{[\s\S]*?font-size: 34px/u);
+});
+
+test("the top-right Discord control becomes an accessible account menu", () => {
+  for (const html of [landingHtml, explorerHtml]) {
+    assert.match(html, /data-account-menu/u);
+    assert.match(html, /data-discord-icon/u);
+    assert.match(html, />My Profile</u);
+    assert.match(html, />Settings</u);
+    assert.match(html, /aria-label="Sign in with Discord"/u);
+  }
+  assert.match(themeShell, /menu\.addEventListener\("pointerenter", openForPointer\)/u);
+  assert.match(themeShell, /menu\.addEventListener\("focusin", cancelClose\)/u);
+  assert.match(themeShell, /event\.key !== "Escape"/u);
+  assert.match(landingHtml, /data-account-sign-in/u);
+  assert.match(landingApp, /accountMenu\.hidden = true/u);
+  assert.match(landingApp, /accountMenu\.hidden = false/u);
+  assert.match(landingApp, /const label = link\.querySelector\("span"\)/u);
+  assert.doesNotMatch(landingApp, /link\.textContent = link\.classList\.contains/u);
+  assert.match(explorer, /function configureTopbarAccount\(account = null\)/u);
+  assert.match(explorer, /els\.topbarSettingsButton\.addEventListener/u);
+  assert.match(explorer, /REQUESTED_SETTINGS_OPEN/u);
+  assert.match(landingStyles, /\.account-menu-popover/u);
+  assert.match(explorerStyles, /\.account-menu-popover/u);
+});
+
+test("developer diagnostics and role controls are server-entitlement gated", () => {
+  assert.match(explorerHtml, /id="mapMeta" class="database-meta" hidden/u);
+  assert.match(explorerHtml, /id="cloudSyncLink"[^>]*hidden/u);
+  assert.match(explorerHtml, /id="topbarDeveloperButton"[^>]*hidden/u);
+  assert.match(explorer, /state\.developerModeAvailable && state\.preferences\.developerMode/u);
+  assert.match(explorer, /if \(state\.developerModeAvailable\) options\.push/u);
+  assert.match(explorer, /if \(!state\.developerAdminAvailable\) return/u);
+  assert.match(explorer, /\/admin\/developers\//u);
 });
 
 test("light and dark themes avoid whole-control opacity and dark-only text colors", () => {
@@ -64,6 +142,52 @@ test("light and dark themes avoid whole-control opacity and dark-only text color
   assert.match(explorerStyles, /\.checklist-category-tab\s*\{[\s\S]*?rgba\(var\(--background-rgb\), 0\.82\)/u);
   assert.match(explorerStyles, /\.catalog-description\s*\{[\s\S]*?color-mix\(in srgb, var\(--muted\)/u);
   assert.match(explorerStyles, /\.catalog-index-row--tiered \.catalog-index-copy small\s*\{[\s\S]*?var\(--text\)/u);
+});
+
+test("the shared shell uses the compact typography scale from the approved map UI", () => {
+  assert.match(explorerStyles, /Inter, ui-sans-serif, system-ui/u);
+  assert.doesNotMatch(explorerStyles, /ui-rounded/u);
+  assert.match(explorerStyles, /\.brand h1\s*\{[\s\S]*?font-size: 18px/u);
+  assert.match(explorerStyles, /\.map-select\s*\{[\s\S]*?font-size: 12px/u);
+  assert.match(explorerStyles, /\.catalog-heading h1\s*\{[\s\S]*?clamp\(20px, 2\.2vw, 26px\)/u);
+  assert.match(explorerStyles, /\.catalog-identity h2\s*\{[\s\S]*?font-size: 19px/u);
+  assert.match(explorerStyles, /\.catalog-description\s*\{[\s\S]*?font-size: 13px/u);
+  assert.match(landingStyles, /Inter, ui-sans-serif, system-ui/u);
+  assert.doesNotMatch(landingStyles, /ui-rounded/u);
+  assert.doesNotMatch(landingStyles, /7\.4rem/u);
+  assert.doesNotMatch(landingStyles, /4\.5rem/u);
+  for (const styles of [landingStyles, explorerStyles]) {
+    assert.match(styles, /\.theme-picker-label\s*\{[^}]*align-items: center/u);
+    assert.match(styles, /\.theme-picker-label\s*\{[^}]*flex-direction: column/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*width: 6\.25rem/u);
+    assert.match(styles, /\.theme-picker\s*\{[^}]*min-height: 28px/u);
+    assert.match(styles, /\.account-sign-in\s*\{[^}]*width: 36px/u);
+  }
+  assert.match(landingStyles, /clamp\(2\.5rem, 5vw, 4\.4rem\)/u);
+});
+
+test("map and filter controls remain compact as the map inventory grows", () => {
+  assert.match(explorerHtml, /id="mapTabs"[^>]*aria-label="Map selection"/u);
+  assert.match(explorerHtml, /class="panel item-panel"[\s\S]*?for="searchInput"[\s\S]*?id="layerTabs"/u);
+  assert.match(explorer, /document\.createElement\("select"\)/u);
+  assert.match(explorer, /document\.createElement\("optgroup"\)/u);
+  assert.match(explorer, /select\.addEventListener\("change"/u);
+  assert.match(explorerStyles, /\.map-select\s*\{[\s\S]*?height: 34px/u);
+  assert.match(explorerStyles, /\.map-filter-actions\s*\{[\s\S]*?grid-template-columns:/u);
+  assert.match(explorerHtml, /class="share-pins-icon"/u);
+  assert.doesNotMatch(explorer, /Share current pins/u);
+});
+
+test("the live UI shell fails closed while localhost can use private reviewed content", async () => {
+  const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
+  assert.match(explorerConfig, /contentAvailable: isLocalPreview/u);
+  assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview \?/u);
+  assert.doesNotMatch(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases/u);
+  assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
+  assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
+  assert.match(explorer, /if \(!CONTENT_AVAILABLE\)/u);
+  assert.match(explorer, /Awaiting reviewed snapshot/u);
+  assert.match(explorerStyles, /\.content-unavailable\[hidden\]\s*\{\s*display: none/u);
 });
 
 test("the local private-content bridge is scoped and contains no machine-specific path", () => {

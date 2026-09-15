@@ -1,41 +1,13 @@
 const loginLinks = [...document.querySelectorAll("[data-login]")];
 const accountButton = document.querySelector("[data-account]");
+const profileLink = document.querySelector("[data-profile-link]");
+const accountMenu = document.querySelector("[data-account-menu]");
 const logoutButton = document.querySelector("[data-logout]");
 const deleteAccountButton = document.querySelector("[data-delete-account]");
 const status = document.querySelector("[data-auth-status]");
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
-const COLOR_MODE_STORAGE_KEY = "aniilogs:color-mode:v1";
-const themeToggle = document.querySelector("[data-theme-toggle]");
-
-function applyColorMode(mode) {
-  const normalized = mode === "light" ? "light" : "dark";
-  document.documentElement.dataset.colorMode = normalized;
-  if (themeToggle) {
-    const next = normalized === "dark" ? "light" : "dark";
-    themeToggle.innerHTML = `<span aria-hidden="true">${normalized === "dark" ? "☾" : "☀"}</span>`;
-    themeToggle.setAttribute("aria-label", `Switch to ${next} mode`);
-    themeToggle.title = `Switch to ${next} mode`;
-  }
-}
-
-let initialColorMode = "dark";
-try {
-  initialColorMode = window.localStorage.getItem(COLOR_MODE_STORAGE_KEY) || "dark";
-} catch {
-  // Storage denial leaves the privacy-safe dark default in place.
-}
-applyColorMode(initialColorMode);
-themeToggle?.addEventListener("click", () => {
-  const next = document.documentElement.dataset.colorMode === "dark" ? "light" : "dark";
-  applyColorMode(next);
-  try {
-    window.localStorage.setItem(COLOR_MODE_STORAGE_KEY, next);
-  } catch {
-    // The selected mode still applies for this page view.
-  }
-});
 
 function authSessionToken() {
   try {
@@ -72,8 +44,13 @@ function configureLoginLinks() {
     link.href = signInUrl();
     link.classList.remove("is-disabled");
     link.removeAttribute("aria-disabled");
-    if (link.classList.contains("secondary-button")) link.textContent = "Continue with Discord";
-    else link.innerHTML = '<span aria-hidden="true">✦</span> Sign in';
+    if (link.classList.contains("secondary-button")) {
+      link.textContent = "Continue with Discord";
+      continue;
+    }
+    const label = link.querySelector("span");
+    if (label) label.textContent = "Sign in";
+    link.setAttribute("aria-label", "Sign in with Discord");
   }
 }
 
@@ -100,7 +77,9 @@ async function consumeAuthHandoff() {
 
 function showSignedOut(message = "Sign in to sync progress. Profiles remain private while sharing controls are being built.") {
   for (const link of loginLinks) link.hidden = false;
+  accountMenu.hidden = true;
   accountButton.hidden = true;
+  profileLink.hidden = true;
   logoutButton.hidden = true;
   deleteAccountButton.hidden = true;
   status.textContent = message;
@@ -109,9 +88,11 @@ function showSignedOut(message = "Sign in to sync progress. Profiles remain priv
 function showSignedIn(account) {
   for (const link of loginLinks) link.hidden = true;
   const name = account.displayName || account.globalName || account.username;
+  accountMenu.hidden = false;
   accountButton.textContent = name;
   accountButton.title = `Signed in as @${account.username}`;
   accountButton.hidden = false;
+  profileLink.hidden = false;
   logoutButton.hidden = false;
   deleteAccountButton.hidden = false;
   status.textContent = `Signed in as ${name}. Your profile is private by default.`;
@@ -144,6 +125,7 @@ logoutButton.addEventListener("click", async () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     clearAuthSession();
     showSignedOut("You are signed out.");
+    accountMenu.open = false;
   } catch {
     status.textContent = "Could not sign out. Please try again.";
   } finally {
@@ -169,6 +151,7 @@ deleteAccountButton.addEventListener("click", async () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     clearAuthSession();
     showSignedOut("Your cloud account and its saved data were deleted. Local browser progress was kept.");
+    accountMenu.open = false;
   } catch {
     status.textContent = "Could not delete your account. Nothing was changed; please try again.";
   } finally {

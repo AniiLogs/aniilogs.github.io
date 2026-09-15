@@ -1,4 +1,5 @@
 const SITE_CONFIG = window.ANIILOGS_CONFIG || window.ANIIPEDIA_CONFIG || {};
+const CONTENT_AVAILABLE = SITE_CONFIG.contentAvailable !== false;
 const CONTENT_BASE_URL = String(SITE_CONFIG.contentBaseUrl || ".").replace(/\/+$/u, "");
 function contentUrl(value) {
   const source = String(value || "");
@@ -45,6 +46,7 @@ const SHARE_API_URL = API_URL;
 const CLOUD_SYNC_ENABLED = Boolean(API_URL);
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
 const INITIAL_URL_PARAMS = new URLSearchParams(window.location.search);
+const REQUESTED_SETTINGS_OPEN = INITIAL_URL_PARAMS.get("settings") === "1";
 const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog"]);
 const HIDDEN_MAP_IDS = new Set(["egg-heist", "egg-heist-team"]);
 const REQUESTED_WORKSPACE_VIEW = ENABLED_WORKSPACE_VIEWS.has(INITIAL_URL_PARAMS.get("view"))
@@ -323,6 +325,7 @@ const THEME_PRESETS = Object.freeze({
 const DEFAULT_CUSTOM_THEME = Object.freeze({ ...THEME_PRESETS.emberpup.colors });
 const DEFAULT_PREFERENCES = Object.freeze({
   showMagicAttack: false,
+  developerMode: false,
   language: "en",
   theme: "default",
   mapSelectionPlacement: "top-right",
@@ -475,6 +478,9 @@ const state = {
   localStorageError: "",
   localSnapshotPresent: false,
   cloudSyncAuthenticated: false,
+  developerModeAvailable: false,
+  developerAdminAvailable: false,
+  developerRoleStatus: "",
   cloudSyncHydrating: false,
   cloudSyncTimer: 0,
   preferences: defaultPreferences(),
@@ -483,9 +489,18 @@ const state = {
 const els = {
   appShell: document.querySelector("#appShell"),
   topNavMap: document.querySelector("#topNavMap"),
+  topNavAniilog: document.querySelector("#topNavAniilog"),
   topNavItemlog: document.querySelector("#topNavItemlog"),
+  topNavTeam: document.querySelector("#topNavTeam"),
   topNavProfiles: document.querySelector("#topNavProfiles"),
   topbarContext: document.querySelector("#topbarContext"),
+  topbarAccountMenu: document.querySelector("#topbarAccountMenu"),
+  topbarAccountLabel: document.querySelector("#topbarAccountLabel"),
+  topbarProfileLink: document.querySelector("#topbarProfileLink"),
+  topbarDeveloperButton: document.querySelector("#topbarDeveloperButton"),
+  topbarSettingsButton: document.querySelector("#topbarSettingsButton"),
+  topbarSignInLink: document.querySelector("#topbarSignInLink"),
+  topbarLogoutButton: document.querySelector("#topbarLogoutButton"),
   sidebar: document.querySelector("#sidebar"),
   mapMeta: document.querySelector("#mapMeta"),
   cloudSyncLink: document.querySelector("#cloudSyncLink"),
@@ -543,6 +558,7 @@ const els = {
   catalogPanel: document.querySelector("#catalogPanel"),
   teamPanel: document.querySelector("#teamPanel"),
   mapViewport: document.querySelector("#mapViewport"),
+  contentUnavailable: document.querySelector("#contentUnavailable"),
   mapWorld: document.querySelector("#mapWorld"),
   mapTiles: document.querySelector("#mapTiles"),
   mapImage: document.querySelector("#mapImage"),
@@ -1361,7 +1377,18 @@ function applyThemePreference() {
   setThemeVariables(document.documentElement, colors);
   const themeColor = document.querySelector('meta[name="theme-color"]');
   if (themeColor) themeColor.content = colors.surface;
+  window.AniiLogsTheme?.syncControls(id);
 }
+
+window.addEventListener("aniilogs:themechange", (event) => {
+  if (!event.detail?.theme || !state?.preferences) return;
+  state.preferences.theme = normalizeThemeId(event.detail.theme);
+  if (state.preferences.theme === "custom") {
+    state.preferences.customTheme = normalizeThemeColors(event.detail.colors);
+  }
+  applyThemePreference();
+  persistLocalTracking();
+});
 
 function loadLocalTracking() {
   state.localStorageError = "";
@@ -1391,6 +1418,7 @@ function loadLocalTracking() {
     state.preferences = {
       ...defaultPreferences(),
       showMagicAttack: Boolean(preferences?.showMagicAttack),
+      developerMode: Boolean(preferences?.developerMode),
       language: window.AniipediaI18n.normalizeLocale(preferences?.language),
       theme: normalizeThemeId(preferences?.theme),
       mapSelectionPlacement: normalizeDesktopSelectionPlacement(preferences?.mapSelectionPlacement),
@@ -1477,6 +1505,9 @@ function clearAuthSession() {
     // Storage denial already leaves this page signed out.
   }
   state.cloudSyncAuthenticated = false;
+  state.developerModeAvailable = false;
+  state.developerAdminAvailable = false;
+  applyDeveloperVisibility();
 }
 
 async function apiFetch(path, options = {}) {
@@ -1493,11 +1524,44 @@ function signInReturnUrl() {
   return returnUrl.toString();
 }
 
+function configureTopbarAccount(account = null) {
+  const authenticated = Boolean(account && state.cloudSyncAuthenticated);
+  const name = authenticated
+    ? String(account.displayName || account.globalName || account.username || "Discord account")
+    : "";
+  els.topbarAccountMenu.hidden = !authenticated;
+  els.topbarAccountLabel.hidden = !authenticated;
+  els.topbarAccountLabel.textContent = name;
+  els.topbarProfileLink.hidden = !authenticated;
+  els.topbarDeveloperButton.hidden = !(authenticated && state.developerModeAvailable);
+  els.topbarSignInLink.hidden = authenticated;
+  els.topbarLogoutButton.hidden = !authenticated;
+  els.topbarAccountMenu.querySelector("summary").setAttribute(
+    "aria-label",
+    authenticated ? `Signed in as ${name}; open account menu` : "Sign in with Discord",
+  );
+  if (CLOUD_SYNC_ENABLED) {
+    els.topbarSignInLink.href = `${API_URL}/auth/discord/start?return_to=${encodeURIComponent(signInReturnUrl())}`;
+    els.topbarSignInLink.removeAttribute("aria-disabled");
+  } else {
+    els.topbarSignInLink.href = "/#profiles";
+    els.topbarSignInLink.setAttribute("aria-disabled", "true");
+    els.topbarSignInLink.textContent = "Discord sign-in unavailable";
+  }
+}
+
 function configureCloudSyncLink() {
+  configureTopbarAccount();
   if (!els.cloudSyncLink || !CLOUD_SYNC_ENABLED) return;
-  els.cloudSyncLink.hidden = false;
   els.cloudSyncLink.textContent = "Sign in for cloud sync";
   els.cloudSyncLink.href = `${API_URL}/auth/discord/start?return_to=${encodeURIComponent(signInReturnUrl())}`;
+  applyDeveloperVisibility();
+}
+
+function applyDeveloperVisibility() {
+  const enabled = Boolean(state.developerModeAvailable && state.preferences.developerMode);
+  if (els.mapMeta) els.mapMeta.hidden = !enabled;
+  if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
 }
 
 async function logoutCloudAccount() {
@@ -1510,6 +1574,7 @@ async function logoutCloudAccount() {
     if (!response.ok) throw new Error(`Account logout returned ${response.status}`);
     clearAuthSession();
     configureCloudSyncLink();
+    els.topbarAccountMenu.open = false;
     renderSettings();
   } catch (error) {
     console.error("Could not sign out of AniiLogs", error);
@@ -1531,6 +1596,7 @@ async function deleteCloudAccount() {
     if (!response.ok) throw new Error(`Account deletion returned ${response.status}`);
     clearAuthSession();
     configureCloudSyncLink();
+    els.topbarAccountMenu.open = false;
     renderSettings();
     window.alert("Your cloud account was deleted. Local browser progress was kept.");
   } catch (error) {
@@ -1609,6 +1675,7 @@ function applyCloudProgress(progress, mergeLocal) {
   state.preferences = {
     ...defaultPreferences(),
     showMagicAttack: Boolean(preferredPreferences.showMagicAttack),
+    developerMode: Boolean(preferredPreferences.developerMode),
     language: window.AniipediaI18n.normalizeLocale(preferredPreferences.language),
     theme: normalizeThemeId(preferredPreferences.theme),
     mapSelectionPlacement: normalizeDesktopSelectionPlacement(preferredPreferences.mapSelectionPlacement),
@@ -1619,6 +1686,7 @@ function applyCloudProgress(progress, mergeLocal) {
 }
 
 async function hydrateCloudProgress() {
+  configureTopbarAccount();
   if (!CLOUD_SYNC_ENABLED) return;
   configureCloudSyncLink();
   state.cloudSyncHydrating = true;
@@ -1632,9 +1700,15 @@ async function hydrateCloudProgress() {
       return;
     }
     state.cloudSyncAuthenticated = true;
+    const accountIdentity = account.account || account;
+    state.developerModeAvailable = Boolean(accountIdentity.developerModeAvailable);
+    state.developerAdminAvailable = Boolean(accountIdentity.developerAdminAvailable);
+    configureTopbarAccount(accountIdentity);
+    applyDeveloperVisibility();
     if (els.cloudSyncLink) {
       els.cloudSyncLink.textContent = "Cloud sync active";
       els.cloudSyncLink.removeAttribute("href");
+      applyDeveloperVisibility();
     }
     const progressResponse = await apiFetch("/progress");
     if (!progressResponse.ok) throw new Error(`Cloud progress returned ${progressResponse.status}`);
@@ -2130,8 +2204,8 @@ function renderSettingsTabs() {
   tabs.setAttribute("aria-label", "Settings sections");
   const options = [
     { id: "general", label: "General Settings" },
-    { id: "themes", label: "Themes" },
   ];
+  if (state.developerModeAvailable) options.push({ id: "developer", label: "Developer" });
   options.forEach((option, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -2172,9 +2246,116 @@ function appendSettingsStorageError(container) {
   ));
 }
 
+async function updateDeveloperAccess(discordId, enabled) {
+  state.developerRoleStatus = enabled ? "Granting developer access..." : "Revoking developer access...";
+  renderSettings();
+  try {
+    const response = await apiFetch(`/admin/developers/${encodeURIComponent(discordId)}`, {
+      method: enabled ? "PUT" : "DELETE",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) throw new Error(`Developer role update returned ${response.status}`);
+    state.developerRoleStatus = enabled
+      ? `Developer access granted to Discord user ${discordId}.`
+      : `Developer access revoked from Discord user ${discordId}.`;
+  } catch (error) {
+    console.error("Could not update developer access", error);
+    state.developerRoleStatus = "Developer access was not changed. Verify the Discord user ID and try again.";
+  }
+  renderSettings();
+}
+
+function renderDeveloperSettings(container) {
+  const visibilityCard = document.createElement("section");
+  visibilityCard.className = "settings-card settings-display-card";
+  const visibilityCopy = document.createElement("div");
+  visibilityCopy.className = "settings-account";
+  const visibilityTitle = document.createElement("strong");
+  visibilityTitle.textContent = "Developer tools";
+  const visibilityDetail = document.createElement("small");
+  visibilityDetail.textContent = "This section is provided only when the server authorizes your Discord account.";
+  visibilityCopy.append(visibilityTitle, visibilityDetail);
+  const toggle = document.createElement("label");
+  toggle.className = "settings-toggle";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = Boolean(state.preferences.developerMode);
+  input.addEventListener("change", () => {
+    state.preferences.developerMode = input.checked;
+    persistLocalTracking();
+    applyDeveloperVisibility();
+  });
+  const toggleCopy = document.createElement("span");
+  const toggleTitle = document.createElement("strong");
+  toggleTitle.textContent = "Developer mode";
+  const toggleDetail = document.createElement("small");
+  toggleDetail.textContent = "Show build audit status and developer-only diagnostics.";
+  toggleCopy.append(toggleTitle, toggleDetail);
+  toggle.append(input, toggleCopy);
+  visibilityCard.append(visibilityCopy, toggle);
+  const audit = document.createElement("p");
+  audit.className = "database-meta developer-audit-summary";
+  audit.textContent = els.mapMeta.textContent;
+  visibilityCard.append(audit);
+  container.append(visibilityCard);
+
+  if (!state.developerAdminAvailable) return;
+  const accessCard = document.createElement("section");
+  accessCard.className = "settings-card settings-display-card";
+  const accessCopy = document.createElement("div");
+  accessCopy.className = "settings-account";
+  const accessTitle = document.createElement("strong");
+  accessTitle.textContent = "Developer access";
+  const accessDetail = document.createElement("small");
+  accessDetail.textContent = "Grant or revoke the role using an exact Discord user ID.";
+  accessCopy.append(accessTitle, accessDetail);
+  const field = document.createElement("label");
+  field.className = "settings-language-field";
+  const fieldLabel = document.createElement("span");
+  fieldLabel.textContent = "Discord user ID";
+  const userId = document.createElement("input");
+  userId.type = "text";
+  userId.inputMode = "numeric";
+  userId.pattern = "[0-9]{15,22}";
+  userId.placeholder = "123456789012345678";
+  field.append(fieldLabel, userId);
+  const actions = document.createElement("div");
+  actions.className = "settings-actions";
+  const grant = document.createElement("button");
+  grant.type = "button";
+  grant.textContent = "Grant developer";
+  const revoke = document.createElement("button");
+  revoke.type = "button";
+  revoke.className = "settings-danger";
+  revoke.textContent = "Revoke developer";
+  const submit = (enabled) => {
+    const id = userId.value.trim();
+    if (!/^\d{15,22}$/u.test(id)) {
+      state.developerRoleStatus = "Enter an exact Discord user ID (15 to 22 digits).";
+      renderSettings();
+      return;
+    }
+    void updateDeveloperAccess(id, enabled);
+  };
+  grant.addEventListener("click", () => submit(true));
+  revoke.addEventListener("click", () => submit(false));
+  actions.append(grant, revoke);
+  accessCard.append(accessCopy, field, actions);
+  if (state.developerRoleStatus) {
+    const status = document.createElement("p");
+    status.className = "settings-language-note";
+    status.setAttribute("role", "status");
+    status.textContent = state.developerRoleStatus;
+    accessCard.append(status);
+  }
+  container.append(accessCard);
+}
+
 function renderSettings() {
   els.settingsContent.textContent = "";
-  if (!['general', 'themes'].includes(state.settingsActiveTab)) state.settingsActiveTab = "general";
+  const availableTabs = new Set(["general", ...(state.developerModeAvailable ? ["developer"] : [])]);
+  if (!availableTabs.has(state.settingsActiveTab)) state.settingsActiveTab = "general";
   const tabs = renderSettingsTabs();
   const settingsPanel = document.createElement("div");
   settingsPanel.id = "settingsTabPanel";
@@ -2182,16 +2363,8 @@ function renderSettings() {
   settingsPanel.setAttribute("role", "tabpanel");
   settingsPanel.setAttribute("aria-labelledby", `settingsTab-${state.settingsActiveTab}`);
   els.settingsContent.append(tabs, settingsPanel);
-
-  if (state.settingsActiveTab === "themes") {
-    const themeCard = renderThemeSettingsCard();
-    const themeActions = themeCard.querySelector(".theme-apply-actions");
-    settingsPanel.append(themeCard);
-    appendSettingsStorageError(settingsPanel);
-    if (themeActions) {
-      themeActions.classList.add("settings-theme-footer");
-      els.settingsContent.append(themeActions);
-    }
+  if (state.settingsActiveTab === "developer") {
+    renderDeveloperSettings(settingsPanel);
     return;
   }
 
@@ -6711,11 +6884,12 @@ function updateWorkspaceTabs() {
   });
 
   const catalogView = isCatalogView();
+  els.workspaceTabs.hidden = isFullPanelView();
   els.catalogWorkspace.hidden = !catalogView;
   if (catalogView) {
     els.catalogWorkspace.setAttribute(
       "aria-labelledby",
-      state.sidebarView === "aniilog" ? "aniilogWorkspaceTab" : "itemlogWorkspaceTab",
+      state.sidebarView === "aniilog" ? "topNavAniilog" : "topNavItemlog",
     );
   }
   const fullPanelView = isFullPanelView();
@@ -6724,14 +6898,14 @@ function updateWorkspaceTabs() {
   els.teamPanel.hidden = state.sidebarView !== "team";
   els.mapPanel.classList.toggle("catalog-active", fullPanelView);
   document.body.classList.toggle("catalog-view-active", fullPanelView);
-  const itemlogActive = state.sidebarView === "itemlog";
-  if (itemlogActive) {
-    els.topNavMap?.removeAttribute("aria-current");
-    els.topNavItemlog?.setAttribute("aria-current", "page");
-  } else {
-    els.topNavMap?.setAttribute("aria-current", "page");
-    els.topNavItemlog?.removeAttribute("aria-current");
-  }
+  els.topNavMap?.removeAttribute("aria-current");
+  els.topNavAniilog?.removeAttribute("aria-current");
+  els.topNavItemlog?.removeAttribute("aria-current");
+  els.topNavTeam?.removeAttribute("aria-current");
+  if (state.sidebarView === "aniilog") els.topNavAniilog?.setAttribute("aria-current", "page");
+  else if (state.sidebarView === "itemlog") els.topNavItemlog?.setAttribute("aria-current", "page");
+  else if (state.sidebarView === "team") els.topNavTeam?.setAttribute("aria-current", "page");
+  else els.topNavMap?.setAttribute("aria-current", "page");
   els.topNavProfiles?.removeAttribute("aria-current");
   if (els.topbarContext) {
     els.topbarContext.textContent = {
@@ -7976,7 +8150,7 @@ function setSharePinsFeedback(message, resetDelay = 2200, tone = "info") {
   els.sharePinsStatus.textContent = message;
   setSharePinsNotice(message, tone);
   state.sharePinsResetTimer = window.setTimeout(() => {
-    els.sharePinsButton.textContent = "Share current pins";
+    els.sharePinsButton.innerHTML = '<span>Share</span><svg class="share-pins-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M12 22s7-6.1 7-13A7 7 0 1 0 5 9c0 6.9 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>';
     els.sharePinsStatus.textContent = "";
     setSharePinsNotice();
     updateSharePinsButton();
@@ -9422,15 +9596,8 @@ async function loadMapData(mapId, token) {
 }
 
 function updateMapTabs() {
-  els.mapTabs.querySelectorAll(".map-tab").forEach((tab) => {
-    const selected = tab.dataset.mapId === state.activeMapId;
-    tab.setAttribute("aria-selected", String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-    if (selected) {
-      const group = tab.closest("details");
-      if (group) group.open = true;
-    }
-  });
+  const select = els.mapTabs.querySelector(".map-select");
+  if (select && select.value !== state.activeMapId) select.value = state.activeMapId;
 }
 
 function updateMapOverlayState() {
@@ -9456,37 +9623,34 @@ function openMapOverlay(mapId) {
 }
 
 function renderMapTabs() {
-  const fragment = document.createDocumentFragment();
+  const field = document.createElement("label");
+  field.className = "map-select-field";
+  const label = document.createElement("span");
+  label.className = "map-select-label";
+  label.textContent = "Map";
+  const select = document.createElement("select");
+  select.className = "map-select";
+  select.setAttribute("aria-label", "Map");
   const groups = new Map();
   state.data.maps.filter((map) => !map.parent_map_id && !map.layer).forEach((map) => {
     if (!groups.has(map.group)) groups.set(map.group, []);
     groups.get(map.group).push(map);
   });
   groups.forEach((maps, groupName) => {
-    const group = document.createElement("details");
-    group.className = "map-tab-group";
-    group.open = true;
-    const summary = document.createElement("summary");
-    summary.className = "map-tab-group-title";
-    summary.textContent = `${groupName} (${maps.length})`;
-    const grid = document.createElement("div");
-    grid.className = "map-tab-grid";
-    grid.setAttribute("role", "presentation");
+    const group = document.createElement("optgroup");
+    group.label = `${groupName} (${maps.length})`;
     maps.forEach((map) => {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "map-tab";
-      tab.setAttribute("role", "tab");
-      tab.dataset.mapId = map.id;
-      tab.textContent = map.label;
-      tab.title = map.source_evidence || map.label;
-      tab.addEventListener("click", () => switchMap(map.id));
-      grid.append(tab);
+      const option = document.createElement("option");
+      option.value = map.id;
+      option.textContent = map.label;
+      option.title = map.source_evidence || map.label;
+      group.append(option);
     });
-    group.append(summary, grid);
-    fragment.append(group);
+    select.append(group);
   });
-  els.mapTabs.replaceChildren(fragment);
+  select.addEventListener("change", () => switchMap(select.value));
+  field.append(label, select);
+  els.mapTabs.replaceChildren(field);
   updateMapTabs();
 }
 
@@ -9664,6 +9828,17 @@ function bindEvents() {
   els.teamWorkspaceTab.addEventListener("click", () => setSidebarView("team"));
   els.appVersion.addEventListener("click", openChangelog);
   els.settingsButton.addEventListener("click", openSettings);
+  els.topbarDeveloperButton.addEventListener("click", () => {
+    els.topbarAccountMenu.open = false;
+    state.settingsActiveTab = "developer";
+    if (state.settingsOpen) renderSettings();
+    else openSettings();
+  });
+  els.topbarSettingsButton.addEventListener("click", () => {
+    els.topbarAccountMenu.open = false;
+    openSettings();
+  });
+  els.topbarLogoutButton.addEventListener("click", () => void logoutCloudAccount());
   els.settingsCloseButton.addEventListener("click", closeSettings);
   els.settingsOverlay.addEventListener("click", (event) => {
     if (event.target === els.settingsOverlay) closeSettings();
@@ -9709,22 +9884,6 @@ function bindEvents() {
   els.checklistSearchInput.addEventListener("input", () => {
     state.checklistSearch = normalizedSearch(els.checklistSearchInput.value);
     renderChecklist();
-  });
-  els.mapTabs.addEventListener("keydown", (event) => {
-    if (!new Set(["ArrowLeft", "ArrowRight", "Home", "End"]).has(event.key)) return;
-    const tabs = [...els.mapTabs.querySelectorAll(".map-tab")];
-    const currentIndex = tabs.findIndex((tab) => tab.dataset.mapId === state.activeMapId);
-    let nextIndex = currentIndex;
-    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
-    if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = tabs.length - 1;
-    event.preventDefault();
-    const nextTab = tabs[nextIndex];
-    if (nextTab) {
-      switchMap(nextTab.dataset.mapId);
-      nextTab.focus();
-    }
   });
   els.selectAllButton.addEventListener("click", () => {
     clearLocatedSpawn();
@@ -9886,6 +10045,31 @@ async function init() {
     panel: els.teamPanel,
   });
   bindEvents();
+  if (!CONTENT_AVAILABLE) {
+    els.appVersion.textContent = `${APP_VERSION} · UI preview`;
+    els.contentUnavailable.hidden = false;
+    els.mapWorld.hidden = true;
+    document.querySelector(".map-toolbar").hidden = true;
+    document.querySelector(".map-readout-cluster").hidden = true;
+    const field = document.createElement("label");
+    field.className = "map-select-field";
+    field.innerHTML = '<span class="map-select-label">Map</span><select class="map-select" aria-label="Map" disabled><option>Awaiting reviewed snapshot</option></select>';
+    els.mapTabs.replaceChildren(field);
+    els.filterCount.textContent = "Unavailable";
+    els.itemList.innerHTML = '<div class="content-unavailable-sidebar">Map markers and filters will return with the reviewed snapshot.</div>';
+    [els.searchInput, els.selectAllButton, els.selectNoneButton, els.sharePinsButton,
+      els.mapWorkspaceTab, els.trackingWorkspaceTab, els.checklistWorkspaceTab].forEach((control) => {
+      control.disabled = true;
+    });
+    els.topNavItemlog.removeAttribute("href");
+    els.topNavItemlog.classList.add("nav-disabled");
+    els.topNavItemlog.setAttribute("aria-disabled", "true");
+    els.topNavItemlog.title = "Awaiting an audited current-build snapshot";
+    updateWorkspaceTabs();
+    renderSettings();
+    if (REQUESTED_SETTINGS_OPEN) openSettings();
+    return;
+  }
   await loadRequestedShortShareSelection();
   const checklistRequest = ENABLED_WORKSPACE_VIEWS.has("checklist")
     ? fetch(CHECKLIST_URL)
@@ -9933,6 +10117,12 @@ async function init() {
   renderSettings();
   renderMapTabs();
   switchMap(state.activeMapId, Boolean(state.pendingSharedPinSelection || REQUESTED_SHORT_SHARE_ID));
+  if (REQUESTED_SETTINGS_OPEN) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("settings");
+    window.history.replaceState(null, "", cleanUrl);
+    openSettings();
+  }
   if ("requestIdleCallback" in window) {
     window.requestIdleCallback(preloadAniilogData, { timeout: 1500 });
   } else {

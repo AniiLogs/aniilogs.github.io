@@ -6,9 +6,10 @@
     <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo explorers.">
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Your Aniimo adventure journal</title>
-    <link rel="stylesheet" href="/styles.css?v=0.3.1-shell-contrast">
+    <link rel="stylesheet" href="/styles.css?v=0.7.0-compact-sections">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
-    <script src="/app.js?v=0.2.2" defer></script>
+    <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
+    <script src="/app.js?v=0.5.0-unified-shell" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -19,15 +20,37 @@
       </a>
       <nav aria-label="Main navigation">
         <a href="/explorer/">Map</a>
+        <a class="nav-disabled" aria-disabled="true" title="Withheld until current-build numbering is verified">Aniilog</a>
         <a href="/explorer/?view=itemlog">Item-log</a>
         <a href="#profiles">Profiles</a>
       </nav>
       <div class="account-actions">
-        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to light mode" title="Switch to light mode"><span aria-hidden="true">☾</span></button>
-        <a class="discord-button" href="/api/auth/discord/start" data-login><span aria-hidden="true">✦</span> Sign in</a>
-        <button class="avatar-button" type="button" data-account hidden></button>
-        <button class="quiet-button" type="button" data-logout hidden>Log out</button>
-        <button class="danger-button" type="button" data-delete-account hidden>Delete account</button>
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span data-account hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <a href="#profiles" data-profile-link hidden>My Profile</a>
+            <a href="/explorer/?settings=1">Settings</a>
+            <button type="button" data-logout hidden>Log out</button>
+            <button class="account-menu-danger" type="button" data-delete-account hidden>Delete account</button>
+          </div>
+        </details>
       </div>
     </header>
 
