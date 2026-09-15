@@ -28,14 +28,17 @@ async function canonicalBytes(path) {
   return Buffer.from(bytes.toString("utf8").replaceAll("\r\n", "\n"), "utf8");
 }
 
-if (review.schemaVersion !== 1 || !Number.isInteger(review.packageVersion)) {
+if (review.schemaVersion !== 2 || !Number.isInteger(review.packageVersion)) {
   throw new Error("release-review.json has an unsupported schema or package version.");
 }
 if (!/^[a-f0-9]{64}$/u.test(String(review.publicTreeSha256 || ""))) {
   throw new Error("release-review.json has an invalid public tree hash.");
 }
-if (requireApproved && review.deploymentApproved !== true) {
-  throw new Error("Deployment is not approved in release-review.json.");
+if (review.gameContentDeploymentApproved !== false) {
+  throw new Error("Game-content deployment must remain explicitly unapproved in the public UI review.");
+}
+if (requireApproved && review.publicUiDeploymentApproved !== true) {
+  throw new Error("Public UI deployment is not approved in release-review.json.");
 }
 
 const paths = (await collectFiles(publicRoot)).sort((left, right) => {
@@ -59,12 +62,13 @@ const actual = {
 };
 const mismatches = Object.entries(actual)
   .filter(([key, value]) => review[key] !== value)
-  .map(([key, value]) => `${key}=${value}, approved=${review[key]}`);
+  .map(([key, value]) => `${key}=${value}, reviewed=${review[key]}`);
 if (mismatches.length) throw new Error(`Reviewed public payload drifted: ${mismatches.join("; ")}.`);
 
 console.log(JSON.stringify({
   status: "pass",
   packageVersion: review.packageVersion,
-  deploymentApproved: review.deploymentApproved,
+  publicUiDeploymentApproved: review.publicUiDeploymentApproved,
+  gameContentDeploymentApproved: review.gameContentDeploymentApproved,
   ...actual,
 }));

@@ -8,6 +8,7 @@ const migration = await readFile(resolve(root, "migrations", "0003_auth_handoffs
 const liveSmoke = await readFile(resolve(root, "scripts", "validate-live-api.mjs"), "utf8");
 const privacy = await readFile(resolve(root, "public", "privacy.html"), "utf8");
 const explorerConfig = await readFile(resolve(root, "public", "explorer", "app-config.js"), "utf8");
+const releaseReview = JSON.parse(await readFile(resolve(root, "release-review.json"), "utf8"));
 
 if (!configText.includes('"name": "aniilogs-api"')) throw new Error("Pages project name changed.");
 if (!configText.includes('"pages_build_output_dir": "./.pages-api-dist"')) {
@@ -18,6 +19,12 @@ if (!configText.includes('"PUBLIC_SITE_ORIGIN": "https://aniilogs.github.io"')) 
 }
 if (!configText.includes('"DISCORD_CLIENT_ID": "1548899251655020634"')) {
   throw new Error("AniiLogs Discord client ID is not pinned.");
+}
+if (!configText.includes('"CONTENT_RELEASE_ENABLED": "false"')) {
+  throw new Error("Cloudflare release content is not explicitly disabled in deploy configuration.");
+}
+if (releaseReview.schemaVersion !== 2 || releaseReview.gameContentDeploymentApproved !== false) {
+  throw new Error("Public UI review does not explicitly keep game-content deployment unapproved.");
 }
 if (!configText.includes('"binding": "CONTENT"') || !configText.includes('"bucket_name": "aniilogs-data-prod"')) {
   throw new Error("Private release-content R2 binding is missing.");

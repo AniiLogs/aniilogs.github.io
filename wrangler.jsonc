@@ -19,6 +19,7 @@
   ],
   "vars": {
     "PUBLIC_SITE_ORIGIN": "https://aniilogs.github.io",
-    "DISCORD_CLIENT_ID": "1548899251655020634"
+    "DISCORD_CLIENT_ID": "1548899251655020634",
+    "CONTENT_RELEASE_ENABLED": "false"
   }
 }
