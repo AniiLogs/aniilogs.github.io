@@ -4016,6 +4016,17 @@ button.selection-minimized-coordinate:focus-visible {
   display: block;
 }
 
+.selection-description {
+  margin: 8px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.selection-description[hidden] {
+  display: none;
+}
+
 .selection-name {
   justify-self: start;
   max-width: 100%;

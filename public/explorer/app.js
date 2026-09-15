@@ -9582,6 +9582,12 @@ function renderSelectionDetail(detail, spawn, item) {
   });
   title.append(icon, titleText, minimizedCoordinates);
 
+  const descriptionText = String(spawn.description || item.description || "").trim();
+  const description = document.createElement("p");
+  description.className = "selection-description";
+  description.textContent = descriptionText;
+  description.hidden = !descriptionText;
+
   const grid = document.createElement("div");
   grid.className = "detail-grid";
   const typeLabel = spawn.display_type_label || item.display_type_label || markerTypeLabel(spawn.marker_type);
@@ -9623,7 +9629,7 @@ function renderSelectionDetail(detail, spawn, item) {
     grid.append(left, right);
   });
 
-  detail.append(title, grid);
+  detail.append(title, description, grid);
   if (state.sidebarView !== "map") {
     const locate = document.createElement("button");
     locate.type = "button";

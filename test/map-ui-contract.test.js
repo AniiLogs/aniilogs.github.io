@@ -275,11 +275,18 @@ test("special Aniimo badges are unframed and anchored at the portrait top right"
   assert.doesNotMatch(explorerStyles, /\.aniimo-special-badge\s*\{[^}]*border-radius:\s*(?:50%|999)/su);
 });
 
+test("map selections surface the reviewed short marker descriptions", () => {
+  assert.match(explorer, /const descriptionText = String\(spawn\.description \|\| item\.description \|\| ""\)\.trim\(\)/u);
+  assert.match(explorer, /description\.className = "selection-description"/u);
+  assert.match(explorer, /detail\.append\(title, description, grid\)/u);
+  assert.match(explorerStyles, /\.selection-description\s*\{[^}]*font-size: 12px;/su);
+});
+
 test("the live UI loads only the package-pinned reviewed private content route", async () => {
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-current-interiors-r8"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-lumin-details-r9"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
