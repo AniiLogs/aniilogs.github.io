@@ -323,6 +323,15 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerStyles, /\.content-unavailable\[hidden\]\s*\{\s*display: none/u);
 });
 
+test("desktop map selections open beside the selected marker and remain draggable", () => {
+  assert.match(explorer, /mapSelectionPlacement: "floating"/u);
+  assert.match(explorer, /function positionDesktopSelectionAtAnchor\(anchor\)/u);
+  assert.match(explorer, /selectSpawn\(canvasCandidate\.index, \{ clientX: event\.clientX, clientY: event\.clientY \}\)/u);
+  assert.match(explorer, /setDesktopSelectionAnchor\(Number\(anchor\?\.clientX\), Number\(anchor\?\.clientY\)\)/u);
+  assert.match(explorer, /desktopSelectionHeading\.addEventListener\("pointerdown", startDesktopSelectionDrag\)/u);
+  assert.match(explorerStyles, /#desktopSelectionPanel\.is-floating-placement \.panel-heading\s*\{[^}]*cursor: grab;/su);
+});
+
 test("game rich text is rendered with safe DOM nodes", () => {
   assert.match(explorer, /function appendGameRichText\(element, value\)/u);
   assert.match(explorer, /<style=\(\[A-Za-z0-9_\]\+\)>\|<\\\/style>/u);

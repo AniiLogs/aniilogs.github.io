@@ -249,7 +249,8 @@ const DEFAULT_PREFERENCES = Object.freeze({
   developerMode: false,
   language: "en",
   theme: "default",
-  mapSelectionPlacement: "top-right",
+  mapSelectionPlacement: "floating",
+  mapSelectionPopupVersion: 2,
   mapSelectionDefaultState: "expanded",
   mapSelectionFloatingPosition: null,
   customTheme: DEFAULT_CUSTOM_THEME,
@@ -326,6 +327,7 @@ const state = {
   mobileSelectionMinimized: true,
   desktopSelectionMinimized: false,
   desktopSelectionDrag: null,
+  desktopSelectionAnchor: null,
   sidebarCollapsed: false,
   sidebarView: REQUESTED_WORKSPACE_VIEW,
   settingsOpen: false,
@@ -1241,6 +1243,15 @@ function normalizeSelectionFloatingPosition(value) {
   };
 }
 
+function normalizedSelectionPlacementPreference(preferences) {
+  const placement = normalizeDesktopSelectionPlacement(preferences?.mapSelectionPlacement);
+  const popupVersion = Number(preferences?.mapSelectionPopupVersion) || 0;
+  // Top right was the old implicit default. Move untouched/default profiles
+  // to the click-anchored popup while preserving other chosen placements.
+  if (popupVersion < 2 && placement === "top-right") return "floating";
+  return placement;
+}
+
 function hexColorRgb(value) {
   const normalized = normalizeHexColor(value, "#000000");
   return [1, 3, 5].map((offset) => Number.parseInt(normalized.slice(offset, offset + 2), 16));
@@ -1329,12 +1340,15 @@ function loadLocalTracking() {
       developerMode: Boolean(preferences?.developerMode),
       language: window.AniipediaI18n.normalizeLocale(preferences?.language),
       theme: normalizeThemeId(preferences?.theme),
-      mapSelectionPlacement: normalizeDesktopSelectionPlacement(preferences?.mapSelectionPlacement),
+      mapSelectionPlacement: normalizedSelectionPlacementPreference(preferences),
+      mapSelectionPopupVersion: 2,
       mapSelectionDefaultState: normalizeSelectionDefaultState(preferences?.mapSelectionDefaultState),
       mapSelectionFloatingPosition: normalizeSelectionFloatingPosition(preferences?.mapSelectionFloatingPosition),
       customTheme: normalizeThemeColors(preferences?.customTheme),
     };
-    if (snapshot.shouldMigrate) persistLocalTracking({ sync: false });
+    if (snapshot.shouldMigrate || Number(preferences?.mapSelectionPopupVersion) < 2) {
+      persistLocalTracking({ sync: false });
+    }
   } catch (error) {
     state.tracking = new Map();
     state.completed = new Set();
@@ -1577,7 +1591,8 @@ function applyCloudProgress(progress, mergeLocal) {
     developerMode: Boolean(preferredPreferences.developerMode),
     language: window.AniipediaI18n.normalizeLocale(preferredPreferences.language),
     theme: normalizeThemeId(preferredPreferences.theme),
-    mapSelectionPlacement: normalizeDesktopSelectionPlacement(preferredPreferences.mapSelectionPlacement),
+    mapSelectionPlacement: normalizedSelectionPlacementPreference(preferredPreferences),
+    mapSelectionPopupVersion: 2,
     mapSelectionDefaultState: normalizeSelectionDefaultState(preferredPreferences.mapSelectionDefaultState),
     mapSelectionFloatingPosition: normalizeSelectionFloatingPosition(preferredPreferences.mapSelectionFloatingPosition),
     customTheme: normalizeThemeColors(preferredPreferences.customTheme),
@@ -2334,10 +2349,10 @@ function renderSettings() {
   const selectionPlacementSelect = document.createElement("select");
   [
     { value: "top-left", label: "Top left" },
-    { value: "top-right", label: "Top right (recommended)" },
+    { value: "top-right", label: "Top right" },
     { value: "bottom-left", label: "Bottom left" },
     { value: "bottom-right", label: "Bottom right" },
-    { value: "floating", label: "Floating (draggable)" },
+    { value: "floating", label: "At selected marker (draggable, recommended)" },
     { value: "sidebar", label: "Sidebar" },
   ].forEach(({ value, label }) => {
     const option = document.createElement("option");
@@ -2348,6 +2363,7 @@ function renderSettings() {
   selectionPlacementSelect.value = normalizeDesktopSelectionPlacement(state.preferences.mapSelectionPlacement);
   selectionPlacementSelect.addEventListener("change", () => {
     state.preferences.mapSelectionPlacement = normalizeDesktopSelectionPlacement(selectionPlacementSelect.value);
+    state.preferences.mapSelectionPopupVersion = 2;
     persistLocalTracking();
     syncDesktopSelectionPlacement();
   });
@@ -2375,7 +2391,7 @@ function renderSettings() {
   selectionDefaultLabel.append(selectionDefaultLabelText, selectionDefaultSelect);
   const selectionPlacementNote = document.createElement("small");
   selectionPlacementNote.className = "settings-language-note";
-  selectionPlacementNote.textContent = "Floating position and the default panel state are saved in this browser. Mobile always uses a compact touch bar that expands into a bottom sheet.";
+  selectionPlacementNote.textContent = "The floating panel opens beside the marker you select and can be dragged by its heading. Mobile uses a compact touch bar that expands into a bottom sheet.";
   selectionPlacementCard.append(
     selectionPlacementCopy,
     selectionPlacementLabel,
@@ -7396,9 +7412,39 @@ function desktopSelectionFloatingMetrics() {
   const panelHeight = els.desktopSelectionPanel.offsetHeight;
   return {
     margin,
+    surfaceWidth,
+    surfaceHeight,
+    panelWidth,
+    panelHeight,
     travelX: Math.max(0, surfaceWidth - panelWidth - margin * 2),
     travelY: Math.max(0, surfaceHeight - panelHeight - margin * 2),
   };
+}
+
+function setDesktopSelectionAnchor(clientX, clientY) {
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    state.desktopSelectionAnchor = null;
+    return;
+  }
+  const surfaceRect = els.mapSurface.getBoundingClientRect();
+  state.desktopSelectionAnchor = {
+    x: clientX - surfaceRect.left,
+    y: clientY - surfaceRect.top,
+  };
+}
+
+function positionDesktopSelectionAtAnchor(anchor) {
+  const metrics = desktopSelectionFloatingMetrics();
+  const gap = 18;
+  let left = anchor.x + gap;
+  let top = anchor.y + gap;
+  if (left + metrics.panelWidth + metrics.margin > metrics.surfaceWidth) {
+    left = anchor.x - metrics.panelWidth - gap;
+  }
+  if (top + metrics.panelHeight + metrics.margin > metrics.surfaceHeight) {
+    top = anchor.y - metrics.panelHeight - gap;
+  }
+  return positionDesktopSelectionFloatingPanel(left, top);
 }
 
 function positionDesktopSelectionFloatingPanel(left, top) {
@@ -7419,6 +7465,10 @@ function applyDesktopSelectionFloatingPosition() {
   if (normalizeDesktopSelectionPlacement(state.preferences.mapSelectionPlacement) !== "floating") return;
   if (MOBILE_LAYOUT_QUERY.matches || els.desktopSelectionPanel.hidden || state.desktopSelectionDrag) return;
   const metrics = desktopSelectionFloatingMetrics();
+  if (state.desktopSelectionAnchor) {
+    positionDesktopSelectionAtAnchor(state.desktopSelectionAnchor);
+    return;
+  }
   const savedPosition = normalizeSelectionFloatingPosition(state.preferences.mapSelectionFloatingPosition);
   if (savedPosition) {
     positionDesktopSelectionFloatingPanel(
@@ -7446,6 +7496,7 @@ function startDesktopSelectionDrag(event) {
     surfaceTop: surfaceRect.top,
     position: normalizeSelectionFloatingPosition(state.preferences.mapSelectionFloatingPosition),
   };
+  state.desktopSelectionAnchor = null;
   els.desktopSelectionPanel.classList.add("is-dragging");
   event.currentTarget.setPointerCapture(event.pointerId);
   event.preventDefault();
@@ -7983,7 +8034,7 @@ function finishPointerInteraction(event, cancelled = false) {
   if (canvasCandidate) {
     state.canvasPointerHit = null;
     if (!cancelled && Math.hypot(event.clientX - canvasCandidate.x, event.clientY - canvasCandidate.y) < 8) {
-      selectSpawn(canvasCandidate.index);
+      selectSpawn(canvasCandidate.index, { clientX: event.clientX, clientY: event.clientY });
     }
     return;
   }
@@ -9254,7 +9305,8 @@ function createMarkerPin(entry) {
     if (event.detail !== 0) return;
     if (window.performance.now() < state.suppressPinClickUntil) return;
     const view = currentMapView();
-    selectSpawn(index);
+    const rect = pin.getBoundingClientRect();
+    selectSpawn(index, { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 });
     restoreMapView(view);
   });
   if (state.selectedSpawnIndex === index) {
@@ -9500,7 +9552,7 @@ function renderPins(entries) {
   els.pinLayer.replaceChildren(fragment);
 }
 
-function selectSpawn(index) {
+function selectSpawn(index, anchor = null) {
   const spawn = state.data.spawns[index];
   if (!spawn) return;
   const item = state.data.itemsById.get(spawn.item_id);
@@ -9521,6 +9573,9 @@ function selectSpawn(index) {
     state.desktopSelectionMinimized = normalizeSelectionDefaultState(
       state.preferences.mapSelectionDefaultState,
     ) === "minimized";
+    if (normalizeDesktopSelectionPlacement(state.preferences.mapSelectionPlacement) === "floating") {
+      setDesktopSelectionAnchor(Number(anchor?.clientX), Number(anchor?.clientY));
+    }
   }
   setDesktopSelectionVisible(true);
   updateDesktopSelectionPanel();
