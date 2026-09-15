@@ -119,6 +119,7 @@ test("the top-right Discord control becomes an accessible account menu", () => {
   assert.match(explorer, /REQUESTED_SETTINGS_OPEN/u);
   assert.match(landingStyles, /\.account-menu-popover/u);
   assert.match(explorerStyles, /\.account-menu-popover/u);
+  assert.match(explorerStyles, /\[hidden\]\s*\{\s*display: none !important;/u);
 });
 
 test("developer diagnostics and role controls are server-entitlement gated", () => {

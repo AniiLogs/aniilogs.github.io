@@ -90,6 +90,10 @@ button[aria-pressed="true"] {
   overflow: hidden;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 @view-transition {
   navigation: auto;
 }
