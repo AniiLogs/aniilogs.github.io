@@ -34,8 +34,8 @@ if (review.schemaVersion !== 2 || !Number.isInteger(review.packageVersion)) {
 if (!/^[a-f0-9]{64}$/u.test(String(review.publicTreeSha256 || ""))) {
   throw new Error("release-review.json has an invalid public tree hash.");
 }
-if (review.gameContentDeploymentApproved !== false) {
-  throw new Error("Game-content deployment must remain explicitly unapproved in the public UI review.");
+if (review.gameContentDeploymentApproved !== true) {
+  throw new Error("Reviewed private game-content deployment is not approved in release-review.json.");
 }
 if (requireApproved && review.publicUiDeploymentApproved !== true) {
   throw new Error("Public UI deployment is not approved in release-review.json.");

@@ -20,11 +20,11 @@ if (!configText.includes('"PUBLIC_SITE_ORIGIN": "https://aniilogs.github.io"')) 
 if (!configText.includes('"DISCORD_CLIENT_ID": "1548899251655020634"')) {
   throw new Error("AniiLogs Discord client ID is not pinned.");
 }
-if (!configText.includes('"CONTENT_RELEASE_ENABLED": "false"')) {
-  throw new Error("Cloudflare release content is not explicitly disabled in deploy configuration.");
+if (!configText.includes('"CONTENT_RELEASE_ENABLED": "true"')) {
+  throw new Error("Reviewed Cloudflare release content is not explicitly enabled in deploy configuration.");
 }
-if (releaseReview.schemaVersion !== 2 || releaseReview.gameContentDeploymentApproved !== false) {
-  throw new Error("Public UI review does not explicitly keep game-content deployment unapproved.");
+if (releaseReview.schemaVersion !== 2 || releaseReview.gameContentDeploymentApproved !== true) {
+  throw new Error("Release review does not explicitly approve the private game-content deployment.");
 }
 if (!configText.includes('"binding": "CONTENT"') || !configText.includes('"bucket_name": "aniilogs-data-prod"')) {
   throw new Error("Private release-content R2 binding is missing.");
@@ -53,11 +53,11 @@ if (!workerSource.includes('body.confirmation !== "DELETE"')) {
 if (!workerSource.includes('CONTENT_PATH_PREFIX = `/api/content/releases/${CONTENT_RELEASE}/`')) {
   throw new Error("Package-pinned R2 content gateway is missing.");
 }
-if (!explorerConfig.includes("contentAvailable: isLocalPreview")) {
-  throw new Error("Explorer production content is not fail-closed behind the localhost preview gate.");
+if (!explorerConfig.includes("contentAvailable: true")) {
+  throw new Error("Explorer production content is not enabled for the reviewed release.");
 }
-if (explorerConfig.includes("aniilogs-api.pages.dev/api/content/releases/")) {
-  throw new Error("Explorer production config exposes an unreviewed release-content route.");
+if (!explorerConfig.includes("https://aniilogs-api.pages.dev/api/content/releases/3509129")) {
+  throw new Error("Explorer production config is not pinned to the reviewed private release route.");
 }
 if (!workerSource.includes('env.CONTENT_RELEASE_ENABLED || ""')) {
   throw new Error("R2 content gateway is not fail-closed behind explicit release approval.");
@@ -73,5 +73,5 @@ console.log(JSON.stringify({
   project: "aniilogs-api",
   intendedOrigin: "https://aniilogs-api.pages.dev",
   publicSiteOrigin: "https://aniilogs.github.io",
-  remoteDeploymentApproved: false,
+  remoteDeploymentApproved: true,
 }));

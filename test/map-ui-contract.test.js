@@ -43,10 +43,11 @@ test("Aniilog forms remain nested under one expandable species row", () => {
   assert.match(explorer, /persistAniilogExpandedGroups\(expandedGroups\)/u);
 });
 
-test("Pet Manual objectives are presented as Aniilog Research rather than traits", () => {
+test("gameplay traits and Pet Manual objectives use separate catalog sections", () => {
+  assert.match(explorer, /catalogAbilitySearchTerms\(entry\?\.traits\)/);
   assert.match(explorer, /catalogAbilitySearchTerms\(entry\?\.aniilog_research\)/);
+  assert.match(explorer, /renderCatalogAbilitySection\("Traits", entry\.traits/);
   assert.match(explorer, /renderCatalogAbilitySection\("Aniilog Research", entry\.aniilog_research/);
-  assert.doesNotMatch(explorer, /renderCatalogAbilitySection\("Trait", entry\.traits/);
 });
 
 test("mixed current Aniimo art families share one circular portrait treatment", () => {
@@ -222,11 +223,11 @@ test("map hover keeps the normal icon unless a selected-state replacement exists
   assert.doesNotMatch(explorerStyles, /(?:^|\n)\.pin:hover \.pin-icon:not\(\.pin-icon-selected\)/u);
 });
 
-test("the live UI shell fails closed while localhost can use private reviewed content", async () => {
+test("the live UI loads only the package-pinned reviewed private content route", async () => {
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
-  assert.match(explorerConfig, /contentAvailable: isLocalPreview/u);
-  assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview \?/u);
-  assert.doesNotMatch(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases/u);
+  assert.match(explorerConfig, /contentAvailable: true/u);
+  assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
+  assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
   assert.match(explorer, /if \(!CONTENT_AVAILABLE\)/u);

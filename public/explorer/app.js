@@ -3062,6 +3062,7 @@ function catalogEntrySearchText(entry) {
     entry?.stats?.flatMap((stat) => [stat?.label, stat?.value]),
     catalogAbilitySearchTerms(entry?.skills),
     catalogAbilitySearchTerms(entry?.ultimates),
+    catalogAbilitySearchTerms(entry?.traits),
     catalogAbilitySearchTerms(entry?.aniilog_research),
     catalogAbilitySearchTerms(entry?.mobility_skills),
     entry?.exploration?.flatMap((ability) => [ability?.name, ability?.description, ability?.level]),
@@ -4469,7 +4470,7 @@ function renderCatalogAbilityBehavior(ability) {
 
 function renderCatalogAbilitySection(title, abilities, emptyText = "No data available.") {
   const section = createCatalogSection(title);
-  const compact = title === "Ultimate" || title === "Aniilog Research" || title === "Mobility skills";
+  const compact = title === "Ultimate" || title === "Traits" || title === "Aniilog Research" || title === "Mobility skills";
   if (compact) section.classList.add("catalog-section--compact");
   if (!Array.isArray(abilities) || !abilities.length) {
     const empty = document.createElement("p");
@@ -5317,6 +5318,7 @@ function renderAniilogCatalogRecord(entry) {
   utilityGrid.className = "catalog-utility-grid";
   utilityGrid.append(
     renderCatalogAbilitySection("Ultimate", entry.ultimates, "No Ultimate ability is currently listed for this form."),
+    renderCatalogAbilitySection("Traits", entry.traits, "No gameplay trait is currently listed for this form."),
     renderCatalogAbilitySection("Aniilog Research", entry.aniilog_research, "No Aniilog Research entry is currently listed for this form."),
     renderCatalogAbilitySection("Mobility skills", entry.mobility_skills, "No Mobility skill is currently listed for this form."),
     renderCatalogLevels("Exploration", entry.exploration, "None", { compact: true }),
