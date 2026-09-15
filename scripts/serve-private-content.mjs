@@ -18,6 +18,7 @@ const contentTypes = new Map([
   [".json", "application/json; charset=utf-8"],
   [".png", "image/png"],
   [".webp", "image/webp"],
+  [".mp4", "video/mp4"],
 ]);
 
 createServer(async (request, response) => {

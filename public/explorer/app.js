@@ -25,6 +25,18 @@ const LOCAL_PREFERENCES_STORAGE_KEY = "aniilogs:explorer:preferences:v1";
 const LEGACY_LOCAL_TRACKING_STORAGE_KEY = "minmax-map:tracking:v1";
 const LEGACY_LOCAL_COMPLETION_STORAGE_KEY = "minmax-map:completed:v1";
 const LEGACY_LOCAL_PREFERENCES_STORAGE_KEY = "minmax-map:preferences:v1";
+const PROGRESS_STORAGE_KEYS = Object.freeze({
+  current: Object.freeze({
+    tracking: LOCAL_TRACKING_STORAGE_KEY,
+    completed: LOCAL_COMPLETION_STORAGE_KEY,
+    preferences: LOCAL_PREFERENCES_STORAGE_KEY,
+  }),
+  legacy: Object.freeze({
+    tracking: LEGACY_LOCAL_TRACKING_STORAGE_KEY,
+    completed: LEGACY_LOCAL_COMPLETION_STORAGE_KEY,
+    preferences: LEGACY_LOCAL_PREFERENCES_STORAGE_KEY,
+  }),
+});
 const MIN_SCALE = 0.03;
 const MAX_SCALE = 16;
 const MAP_EDGE_MARGIN = 48;
@@ -48,6 +60,7 @@ const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
 const INITIAL_URL_PARAMS = new URLSearchParams(window.location.search);
 const REQUESTED_SETTINGS_OPEN = INITIAL_URL_PARAMS.get("settings") === "1";
 const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog"]);
+if (SITE_CONFIG.aniilogAvailable) ENABLED_WORKSPACE_VIEWS.add("aniilog");
 const HIDDEN_MAP_IDS = new Set(["egg-heist", "egg-heist-team"]);
 const REQUESTED_WORKSPACE_VIEW = ENABLED_WORKSPACE_VIEWS.has(INITIAL_URL_PARAMS.get("view"))
   ? INITIAL_URL_PARAMS.get("view")
@@ -1393,21 +1406,14 @@ window.addEventListener("aniilogs:themechange", (event) => {
 function loadLocalTracking() {
   state.localStorageError = "";
   try {
-    const currentTracking = window.localStorage.getItem(LOCAL_TRACKING_STORAGE_KEY);
-    const currentCompleted = window.localStorage.getItem(LOCAL_COMPLETION_STORAGE_KEY);
-    const currentPreferences = window.localStorage.getItem(LOCAL_PREFERENCES_STORAGE_KEY);
-    const rawTracking = currentTracking ?? window.localStorage.getItem(LEGACY_LOCAL_TRACKING_STORAGE_KEY);
-    const rawCompleted = currentCompleted ?? window.localStorage.getItem(LEGACY_LOCAL_COMPLETION_STORAGE_KEY);
-    const rawPreferences = currentPreferences ?? window.localStorage.getItem(LEGACY_LOCAL_PREFERENCES_STORAGE_KEY);
-    const migratedLegacySnapshot = (
-      (currentTracking === null && rawTracking !== null)
-      || (currentCompleted === null && rawCompleted !== null)
-      || (currentPreferences === null && rawPreferences !== null)
+    const snapshot = window.AniiLogsProgressStorage.readLocalSnapshot(
+      window.localStorage,
+      PROGRESS_STORAGE_KEYS,
     );
-    state.localSnapshotPresent = Boolean(rawTracking || rawCompleted || rawPreferences);
-    const trackingEntries = rawTracking ? JSON.parse(rawTracking) : [];
-    const completedEntries = rawCompleted ? JSON.parse(rawCompleted) : [];
-    const preferences = rawPreferences ? JSON.parse(rawPreferences) : {};
+    state.localSnapshotPresent = snapshot.present;
+    const trackingEntries = snapshot.tracking;
+    const completedEntries = snapshot.completed;
+    const preferences = snapshot.preferences;
     const normalizedTracking = Array.isArray(trackingEntries)
       ? trackingEntries.map(normalizeTrackingEntry).filter(Boolean)
       : [];
@@ -1426,7 +1432,7 @@ function loadLocalTracking() {
       mapSelectionFloatingPosition: normalizeSelectionFloatingPosition(preferences?.mapSelectionFloatingPosition),
       customTheme: normalizeThemeColors(preferences?.customTheme),
     };
-    if (migratedLegacySnapshot) persistLocalTracking({ sync: false });
+    if (snapshot.shouldMigrate) persistLocalTracking({ sync: false });
   } catch (error) {
     state.tracking = new Map();
     state.completed = new Set();
@@ -1437,17 +1443,14 @@ function loadLocalTracking() {
 
 function persistLocalTracking({ sync = true } = {}) {
   try {
-    window.localStorage.setItem(
-      LOCAL_TRACKING_STORAGE_KEY,
-      JSON.stringify([...state.tracking.values()]),
-    );
-    window.localStorage.setItem(
-      LOCAL_COMPLETION_STORAGE_KEY,
-      JSON.stringify([...state.completed]),
-    );
-    window.localStorage.setItem(
-      LOCAL_PREFERENCES_STORAGE_KEY,
-      JSON.stringify(state.preferences),
+    window.AniiLogsProgressStorage.writeLocalSnapshot(
+      window.localStorage,
+      PROGRESS_STORAGE_KEYS,
+      {
+        tracking: [...state.tracking.values()],
+        completed: [...state.completed],
+        preferences: state.preferences,
+      },
     );
     state.localStorageError = "";
     state.localSnapshotPresent = true;
@@ -1649,29 +1652,18 @@ function scheduleCloudProgressUpload() {
 }
 
 function applyCloudProgress(progress, mergeLocal) {
-  const serverTracking = Array.isArray(progress?.tracking)
-    ? progress.tracking.map(normalizeTrackingEntry).filter(Boolean)
-    : [];
-  const combinedTracking = new Map(serverTracking.map((entry) => [entry.id, entry]));
-  if (mergeLocal) {
-    for (const entry of state.tracking.values()) combinedTracking.set(entry.id, entry);
-  }
-  const combinedCompleted = new Set(
-    Array.isArray(progress?.completed)
-      ? progress.completed.map((entry) => String(entry || "").trim()).filter(Boolean)
-      : [],
+  const merged = window.AniiLogsProgressStorage.mergeSnapshots(
+    progress,
+    {
+      tracking: [...state.tracking.values()],
+      completed: [...state.completed],
+      preferences: state.preferences,
+    },
+    { mergeLocal, normalizeTrackingEntry },
   );
-  if (mergeLocal) {
-    for (const id of state.completed) combinedCompleted.add(id);
-  }
-  const serverPreferences = progress?.preferences && typeof progress.preferences === "object"
-    ? progress.preferences
-    : {};
-  const preferredPreferences = mergeLocal
-    ? { ...serverPreferences, ...state.preferences }
-    : serverPreferences;
-  state.tracking = combinedTracking;
-  state.completed = combinedCompleted;
+  const preferredPreferences = merged.preferences;
+  state.tracking = new Map(merged.tracking.map((entry) => [entry.id, entry]));
+  state.completed = new Set(merged.completed);
   state.preferences = {
     ...defaultPreferences(),
     showMagicAttack: Boolean(preferredPreferences.showMagicAttack),
@@ -3022,6 +3014,8 @@ function catalogAbilitySearchTerms(abilities) {
     return [
       ability?.name,
       ability?.description,
+      ability?.clue_title,
+      ability?.objective,
       ability?.group,
       ability?.power,
       ability?.consume,
@@ -3068,7 +3062,7 @@ function catalogEntrySearchText(entry) {
     entry?.stats?.flatMap((stat) => [stat?.label, stat?.value]),
     catalogAbilitySearchTerms(entry?.skills),
     catalogAbilitySearchTerms(entry?.ultimates),
-    catalogAbilitySearchTerms(entry?.traits),
+    catalogAbilitySearchTerms(entry?.aniilog_research),
     catalogAbilitySearchTerms(entry?.mobility_skills),
     entry?.exploration?.flatMap((ability) => [ability?.name, ability?.description, ability?.level]),
     entry?.homeland?.flatMap((ability) => [
@@ -3582,6 +3576,12 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   if (isVirtual) button.style.transform = `translateY(${virtualIndex * CATALOG_INDEX_ROW_HEIGHT}px)`;
 
   const icon = makeIcon("catalog-index-icon", entry.icon);
+  if (view === "aniilog") {
+    icon.classList.add("catalog-aniimo-portrait");
+    if (String(entry.icon || "").toLowerCase().includes("ui_pethead_")) {
+      icon.classList.add("catalog-aniimo-portrait--full-body");
+    }
+  }
   const copy = document.createElement("span");
   copy.className = "catalog-index-copy";
   const name = document.createElement("strong");
@@ -4469,7 +4469,7 @@ function renderCatalogAbilityBehavior(ability) {
 
 function renderCatalogAbilitySection(title, abilities, emptyText = "No data available.") {
   const section = createCatalogSection(title);
-  const compact = title === "Ultimate" || title === "Trait" || title === "Mobility skills";
+  const compact = title === "Ultimate" || title === "Aniilog Research" || title === "Mobility skills";
   if (compact) section.classList.add("catalog-section--compact");
   if (!Array.isArray(abilities) || !abilities.length) {
     const empty = document.createElement("p");
@@ -4596,6 +4596,21 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
         const description = document.createElement("p");
         description.textContent = displayed.description;
         copy.append(description);
+      }
+      if (displayed.objective) {
+        const objective = document.createElement("div");
+        objective.className = "catalog-quest-objective";
+        const label = document.createElement("strong");
+        label.textContent = displayed.clue_title || "Objective";
+        const text = document.createElement("p");
+        text.textContent = displayed.objective;
+        objective.append(label, text);
+        if (Number.isFinite(Number(displayed.reward)) && Number(displayed.reward) > 0) {
+          const reward = document.createElement("small");
+          reward.textContent = `Reward: ${displayed.reward}`;
+          objective.append(reward);
+        }
+        copy.append(objective);
       }
       const behavior = renderCatalogAbilityBehavior(displayed);
       if (behavior) copy.append(behavior);
@@ -5114,14 +5129,142 @@ function renderAniilogBossVariants(bossVariants) {
   return section;
 }
 
+function attachPackedAniimoBackdrop(record, entry) {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  if (!entry.video || reduceMotion.matches) return;
+
+  const video = document.createElement("video");
+  video.className = "catalog-aniimo-video-source";
+  video.crossOrigin = "anonymous";
+  video.src = contentUrl(entry.video);
+  video.muted = true;
+  video.loop = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.tabIndex = -1;
+  video.setAttribute("aria-hidden", "true");
+
+  const canvas = document.createElement("canvas");
+  canvas.className = "catalog-aniimo-video-backdrop";
+  canvas.width = 600;
+  canvas.height = 600;
+  canvas.tabIndex = -1;
+  canvas.setAttribute("aria-hidden", "true");
+
+  const gl = canvas.getContext("webgl", {
+    alpha: true,
+    antialias: false,
+    depth: false,
+    premultipliedAlpha: true,
+    preserveDrawingBuffer: false,
+  });
+  if (!gl) return;
+
+  const compileShader = (type, source) => {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  };
+  const vertexShader = compileShader(gl.VERTEX_SHADER, `
+    attribute vec2 a_position;
+    varying vec2 v_uv;
+    void main() {
+      v_uv = (a_position + 1.0) * 0.5;
+      gl_Position = vec4(a_position, 0.0, 1.0);
+    }
+  `);
+  const fragmentShader = compileShader(gl.FRAGMENT_SHADER, `
+    precision mediump float;
+    uniform sampler2D u_video;
+    varying vec2 v_uv;
+    void main() {
+      vec3 color = texture2D(u_video, vec2(v_uv.x, 0.5 + v_uv.y * 0.5)).rgb;
+      vec3 mask = texture2D(u_video, vec2(v_uv.x, v_uv.y * 0.5)).rgb;
+      float alpha = clamp(dot(mask, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+      gl_FragColor = vec4(color * alpha, alpha);
+    }
+  `);
+  if (!vertexShader || !fragmentShader) return;
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+    gl.STATIC_DRAW,
+  );
+  const position = gl.getAttribLocation(program, "a_position");
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.useProgram(program);
+  gl.uniform1i(gl.getUniformLocation(program, "u_video"), 0);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0, 0, 0, 0);
+
+  let stopped = false;
+  const draw = () => {
+    if (!canvas.isConnected || reduceMotion.matches) {
+      stopped = true;
+      video.pause();
+      return;
+    }
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    if (typeof video.requestVideoFrameCallback === "function") {
+      video.requestVideoFrameCallback(draw);
+    } else {
+      window.requestAnimationFrame(draw);
+    }
+  };
+  video.addEventListener("playing", () => {
+    if (!stopped) draw();
+  }, { once: true });
+  video.addEventListener("error", () => {
+    stopped = true;
+    canvas.remove();
+    video.remove();
+  }, { once: true });
+  record.append(canvas, video);
+  video.play().catch(() => {});
+}
+
 function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
+  attachPackedAniimoBackdrop(record, entry);
 
   const identity = document.createElement("header");
   identity.className = "catalog-identity";
   identity.dataset.catalogEntryId = entry.id;
   const icon = makeIcon("catalog-hero-icon", entry.icon);
+  icon.classList.add("catalog-aniimo-portrait", "catalog-aniimo-portrait--hero");
+  if (String(entry.icon || "").toLowerCase().includes("ui_pethead_")) {
+    icon.classList.add("catalog-aniimo-portrait--full-body");
+  }
   icon.alt = `${entry.name} ${entry.form_label} form icon`;
   const copy = document.createElement("div");
   const stickyIndicator = document.createElement("span");
@@ -5147,14 +5290,15 @@ function renderAniilogCatalogRecord(entry) {
   identity.append(icon, copy);
   const actions = document.createElement("div");
   actions.className = "catalog-identity-actions";
-  const locate = document.createElement("button");
-  locate.type = "button";
-  locate.className = "catalog-locate-button";
-  locate.textContent = "Locate on Map";
-  locate.disabled = !Array.isArray(entry.map_ids) || !entry.map_ids.length;
-  locate.addEventListener("click", () => locateAniilogEntry(entry));
-  actions.append(locate);
-  identity.append(actions);
+  if (Array.isArray(entry.map_ids) && entry.map_ids.length) {
+    const locate = document.createElement("button");
+    locate.type = "button";
+    locate.className = "catalog-locate-button";
+    locate.textContent = "Locate on Map";
+    locate.addEventListener("click", () => locateAniilogEntry(entry));
+    actions.append(locate);
+    identity.append(actions);
+  }
   record.append(identity);
 
   if (entry.description) {
@@ -5173,7 +5317,7 @@ function renderAniilogCatalogRecord(entry) {
   utilityGrid.className = "catalog-utility-grid";
   utilityGrid.append(
     renderCatalogAbilitySection("Ultimate", entry.ultimates, "No Ultimate ability is currently listed for this form."),
-    renderCatalogAbilitySection("Trait", entry.traits, "No Trait is currently listed for this form."),
+    renderCatalogAbilitySection("Aniilog Research", entry.aniilog_research, "No Aniilog Research entry is currently listed for this form."),
     renderCatalogAbilitySection("Mobility skills", entry.mobility_skills, "No Mobility skill is currently listed for this form."),
     renderCatalogLevels("Exploration", entry.exploration, "None", { compact: true }),
     renderCatalogHomelandLevels(entry.homeland),
@@ -7072,6 +7216,17 @@ function renderMapBase() {
   scheduleMapTileDetail();
 }
 
+function openWorkspaceFromNavigation(event, view) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!ENABLED_WORKSPACE_VIEWS.has(view)) return;
+  event.preventDefault();
+  setSidebarView(view);
+  const url = new URL(window.location.href);
+  if (view === "map") url.searchParams.delete("view");
+  else url.searchParams.set("view", view);
+  window.history.pushState({ workspaceView: view }, "", url);
+}
+
 function renderMapSections() {
   els.mapSectionLayer.replaceChildren();
   els.mapSectionShortcutLayer.replaceChildren();
@@ -8685,8 +8840,11 @@ const TELEPORT_GROUPS = [
   { id: "sanctum", label: "Sanctums" },
   { id: "branch", label: "Branches" },
   { id: "outpost", label: "Outposts" },
+  { id: "rv_park", label: "RV Parks" },
+  { id: "transporter", label: "Transporters" },
   { id: "nurture", label: "Nurture Sites" },
   { id: "vein_abundance", label: "Vein Abundance Sites" },
+  { id: "vein_rift", label: "Vein Rifts" },
 ];
 
 const EGG_GROUPS = [
@@ -8747,13 +8905,21 @@ function createMiscGroupSection(label) {
 }
 
 function renderTeleportGroups(section, layerItems) {
+  const grouped = new Set();
   TELEPORT_GROUPS.forEach(({ id, label }) => {
     const items = layerItems.filter((item) => item.teleport_type === id);
+    items.forEach((item) => grouped.add(item.item_id));
     renderMapCollectionGroup(section, {
       groupKey: `teleport-group:${id}`,
       label,
       items,
     });
+  });
+  const ungrouped = layerItems.filter((item) => !grouped.has(item.item_id));
+  renderMapCollectionGroup(section, {
+    groupKey: "teleport-group:other",
+    label: "Other Travel",
+    items: ungrouped,
   });
 }
 
@@ -9495,8 +9661,11 @@ function prepareData(data) {
   });
   data.mapsById = new Map(data.maps.map((map) => [map.id, map]));
   data.map = data.maps[0];
-  if (!data.mapsById.has(state.activeMapId)) {
-    state.activeMapId = data.maps[0].id;
+  if (
+    !data.mapsById.has(state.activeMapId)
+    || data.mapsById.get(state.activeMapId)?.availability === "awaiting_current_asset"
+  ) {
+    state.activeMapId = data.maps.find((map) => map.availability !== "awaiting_current_asset")?.id || data.maps[0].id;
   }
   data.itemsById = new Map();
   data.spawnsByItemId = new Map();
@@ -9644,6 +9813,7 @@ function renderMapTabs() {
       option.value = map.id;
       option.textContent = map.label;
       option.title = map.source_evidence || map.label;
+      option.disabled = map.availability === "awaiting_current_asset";
       group.append(option);
     });
     select.append(group);
@@ -9826,6 +9996,13 @@ function bindEvents() {
   els.aniilogWorkspaceTab.addEventListener("click", () => setSidebarView("aniilog"));
   els.itemlogWorkspaceTab.addEventListener("click", () => setSidebarView("itemlog"));
   els.teamWorkspaceTab.addEventListener("click", () => setSidebarView("team"));
+  els.topNavMap?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "map"));
+  els.topNavAniilog?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "aniilog"));
+  els.topNavItemlog?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "itemlog"));
+  window.addEventListener("popstate", () => {
+    const view = new URLSearchParams(window.location.search).get("view") || "map";
+    setSidebarView(ENABLED_WORKSPACE_VIEWS.has(view) ? view : "map");
+  });
   els.appVersion.addEventListener("click", openChangelog);
   els.settingsButton.addEventListener("click", openSettings);
   els.topbarDeveloperButton.addEventListener("click", () => {
@@ -10044,6 +10221,13 @@ async function init() {
     sidebar: els.teamSidebarContent,
     panel: els.teamPanel,
   });
+  if (ENABLED_WORKSPACE_VIEWS.has("aniilog")) {
+    els.topNavAniilog.href = "/explorer/?view=aniilog";
+    els.topNavAniilog.classList.remove("nav-disabled");
+    els.topNavAniilog.removeAttribute("aria-disabled");
+    els.topNavAniilog.removeAttribute("title");
+    els.aniilogWorkspaceTab.disabled = false;
+  }
   bindEvents();
   if (!CONTENT_AVAILABLE) {
     els.appVersion.textContent = `${APP_VERSION} · UI preview`;

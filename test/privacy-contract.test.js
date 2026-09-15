@@ -7,6 +7,7 @@ const accountMigration = await readFile(new URL("../migrations/0001_discord_acco
 const progressMigration = await readFile(new URL("../migrations/0002_progress_and_shares.sql", import.meta.url), "utf8");
 const handoffMigration = await readFile(new URL("../migrations/0003_auth_handoffs.sql", import.meta.url), "utf8");
 const explorer = await readFile(new URL("../public/explorer/app.js", import.meta.url), "utf8");
+const progressStorage = await readFile(new URL("../public/explorer/progress-storage.js", import.meta.url), "utf8");
 const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
 const landing = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
 const landingApp = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
@@ -37,7 +38,8 @@ test("AniiLogs storage keys preserve read-only fallback from the old site", () =
   assert.match(explorer, /aniilogs:explorer:tracking:v1/u);
   assert.match(explorer, /aniilogs:explorer:completed:v1/u);
   assert.match(explorer, /aniilogs:explorer:preferences:v1/u);
-  assert.match(explorer, /currentTracking \?\? window\.localStorage\.getItem\(LEGACY_LOCAL_TRACKING_STORAGE_KEY\)/u);
+  assert.match(explorer, /AniiLogsProgressStorage\.readLocalSnapshot/u);
+  assert.match(progressStorage, /current\[name\] \?\? legacy\[name\]/u);
   assert.match(explorer, /persistLocalTracking\(\{ sync: false \}\)/u);
 });
 

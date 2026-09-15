@@ -7,6 +7,7 @@
     apiUrl,
     shareApiUrl: apiUrl,
     contentAvailable: isLocalPreview,
+    aniilogAvailable: isLocalPreview,
     contentBaseUrl,
     itemDataUrl: isLocalPreview
       ? `${contentBaseUrl}/data/itemlog_data.json?v=20260914-build3509129-r2-v1`

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev -c wrangler.worker-local.jsonc",
     "deploy": "npm run api:deploy",
-    "check": "node --check src/index.js && node --check public/theme-shell.js && node --check public/app.js && node --check public/explorer/app-config.js && node --check public/explorer/localization.js && node --check public/explorer/app.js && node --check scripts/validate-live-api.mjs && node --check scripts/validate-public-repository-boundary.mjs && node --check scripts/validate-reviewed-release.mjs",
+    "check": "node --check src/index.js && node --check public/theme-shell.js && node --check public/app.js && node --check public/explorer/app-config.js && node --check public/explorer/localization.js && node --check public/explorer/progress-storage.js && node --check public/explorer/app.js && node --check scripts/validate-live-api.mjs && node --check scripts/validate-public-repository-boundary.mjs && node --check scripts/validate-reviewed-release.mjs",
     "test": "node --test test/*.test.js",
     "repo:validate": "node scripts/validate-public-repository-boundary.mjs",
     "release:validate": "node scripts/validate-reviewed-release.mjs",

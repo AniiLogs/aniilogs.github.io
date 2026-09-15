@@ -142,6 +142,7 @@ function securityHeaders(headers = new Headers(), localPreview = false) {
     "form-action 'self'",
     "frame-ancestors 'none'",
     `img-src 'self' data: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com${localContentOrigin}`,
+    `media-src 'self' https://aniilogs-api.pages.dev${localContentOrigin}`,
     "object-src 'none'",
     "script-src 'self'",
     "style-src 'self'",
@@ -191,6 +192,16 @@ async function getReleaseContent(request, env) {
   if (!object) return json({ error: "Not found" }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
+  if (!headers.has("content-type")) {
+    const extension = key.slice(key.lastIndexOf(".")).toLowerCase();
+    const fallbackTypes = {
+      ".json": "application/json; charset=utf-8",
+      ".mp4": "video/mp4",
+      ".png": "image/png",
+      ".webp": "image/webp",
+    };
+    headers.set("content-type", fallbackTypes[extension] || "application/octet-stream");
+  }
   if (object.httpEtag) headers.set("etag", object.httpEtag);
   if (Number.isFinite(object.size)) headers.set("content-length", String(object.size));
   headers.set("cache-control", "public, max-age=31536000, immutable");

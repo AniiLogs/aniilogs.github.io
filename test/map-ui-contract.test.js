@@ -43,6 +43,34 @@ test("Aniilog forms remain nested under one expandable species row", () => {
   assert.match(explorer, /persistAniilogExpandedGroups\(expandedGroups\)/u);
 });
 
+test("Pet Manual objectives are presented as Aniilog Research rather than traits", () => {
+  assert.match(explorer, /catalogAbilitySearchTerms\(entry\?\.aniilog_research\)/);
+  assert.match(explorer, /renderCatalogAbilitySection\("Aniilog Research", entry\.aniilog_research/);
+  assert.doesNotMatch(explorer, /renderCatalogAbilitySection\("Trait", entry\.traits/);
+});
+
+test("mixed current Aniimo art families share one circular portrait treatment", () => {
+  assert.match(explorer, /catalog-aniimo-portrait--full-body/);
+  assert.match(explorerStyles, /\.catalog-aniimo-portrait\s*\{[^}]*border-radius:\s*50%/s);
+  assert.match(explorerStyles, /\.catalog-aniimo-portrait--full-body\s*\{[^}]*padding:\s*3px/s);
+  assert.match(explorerStyles, /\.item-row\.aniimo-row \.item-icon,[\s\S]*?border-radius:\s*50%/s);
+});
+
+test("packed PetManual videos use their lower grayscale plane as transparency", () => {
+  assert.match(explorer, /function attachPackedAniimoBackdrop\(record, entry\)/u);
+  assert.match(explorer, /video\.crossOrigin = "anonymous"/u);
+  assert.match(explorer, /vec3 color = texture2D\(u_video, vec2\(v_uv\.x, 0\.5 \+ v_uv\.y \* 0\.5\)\)\.rgb/u);
+  assert.match(explorer, /vec3 mask = texture2D\(u_video, vec2\(v_uv\.x, v_uv\.y \* 0\.5\)\)\.rgb/u);
+  assert.match(explorer, /gl_FragColor = vec4\(color \* alpha, alpha\)/u);
+  assert.match(explorerStyles, /\.catalog-aniimo-video-source\s*\{\s*display: none/u);
+  assert.match(explorerStyles, /\.catalog-aniimo-video-backdrop\s*\{[\s\S]*?position: fixed/u);
+});
+
+test("Aniimo without verified wild locations do not offer Locate on Map", () => {
+  assert.match(explorer, /if \(Array\.isArray\(entry\.map_ids\) && entry\.map_ids\.length\)/u);
+  assert.doesNotMatch(explorer, /locate\.disabled = !Array\.isArray\(entry\.map_ids\)/u);
+});
+
 test("named and custom themes share one site-wide preference", () => {
   assert.match(landingHtml, /data-site-theme-select/u);
   assert.match(explorerHtml, /data-site-theme-select/u);
@@ -179,6 +207,19 @@ test("map and filter controls remain compact as the map inventory grows", () => 
   assert.match(explorerStyles, /\.map-filter-actions\s*\{[\s\S]*?grid-template-columns:/u);
   assert.match(explorerHtml, /class="share-pins-icon"/u);
   assert.doesNotMatch(explorer, /Share current pins/u);
+});
+
+test("Travel renders current portal groups and never drops unclassified destinations", () => {
+  assert.match(explorer, /\{ id: "rv_park", label: "RV Parks" \}/u);
+  assert.match(explorer, /\{ id: "transporter", label: "Transporters" \}/u);
+  assert.match(explorer, /\{ id: "vein_rift", label: "Vein Rifts" \}/u);
+  assert.match(explorer, /groupKey: "teleport-group:other"/u);
+  assert.match(explorer, /label: "Other Travel"/u);
+});
+
+test("map hover keeps the normal icon unless a selected-state replacement exists", () => {
+  assert.match(explorerStyles, /\.pin:has\(\.pin-icon-selected\):hover \.pin-icon:not\(\.pin-icon-selected\)/u);
+  assert.doesNotMatch(explorerStyles, /(?:^|\n)\.pin:hover \.pin-icon:not\(\.pin-icon-selected\)/u);
 });
 
 test("the live UI shell fails closed while localhost can use private reviewed content", async () => {

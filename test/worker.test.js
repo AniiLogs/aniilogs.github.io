@@ -326,6 +326,27 @@ test("release content is served from the private R2 binding without directory li
   assert.equal(traversalResponse.status, 404);
 });
 
+test("release video content receives a safe MP4 type when R2 metadata is absent", async () => {
+  const bytes = new Uint8Array([0, 0, 0, 24]);
+  const env = {
+    PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io",
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        return key.endsWith("assets/aniimo-videos/1001100.mp4")
+          ? { body: bytes, size: bytes.byteLength }
+          : null;
+      },
+    },
+  };
+  const response = await worker.fetch(new Request(
+    "https://api.aniilogs.example/api/content/releases/3509129/assets/aniimo-videos/1001100.mp4",
+  ), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "video/mp4");
+  assert.match(response.headers.get("content-security-policy") || "", /media-src/u);
+});
+
 test("release content fails closed until an audited snapshot is explicitly enabled", async () => {
   let reads = 0;
   const response = await worker.fetch(new Request(
