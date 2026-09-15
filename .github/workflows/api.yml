@@ -1,0 +1,69 @@
+name: Deploy AniiLogs API to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/api.yml"
+      - "migrations/**"
+      - "scripts/build-pages-api.mjs"
+      - "scripts/validate-live-api.mjs"
+      - "scripts/validate-pages-api.mjs"
+      - "scripts/validate-public-repository-boundary.mjs"
+      - "scripts/validate-reviewed-release.mjs"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "release-review.json"
+      - "wrangler.jsonc"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: aniilogs-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: aniilogs-api-production
+      url: https://aniilogs-api.pages.dev
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install pinned dependencies
+        run: npm ci
+
+      - name: Verify reviewed release and repository boundary
+        run: npm run release:deploy-check
+
+      - name: Build and validate Pages API bundle
+        run: npm run api:validate
+
+      - name: Apply pending production D1 migrations
+        run: npx wrangler d1 migrations apply aniilogs-prod --remote
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy production API
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy .pages-api-dist --project-name=aniilogs-api --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke-test production API
+        run: npm run api:smoke -- --api-origin=https://aniilogs-api.pages.dev
