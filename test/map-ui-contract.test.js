@@ -36,6 +36,9 @@ test("current section overlays and cave entrances expose interior navigation", (
   assert.match(explorer, /spawn\.hover_icon \|\| item\.hover_icon/u);
   assert.match(explorerStyles, /\.pin:hover \.pin-icon-selected/u);
   assert.match(explorerStyles, /\.pin\.pin-underground \{[\s\S]*--pin-size: 22px/u);
+  assert.match(explorer, /const UNDERGROUND_MAP_LAYERS = Object\.freeze\(\{\}\)/u);
+  assert.doesNotMatch(explorer, /assets\/maps\/underground/u);
+  assert.match(explorerStyles, /\.map-section-link \{[\s\S]*?background: transparent;/u);
 });
 
 test("cave navigation uses the current in-game marker art rather than legacy custom arrows", () => {
@@ -276,7 +279,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-special-bosses-r7"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-current-interiors-r8"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

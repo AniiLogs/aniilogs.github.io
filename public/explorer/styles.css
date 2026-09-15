@@ -7928,26 +7928,26 @@ button.catalog-item-reference {
   height: 100%;
   padding: 0;
   border: 0;
-  background: rgba(var(--accent-rgb), 0.04);
+  background: transparent;
   cursor: pointer;
   pointer-events: auto;
   transition: background 150ms ease, filter 150ms ease;
 }
 
 .map-section-link--underground {
-  background: rgba(var(--accent-2-rgb), 0.04);
+  background: transparent;
 }
 
 .map-section-link:hover,
 .map-section-link:focus-visible {
-  background: rgba(var(--accent-rgb), 0.52);
-  filter: drop-shadow(0 0 18px rgba(var(--accent-rgb), 0.9));
+  background: rgba(var(--accent-rgb), 0.14);
+  filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.5));
   outline: none;
 }
 
 .map-section-link--underground:hover,
 .map-section-link--underground:focus-visible {
-  background: rgba(var(--accent-2-rgb), 0.5);
+  background: rgba(var(--accent-2-rgb), 0.14);
 }
 
 .map-section-shortcut-layer {
