@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "packageVersion": 3509129,
+  "packageVersion": 3528012,
   "publicUiDeploymentApproved": true,
   "gameContentDeploymentApproved": true,
   "publicFileCount": 11,
-  "publicTotalBytes": 737607,
-  "publicTreeSha256": "3bb94dade55832ee03f93aa7c0f3740c18baab3086204416febcf4175f4ce779"
+  "publicTotalBytes": 737958,
+  "publicTreeSha256": "d6137097cdbdaba5cfaf4f25feadd81619a7396d51c05dd713c2f3585e9caf34"
 }

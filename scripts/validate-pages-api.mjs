@@ -56,7 +56,7 @@ if (!workerSource.includes('CONTENT_PATH_PREFIX = `/api/content/releases/${CONTE
 if (!explorerConfig.includes("contentAvailable: true")) {
   throw new Error("Explorer production content is not enabled for the reviewed release.");
 }
-if (!explorerConfig.includes("https://aniilogs-api.pages.dev/api/content/releases/3509129")) {
+if (!explorerConfig.includes("https://aniilogs-api.pages.dev/api/content/releases/3528012")) {
   throw new Error("Explorer production config is not pinned to the reviewed private release route.");
 }
 if (!workerSource.includes('env.CONTENT_RELEASE_ENABLED || ""')) {

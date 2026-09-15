@@ -7,8 +7,10 @@ const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
 const SHARE_LIFETIME_SECONDS = 3 * 60 * 60;
 const SHARE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const MAX_PROGRESS_BYTES = 512 * 1024;
-const CONTENT_RELEASE = "3509129";
+const CONTENT_RELEASE = "3528012";
+const ASSET_FALLBACK_RELEASE = "3509129";
 const CONTENT_PATH_PREFIX = `/api/content/releases/${CONTENT_RELEASE}/`;
+const RELEASE_PATCH_KEY = `releases/${CONTENT_RELEASE}/data/release_patch.json.gz`;
 
 const encoder = new TextEncoder();
 
@@ -188,7 +190,17 @@ async function getReleaseContent(request, env) {
   if (!env.CONTENT) return json({ error: "Content storage is unavailable." }, 503);
   const key = validContentKey(new URL(request.url).pathname);
   if (!key) return json({ error: "Not found" }, 404);
-  const object = request.method === "HEAD" ? await env.CONTENT.head(key) : await env.CONTENT.get(key);
+  const read = (objectKey) => request.method === "HEAD" ? env.CONTENT.head(objectKey) : env.CONTENT.get(objectKey);
+  let object = await read(key);
+  if (!object && request.method !== "HEAD" && key.startsWith(`releases/${CONTENT_RELEASE}/data/`) && key.endsWith(".json")) {
+    object = await materializeReleaseData(key, env);
+  }
+  if (!object && key.startsWith(`releases/${CONTENT_RELEASE}/assets/`)) {
+    object = await read(key.replace(
+      `releases/${CONTENT_RELEASE}/assets/`,
+      `releases/${ASSET_FALLBACK_RELEASE}/assets/`,
+    ));
+  }
   if (!object) return json({ error: "Not found" }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
@@ -211,6 +223,59 @@ async function getReleaseContent(request, env) {
       : "public, max-age=31536000, immutable",
   );
   return new Response(request.method === "HEAD" ? null : object.body, { status: 200, headers });
+}
+
+async function materializeReleaseData(key, env) {
+  if (typeof env.CONTENT.put !== "function") return null;
+  const filename = key.slice(key.lastIndexOf("/") + 1);
+  const baselineKey = `releases/${ASSET_FALLBACK_RELEASE}/data/${filename}`;
+  const [baselineObject, patchObject] = await Promise.all([
+    env.CONTENT.get(baselineKey),
+    env.CONTENT.get(RELEASE_PATCH_KEY),
+  ]);
+  if (!baselineObject || !patchObject) return null;
+
+  const [payload, patch] = await Promise.all([
+    new Response(baselineObject.body).json(),
+    new Response(patchObject.body.pipeThrough(new DecompressionStream("gzip"))).json(),
+  ]);
+  if (patch.package_version !== Number(CONTENT_RELEASE)) return null;
+
+  if (filename === "map_site_data.json") {
+    payload.data_quality = { ...(payload.data_quality || {}), package_version: patch.package_version };
+  } else {
+    payload.package_version = patch.package_version;
+  }
+  if (filename === "itemlog_data.json") {
+    for (const entry of payload.entries || []) {
+      if (Object.hasOwn(patch.item_descriptions || {}, entry.item_id)) {
+        entry.description = patch.item_descriptions[entry.item_id];
+      }
+    }
+    payload.generated_at_utc = patch.generated_at;
+    payload.source_policy = "Current game files; every added description is resolved from the build 3528012 English localization archive.";
+    payload.audit_status = "Build 3528012 names and descriptions validated; parameterized and genuinely absent descriptions remain blank.";
+    payload.totals.items_with_descriptions = (payload.entries || []).filter((entry) => Boolean(entry.description)).length;
+    payload.totals.items_without_descriptions = (payload.entries || []).length - payload.totals.items_with_descriptions;
+    payload.totals.descriptions_added_in_3528012 = Object.keys(patch.item_descriptions || {}).length;
+  }
+  if (filename === "aniilog_data.json") {
+    for (const entry of payload.entries || []) {
+      if (Object.hasOwn(patch.aniimo_traits || {}, entry.form_id)) entry.traits = patch.aniimo_traits[entry.form_id];
+    }
+    payload.generated_at = patch.generated_at;
+    payload.publication_status = "private_reviewed";
+    payload.data_quality = {
+      ...(payload.data_quality || {}),
+      trait_policy: "Per-form gameplay traits use stable form and trait IDs resolved against build 3528012.",
+      traits_added_in_3528012: Object.keys(patch.aniimo_traits || {}).length,
+      entries_without_traits: (payload.entries || []).filter((entry) => !entry.traits?.length).map((entry) => entry.form_id),
+    };
+  }
+
+  const body = JSON.stringify(payload);
+  await env.CONTENT.put(key, body, { httpMetadata: { contentType: "application/json; charset=utf-8" } });
+  return env.CONTENT.get(key);
 }
 
 function oauthConfigured(env) {

@@ -139,6 +139,11 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
   assert.match(explorerStyles, /\.app-topbar\s*\{[\s\S]*?grid-template-columns: 1fr auto 1fr/u);
 });
 
+test("the page background stays viewport-fixed while mobile content scrolls", () => {
+  assert.match(explorerStyles, /body::before\s*\{[\s\S]*?position: fixed;[\s\S]*?inset: 0;/u);
+  assert.match(explorerStyles, /body\s*\{[\s\S]*?isolation: isolate;[\s\S]*?background: var\(--background\);/u);
+});
+
 test("logs are top-level sections while the Map sidebar contains only map tools", () => {
   assert.match(landingHtml, /href="\/explorer\/\?view=aniilog"[^>]*>Aniilog</u);
   assert.match(explorerHtml, /id="topNavAniilog"[^>]*>Aniilog</u);
@@ -291,12 +296,15 @@ test("the live UI loads only the package-pinned reviewed private content route",
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-all-interiors-r11"/u);
-  assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
+  assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-data-repair-r1"/u);
+  assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
   assert.match(explorer, /if \(!CONTENT_AVAILABLE\)/u);
   assert.match(explorer, /Awaiting reviewed snapshot/u);
+  assert.match(explorer, /`Game build \$\{CONTENT_PACKAGE_VERSION\}`/u);
+  assert.doesNotMatch(explorer, /v0\.9\.4-private-content/u);
   assert.match(explorerStyles, /\.content-unavailable\[hidden\]\s*\{\s*display: none/u);
 });
 

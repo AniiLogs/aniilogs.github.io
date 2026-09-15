@@ -2,6 +2,7 @@ const SITE_CONFIG = window.ANIILOGS_CONFIG || window.ANIIPEDIA_CONFIG || {};
 const CONTENT_AVAILABLE = SITE_CONFIG.contentAvailable !== false;
 const CONTENT_BASE_URL = String(SITE_CONFIG.contentBaseUrl || ".").replace(/\/+$/u, "");
 const CONTENT_REVISION = String(SITE_CONFIG.contentRevision || "");
+const CONTENT_PACKAGE_VERSION = String(SITE_CONFIG.contentPackageVersion || "").trim();
 function contentUrl(value) {
   const source = String(value || "");
   if (!source || /^(?:data:|blob:)/iu.test(source)) return source;
@@ -20,7 +21,9 @@ const ITEMLOG_DATA_URL =
   contentUrl("./data/itemlog_data.json");
 const ANIILOG_DATA_URL = contentUrl("./data/aniilog_data.json");
 const ANIILOG_MEDIA_URL = contentUrl("./data/aniilog_media.json");
-const APP_VERSION = "v0.9.4-private-content";
+const APP_VERSION = CONTENT_PACKAGE_VERSION
+  ? `Game build ${CONTENT_PACKAGE_VERSION}`
+  : "Game build unavailable";
 const GITHUB_COMMITS_URL = "https://api.github.com/repos/AniiLogs/aniilogs.github.io/commits?sha=main&per_page=30";
 const CHANGELOG_INTERNAL_MARKER_RE = /\[(?:skip changelog|internal)\]/i;
 const CHANGELOG_PUBLIC_ENTRY_LIMIT = 12;
