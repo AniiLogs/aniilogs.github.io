@@ -6,10 +6,10 @@
     <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo explorers.">
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Your Aniimo adventure journal</title>
-    <link rel="stylesheet" href="/styles.css?v=0.7.1-compact-theme">
+    <link rel="stylesheet" href="/styles.css?v=0.8.0-private-profile">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
     <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
-    <script src="/app.js?v=0.5.0-unified-shell" defer></script>
+    <script src="/app.js?v=0.6.0-private-profile" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -127,6 +127,24 @@
             <h3>Explorer profiles</h3>
             <p>Sign in with Discord to sync your progress. Profiles stay private until sharing controls are ready.</p>
             <span class="coming-soon"><i></i> Private by default</span>
+            <form class="profile-editor" data-profile-editor hidden>
+              <div class="profile-editor-heading">
+                <strong>My private profile</strong>
+                <small>Only you can access this profile. Saving cannot publish it.</small>
+              </div>
+              <label>
+                <span>Display name</span>
+                <input type="text" name="displayName" maxlength="80" autocomplete="nickname" required data-profile-display-name>
+              </label>
+              <label>
+                <span>About me</span>
+                <textarea name="bio" maxlength="500" rows="3" placeholder="A little about your Aniimo adventure…" data-profile-bio></textarea>
+              </label>
+              <div class="profile-editor-actions">
+                <button type="submit" data-profile-save>Save profile</button>
+                <span role="status" aria-live="polite" data-profile-status></span>
+              </div>
+            </form>
           </article>
         </div>
       </section>

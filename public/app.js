@@ -5,6 +5,11 @@ const accountMenu = document.querySelector("[data-account-menu]");
 const logoutButton = document.querySelector("[data-logout]");
 const deleteAccountButton = document.querySelector("[data-delete-account]");
 const status = document.querySelector("[data-auth-status]");
+const profileEditor = document.querySelector("[data-profile-editor]");
+const profileDisplayName = document.querySelector("[data-profile-display-name]");
+const profileBio = document.querySelector("[data-profile-bio]");
+const profileSaveButton = document.querySelector("[data-profile-save]");
+const profileStatus = document.querySelector("[data-profile-status]");
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
@@ -82,6 +87,9 @@ function showSignedOut(message = "Sign in to sync progress. Profiles remain priv
   profileLink.hidden = true;
   logoutButton.hidden = true;
   deleteAccountButton.hidden = true;
+  profileEditor.hidden = true;
+  profileEditor.reset();
+  profileStatus.textContent = "";
   status.textContent = message;
 }
 
@@ -96,7 +104,60 @@ function showSignedIn(account) {
   logoutButton.hidden = false;
   deleteAccountButton.hidden = false;
   status.textContent = `Signed in as ${name}. Your profile is private by default.`;
+  void loadPrivateProfile(name);
 }
+
+async function loadPrivateProfile(fallbackName = "") {
+  profileEditor.hidden = false;
+  profileStatus.textContent = "Loading your private profile…";
+  try {
+    const response = await apiFetch("/profile");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const profile = payload.profile || {};
+    profileDisplayName.value = String(profile.displayName || fallbackName).slice(0, 80);
+    profileBio.value = String(profile.bio || "").slice(0, 500);
+    profileStatus.textContent = profile.isPublic
+      ? "Profile visibility was reset to private."
+      : "Private · visible only to you";
+  } catch {
+    profileEditor.hidden = true;
+    profileStatus.textContent = "";
+    status.textContent = "Signed in, but your private profile could not be loaded.";
+  }
+}
+
+profileEditor.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const displayName = profileDisplayName.value.trim();
+  const bio = profileBio.value.trim();
+  if (!displayName) {
+    profileStatus.textContent = "Enter a display name.";
+    profileDisplayName.focus();
+    return;
+  }
+  profileSaveButton.disabled = true;
+  profileStatus.textContent = "Saving privately…";
+  try {
+    const response = await apiFetch("/profile", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ displayName, bio }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.profile?.isPublic !== false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    profileDisplayName.value = payload.profile.displayName;
+    profileBio.value = payload.profile.bio || "";
+    accountButton.textContent = payload.profile.displayName;
+    profileStatus.textContent = "Saved privately · visible only to you";
+  } catch {
+    profileStatus.textContent = "Could not save. Nothing was published.";
+  } finally {
+    profileSaveButton.disabled = false;
+  }
+});
 
 async function refreshAccount() {
   try {

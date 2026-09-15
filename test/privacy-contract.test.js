@@ -9,6 +9,7 @@ const handoffMigration = await readFile(new URL("../migrations/0003_auth_handoff
 const explorer = await readFile(new URL("../public/explorer/app.js", import.meta.url), "utf8");
 const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
 const landing = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+const landingApp = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
 const privacy = await readFile(new URL("../public/privacy.html", import.meta.url), "utf8");
 
 test("profiles are private by default and profile edits cannot publish them", () => {
@@ -16,6 +17,12 @@ test("profiles are private by default and profile edits cannot publish them", ()
   assert.match(source, /INSERT OR IGNORE INTO profiles[\s\S]*VALUES \(\?, \?, NULL, 0, \?, \?\)/u);
   assert.match(source, /UPDATE profiles SET display_name = \?, bio = \?, is_public = 0/u);
   assert.doesNotMatch(source, /\/api\/profiles\//u);
+  assert.match(landing, /data-profile-editor hidden/u);
+  assert.match(landing, /Only you can access this profile\. Saving cannot publish it\./u);
+  assert.match(landingApp, /apiFetch\("\/profile"\)/u);
+  assert.match(landingApp, /method: "PATCH"/u);
+  assert.match(landingApp, /payload\.profile\?\.isPublic !== false/u);
+  assert.match(landingApp, /Nothing was published\./u);
 });
 
 test("cloud progress is owner-scoped and map shares expose only compact selections", () => {

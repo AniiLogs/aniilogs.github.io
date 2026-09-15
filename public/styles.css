@@ -311,6 +311,52 @@ h1 span { color: var(--coral); white-space: nowrap; }
 .feature-card > p:not(.card-kicker) { position: relative; z-index: 4; max-width: 490px; color: #58726a; line-height: 1.6; }
 .coming-soon { position: relative; z-index: 5; display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 1.2rem; padding: 0.55rem 0.75rem; border-radius: 999px; background: rgba(255,255,255,0.55); letter-spacing: 0.07em; }
 .coming-soon i { width: 7px; height: 7px; border-radius: 50%; background: var(--coral); }
+.profile-editor {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--lavender) 45%, var(--line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--cream) 84%, transparent);
+  color: var(--ink);
+}
+.profile-editor-heading { display: grid; gap: 0.15rem; }
+.profile-editor-heading strong { font-size: 0.9rem; }
+.profile-editor-heading small { color: var(--ink-soft); font-size: 0.72rem; line-height: 1.35; }
+.profile-editor label { display: grid; gap: 0.3rem; color: var(--ink-soft); font-size: 0.7rem; font-weight: 800; }
+.profile-editor input,
+.profile-editor textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.58rem 0.66rem;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+.profile-editor input:focus,
+.profile-editor textarea:focus { border-color: var(--lavender); outline: 2px solid color-mix(in srgb, var(--lavender) 35%, transparent); outline-offset: 1px; }
+.profile-editor-actions { display: flex; min-height: 32px; align-items: center; gap: 0.65rem; }
+.profile-editor-actions button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: var(--lavender);
+  color: var(--on-lavender, #fff);
+  padding: 0.48rem 0.72rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+.profile-editor-actions button:disabled { cursor: wait; opacity: 0.65; }
+.profile-editor-actions [role="status"] { color: var(--ink-soft); font-size: 0.67rem; line-height: 1.3; }
 .card-scenery { position: absolute; inset: auto 0 0; height: 45%; }
 .scenery-hill { position: absolute; bottom: -28%; width: 80%; height: 115%; border-radius: 50%; }
 .hill-back { right: -25%; background: #86c99c; }
