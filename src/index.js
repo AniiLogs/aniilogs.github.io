@@ -260,6 +260,9 @@ async function materializeReleaseData(key, env) {
     payload.totals.descriptions_added_in_3528012 = Object.keys(patch.item_descriptions || {}).length;
   }
   if (filename === "aniilog_data.json") {
+    const byFormId = new Map((payload.entries || []).map((entry) => [String(entry.form_id), entry]));
+    for (const entry of patch.aniimo_entries || []) byFormId.set(String(entry.form_id), entry);
+    payload.entries = [...byFormId.values()];
     for (const entry of payload.entries || []) {
       if (Object.hasOwn(patch.aniimo_traits || {}, entry.form_id)) entry.traits = patch.aniimo_traits[entry.form_id];
     }
@@ -270,7 +273,20 @@ async function materializeReleaseData(key, env) {
       trait_policy: "Per-form gameplay traits use stable form and trait IDs resolved against build 3528012.",
       traits_added_in_3528012: Object.keys(patch.aniimo_traits || {}).length,
       entries_without_traits: (payload.entries || []).filter((entry) => !entry.traits?.length).map((entry) => entry.form_id),
+      special_roster_policy: "Lunara, Fennelun, Helion, and Soleon are current-client special forms outside the ordinary country roster and are joined by stable form ID.",
     };
+    payload.totals.entries = payload.entries.length;
+    payload.totals.starter_special_forms = (patch.aniimo_entries || []).length;
+    payload.totals.starter_special_families = 2;
+  }
+  if (filename === "aniilog_media.json") {
+    const byFormId = new Map((payload.entries || []).map((entry) => [String(entry.form_id), entry]));
+    for (const entry of patch.aniimo_media_entries || []) byFormId.set(String(entry.form_id), entry);
+    payload.entries = [...byFormId.values()];
+  }
+  if (filename === "checklist_data.json") {
+    payload.special_entries = patch.checklist_special_entries || [];
+    payload.totals.special_entries = payload.special_entries.length;
   }
 
   const body = JSON.stringify(payload);

@@ -6139,6 +6139,8 @@ function getAniilogEntryNumber(entry) {
 }
 
 function getAniilogGroupKey(entry) {
+  const familyId = String(entry?.family_id || "").trim().toLowerCase();
+  if (familyId) return `family::${familyId}`;
   const number = getAniilogEntryNumber(entry).toLowerCase();
   const name = getAniilogEntryName(entry)
     .replace(/\s+\([^)]+\)$/u, "")
@@ -6367,7 +6369,10 @@ function renderCatalogPreview(options = {}) {
   const entries = catalogEntriesForView(view);
   if (view === "aniilog" && state.aniilogData?.totals) {
     const totals = state.aniilogData.totals;
-    subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms · ${formatNumber(totals.entries)} visible forms total`;
+    const specialSummary = Number(totals.starter_special_forms) > 0
+      ? ` · ${formatNumber(totals.starter_special_families)} Legendary starter families / ${formatNumber(totals.starter_special_forms)} forms`
+      : "";
+    subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
   } else if (view === "itemlog" && allEntries.length) {
     const totals = state.itemlogData?.totals;
     subtitle.textContent = `${formatNumber(entries.length)} of ${formatNumber(totals?.named_items || allEntries.length)} packaged item definitions`;

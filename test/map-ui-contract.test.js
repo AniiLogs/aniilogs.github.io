@@ -56,6 +56,7 @@ test("cave navigation uses the current in-game marker art rather than legacy cus
 
 test("Aniilog forms remain nested under one expandable species row", () => {
   assert.match(explorer, /function getAniilogGroupKey\(entry\)/u);
+  assert.match(explorer, /entry\?\.family_id/u);
   assert.match(explorer, /function renderAniilogGroupedIndex\(entries, selectedId\)/u);
   assert.match(explorer, /const baseEntry = groupEntries\.find\(isAniilogBasicForm\) \|\| groupEntries\[0\]/u);
   assert.match(explorer, /className = "catalog-form-children"/u);
@@ -142,6 +143,8 @@ test("the shared shell keeps primary navigation visible and transitions fluidly"
 test("the page background stays viewport-fixed while mobile content scrolls", () => {
   assert.match(explorerStyles, /body::before\s*\{[\s\S]*?position: fixed;[\s\S]*?inset: 0;/u);
   assert.match(explorerStyles, /body\s*\{[\s\S]*?isolation: isolate;[\s\S]*?background: var\(--background\);/u);
+  assert.match(explorerStyles, /\.map-panel\.catalog-active\s*\{[\s\S]*?contain: none;/u);
+  assert.match(explorerStyles, /\.catalog-aniimo-video-backdrop\s*\{[\s\S]*?position: fixed;[\s\S]*?object-position: center;/u);
 });
 
 test("logs are top-level sections while the Map sidebar contains only map tools", () => {
@@ -297,7 +300,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-data-repair-r1"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-special-families-r2"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
