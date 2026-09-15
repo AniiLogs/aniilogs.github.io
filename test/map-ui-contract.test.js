@@ -261,14 +261,22 @@ test("only species-specific Aniimo map portraits receive the circular frame", ()
 });
 
 test("special Aniimo badges are unframed and anchored at the portrait top right", () => {
+  assert.match(explorer, /function specialBadgeSource\(subject, fallback = null\)/u);
+  assert.match(explorer, /function iconWithSpecialBadge\(icon, subject, fallback = null, className = ""\)/u);
+  assert.match(explorer, /"item-icon-badge-frame"/u);
+  assert.match(explorer, /makeIcon\("aniimo-special-badge", specialBadgeSource\(spawn, item\)\)/u);
+  assert.match(explorer, /context\.drawImage\(specialBadge, x \+ size \/ 2 - 15, y - size \/ 2 - 3, 18, 18\)/u);
+  assert.match(explorer, /"selection-icon-badge-frame"/u);
   assert.match(explorerStyles, /\.aniimo-special-badge\s*\{[^}]*top: -3px;[^}]*right: -3px;[^}]*border-radius: 0;[^}]*background: transparent;/su);
+  assert.match(explorerStyles, /\.item-icon-badge-frame > \.aniimo-special-badge,[\s\S]*?\.selection-icon-badge-frame > \.aniimo-special-badge/u);
+  assert.doesNotMatch(explorerStyles, /\.aniimo-special-badge\s*\{[^}]*border-radius:\s*(?:50%|999)/su);
 });
 
 test("the live UI loads only the package-pinned reviewed private content route", async () => {
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-layer-filters-r6"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3509129-special-bosses-r7"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3509129/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

@@ -8107,6 +8107,19 @@ function makeIcon(className, source) {
   return icon;
 }
 
+function specialBadgeSource(subject, fallback = null) {
+  return subject?.special_badge_icon || fallback?.special_badge_icon || "";
+}
+
+function iconWithSpecialBadge(icon, subject, fallback = null, className = "") {
+  const badgeSource = specialBadgeSource(subject, fallback);
+  if (!badgeSource) return icon;
+  const wrapper = document.createElement("span");
+  wrapper.className = ["aniimo-badged-portrait", className].filter(Boolean).join(" ");
+  wrapper.append(icon, makeIcon("aniimo-special-badge", badgeSource));
+  return wrapper;
+}
+
 function itemPassesFilters(item) {
   if (!item) return false;
   return (state.data.itemIdsByMap.get(state.activeMapId) || new Set()).has(item.item_id);
@@ -8666,7 +8679,12 @@ function createMapItemRow(item, { child = false, expandable = false } = {}) {
     });
   }
 
-  const icon = itemIconVisual(item, expandable);
+  const icon = iconWithSpecialBadge(
+    itemIconVisual(item, expandable),
+    item,
+    null,
+    "item-icon-badge-frame",
+  );
   const text = document.createElement("span");
   text.className = "item-text";
   const strong = document.createElement("strong");
@@ -8805,7 +8823,12 @@ function createSpawnChildRow(entry, siblings = [], siblingIndex = 0) {
     refreshVisibility();
   });
 
-  const icon = makeIcon("item-icon", spawn.icon || item?.icon);
+  const icon = iconWithSpecialBadge(
+    makeIcon("item-icon", spawn.icon || item?.icon),
+    spawn,
+    item,
+    "item-icon-badge-frame",
+  );
   const text = document.createElement("span");
   text.className = "item-text";
   const strong = document.createElement("strong");
@@ -9247,6 +9270,9 @@ function createMarkerPin(entry) {
   const undergroundBadge = spawn.is_underground && state.data.underground_badge_icon
     ? makeIcon("pin-underground-badge", state.data.underground_badge_icon)
     : null;
+  const specialBadge = specialBadgeSource(spawn, item)
+    ? makeIcon("aniimo-special-badge", specialBadgeSource(spawn, item))
+    : null;
   const pinBody = document.createElement("span");
   pinBody.className = "pin-body";
   const label = document.createElement("span");
@@ -9257,6 +9283,7 @@ function createMarkerPin(entry) {
   label.textContent = `${labelName} ${Math.round(spawn.x)}, ${Math.round(spawn.y)}${availabilityLabel ? ` - ${availabilityLabel}` : ""}`;
   pinBody.append(icon);
   if (hoverIcon) pinBody.append(hoverIcon);
+  if (specialBadge) pinBody.append(specialBadge);
   if (undergroundBadge) pinBody.append(undergroundBadge);
   if (state.completed.has(luminCompletionIdForSpawn(spawn))) {
     pinBody.append(createPinCompletionBadge());
@@ -9449,6 +9476,10 @@ function renderCanvasPins() {
       const badge = canvasIcon(state.data.underground_badge_icon);
       if (badge) context.drawImage(badge, x + size / 2 - 16, y - size / 2 - 4, 18, 18);
     }
+    const specialBadge = canvasIcon(specialBadgeSource(spawn, item));
+    if (specialBadge) {
+      context.drawImage(specialBadge, x + size / 2 - 15, y - size / 2 - 3, 18, 18);
+    }
     if (state.completed.has(luminCompletionIdForSpawn(spawn))) {
       const badgeRadius = Math.max(5, Math.min(6.5, size * 0.2));
       const badgeX = x + size * 0.34;
@@ -9558,7 +9589,15 @@ function renderSelectionDetail(detail, spawn, item) {
 
   const title = document.createElement("div");
   title.className = "selection-title";
-  const icon = makeIcon("", spawn.icon || item.icon);
+  const icon = iconWithSpecialBadge(
+    makeIcon(
+      item.is_aniimo ? "selection-portrait selection-aniimo-portrait" : "selection-portrait",
+      spawn.icon || item.icon,
+    ),
+    spawn,
+    item,
+    "selection-icon-badge-frame",
+  );
   const titleText = document.createElement("div");
   titleText.className = "selection-title-copy";
   const strong = document.createElement("strong");

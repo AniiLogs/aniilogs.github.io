@@ -3500,6 +3500,17 @@ html[data-theme="pawney"] .sidebar {
   height: 30px;
 }
 
+.aniimo-badged-portrait {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.item-icon-badge-frame {
+  width: 30px;
+  height: 30px;
+}
+
 .item-icon-stacked {
   position: absolute;
   width: 22px;
@@ -3987,6 +3998,18 @@ button.selection-minimized-coordinate:focus-visible {
   width: 36px;
   height: 36px;
   object-fit: contain;
+}
+
+.selection-icon-badge-frame {
+  width: 36px;
+  height: 36px;
+}
+
+.selection-title .selection-aniimo-portrait {
+  box-sizing: border-box;
+  border: 1px solid rgba(235, 255, 248, 0.92);
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 34%, #ffffff 0 50%, #e8eeef 76%, #cbd5d7 100%);
 }
 
 .selection-title strong {
@@ -8013,6 +8036,16 @@ button.catalog-item-reference {
   border-radius: 0;
   background: transparent;
   object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  z-index: 3;
+}
+
+.item-icon-badge-frame > .aniimo-special-badge,
+.selection-icon-badge-frame > .aniimo-special-badge {
+  width: 18px;
+  height: 18px;
 }
 
 .pin-icon-selected {
