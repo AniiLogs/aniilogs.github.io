@@ -2839,11 +2839,29 @@ function itemlogMethodSourceOptions(entries = allCatalogEntriesForView("itemlog"
       else methods.set(key, { id: itemlogMethodSourceId(label), label, count: 1 });
     });
   });
-  return [...methods.values()].sort((left, right) => compareText(left.label, right.label));
+  const options = [];
+  const heldStatsCount = entries.filter((entry) => entry?.held_item_details?.base_attributes?.length).length;
+  if (heldStatsCount) options.push({ id: "has-held-stats", label: "Equippable Held Items", count: heldStatsCount });
+  const rvDetailsCount = entries.filter((entry) => entry?.rv_details).length;
+  if (rvDetailsCount) options.push({ id: "has-rv-details", label: "Has RV requirements", count: rvDetailsCount });
+  const qualityCounts = new Map();
+  entries.forEach((entry) => {
+    const quality = String(entry?.quality || "").trim();
+    if (quality) qualityCounts.set(quality, (qualityCounts.get(quality) || 0) + 1);
+  });
+  [...qualityCounts].sort(([left], [right]) => compareText(left, right)).forEach(([quality, count]) => {
+    options.push({ id: `quality:${quality}`, label: quality, count });
+  });
+  return [...options, ...methods.values()].sort((left, right) => compareText(left.label, right.label));
 }
 
 function itemlogEntryMatchesFilter(entry, selectedSource, park = "all", tier = "all") {
   if (selectedSource === "all") return true;
+  if (selectedSource === "has-held-stats") return Boolean(entry?.held_item_details?.base_attributes?.length);
+  if (selectedSource === "has-rv-details") return Boolean(entry?.rv_details);
+  if (selectedSource.startsWith("quality:")) {
+    return String(entry?.quality || "") === selectedSource.slice("quality:".length);
+  }
   if (selectedSource === "rv-expedition") {
     return itemlogExpeditionSources(entry).some((source) => (
       (park === "all" || source?.park === park)
@@ -4127,7 +4145,7 @@ function renderCatalogCategoryToolbar(view) {
 
     const methodSources = itemlogMethodSourceOptions(categoryEntries);
     const acquisitionSources = document.createElement("optgroup");
-    acquisitionSources.label = "How to obtain";
+    acquisitionSources.label = "Item filters";
     methodSources.forEach((source) => appendSourceOption(acquisitionSources, source));
     if (methodSources.length) sourceSelect.append(acquisitionSources);
     sourceSelect.addEventListener("change", () => {
@@ -5749,7 +5767,7 @@ function renderHeldItemDetails(details) {
   const advancedEffects = Array.isArray(details.advanced_effects) ? details.advanced_effects : [];
   if (!attributes.length && !coreEffects.length && !advancedEffects.length) return null;
 
-  const section = createCatalogSection("Held Item effects");
+  const section = createCatalogSection("Held Item stats & effects");
   section.classList.add("catalog-held-item-section");
   if (attributes.length) {
     const facts = document.createElement("dl");
@@ -5760,6 +5778,13 @@ function renderHeldItemDetails(details) {
       `${attribute?.name || "Attribute"} +${attribute?.display_value || formatNumber(attribute?.amount || 0)}`,
     ));
     section.append(facts);
+  }
+  if (details.enhancement?.maximum_level) {
+    const progression = document.createElement("dl");
+    progression.className = "catalog-facts catalog-held-item-enhancement";
+    appendCatalogFact(progression, "Maximum enhancement", `Level ${formatNumber(details.enhancement.maximum_level)}`);
+    appendCatalogFact(progression, "Base attributes at maximum", `+${details.enhancement.display_bonus}`);
+    section.append(progression);
   }
 
   const effects = document.createElement("div");

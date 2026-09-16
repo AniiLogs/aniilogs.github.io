@@ -386,11 +386,21 @@ test("current-build Held Item effects and underline markup are rendered safely",
   const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
   assert.match(worker, /patch\.item_held_details/u);
   assert.match(explorer, /function renderHeldItemDetails\(details\)/u);
-  assert.match(explorer, /createCatalogSection\("Held Item effects"\)/u);
+  assert.match(explorer, /createCatalogSection\("Held Item stats & effects"\)/u);
   assert.match(explorer, /Advanced effect · Tier/u);
   assert.match(explorer, /Rune Energy/u);
   assert.match(explorer, /document\.createElement\(match\[2\] === "b"/u);
   assert.match(explorerStyles, /\.catalog-held-item-effect-card/u);
+});
+
+test("item filters retain useful quality and enriched-data facets", () => {
+  assert.match(explorer, /id: "has-held-stats", label: "Equippable Held Items"/u);
+  assert.match(explorer, /id: "has-rv-details", label: "Has RV requirements"/u);
+  assert.match(explorer, /id: `quality:\$\{quality\}`/u);
+  assert.match(explorer, /selectedSource === "has-held-stats"/u);
+  assert.match(explorer, /selectedSource\.startsWith\("quality:"\)/u);
+  assert.match(explorer, /Maximum enhancement/u);
+  assert.match(explorer, /Base attributes at maximum/u);
 });
 
 test("Astra POIs use current map-marker art inside the in-game marker frame", () => {
