@@ -352,9 +352,9 @@ test("the live UI loads only the package-pinned reviewed private content route",
   const explorerConfig = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
-  assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-item-visibility-r19"/u);
-  assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
+  assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
+  assert.match(explorerConfig, /contentRevision = "20260916-build3535596-map-audit-r1"/u);
+  assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
   assert.match(explorer, /if \(!CONTENT_AVAILABLE\)/u);

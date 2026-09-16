@@ -7,7 +7,7 @@ const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
 const SHARE_LIFETIME_SECONDS = 3 * 60 * 60;
 const SHARE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const MAX_PROGRESS_BYTES = 512 * 1024;
-const CONTENT_RELEASE = "3528012";
+const CONTENT_RELEASE = "3535596";
 const ASSET_FALLBACK_RELEASE = "3509129";
 const CONTENT_PATH_PREFIX = `/api/content/releases/${CONTENT_RELEASE}/`;
 const RELEASE_PATCH_KEY = `releases/${CONTENT_RELEASE}/data/release_patch.json.gz`;
@@ -272,12 +272,12 @@ async function materializeReleaseData(key, env) {
       }
     }
     payload.generated_at_utc = patch.generated_at;
-    payload.source_policy = "Current game files; every added description is resolved from the build 3528012 English localization archive.";
-    payload.audit_status = "Build 3528012 names and descriptions validated; parameterized and genuinely absent descriptions remain blank.";
+    payload.source_policy = "Current game files; every added description is resolved from the build 3535596 English localization archive.";
+    payload.audit_status = "Build 3535596 names and descriptions validated; parameterized and genuinely absent descriptions remain blank.";
     payload.totals.items_with_descriptions = (payload.entries || []).filter((entry) => Boolean(entry.description)).length;
     payload.totals.items_without_descriptions = (payload.entries || []).length - payload.totals.items_with_descriptions;
-    payload.totals.descriptions_added_in_3528012 = Object.keys(patch.item_descriptions || {}).length;
-    payload.totals.icons_added_in_3528012 = Object.keys(patch.item_icons || {}).length;
+    payload.totals.descriptions_added_in_3535596 = Object.keys(patch.item_descriptions || {}).length;
+    payload.totals.icons_added_in_3535596 = Object.keys(patch.item_icons || {}).length;
     payload.totals.items_without_icons = (payload.entries || []).filter((entry) => !entry.icon).length;
     payload.totals.items_with_rv_details = Object.keys(patch.item_rv_details || {}).length;
     payload.totals.items_with_held_item_details = Object.keys(patch.item_held_details || {}).length;
@@ -309,12 +309,12 @@ async function materializeReleaseData(key, env) {
     payload.publication_status = "private_reviewed";
     payload.data_quality = {
       ...(payload.data_quality || {}),
-      trait_policy: "Exactly one trait per published form, joined to its assigned feature ID in build 3528012 pet_data; catalog-only traits are excluded.",
+      trait_policy: "Exactly one trait per published form, joined to its assigned feature ID in build 3535596 pet_data; catalog-only traits are excluded.",
       trait_forms_reconciled: Object.keys(patch.aniimo_traits || {}).length,
       traits_without_icons: (payload.entries || []).flatMap((entry) => (entry.traits || [])
         .filter((trait) => !trait.icon)
         .map((trait) => ({ form_id: entry.form_id, trait_id: trait.trait_id }))),
-      ability_descriptions_added_in_3528012: Object.keys(patch.aniimo_abilities || {}).length,
+      ability_descriptions_added_in_3535596: Object.keys(patch.aniimo_abilities || {}).length,
       abilities_without_descriptions: (payload.entries || []).flatMap((entry) => [
         ...(entry.skills || []).map((ability) => ({ form_id: entry.form_id, field: "skills", ability })),
         ...(entry.ultimates || []).map((ability) => ({ form_id: entry.form_id, field: "ultimates", ability })),

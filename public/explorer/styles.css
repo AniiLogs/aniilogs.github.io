@@ -7855,14 +7855,7 @@ button.catalog-item-reference {
 }
 
 .catalog-aniilog-record::after {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  background:
-    linear-gradient(90deg, rgba(var(--background-rgb), 0.76), transparent 22% 78%, rgba(var(--background-rgb), 0.76)),
-    linear-gradient(0deg, rgba(var(--background-rgb), 0.88), transparent 28% 72%, rgba(var(--background-rgb), 0.8));
-  content: "";
-  pointer-events: none;
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

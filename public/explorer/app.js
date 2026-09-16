@@ -2220,7 +2220,7 @@ function renderDeveloperSettings(container) {
     state.preferences.developerMode = input.checked;
     persistLocalTracking();
     applyDeveloperVisibility();
-    if (state.sidebarView === "itemlog") renderCatalogPreview();
+    if (state.sidebarView === "itemlog" || state.sidebarView === "aniilog") renderCatalogPreview();
   });
   const toggleCopy = document.createElement("span");
   const toggleTitle = document.createElement("strong");
@@ -5373,9 +5373,11 @@ function renderAniilogCatalogRecord(entry) {
     record.append(description);
   }
 
-  const statSection = createCatalogSection(`Base stats · Total ${aniilogBaseStatTotal(entry)}`);
-  statSection.append(renderAniilogStatComparison(entry));
-  record.append(statSection);
+  if (developerModeEnabled()) {
+    const statSection = createCatalogSection(`Base stats · Total ${aniilogBaseStatTotal(entry)}`);
+    statSection.append(renderAniilogStatComparison(entry));
+    record.append(statSection);
+  }
 
   record.append(renderCatalogAbilitySection("Combat skills", entry.skills, "No combat skill data is currently available."));
   const utilityGrid = document.createElement("div");
@@ -6729,12 +6731,14 @@ function renderCatalogPreview(options = {}) {
 
   const allEntries = allCatalogEntriesForView(view);
   const entries = catalogEntriesForView(view);
-  if (view === "aniilog" && state.aniilogData?.totals) {
+  if (view === "aniilog" && state.aniilogData?.totals && developerModeEnabled()) {
     const totals = state.aniilogData.totals;
     const specialSummary = Number(totals.starter_special_forms) > 0
       ? ` · ${formatNumber(totals.starter_special_families)} Legendary starter families / ${formatNumber(totals.starter_special_forms)} forms`
       : "";
     subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
+  } else if (view === "aniilog") {
+    subtitle.textContent = "Current-build Aniimo records";
   } else if (view === "itemlog" && allEntries.length) {
     subtitle.textContent = `${formatNumber(entries.length)} of ${formatNumber(allEntries.length)} packaged item definitions`;
   }
@@ -9774,7 +9778,8 @@ function availabilityLabelForSpawn(spawn) {
 }
 
 function isAstraMarkPointIcon(source) {
-  return String(source || "").includes("/map-markpoint-3528012/");
+  return String(source || "").includes("/map-markpoint-3535596/")
+    || String(source || "").includes("/map-markpoint-3528012/");
 }
 
 function createMarkerPin(entry) {

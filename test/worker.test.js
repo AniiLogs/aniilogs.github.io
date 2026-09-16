@@ -273,7 +273,7 @@ test("API preflights expose CORS only to the exact configured site", async () =>
 });
 
 test("release content is served from the private R2 binding without directory listing", async () => {
-  const bytes = new TextEncoder().encode('{"release":3528012}');
+  const bytes = new TextEncoder().encode('{"release":3535596}');
   const requestedKeys = [];
   const storedObject = () => ({
     body: bytes,
@@ -299,29 +299,29 @@ test("release content is served from the private R2 binding without directory li
   };
 
   const getResponse = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/data/map_site_data.json",
+    "https://api.aniilogs.example/api/content/releases/3535596/data/map_site_data.json",
     { headers: { origin: "https://aniilogs.github.io" } },
   ), env);
   assert.equal(getResponse.status, 200);
-  assert.equal(await getResponse.text(), '{"release":3528012}');
+  assert.equal(await getResponse.text(), '{"release":3535596}');
   assert.equal(getResponse.headers.get("cache-control"), "public, max-age=60, must-revalidate");
   assert.equal(getResponse.headers.get("access-control-allow-origin"), "*");
-  assert.deepEqual(requestedKeys[0], ["get", "releases/3528012/data/map_site_data.json"]);
+  assert.deepEqual(requestedKeys[0], ["get", "releases/3535596/data/map_site_data.json"]);
 
   const headResponse = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/data/map_site_data.json",
+    "https://api.aniilogs.example/api/content/releases/3535596/data/map_site_data.json",
     { method: "HEAD" },
   ), env);
   assert.equal(headResponse.status, 200);
   assert.equal(await headResponse.text(), "");
-  assert.deepEqual(requestedKeys[1], ["head", "releases/3528012/data/map_site_data.json"]);
+  assert.deepEqual(requestedKeys[1], ["head", "releases/3535596/data/map_site_data.json"]);
 
   const listingResponse = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/",
+    "https://api.aniilogs.example/api/content/releases/3535596/",
   ), env);
   assert.equal(listingResponse.status, 404);
   const traversalResponse = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/data%5Csecret.json",
+    "https://api.aniilogs.example/api/content/releases/3535596/data%5Csecret.json",
   ), env);
   assert.equal(traversalResponse.status, 404);
 });
@@ -340,7 +340,7 @@ test("release video content receives a safe MP4 type when R2 metadata is absent"
     },
   };
   const response = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/assets/aniimo-videos/1001100.mp4",
+    "https://api.aniilogs.example/api/content/releases/3535596/assets/aniimo-videos/1001100.mp4",
   ), env);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "video/mp4");
@@ -363,12 +363,12 @@ test("release map shards fall back to the reviewed asset release", async () => {
     },
   };
   const response = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/data/maps/country-of-time.json",
+    "https://api.aniilogs.example/api/content/releases/3535596/data/maps/country-of-time.json",
   ), env);
   assert.equal(response.status, 200);
   assert.equal(await response.text(), '{"items":[1],"spawns":[2]}');
   assert.deepEqual(requestedKeys, [
-    "releases/3528012/data/maps/country-of-time.json",
+    "releases/3535596/data/maps/country-of-time.json",
     "releases/3509129/data/maps/country-of-time.json",
   ]);
 });
@@ -376,7 +376,7 @@ test("release map shards fall back to the reviewed asset release", async () => {
 test("release content fails closed until an audited snapshot is explicitly enabled", async () => {
   let reads = 0;
   const response = await worker.fetch(new Request(
-    "https://api.aniilogs.example/api/content/releases/3528012/data/map_site_data.json",
+    "https://api.aniilogs.example/api/content/releases/3535596/data/map_site_data.json",
   ), {
     CONTENT: {
       async get() {
@@ -569,3 +569,4 @@ test("account deletion rejects a cross-origin request", async () => {
   assert.equal(response.status, 403);
   assert.equal(state.accounts.has(state.discordIds.owner), true);
 });
+
