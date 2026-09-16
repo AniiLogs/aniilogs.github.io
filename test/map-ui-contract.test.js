@@ -342,7 +342,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-trait-icons-r17"/u);
+  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-item-visibility-r18"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
@@ -370,8 +370,20 @@ test("internal test items are available only to entitled developer mode", () => 
   assert.match(explorer, /Test Invitation Letter/u);
   assert.match(explorer, /View All Items/u);
   assert.match(explorer, /return developerModeEnabled\(\) \? entries : entries\.filter/u);
+  assert.match(explorer, /entry\?\.client_visibility\?\.status === "developer-only"/u);
   assert.match(explorer, /function developerModeEnabled\(\) \{\s*return Boolean\(state\.developerModeAvailable && state\.preferences\.developerMode\);/su);
   assert.match(explorer, /if \(state\.sidebarView === "itemlog"\) renderCatalogPreview\(\);/u);
+});
+
+test("item records show current-client source and unlock references without claiming availability", async () => {
+  const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  assert.match(worker, /Object\.assign\(entry, patch\.item_audit\[entry\.item_id\]\)/u);
+  assert.match(explorer, /function renderItemLogClientReferences\(entry\)/u);
+  assert.match(explorer, /References in the current client files; a listed route does not confirm/u);
+  assert.match(explorer, /No direct source or unlock reference was found/u);
+  assert.match(explorer, /source\.source_id/u);
+  assert.match(explorer, /unlock\.source_table/u);
+  assert.match(explorer, /Same-name definitions/u);
 });
 
 test("game rich text is rendered with safe DOM nodes", () => {

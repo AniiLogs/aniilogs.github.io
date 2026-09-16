@@ -2704,6 +2704,7 @@ const DEVELOPER_ONLY_ITEM_NAME_PATTERNS = Object.freeze([
 ]);
 
 function isDeveloperOnlyItemlogEntry(entry) {
+  if (entry?.client_visibility?.status === "developer-only") return true;
   const name = String(entry?.name || "").trim();
   return DEVELOPER_ONLY_ITEM_NAME_PATTERNS.some((pattern) => pattern.test(name));
 }
@@ -5729,6 +5730,58 @@ function renderItemLogProgressionUses(progressionUses) {
   return section;
 }
 
+function renderItemLogClientReferences(entry) {
+  const sources = Array.isArray(entry.source_references) ? entry.source_references : [];
+  const unlocks = Array.isArray(entry.unlock_references) ? entry.unlock_references : [];
+  const section = createCatalogSection("Client references");
+  const note = document.createElement("p");
+  note.className = "catalog-description";
+  note.textContent = sources.length || unlocks.length
+    ? "References in the current client files; a listed route does not confirm that it is currently obtainable."
+    : "No direct source or unlock reference was found in the inspected client tables. This does not prove the item is unobtainable.";
+  section.append(note);
+  const list = document.createElement("div");
+  list.className = "catalog-requirements-list";
+  if (developerModeEnabled() && entry.client_visibility?.status === "developer-only") {
+    const row = document.createElement("div");
+    row.className = "catalog-requirement-row";
+    const label = document.createElement("strong");
+    label.textContent = "Developer-only item";
+    const detail = document.createElement("p");
+    detail.textContent = entry.client_visibility.evidence || entry.client_visibility.reason;
+    row.append(label, detail);
+    list.append(row);
+  }
+  for (const source of sources) {
+    const row = document.createElement("div");
+    row.className = "catalog-requirement-row";
+    const label = document.createElement("strong");
+    label.textContent = `${source.label || "Source"} · source #${source.source_id}`;
+    row.append(label);
+    if (source.hint) {
+      const hint = document.createElement("p");
+      appendGameRichText(hint, source.hint);
+      row.append(hint);
+    }
+    list.append(row);
+  }
+  for (const unlock of unlocks) {
+    const row = document.createElement("div");
+    row.className = "catalog-requirement-row";
+    const label = document.createElement("strong");
+    label.textContent = `Unlock · ${unlock.label || unlock.detail}`;
+    row.append(label);
+    if (unlock.source_id) {
+      const detail = document.createElement("p");
+      detail.textContent = `${unlock.source_table} #${unlock.source_id}`;
+      row.append(detail);
+    }
+    list.append(row);
+  }
+  if (list.childElementCount) section.append(list);
+  return section;
+}
+
 function renderRvProgression(details) {
   if (!details || typeof details !== "object") return null;
   const unlock = details.unlock_requirement;
@@ -6340,6 +6393,10 @@ function renderItemLogCatalogRecord(entry) {
   if (entry.evidence_label && !detailFacts.some((fact) => fact?.label === "Current-build evidence")) {
     detailFacts.push({ label: "Current-build evidence", value: entry.evidence_label });
   }
+  if (Number(entry.duplicate_name_count) > 1) {
+    detailFacts.push({ label: "Item ID", value: entry.item_id });
+    detailFacts.push({ label: "Same-name definitions", value: String(entry.duplicate_name_count) });
+  }
   detailFacts.forEach((fact) => appendCatalogFact(facts, fact?.label, fact?.value));
   if (facts.childElementCount) {
     details.append(facts);
@@ -6362,6 +6419,8 @@ function renderItemLogCatalogRecord(entry) {
   if (heldItemDetails) record.append(heldItemDetails);
   const requirements = renderItemLogRequirements(entry.requirements);
   if (requirements) record.append(requirements);
+  const clientReferences = renderItemLogClientReferences(entry);
+  if (clientReferences) record.append(clientReferences);
   const expeditionSources = renderRvExpeditionSources(entry);
   if (expeditionSources) record.append(expeditionSources);
   const obtainMethods = renderItemLogObtainMethods(

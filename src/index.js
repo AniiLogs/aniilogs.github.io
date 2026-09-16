@@ -267,6 +267,9 @@ async function materializeReleaseData(key, env) {
       if (Object.hasOwn(patch.item_held_details || {}, entry.item_id)) {
         entry.held_item_details = patch.item_held_details[entry.item_id];
       }
+      if (Object.hasOwn(patch.item_audit || {}, entry.item_id)) {
+        Object.assign(entry, patch.item_audit[entry.item_id]);
+      }
     }
     payload.generated_at_utc = patch.generated_at;
     payload.source_policy = "Current game files; every added description is resolved from the build 3528012 English localization archive.";
@@ -281,6 +284,13 @@ async function materializeReleaseData(key, env) {
     payload.totals.rv_level_unlock_items = (payload.entries || []).filter((entry) => entry.rv_details?.unlock_requirement?.rv_level).length;
     payload.totals.rv_components = (payload.entries || []).filter((entry) => entry.rv_details?.component).length;
     payload.totals.rv_production_unlock_items = (payload.entries || []).filter((entry) => entry.rv_details?.production_unlocks?.length).length;
+    payload.totals.developer_only_items = (payload.entries || []).filter((entry) => entry.client_visibility?.status === "developer-only").length;
+    payload.totals.player_facing_items = (payload.entries || []).length - payload.totals.developer_only_items;
+    payload.totals.client_defined_items = (payload.entries || []).filter((entry) => entry.client_visibility?.reason !== "legacy-map-alias").length;
+    payload.totals.items_with_client_source_references = (payload.entries || []).filter((entry) => entry.source_references?.length).length;
+    payload.totals.items_with_unlock_references = (payload.entries || []).filter((entry) => entry.unlock_references?.length).length;
+    payload.totals.items_with_map_targets = (payload.entries || []).filter((entry) => entry.map_targets?.length).length;
+    payload.client_visibility_policy = patch.item_visibility_policy || "";
   }
   if (filename === "aniilog_data.json") {
     const byFormId = new Map((payload.entries || []).map((entry) => [String(entry.form_id), entry]));
