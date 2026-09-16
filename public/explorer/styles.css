@@ -3484,6 +3484,40 @@ html[data-theme="pawney"] .sidebar {
   gap: 7px;
 }
 
+.map-lumin-source {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 9px;
+  background: rgba(var(--background-rgb), 0.2);
+}
+
+.map-lumin-source-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-lumin-source-heading span,
+.map-lumin-source small {
+  color: var(--muted);
+  font-size: 0.77rem;
+}
+
+.map-lumin-source p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.map-lumin-unplaced {
+  border-style: dashed;
+}
+
 .map-item-group[hidden] {
   display: none;
 }

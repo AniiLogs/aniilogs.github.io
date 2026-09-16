@@ -331,10 +331,21 @@ test("special Aniimo badges are unframed and anchored at the portrait top right"
 });
 
 test("map selections surface the reviewed short marker descriptions", () => {
-  assert.match(explorer, /const descriptionText = String\(spawn\.description \|\| item\.description \|\| ""\)\.trim\(\)/u);
+  assert.match(explorer, /const descriptionText = String\(spawn\.description \|\| item\.description \|\| luminMetadata\?\.guide \|\| ""\)\.trim\(\)/u);
   assert.match(explorer, /description\.className = "selection-description"/u);
   assert.match(explorer, /detail\.append\(title, description, grid\)/u);
   assert.match(explorerStyles, /\.selection-description\s*\{[^}]*font-size: 12px;/su);
+});
+
+test("the map organizes Lumin sources without inventing Blessed Aniimo locations", () => {
+  assert.match(explorer, /function renderLuminMapSources\(section, layerItems\)/u);
+  assert.match(explorer, /renderLuminMapSources\(section, layerItems\)/u);
+  assert.match(explorer, /label: "Field boss first clears"/u);
+  assert.match(explorer, /spawn\.special_type === "Alpha"/u);
+  assert.match(explorer, /"blessed-aniimo", "description"/u);
+  assert.match(explorer, /no fixed Blessed Aniimo locations are verified/u);
+  assert.match(explorer, /The current map marker does not identify whether this Amber is ordinary, guarded, or ecosystem-based/u);
+  assert.match(explorerStyles, /\.map-lumin-source\s*\{/u);
 });
 
 test("the live UI loads only the package-pinned reviewed private content route", async () => {

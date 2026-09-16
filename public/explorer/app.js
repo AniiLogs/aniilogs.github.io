@@ -8927,6 +8927,9 @@ function updateFilterCount() {
 }
 
 function itemRowSubtitle(item) {
+  if (item.source_kind === "current_field_boss_lumin_reward") {
+    return "First-clear Lumin Amber rewards";
+  }
   if (item.teleport_type === "nurture" || item.teleport_type === "vein_abundance") {
     return item.display_type_label || item.display_name;
   }
@@ -8941,6 +8944,9 @@ function itemRowSubtitle(item) {
 }
 
 function itemRowName(item) {
+  if (item.source_kind === "current_field_boss_lumin_reward") {
+    return "Alpha & Omega first clears";
+  }
   if (item.is_aniimo) return aniimoListName(item);
   if (item.teleport_type === "nurture" || item.teleport_type === "vein_abundance") {
     const spawn = activeMapSpawnEntries(item.item_id)[0]?.spawn;
@@ -9141,7 +9147,7 @@ function luminEventFamilyLabel(spawn) {
 
 function spawnChildDisplayParts(spawn, siblings = [], siblingIndex = 0) {
   const sequence = duplicateSpawnSequence(spawn, siblings, siblingIndex);
-  if (spawn.marker_type === "quest_lumen_seed") {
+  if (spawn.marker_type === "quest_lumen_seed" || spawn.marker_type === "field_boss_lumin_reward") {
     return { name: compactBossClearTitle(spawn), sequence, typeLabel: "" };
   }
   if (spawn.marker_type === "lumin_event") {
@@ -9328,6 +9334,134 @@ function renderMapCollectionGroup(section, {
   }
   section.append(group);
   state.renderedMapGroups.set(groupKey, { group, parent, items, label, count });
+}
+
+function luminGuideText(id, field) {
+  const guide = state.checklistData?.lumin_guides?.find((entry) => entry.id === id);
+  if (!guide) return "";
+  return window.AniipediaI18n.translateUid(guide.localization_uids?.[field], guide[field] || "");
+}
+
+function appendLuminMapSource(section, { label, description, items, note = "" }) {
+  if (!items.length) return;
+  const group = document.createElement("section");
+  group.className = "map-lumin-source";
+  const heading = document.createElement("div");
+  heading.className = "map-lumin-source-heading";
+  const title = document.createElement("strong");
+  title.textContent = window.AniipediaI18n.translate(label);
+  const count = document.createElement("span");
+  const total = items.reduce((sum, item) => sum + activeMapSpawnEntries(item.item_id).length, 0);
+  count.textContent = `${total} ${total === 1 ? "location" : "locations"}`;
+  heading.append(title, count);
+  group.append(heading);
+  if (description) {
+    const detail = document.createElement("p");
+    detail.textContent = description;
+    group.append(detail);
+  }
+  if (note) {
+    const caveat = document.createElement("small");
+    caveat.textContent = note;
+    group.append(caveat);
+  }
+  items.forEach((item) => appendMapItemWithChildren(group, item));
+  section.append(group);
+}
+
+function renderLuminMapSources(section, layerItems) {
+  const byType = (type) => layerItems.filter((item) => item.marker_type === type);
+  appendLuminMapSource(section, {
+    label: "Map-marked Lumin Amber",
+    description: "Individual Amber pins from the current game map. These markers do not identify whether an Amber is guarded or part of an ecosystem challenge.",
+    items: byType("lumin_amber"),
+  });
+  appendLuminMapSource(section, {
+    label: "Lumin Collection & Runaway Amber",
+    description: luminGuideText("lumin-collection", "description"),
+    note: `${luminGuideText("runaway-amber", "description")} Runaway Amber is named on its individual map entry; the game files do not give it a separate marker type.`,
+    items: byType("lumin_event"),
+  });
+  appendLuminMapSource(section, {
+    label: "Lumin Markings",
+    description: "Map-marked Lumin challenges with their own locations and completion state.",
+    items: byType("lumin_marking"),
+  });
+  const bossItems = layerItems.filter((item) => item.source_kind === "current_field_boss_lumin_reward");
+  const bossSpawns = bossItems.flatMap((item) => activeMapSpawnEntries(item.item_id).map(({ spawn }) => spawn));
+  const alphaCount = bossSpawns.filter((spawn) => spawn.special_type === "Alpha").length;
+  const omegaCount = bossSpawns.filter((spawn) => spawn.special_type === "Omega").length;
+  appendLuminMapSource(section, {
+    label: "Field boss first clears",
+    description: "One Lumin Amber for the first clear of each verified field boss. These are one-time rewards, not repeatable drops.",
+    note: `${alphaCount} Alpha · ${omegaCount} Omega`,
+    items: bossItems,
+  });
+
+  const blessedDescription = luminGuideText("blessed-aniimo", "description");
+  if (blessedDescription) {
+    const blessed = document.createElement("aside");
+    blessed.className = "map-lumin-source map-lumin-unplaced";
+    const title = document.createElement("strong");
+    title.textContent = luminGuideText("blessed-aniimo", "name") || "Blessed Aniimo";
+    const detail = document.createElement("p");
+    detail.textContent = blessedDescription;
+    const note = document.createElement("small");
+    note.textContent = "Catch-related source; no fixed Blessed Aniimo locations are verified in the current map files.";
+    blessed.append(title, detail, note);
+    section.append(blessed);
+  }
+
+  const otherGuides = ["guarded-amber", "ecosystem-amber"];
+  otherGuides.forEach((id) => {
+    const description = luminGuideText(id, "description");
+    if (!description) return;
+    const info = document.createElement("aside");
+    info.className = "map-lumin-source map-lumin-unplaced";
+    const title = document.createElement("strong");
+    title.textContent = luminGuideText(id, "name");
+    const detail = document.createElement("p");
+    detail.textContent = description;
+    const note = document.createElement("small");
+    note.textContent = "The current map markers do not distinguish these from generic Amber pins; no separate locations have been assigned.";
+    info.append(title, detail, note);
+    section.append(info);
+  });
+
+  const recognized = new Set([
+    ...byType("lumin_amber"),
+    ...byType("lumin_event"),
+    ...byType("lumin_marking"),
+    ...bossItems,
+  ]);
+  layerItems.filter((item) => !recognized.has(item))
+    .forEach((item) => appendMapItemWithChildren(section, item));
+}
+
+function luminMapMetadata(spawn) {
+  if (spawn.marker_type === "field_boss_lumin_reward") {
+    return {
+      source: `${spawn.special_type || "Field boss"} first clear`,
+      guide: "One-time reward for the first defeat of this field boss.",
+    };
+  }
+  if (spawn.marker_type === "lumin_event") {
+    const runaway = /^Runaway Amber:/i.test(String(spawn.display_name || ""));
+    return {
+      source: runaway ? "Runaway Amber" : "Lumin Collection / event",
+      guide: luminGuideText(runaway ? "runaway-amber" : "lumin-collection", "description"),
+    };
+  }
+  if (spawn.marker_type === "lumin_amber") {
+    return {
+      source: "Map-marked Amber",
+      guide: "The current map marker does not identify whether this Amber is ordinary, guarded, or ecosystem-based.",
+    };
+  }
+  if (spawn.marker_type === "lumin_marking") {
+    return { source: "Lumin Marking", guide: "Complete this map-marked Lumin challenge." };
+  }
+  return null;
 }
 
 const TELEPORT_GROUPS = [
@@ -9589,21 +9723,15 @@ function renderItems() {
       return;
     }
 
-    const groupedItemIds = new Set();
     if (layer.id === "ambers") {
-      const blessedItems = layerItems.filter((item) => item.form_label === "Blessed");
-      blessedItems.forEach((item) => groupedItemIds.add(item.item_id));
-      renderMapCollectionGroup(section, {
-        groupKey: "amber-group:blessed-aniimo",
-        label: "Blessed Aniimo",
-        items: blessedItems,
-      });
+      renderLuminMapSources(section, layerItems);
+      els.itemList.append(section);
+      return;
     }
 
     let previousMiscGroup = "";
     let miscGroupContent = null;
     layerItems.forEach((item) => {
-      if (groupedItemIds.has(item.item_id)) return;
       if (layer.id === "misc") {
         const miscGroup = miscGroupForItem(item);
         if (miscGroup !== previousMiscGroup) {
@@ -10102,7 +10230,8 @@ function renderSelectionDetail(detail, spawn, item) {
   });
   title.append(icon, titleText, minimizedCoordinates);
 
-  const descriptionText = String(spawn.description || item.description || "").trim();
+  const luminMetadata = luminMapMetadata(spawn);
+  const descriptionText = String(spawn.description || item.description || luminMetadata?.guide || "").trim();
   const description = document.createElement("p");
   description.className = "selection-description";
   description.textContent = descriptionText;
@@ -10117,6 +10246,8 @@ function renderSelectionDetail(detail, spawn, item) {
   const regionValue = regionDetailValue(spawn);
   const rows = [
     ["Type", typeLabel],
+    luminMetadata ? ["Lumin source", luminMetadata.source] : null,
+    spawn.marker_type === "field_boss_lumin_reward" ? ["Reward", `${spawn.reward_amount || 1} Lumin Amber (first clear)`] : null,
     spawn.document_group ? ["Series", spawn.document_group] : null,
     spawn.collectible_group ? ["Series", spawn.collectible_group] : null,
     formValue ? ["Form", formValue] : null,
