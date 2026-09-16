@@ -284,12 +284,16 @@ test("map and filter controls remain compact as the map inventory grows", () => 
   assert.doesNotMatch(explorer, /Share current pins/u);
 });
 
-test("Travel renders current portal groups and never drops unclassified destinations", () => {
+test("Travel flattens redundant portal rows and never drops unclassified destinations", () => {
+  assert.match(explorer, /\{ id: "bloom_branch", label: "Bloom Branches" \}/u);
   assert.match(explorer, /\{ id: "rv_park", label: "RV Parks" \}/u);
   assert.match(explorer, /\{ id: "transporter", label: "Transporters" \}/u);
   assert.match(explorer, /\{ id: "vein_rift", label: "Vein Rifts" \}/u);
-  assert.match(explorer, /groupKey: "teleport-group:other"/u);
-  assert.match(explorer, /label: "Other Travel"/u);
+  assert.match(explorer, /const FLAT_TELEPORT_GROUPS = new Set\(\[/u);
+  assert.match(explorer, /flattenSingleItem: FLAT_TELEPORT_GROUPS\.has\(id\)/u);
+  assert.match(explorer, /if \(flattenSingleItem && items\.length === 1\)/u);
+  assert.match(explorer, /ungrouped\.forEach\(\(item\) => appendMapItemWithChildren\(section, item\)\)/u);
+  assert.doesNotMatch(explorer, /label: "Other Travel"/u);
 });
 
 test("map hover keeps the normal icon unless a selected-state replacement exists", () => {
@@ -327,7 +331,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-region-names-r12"/u);
+  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-flat-travel-groups-r13"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

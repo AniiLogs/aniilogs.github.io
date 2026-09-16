@@ -9117,7 +9117,13 @@ function mapItemsFullySelected(items) {
   });
 }
 
-function renderMapCollectionGroup(section, { groupKey, label, items, className = "" }) {
+function renderMapCollectionGroup(section, {
+  groupKey,
+  label,
+  items,
+  className = "",
+  flattenSingleItem = false,
+}) {
   if (!items.length) return;
   const expanded = state.expandedMapGroups.has(groupKey);
   const group = document.createElement("section");
@@ -9183,7 +9189,13 @@ function renderMapCollectionGroup(section, { groupKey, label, items, className =
 
   if (expanded) {
     const { wrapper, list } = createMapChildrenContainer(groupKey, label);
-    items.forEach((item) => appendMapItemWithChildren(list, item, { child: true }));
+    if (flattenSingleItem && items.length === 1) {
+      const item = items[0];
+      const entries = activeMapSpawnEntries(item.item_id);
+      entries.forEach((entry, index) => list.append(createSpawnChildRow(entry, entries, index)));
+    } else {
+      items.forEach((item) => appendMapItemWithChildren(list, item, { child: true }));
+    }
     group.append(wrapper);
   }
   section.append(group);
@@ -9192,6 +9204,7 @@ function renderMapCollectionGroup(section, { groupKey, label, items, className =
 
 const TELEPORT_GROUPS = [
   { id: "bloom", label: "Blooms" },
+  { id: "bloom_branch", label: "Bloom Branches" },
   { id: "sanctum", label: "Sanctums" },
   { id: "branch", label: "Branches" },
   { id: "outpost", label: "Outposts" },
@@ -9201,6 +9214,14 @@ const TELEPORT_GROUPS = [
   { id: "vein_abundance", label: "Vein Abundance Sites" },
   { id: "vein_rift", label: "Vein Rifts" },
 ];
+
+const FLAT_TELEPORT_GROUPS = new Set([
+  "bloom",
+  "bloom_branch",
+  "sanctum",
+  "rv_park",
+  "transporter",
+]);
 
 const EGG_GROUPS = [
   { id: "elite", label: "Elite Eggs", className: "elite-egg" },
@@ -9268,14 +9289,11 @@ function renderTeleportGroups(section, layerItems) {
       groupKey: `teleport-group:${id}`,
       label,
       items,
+      flattenSingleItem: FLAT_TELEPORT_GROUPS.has(id),
     });
   });
   const ungrouped = layerItems.filter((item) => !grouped.has(item.item_id));
-  renderMapCollectionGroup(section, {
-    groupKey: "teleport-group:other",
-    label: "Other Travel",
-    items: ungrouped,
-  });
+  ungrouped.forEach((item) => appendMapItemWithChildren(section, item));
 }
 
 function refreshGroupedItemControls() {
