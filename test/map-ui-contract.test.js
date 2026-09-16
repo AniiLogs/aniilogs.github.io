@@ -327,7 +327,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-rv-i18n-r7"/u);
+  assert.match(explorerConfig, /contentRevision = "20260915-build3528012-rv-i18n-r8"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
@@ -376,7 +376,28 @@ test("current-build RV progression is applied and rendered on item details", asy
   assert.match(explorer, /function renderRvProgression\(details\)/u);
   assert.match(explorer, /createCatalogSection\("RV progression"\)/u);
   assert.match(explorer, /renderRvProgression\(entry\.rv_details\)/u);
+  assert.match(explorer, /label\.textContent = "Required materials"/u);
+  assert.match(explorer, /ingredients\.forEach\(\(ingredient\) => list\.append\(renderItemlogReference\(ingredient\)\)\)/u);
   assert.match(explorerStyles, /\.catalog-rv-upgrade-grid/u);
+  assert.match(explorerStyles, /\.catalog-rv-production-card/u);
+});
+
+test("current-build Held Item effects and underline markup are rendered safely", async () => {
+  const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+  assert.match(worker, /patch\.item_held_details/u);
+  assert.match(explorer, /function renderHeldItemDetails\(details\)/u);
+  assert.match(explorer, /createCatalogSection\("Held Item effects"\)/u);
+  assert.match(explorer, /Advanced effect · Tier/u);
+  assert.match(explorer, /Rune Energy/u);
+  assert.match(explorer, /document\.createElement\(match\[2\] === "b"/u);
+  assert.match(explorerStyles, /\.catalog-held-item-effect-card/u);
+});
+
+test("Astra POIs use current map-marker art inside the in-game marker frame", () => {
+  assert.match(explorer, /function isAstraMarkPointIcon\(source\)/u);
+  assert.match(explorer, /pin\.classList\.add\("pin-astra-markpoint"\)/u);
+  assert.match(explorer, /context\.roundRect\(x - size \/ 2, y - size \/ 2, size, size, radius\)/u);
+  assert.match(explorerStyles, /\.pin-astra-markpoint \.pin-body/u);
 });
 
 test("all current Aniimo client languages are available across the site", async () => {

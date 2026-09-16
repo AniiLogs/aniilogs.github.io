@@ -264,6 +264,9 @@ async function materializeReleaseData(key, env) {
       if (Object.hasOwn(patch.item_rv_details || {}, entry.item_id)) {
         entry.rv_details = patch.item_rv_details[entry.item_id];
       }
+      if (Object.hasOwn(patch.item_held_details || {}, entry.item_id)) {
+        entry.held_item_details = patch.item_held_details[entry.item_id];
+      }
     }
     payload.generated_at_utc = patch.generated_at;
     payload.source_policy = "Current game files; every added description is resolved from the build 3528012 English localization archive.";
@@ -274,6 +277,7 @@ async function materializeReleaseData(key, env) {
     payload.totals.icons_added_in_3528012 = Object.keys(patch.item_icons || {}).length;
     payload.totals.items_without_icons = (payload.entries || []).filter((entry) => !entry.icon).length;
     payload.totals.items_with_rv_details = Object.keys(patch.item_rv_details || {}).length;
+    payload.totals.items_with_held_item_details = Object.keys(patch.item_held_details || {}).length;
     payload.totals.rv_level_unlock_items = (payload.entries || []).filter((entry) => entry.rv_details?.unlock_requirement?.rv_level).length;
     payload.totals.rv_components = (payload.entries || []).filter((entry) => entry.rv_details?.component).length;
     payload.totals.rv_production_unlock_items = (payload.entries || []).filter((entry) => entry.rv_details?.production_unlocks?.length).length;

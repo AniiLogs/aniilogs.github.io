@@ -5668,9 +5668,21 @@ function renderRvProgression(details) {
     title.textContent = "Production unlocks";
     production.append(title);
     productionUnlocks.forEach((entry) => {
-      const row = document.createElement("span");
+      const card = document.createElement("article");
+      card.className = "catalog-rv-production-card";
+      const row = document.createElement("strong");
       row.textContent = entry?.text || "Configured production unlock";
-      production.append(row);
+      card.append(row);
+      const ingredients = Array.isArray(entry?.ingredients) ? entry.ingredients.filter(Boolean) : [];
+      if (ingredients.length) {
+        const label = document.createElement("small");
+        label.textContent = "Required materials";
+        const list = document.createElement("div");
+        list.className = "catalog-item-reference-grid catalog-rv-production-costs";
+        ingredients.forEach((ingredient) => list.append(renderItemlogReference(ingredient)));
+        card.append(label, list);
+      }
+      production.append(card);
     });
     section.append(production);
   }
@@ -5727,6 +5739,61 @@ function renderRvProgression(details) {
     detailsElement.append(detailsSummary, grid);
     section.append(detailsElement);
   }
+  return section;
+}
+
+function renderHeldItemDetails(details) {
+  if (!details || typeof details !== "object") return null;
+  const attributes = Array.isArray(details.base_attributes) ? details.base_attributes : [];
+  const coreEffects = Array.isArray(details.core_effects) ? details.core_effects : [];
+  const advancedEffects = Array.isArray(details.advanced_effects) ? details.advanced_effects : [];
+  if (!attributes.length && !coreEffects.length && !advancedEffects.length) return null;
+
+  const section = createCatalogSection("Held Item effects");
+  section.classList.add("catalog-held-item-section");
+  if (attributes.length) {
+    const facts = document.createElement("dl");
+    facts.className = "catalog-facts catalog-held-item-attributes";
+    attributes.forEach((attribute) => appendCatalogFact(
+      facts,
+      "Base attribute",
+      `${attribute?.name || "Attribute"} +${attribute?.display_value || formatNumber(attribute?.amount || 0)}`,
+    ));
+    section.append(facts);
+  }
+
+  const effects = document.createElement("div");
+  effects.className = "catalog-held-item-effects";
+  coreEffects.forEach((effect) => {
+    const card = document.createElement("article");
+    card.className = "catalog-held-item-effect-card";
+    const title = document.createElement("strong");
+    title.textContent = "Core effect";
+    const description = document.createElement("p");
+    appendGameRichText(description, effect?.description || "");
+    card.append(title, description);
+    effects.append(card);
+  });
+  advancedEffects.forEach((tier) => {
+    tier.effects.forEach((effect) => {
+      const card = document.createElement("article");
+      card.className = "catalog-held-item-effect-card catalog-held-item-effect-card--advanced";
+      const header = document.createElement("header");
+      const title = document.createElement("strong");
+      title.textContent = `Advanced effect · Tier ${formatNumber(tier.tier)}`;
+      header.append(title);
+      if (tier.rune_energy_required) {
+        const badge = document.createElement("span");
+        badge.textContent = `${formatNumber(tier.rune_energy_required)} Rune Energy`;
+        header.append(badge);
+      }
+      const description = document.createElement("p");
+      appendGameRichText(description, effect?.description || "");
+      card.append(header, description);
+      effects.append(card);
+    });
+  });
+  if (effects.childElementCount) section.append(effects);
   return section;
 }
 
@@ -6198,6 +6265,8 @@ function renderItemLogCatalogRecord(entry) {
   if (progressionUses) record.append(progressionUses);
   const rvProgression = renderRvProgression(entry.rv_details);
   if (rvProgression) record.append(rvProgression);
+  const heldItemDetails = renderHeldItemDetails(entry.held_item_details);
+  if (heldItemDetails) record.append(heldItemDetails);
   const requirements = renderItemLogRequirements(entry.requirements);
   if (requirements) record.append(requirements);
   const expeditionSources = renderRvExpeditionSources(entry);
@@ -9404,6 +9473,10 @@ function availabilityLabelForSpawn(spawn) {
   return typeof spawn?.availability?.label === "string" ? spawn.availability.label : "";
 }
 
+function isAstraMarkPointIcon(source) {
+  return String(source || "").includes("/map-markpoint-3528012/");
+}
+
 function createMarkerPin(entry) {
   const { spawn, index } = entry;
   const item = state.data.itemsById.get(spawn.item_id);
@@ -9421,6 +9494,7 @@ function createMarkerPin(entry) {
 
   const iconSource = spawn.icon || item.icon;
   if (!iconSource) pin.classList.add("pin-no-icon");
+  if (isAstraMarkPointIcon(iconSource)) pin.classList.add("pin-astra-markpoint");
   const icon = makeIcon("pin-icon", iconSource);
   const hoverIconSource = spawn.hover_icon || item.hover_icon;
   const hoverIcon = hoverIconSource ? makeIcon("pin-icon pin-icon-selected", hoverIconSource) : null;
@@ -9622,7 +9696,22 @@ function renderCanvasPins() {
     const hoverIconSource = spawn.hover_icon || item?.hover_icon;
     const icon = canvasIcon(index === state.hoveredCanvasIndex && hoverIconSource ? hoverIconSource : defaultIconSource);
     if (icon) {
-      context.drawImage(icon, x - size / 2, y - size / 2, size, size);
+      if (isAstraMarkPointIcon(defaultIconSource)) {
+        const radius = Math.max(5, size * 0.19);
+        context.save();
+        context.beginPath();
+        context.roundRect(x - size / 2, y - size / 2, size, size, radius);
+        context.fillStyle = "rgba(20, 27, 48, 0.96)";
+        context.fill();
+        context.strokeStyle = "rgba(83, 92, 124, 0.92)";
+        context.lineWidth = 1;
+        context.stroke();
+        context.restore();
+        const iconSize = size * 0.72;
+        context.drawImage(icon, x - iconSize / 2, y - iconSize / 2, iconSize, iconSize);
+      } else {
+        context.drawImage(icon, x - size / 2, y - size / 2, size, size);
+      }
     } else {
       context.beginPath();
       context.fillStyle = item?.color || "#7fc6b2";
@@ -10522,7 +10611,7 @@ function bindEvents() {
 
 function appendGameRichText(element, value) {
   const source = String(value || "");
-  const tokenPattern = /<style=([A-Za-z0-9_]+)>|<\/style>|<link="[^"]*">|<\/link>/gu;
+  const tokenPattern = /<style=([A-Za-z0-9_]+)>|<\/style>|<link="[^"]*">|<\/link>|<(u|b|i)>|<\/(u|b|i)>|<color=#[0-9A-Fa-f]{3,8}>|<\/color>/gu;
   const stack = [element];
   let cursor = 0;
   for (const match of source.matchAll(tokenPattern)) {
@@ -10532,7 +10621,18 @@ function appendGameRichText(element, value) {
       span.className = `game-rich-text game-rich-text--${match[1].toLowerCase().replaceAll("_", "-")}`;
       stack.at(-1).append(span);
       stack.push(span);
+    } else if (match[2]) {
+      const inline = document.createElement(match[2] === "b" ? "strong" : match[2] === "i" ? "em" : "u");
+      stack.at(-1).append(inline);
+      stack.push(inline);
+    } else if (match[0].startsWith("<color=")) {
+      const span = document.createElement("span");
+      span.className = "game-rich-text game-rich-text--color";
+      stack.at(-1).append(span);
+      stack.push(span);
     } else if (match[0] === "</style>" && stack.length > 1) {
+      stack.pop();
+    } else if ((match[3] || match[0] === "</color>") && stack.length > 1) {
       stack.pop();
     }
     cursor = match.index + match[0].length;

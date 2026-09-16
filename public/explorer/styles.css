@@ -5367,6 +5367,47 @@ button.catalog-item-reference {
   background: linear-gradient(145deg, rgba(var(--accent-2-rgb), 0.07), rgba(var(--panel-rgb), 0.52));
 }
 
+.catalog-held-item-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.catalog-held-item-effects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 0.75rem;
+}
+
+.catalog-held-item-effect-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+}
+
+.catalog-held-item-effect-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.catalog-held-item-effect-card header span {
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  color: var(--highlight);
+  background: color-mix(in srgb, var(--highlight) 12%, transparent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.catalog-held-item-effect-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .catalog-rv-unlocks {
   display: grid;
   gap: 5px;
@@ -8087,6 +8128,33 @@ button.catalog-item-reference {
   place-items: center;
   transform-origin: center;
   transition: transform 120ms ease;
+}
+
+.pin-astra-markpoint .pin-body {
+  border: 1px solid rgba(83, 92, 124, 0.92);
+  border-radius: 19%;
+  background: rgba(20, 27, 48, 0.96);
+  box-shadow: 0 2px 5px rgba(4, 8, 18, 0.42);
+}
+
+.pin-astra-markpoint .pin-icon {
+  width: 72%;
+  height: 72%;
+  object-fit: contain;
+}
+
+.catalog-rv-production-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--panel-rgb), 0.42);
+}
+
+.catalog-rv-production-card > small {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .pin:hover,
