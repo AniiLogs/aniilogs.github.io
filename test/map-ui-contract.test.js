@@ -124,6 +124,16 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
+test("core skills swap in place with a reduced-motion safe comparison", () => {
+  assert.match(explorer, /const swapVariant = async \(\) =>/u);
+  assert.match(explorer, /prefers-reduced-motion: reduce/u);
+  assert.match(explorer, /copy\.animate\(/u);
+  assert.match(explorer, /showUpgrade = !showUpgrade;\s*renderVariant\(\)/u);
+  assert.match(explorer, /catalog-skill-variant-note/u);
+  assert.match(explorer, /Effect changed/u);
+  assert.match(explorerStyles, /\.catalog-trait-icon-fallback/u);
+});
+
 test("the shared shell uses the selected accent and Pathfinder terminology", () => {
   assert.match(landingStyles, /:root:not\(\[data-color-mode="light"\]\) nav a:hover,[\s\S]*?rgba\(var\(--accent-rgb\), 0\.13\)/u);
   assert.match(landingHtml, /tools every Pathfinder reaches for first/u);
@@ -332,7 +342,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-flat-vein-abundance-r15"/u);
+  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-traits-core-swap-r16"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

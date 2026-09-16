@@ -4490,8 +4490,36 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
     icon.alt = `${ability.name} icon`;
     const copy = document.createElement("div");
     copy.className = "catalog-ability-copy";
+    copy.setAttribute("aria-live", "polite");
     card.append(copy);
     let showUpgrade = false;
+    let swapping = false;
+
+    const swapVariant = async () => {
+      if (swapping || !ability.upgrade) return;
+      swapping = true;
+      const animate = !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        && typeof copy.animate === "function";
+      let outgoing;
+      if (animate) {
+        outgoing = copy.animate([
+          { opacity: 1, transform: "translateY(0) scale(1)" },
+          { opacity: 0, transform: "translateY(-8px) scale(.985)" },
+        ], { duration: 130, easing: "ease-in", fill: "forwards" });
+        await outgoing.finished.catch(() => {});
+      }
+      showUpgrade = !showUpgrade;
+      renderVariant();
+      outgoing?.cancel();
+      if (animate) {
+        copy.animate([
+          { opacity: 0, transform: "translateY(9px) scale(.985)" },
+          { opacity: 1, transform: "translateY(0) scale(1)" },
+        ], { duration: 230, easing: "cubic-bezier(.2,.8,.2,1)" });
+      }
+      copy.querySelector(".catalog-skill-level-button")?.focus({ preventScroll: true });
+      swapping = false;
+    };
 
     const renderVariant = () => {
       const displayed = showUpgrade && ability.upgrade
@@ -4513,6 +4541,14 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
       const headerCopy = document.createElement("div");
       headerCopy.className = "catalog-ability-header-copy";
       if (iconSource) header.append(icon);
+      else if (title === "Traits") {
+        const fallback = document.createElement("span");
+        fallback.className = "catalog-ability-icon catalog-trait-icon-fallback";
+        fallback.textContent = "✦";
+        fallback.title = "Trait icon not yet verified";
+        fallback.setAttribute("aria-hidden", "true");
+        header.append(fallback);
+      }
       header.append(headerCopy);
       copy.append(header);
 
@@ -4536,16 +4572,14 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
         const levelButton = document.createElement("button");
         levelButton.type = "button";
         levelButton.className = "catalog-skill-level-button";
-        levelButton.textContent = showUpgrade ? "Lv. 2" : "Lv. 1";
+        levelButton.textContent = showUpgrade ? "Lv. 2 ↔" : "Lv. 1 ↔";
+        levelButton.title = showUpgrade ? "Show original core skill" : "Show upgraded core skill";
         levelButton.setAttribute(
           "aria-label",
           `${ability.name || "Core skill"}: show ${showUpgrade ? "Level 1" : "Level 2"}`,
         );
         levelButton.setAttribute("aria-pressed", String(showUpgrade));
-        levelButton.addEventListener("click", () => {
-          showUpgrade = !showUpgrade;
-          renderVariant();
-        });
+        levelButton.addEventListener("click", swapVariant);
         header.append(levelButton);
       }
 
@@ -4592,6 +4626,40 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
         const description = document.createElement("p");
         appendGameRichText(description, displayed.description);
         copy.append(description);
+      }
+      if (ability.upgrade) {
+        const difference = document.createElement("div");
+        difference.className = "catalog-skill-variant-note";
+        const label = document.createElement("strong");
+        label.textContent = showUpgrade ? "Upgraded core skill" : "Original core skill";
+        difference.append(label);
+        if (showUpgrade) {
+          const changes = document.createElement("span");
+          const baseCombat = ability.combat || {};
+          const upgradedCombat = ability.upgrade.combat || {};
+          const factChanges = [
+            ["Might", "might", ""],
+            ["EP Cost", "ep_cost", ""],
+            ["BREAK", "break_power", "%"],
+            ["Cooldown", "cooldown", "s"],
+          ].filter(([, key]) => Number.isFinite(Number(baseCombat[key]))
+            && Number.isFinite(Number(upgradedCombat[key]))
+            && Number(baseCombat[key]) !== Number(upgradedCombat[key]))
+            .map(([name, key, suffix]) => {
+              const factor = key === "break_power" ? 100 : 1;
+              return `${name} ${formatNumber(Number(baseCombat[key]) * factor, 2)}${suffix} → ${formatNumber(Number(upgradedCombat[key]) * factor, 2)}${suffix}`;
+            });
+          if (ability.description !== ability.upgrade.description && ability.upgrade.description) {
+            factChanges.push("Effect changed");
+          }
+          changes.textContent = factChanges.join(" · ") || "Upgraded version";
+          difference.append(changes);
+        } else {
+          const hint = document.createElement("span");
+          hint.textContent = "Select Lv. 1 ↔ to compare the upgrade.";
+          difference.append(hint);
+        }
+        copy.append(difference);
       }
       if (displayed.objective) {
         const objective = document.createElement("div");

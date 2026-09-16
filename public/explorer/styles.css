@@ -6343,6 +6343,15 @@ button.catalog-item-reference {
   object-fit: contain;
 }
 
+.catalog-trait-icon-fallback {
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line));
+  color: var(--accent-2);
+  font-size: 25px;
+  font-weight: 700;
+}
+
 .catalog-ability-copy {
   min-width: 0;
 }
@@ -6405,10 +6414,11 @@ button.catalog-item-reference {
 
 .catalog-skill-level-button {
   align-self: start;
-  padding: 1px 0;
-  border: 0;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line));
+  border-radius: 999px;
   color: #f5c85d;
-  background: transparent;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
   font: inherit;
   font-size: 12px;
   font-weight: 800;
@@ -6420,7 +6430,26 @@ button.catalog-item-reference {
 .catalog-skill-level-button:hover,
 .catalog-skill-level-button:focus-visible {
   color: #fff1a8;
-  text-decoration: underline;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.catalog-skill-variant-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  align-items: baseline;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 75%, var(--accent));
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.catalog-skill-variant-note strong {
+  color: var(--accent-2);
+  font-size: 11px;
 }
 
 .catalog-ability-card--upgraded {

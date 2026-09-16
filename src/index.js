@@ -299,8 +299,11 @@ async function materializeReleaseData(key, env) {
     payload.publication_status = "private_reviewed";
     payload.data_quality = {
       ...(payload.data_quality || {}),
-      trait_policy: "Per-form gameplay traits use stable form and trait IDs resolved against build 3528012.",
-      traits_added_in_3528012: Object.keys(patch.aniimo_traits || {}).length,
+      trait_policy: "Exactly one trait per published form, joined to its assigned feature ID in build 3528012 pet_data; catalog-only traits are excluded.",
+      trait_forms_reconciled: Object.keys(patch.aniimo_traits || {}).length,
+      traits_without_icons: (payload.entries || []).flatMap((entry) => (entry.traits || [])
+        .filter((trait) => !trait.icon)
+        .map((trait) => ({ form_id: entry.form_id, trait_id: trait.trait_id }))),
       ability_descriptions_added_in_3528012: Object.keys(patch.aniimo_abilities || {}).length,
       abilities_without_descriptions: (payload.entries || []).flatMap((entry) => [
         ...(entry.skills || []).map((ability) => ({ form_id: entry.form_id, field: "skills", ability })),
