@@ -5756,7 +5756,8 @@ function renderItemLogClientReferences(entry) {
     const row = document.createElement("div");
     row.className = "catalog-requirement-row";
     const label = document.createElement("strong");
-    label.textContent = `${source.label || "Source"} · source #${source.source_id}`;
+    const referenceKind = source.source_table === "item_shop_data" ? "shop" : "source";
+    label.textContent = `${source.label || "Source"} · ${referenceKind} #${source.source_id}`;
     row.append(label);
     if (source.hint) {
       const hint = document.createElement("p");
