@@ -290,6 +290,7 @@ test("Travel flattens redundant portal rows and never drops unclassified destina
   assert.match(explorer, /\{ id: "transporter", label: "Transporters" \}/u);
   assert.match(explorer, /\{ id: "vein_rift", label: "Vein Rifts" \}/u);
   assert.match(explorer, /const FLAT_TELEPORT_GROUPS = new Set\(\[/u);
+  assert.match(explorer, /"vein_abundance",\s*\n\]\);/u);
   assert.match(explorer, /flattenSingleItem: FLAT_TELEPORT_GROUPS\.has\(id\)/u);
   assert.match(explorer, /if \(flattenSingleItem && items\.length === 1\)/u);
   assert.match(explorer, /ungrouped\.forEach\(\(item\) => appendMapItemWithChildren\(section, item\)\)/u);
@@ -331,7 +332,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3528012/u);
-  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-travel-capabilities-r14"/u);
+  assert.match(explorerConfig, /contentRevision = "20260916-build3528012-flat-vein-abundance-r15"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3528012/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

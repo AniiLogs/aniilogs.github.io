@@ -9221,6 +9221,7 @@ const FLAT_TELEPORT_GROUPS = new Set([
   "sanctum",
   "rv_park",
   "transporter",
+  "vein_abundance",
 ]);
 
 const EGG_GROUPS = [
