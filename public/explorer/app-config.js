@@ -5,7 +5,7 @@
   const contentBaseUrl = isLocalPreview
     ? "http://127.0.0.1:8788/releases/3528012"
     : "https://aniilogs-api.pages.dev/api/content/releases/3528012";
-  const contentRevision = "20260916-build3528012-omega-reward-icons-r10";
+  const contentRevision = "20260916-build3528012-bloom-branches-r11";
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
