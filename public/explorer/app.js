@@ -6839,8 +6839,7 @@ function syncMobileCatalogStickyIdentity() {
   const view = state.sidebarView;
   const recordSelector = view === "aniilog" ? ".catalog-aniilog-record" : ".catalog-itemlog-record";
   const identity = els.catalogPanel.querySelector(`${recordSelector} > .catalog-identity`);
-  const stickyEnabled = MOBILE_LAYOUT_QUERY.matches
-    && (view === "aniilog" || view === "itemlog")
+  const stickyEnabled = (view === "aniilog" || view === "itemlog")
     && !els.catalogPanel.hidden;
   if (!identity || !stickyEnabled) {
     removeMobileCatalogStickyIdentity();

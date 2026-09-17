@@ -7848,9 +7848,8 @@ button.catalog-item-reference {
 
 @media (min-width: 801px) {
   .catalog-aniilog-record > .catalog-identity {
-    position: sticky;
-    top: -1px;
-    z-index: 3;
+    position: relative;
+    z-index: 1;
     margin: -20px -20px 0;
     padding: 20px;
     background: color-mix(in srgb, var(--background) 88%, transparent);
@@ -7865,10 +7864,27 @@ button.catalog-item-reference {
 
 @media (min-width: 801px) {
   .catalog-aniilog-record > .catalog-identity {
-    position: sticky;
-    top: 0;
-    z-index: 5;
+    position: relative;
+    z-index: 1;
   }
+}
+
+.catalog-mobile-sticky-identity {
+  position: fixed;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  left: var(--catalog-sticky-left, 12px);
+  top: 58px;
+  z-index: 80;
+  width: var(--catalog-sticky-width, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  padding: 8px 12px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 0 0 10px 10px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  pointer-events: none;
 }
 
 .catalog-showcase-button,
