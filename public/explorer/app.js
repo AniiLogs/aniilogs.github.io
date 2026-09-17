@@ -5815,6 +5815,18 @@ function renderRvProgression(details) {
       const row = document.createElement("strong");
       row.textContent = entry?.text || "Configured production unlock";
       card.append(row);
+      const productionFacts = document.createElement("small");
+      const productionFactParts = [];
+      if (Number(entry?.output_amount) > 0) {
+        productionFactParts.push(`Output ${formatNumber(entry.output_amount)}`);
+      }
+      if (Number(entry?.workload) > 0) {
+        productionFactParts.push(`Workload ${formatNumber(entry.workload)}`);
+      }
+      if (productionFactParts.length) {
+        productionFacts.textContent = productionFactParts.join(" · ");
+        card.append(productionFacts);
+      }
       const ingredients = Array.isArray(entry?.ingredients) ? entry.ingredients.filter(Boolean) : [];
       if (ingredients.length) {
         const label = document.createElement("small");
@@ -5909,6 +5921,25 @@ function renderHeldItemDetails(details) {
     appendCatalogFact(progression, "Maximum enhancement", `Level ${formatNumber(details.enhancement.maximum_level)}`);
     appendCatalogFact(progression, "Base attributes at maximum", `+${details.enhancement.display_bonus}`);
     section.append(progression);
+  }
+
+  const scaling = Array.isArray(details.scaling) ? details.scaling.filter(Boolean) : [];
+  if (scaling.length) {
+    const scalingList = document.createElement("div");
+    scalingList.className = "catalog-held-item-scaling";
+    const heading = document.createElement("strong");
+    heading.textContent = "Per-level scaling";
+    scalingList.append(heading);
+    scaling.forEach((rule) => {
+      const row = document.createElement("p");
+      const amount = Number(rule?.amount_per_level);
+      const amountText = Number.isFinite(amount)
+        ? (Math.abs(amount) < 1 ? `${formatNumber(amount * 100)}%` : formatNumber(amount))
+        : "value";
+      row.textContent = `${rule?.source_property || "Source"} → ${rule?.target_property || "stat"}: +${amountText} per level`;
+      scalingList.append(row);
+    });
+    section.append(scalingList);
   }
 
   const effects = document.createElement("div");
