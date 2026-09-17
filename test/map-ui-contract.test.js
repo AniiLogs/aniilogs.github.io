@@ -353,7 +353,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20260916-build3535596-irisalis-petal-icons-r3"/u);
+  assert.match(explorerConfig, /contentRevision = "20260917-build3535596-held-metadata-lumin-r4"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
