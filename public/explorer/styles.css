@@ -7863,6 +7863,14 @@ button.catalog-item-reference {
   z-index: 1;
 }
 
+@media (min-width: 801px) {
+  .catalog-aniilog-record > .catalog-identity {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+}
+
 .catalog-showcase-button,
 .catalog-showcase-restore {
   border: 1px solid var(--accent-2);
