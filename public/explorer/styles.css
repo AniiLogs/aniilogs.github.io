@@ -7846,9 +7846,56 @@ button.catalog-item-reference {
   isolation: isolate;
 }
 
+@media (min-width: 801px) {
+  .catalog-aniilog-record > .catalog-identity {
+    position: sticky;
+    top: -1px;
+    z-index: 3;
+    margin: -20px -20px 0;
+    padding: 20px;
+    background: color-mix(in srgb, var(--background) 88%, transparent);
+    backdrop-filter: blur(12px);
+  }
+}
+
 .catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source) {
   position: relative;
   z-index: 1;
+}
+
+.catalog-showcase-button,
+.catalog-showcase-restore {
+  border: 1px solid var(--accent-2);
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent-2) 16%, var(--surface));
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.catalog-showcase-restore {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 4;
+}
+
+.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-identity):not(.catalog-showcase-restore) {
+  display: none;
+}
+
+.catalog-aniilog-record.is-showcase .catalog-identity {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 4;
+  max-width: min(34rem, calc(100vw - 10rem));
+  padding: 0.75rem 1rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(12px);
 }
 
 .catalog-aniimo-video-source {

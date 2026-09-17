@@ -376,6 +376,7 @@ const state = {
     tier: "all",
   },
   aniilogFiltersOpen: false,
+  aniilogShowcaseMode: false,
   aniilogFilterSectionsOpen: new Set(["classes"]),
   aniilogFilterScroll: 0,
   aniilogFilters: {
@@ -437,6 +438,7 @@ const els = {
   settingsButton: document.querySelector("#settingsButton"),
   sidebarCollapseButton: document.querySelector("#sidebarCollapseButton"),
   sidebarRestoreButton: document.querySelector("#sidebarRestoreButton"),
+  aniilogShowcaseRestoreButton: document.querySelector("#aniilogShowcaseRestoreButton"),
   settingsOverlay: document.querySelector("#settingsOverlay"),
   settingsCloseButton: document.querySelector("#settingsCloseButton"),
   changelogOverlay: document.querySelector("#changelogOverlay"),
@@ -5423,6 +5425,13 @@ function renderAniilogCatalogRecord(entry) {
     entry.aniilog_research,
     "No Aniilog Research entry is currently listed for this form.",
   ));
+  const showcaseRestore = document.createElement("button");
+  showcaseRestore.type = "button";
+  showcaseRestore.className = "catalog-showcase-restore";
+  showcaseRestore.textContent = "Back to Aniilog UI";
+  showcaseRestore.hidden = true;
+  showcaseRestore.addEventListener("click", () => setAniilogShowcaseMode(false));
+  record.append(showcaseRestore);
   return record;
 }
 
@@ -6800,7 +6809,26 @@ function renderCatalogPreview(options = {}) {
   state.catalogSelection[view] = selected.id;
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
+  if (view === "aniilog") {
+    const showcaseButton = document.createElement("button");
+    showcaseButton.type = "button";
+    showcaseButton.className = "catalog-showcase-button";
+    showcaseButton.textContent = state.aniilogShowcaseMode ? "Show Aniilog UI" : "Show artwork";
+    showcaseButton.setAttribute("aria-pressed", String(state.aniilogShowcaseMode));
+    showcaseButton.addEventListener("click", () => setAniilogShowcaseMode(!state.aniilogShowcaseMode));
+    els.catalogPanel.querySelector(".catalog-heading")?.append(showcaseButton);
+    setAniilogShowcaseMode(state.aniilogShowcaseMode);
+  }
   scheduleMobileCatalogStickyIdentity();
+}
+
+function setAniilogShowcaseMode(enabled) {
+  state.aniilogShowcaseMode = Boolean(enabled) && state.sidebarView === "aniilog";
+  const record = els.catalogPanel.querySelector(".catalog-aniilog-record");
+  record?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
+  const restore = record?.querySelector(".catalog-showcase-restore");
+  if (restore) restore.hidden = !state.aniilogShowcaseMode;
+  if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
 }
 
 function removeMobileCatalogStickyIdentity() {
