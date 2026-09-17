@@ -6724,10 +6724,7 @@ function renderCatalogPreview(options = {}) {
   const subtitle = document.createElement("p");
   subtitle.textContent = view === "aniilog" ? "Loading form data" : "Loading item data";
   headingCopy.append(name, subtitle);
-  const badge = document.createElement("span");
-  badge.className = "catalog-preview-badge";
-  badge.textContent = "Build definitions";
-  heading.append(headingCopy, badge);
+  heading.append(headingCopy);
   els.catalogPanel.append(heading);
 
   if (view === "aniilog" && state.aniilogData?.review_notice) {
@@ -6813,10 +6810,31 @@ function renderCatalogPreview(options = {}) {
     const showcaseButton = document.createElement("button");
     showcaseButton.type = "button";
     showcaseButton.className = "catalog-showcase-button";
-    showcaseButton.textContent = state.aniilogShowcaseMode ? "Show Aniilog UI" : "Show artwork";
+    showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
     showcaseButton.setAttribute("aria-pressed", String(state.aniilogShowcaseMode));
     showcaseButton.addEventListener("click", () => setAniilogShowcaseMode(!state.aniilogShowcaseMode));
     els.catalogPanel.querySelector(".catalog-heading")?.append(showcaseButton);
+    const variants = (state.aniilogData?.entries || [])
+      .filter((candidate) => candidate?.aniimo_id && candidate.aniimo_id === selected.aniimo_id)
+      .sort((a, b) => String(a.form_label || a.form_name || "").localeCompare(String(b.form_label || b.form_name || "")));
+    if (variants.length > 1) {
+      const variantSelect = document.createElement("select");
+      variantSelect.className = "catalog-showcase-variant-select";
+      variantSelect.setAttribute("aria-label", "Choose Aniimo variant");
+      variants.forEach((candidate) => {
+        const option = document.createElement("option");
+        option.value = candidate.id;
+        option.textContent = candidate.form_label || candidate.form_name || "Variant";
+        option.selected = candidate.id === selected.id;
+        variantSelect.append(option);
+      });
+      variantSelect.hidden = !state.aniilogShowcaseMode;
+      variantSelect.addEventListener("change", () => {
+        state.catalogSelection.aniilog = variantSelect.value;
+        renderCatalogPreview();
+      });
+      els.catalogPanel.querySelector(".catalog-heading")?.append(variantSelect);
+    }
     setAniilogShowcaseMode(state.aniilogShowcaseMode);
   }
   scheduleMobileCatalogStickyIdentity();
@@ -6828,6 +6846,11 @@ function setAniilogShowcaseMode(enabled) {
   record?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   const restore = record?.querySelector(".catalog-showcase-restore");
   if (restore) restore.hidden = !state.aniilogShowcaseMode;
+  els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
+  const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
+  if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
+  const variantSelect = els.catalogPanel.querySelector(".catalog-showcase-variant-select");
+  if (variantSelect) variantSelect.hidden = !state.aniilogShowcaseMode;
   if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
 }
 

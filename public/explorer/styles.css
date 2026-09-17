@@ -7887,7 +7887,18 @@ button.catalog-item-reference {
   pointer-events: none;
 }
 
+.catalog-mobile-sticky-identity.is-stuck {
+  border: 1px solid rgba(var(--accent-rgb), 0.78);
+  border-radius: 9px;
+  background: rgba(var(--panel-rgb), 0.98);
+  box-shadow:
+    inset 0 3px 0 rgba(var(--accent-rgb), 0.88),
+    0 10px 28px rgba(var(--background-rgb), 0.72);
+  backdrop-filter: blur(14px);
+}
+
 .catalog-showcase-button,
+.catalog-showcase-variant-select,
 .catalog-showcase-restore {
   border: 1px solid var(--accent-2);
   border-radius: 999px;
@@ -7897,6 +7908,31 @@ button.catalog-item-reference {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+.catalog-showcase-variant-select {
+  min-width: 9rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  cursor: pointer;
+}
+
+.catalog-panel.is-aniilog-showcase {
+  background: transparent;
+}
+
+.catalog-aniilog-record.is-showcase {
+  border-color: transparent;
+  background: transparent;
+}
+
+.catalog-aniilog-record.is-showcase .catalog-aniimo-video-backdrop {
+  opacity: 1;
+  filter: none;
+}
+
+.catalog-aniilog-record.is-showcase .catalog-locate-button {
+  display: none;
 }
 
 .catalog-showcase-restore {
