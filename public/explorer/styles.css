@@ -7897,6 +7897,13 @@ button.catalog-item-reference {
   backdrop-filter: blur(14px);
 }
 
+.catalog-mobile-sticky-identity.is-showcase {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .catalog-mobile-sticky-identity.is-stuck .catalog-hero-icon {
   width: 48px;
   height: 48px;
@@ -7946,8 +7953,7 @@ button.catalog-item-reference {
 }
 
 .catalog-showcase-button,
-.catalog-showcase-variant-select,
-.catalog-showcase-restore {
+.catalog-showcase-variant-select {
   border: 1px solid var(--accent-2);
   border-radius: 999px;
   padding: 0.45rem 0.75rem;
@@ -7983,14 +7989,7 @@ button.catalog-item-reference {
   display: none;
 }
 
-.catalog-showcase-restore {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  z-index: 4;
-}
-
-.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-identity):not(.catalog-showcase-restore) {
+.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-identity) {
   display: none;
 }
 

@@ -5425,13 +5425,6 @@ function renderAniilogCatalogRecord(entry) {
     entry.aniilog_research,
     "No Aniilog Research entry is currently listed for this form.",
   ));
-  const showcaseRestore = document.createElement("button");
-  showcaseRestore.type = "button";
-  showcaseRestore.className = "catalog-showcase-restore";
-  showcaseRestore.textContent = "Back to Aniilog UI";
-  showcaseRestore.hidden = true;
-  showcaseRestore.addEventListener("click", () => setAniilogShowcaseMode(false));
-  record.append(showcaseRestore);
   return record;
 }
 
@@ -6844,13 +6837,12 @@ function setAniilogShowcaseMode(enabled) {
   state.aniilogShowcaseMode = Boolean(enabled) && state.sidebarView === "aniilog";
   const record = els.catalogPanel.querySelector(".catalog-aniilog-record");
   record?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
-  const restore = record?.querySelector(".catalog-showcase-restore");
-  if (restore) restore.hidden = !state.aniilogShowcaseMode;
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
   const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
   if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
   const variantSelect = els.catalogPanel.querySelector(".catalog-showcase-variant-select");
   if (variantSelect) variantSelect.hidden = !state.aniilogShowcaseMode;
+  document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
 }
 
@@ -6900,6 +6892,7 @@ function syncMobileCatalogStickyIdentity() {
     }
     document.body.append(stickyIdentity);
   }
+  stickyIdentity.classList.toggle("is-showcase", view === "aniilog" && state.aniilogShowcaseMode);
   stickyIdentity.style.setProperty("--catalog-sticky-left", `${Math.max(0, identityRect.left)}px`);
   stickyIdentity.style.setProperty("--catalog-sticky-width", `${Math.max(0, identityRect.width)}px`);
 }
