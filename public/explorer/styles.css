@@ -7897,6 +7897,54 @@ button.catalog-item-reference {
   backdrop-filter: blur(14px);
 }
 
+.catalog-mobile-sticky-identity.is-stuck .catalog-hero-icon {
+  width: 48px;
+  height: 48px;
+  padding: 4px;
+}
+
+.catalog-mobile-sticky-identity.is-stuck .catalog-sticky-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 2px;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.catalog-mobile-sticky-identity.is-stuck .catalog-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.catalog-mobile-sticky-identity.is-stuck h2 {
+  margin-top: 2px;
+  font-size: 18px;
+}
+
+.catalog-mobile-sticky-identity.is-stuck .catalog-tags,
+.catalog-mobile-sticky-identity.is-stuck .catalog-subtitle {
+  display: none;
+}
+
+.catalog-mobile-sticky-identity.is-stuck .catalog-identity-actions {
+  display: flex;
+  align-self: center;
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+.catalog-mobile-sticky-identity.is-stuck .catalog-locate-button {
+  min-height: 34px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
 .catalog-showcase-button,
 .catalog-showcase-variant-select,
 .catalog-showcase-restore {
