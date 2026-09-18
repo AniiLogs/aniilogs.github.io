@@ -8079,22 +8079,15 @@ body.aniilog-artwork-mode .app-topbar {
 body.aniilog-artwork-mode .app-shell {
   position: fixed;
   inset: 0;
-  display: block;
+  display: grid;
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
 }
 
-body.aniilog-artwork-mode #sidebar,
-body.aniilog-artwork-mode #sidebarRestoreButton,
-body.aniilog-artwork-mode .sidebar-collapse-button {
-  display: none !important;
-}
-
 body.aniilog-artwork-mode .map-panel {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
+  position: relative;
+  width: auto;
   height: 100dvh;
   min-height: 100dvh;
   contain: none;
@@ -8103,13 +8096,13 @@ body.aniilog-artwork-mode .map-panel {
 }
 
 body.aniilog-artwork-mode .catalog-panel {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 100;
   display: block;
-  width: 100vw;
-  height: 100dvh;
-  min-height: 100dvh;
+  width: auto;
+  height: auto;
+  min-height: 0;
   overflow: hidden;
   padding: 0;
   background: transparent;
@@ -8131,8 +8124,42 @@ body.aniilog-artwork-mode .catalog-heading {
 
 body.aniilog-artwork-mode .catalog-heading h1,
 body.aniilog-artwork-mode .catalog-heading p,
-body.aniilog-artwork-mode .catalog-aniilog-record > .catalog-identity,
 body.aniilog-artwork-mode .catalog-mobile-sticky-identity {
+  display: none !important;
+}
+
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity {
+  position: fixed;
+  top: 0.9rem;
+  left: calc(360px + 1rem);
+  z-index: 13;
+  display: block;
+  max-width: min(22rem, calc(100vw - 400px));
+  margin: 0;
+  padding: 0.35rem 0.65rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity .catalog-eyebrow,
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity .catalog-tags,
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity .catalog-subtitle,
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity .catalog-hero-icon,
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity .catalog-identity-actions {
+  display: none;
+}
+
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.1rem, 2vw, 1.55rem);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.78);
+}
+
+body.aniilog-artwork-mode .catalog-aniimo-video-backdrop {
   display: none !important;
 }
 
@@ -8156,10 +8183,10 @@ body.aniilog-artwork-mode .catalog-artwork-menu {
 }
 
 body.aniilog-artwork-mode .catalog-aniilog-record {
-  width: 100vw;
-  min-width: 100vw;
-  min-height: 100dvh;
-  height: 100dvh;
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  height: 100%;
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -9391,6 +9418,48 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 
   .catalog-itemlog-record .catalog-facts {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.aniilog-artwork-mode .app-shell {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  body.aniilog-artwork-mode #sidebar,
+  body.aniilog-artwork-mode #sidebarRestoreButton,
+  body.aniilog-artwork-mode .sidebar-collapse-button {
+    display: none !important;
+  }
+
+  body.aniilog-artwork-mode .map-panel {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  body.aniilog-artwork-mode .catalog-panel {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity {
+    top: 4.2rem;
+    left: 0.75rem;
+    max-width: calc(100vw - 1.5rem);
+    padding: 0.25rem 0.4rem;
+  }
+
+  body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity h2 {
+    font-size: 1.15rem;
   }
 
   .catalog-identity {
