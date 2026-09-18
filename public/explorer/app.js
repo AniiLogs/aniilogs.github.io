@@ -6906,6 +6906,7 @@ function renderCatalogPreview(options = {}) {
 
 function setAniilogShowcaseMode(enabled) {
   state.aniilogShowcaseMode = Boolean(enabled) && state.sidebarView === "aniilog";
+  document.body.classList.toggle("aniilog-artwork-mode", state.aniilogShowcaseMode);
   const record = els.catalogPanel.querySelector(".catalog-aniilog-record");
   record?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);

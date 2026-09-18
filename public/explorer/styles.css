@@ -8066,6 +8066,110 @@ button.catalog-item-reference {
   display: none;
 }
 
+/* Artwork mode is an actual viewer, not another section in the catalog. Keep
+   the model on a clean viewport and leave only the compact viewer controls. */
+body.aniilog-artwork-mode {
+  overflow: hidden;
+}
+
+body.aniilog-artwork-mode .app-topbar {
+  display: none;
+}
+
+body.aniilog-artwork-mode .app-shell {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+body.aniilog-artwork-mode #sidebar,
+body.aniilog-artwork-mode #sidebarRestoreButton,
+body.aniilog-artwork-mode .sidebar-collapse-button {
+  display: none !important;
+}
+
+body.aniilog-artwork-mode .map-panel {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  contain: none;
+  overflow: hidden;
+  background: transparent;
+}
+
+body.aniilog-artwork-mode .catalog-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  padding: 0;
+  background: transparent;
+}
+
+body.aniilog-artwork-mode .catalog-heading {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 3.25rem;
+  padding: max(0.65rem, env(safe-area-inset-top)) 0.8rem 0.65rem;
+  background: color-mix(in srgb, var(--background) 78%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+body.aniilog-artwork-mode .catalog-heading h1,
+body.aniilog-artwork-mode .catalog-heading p,
+body.aniilog-artwork-mode .catalog-aniilog-record > .catalog-identity,
+body.aniilog-artwork-mode .catalog-mobile-sticky-identity {
+  display: none !important;
+}
+
+body.aniilog-artwork-mode .catalog-showcase-button {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+body.aniilog-artwork-mode .catalog-artwork-controls.is-visible {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+body.aniilog-artwork-mode .catalog-artwork-menu {
+  min-width: min(13rem, 42vw);
+}
+
+body.aniilog-artwork-mode .catalog-aniilog-record {
+  width: 100vw;
+  min-width: 100vw;
+  min-height: 100dvh;
+  height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-identity) {
+  display: none;
+}
+
 @media (max-width: 760px) {
   .catalog-artwork-controls.is-visible {
     width: 100%;
