@@ -7,5 +7,27 @@ const target = payload.entries.find((entry) => String(entry.form_id) === "101430
 if (!target) throw new Error("Form 1014302 is missing from aniilog media data");
 target.model = "assets/models/1014302/parmon-body-default-rigged-full.glb";
 target.model_label = "Parmon animated model";
+target.showcase_variants = [
+  {
+    id: "default",
+    label: "Default",
+    model: "assets/models/1014302/parmon-body-default-rigged-full.glb",
+  },
+  {
+    id: "black-shiny",
+    label: "Black Shiny",
+    model: "assets/models/1014302/parmon-body-black-shiny-rigged-full.glb",
+  },
+  {
+    id: "white-shiny",
+    label: "White Shiny",
+    model: "assets/models/1014302/parmon-body-white-shiny-rigged-full.glb",
+  },
+  {
+    id: "ea",
+    label: "EA Texture",
+    model: "assets/models/1014302/parmon-body-ea-rigged-full.glb",
+  },
+];
 fs.writeFileSync(destination, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-console.log(JSON.stringify({ package_version: payload.package_version, form_id: target.form_id, model: target.model }));
+console.log(JSON.stringify({ package_version: payload.package_version, form_id: target.form_id, model: target.model, variants: target.showcase_variants.length }));
