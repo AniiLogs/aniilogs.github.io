@@ -7998,7 +7998,13 @@ button.catalog-item-reference {
   min-width: 9rem;
   color: var(--text);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color-scheme: dark;
   cursor: pointer;
+}
+
+.catalog-showcase-variant-select option {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .catalog-panel.is-aniilog-showcase {
@@ -8091,6 +8097,7 @@ body.aniilog-artwork-mode .app-shell {
 
 body.aniilog-artwork-mode .map-panel {
   position: relative;
+  z-index: 200;
   width: auto;
   height: 100dvh;
   min-height: 100dvh;
@@ -8164,7 +8171,14 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity 
 }
 
 body.aniilog-artwork-mode .catalog-aniimo-video-backdrop {
-  display: none !important;
+  display: block;
+  z-index: 0;
+}
+
+body.aniilog-artwork-mode .sidebar-collapse-button {
+  display: grid;
+  z-index: 220;
+  pointer-events: auto;
 }
 
 body.aniilog-artwork-mode .catalog-showcase-button {
