@@ -7857,7 +7857,7 @@ button.catalog-item-reference {
   }
 }
 
-.catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source) {
+.catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas) {
   position: relative;
   z-index: 1;
 }
@@ -7989,7 +7989,7 @@ button.catalog-item-reference {
   display: none;
 }
 
-.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-identity) {
+.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-identity) {
   display: none;
 }
 
@@ -8023,6 +8023,20 @@ button.catalog-item-reference {
 }
 
 .catalog-aniilog-record::after {
+  display: none;
+}
+
+.catalog-aniimo-model-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+.catalog-aniimo-model-canvas.is-load-error {
   display: none;
 }
 

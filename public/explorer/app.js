@@ -2674,6 +2674,8 @@ function ensureAniilogData() {
         if (!mediaEntry?.video) throw new Error(`Aniilog media is missing form ${entry.form_id}`);
         entry.video = mediaEntry.video;
         entry.video_layout = mediaEntry.video_layout;
+        entry.model = mediaEntry.model || "";
+        entry.model_label = mediaEntry.model_label || "";
         entry.showcase_variants = Array.isArray(mediaEntry.showcase_variants)
           ? mediaEntry.showcase_variants
           : [];
@@ -5202,6 +5204,12 @@ function renderAniilogBossVariants(bossVariants) {
 function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const showcaseMedia = entry.showcase_media || entry;
+  if (showcaseMedia.model) {
+    import("./model-showcase.js")
+      .then(({ attachModelShowcase }) => attachModelShowcase(record, contentUrl(showcaseMedia.model)))
+      .catch(() => {});
+    return;
+  }
   if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");
@@ -6833,7 +6841,7 @@ function renderCatalogPreview(options = {}) {
       els.catalogPanel.querySelector(".catalog-heading")?.append(variantSelect);
     }
     const showcaseVariants = Array.isArray(selected.showcase_variants)
-      ? selected.showcase_variants.filter((candidate) => candidate && candidate.video)
+      ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
       : [];
     if (showcaseVariants.length > 1) {
       const modelSelect = document.createElement("select");
@@ -6842,7 +6850,7 @@ function renderCatalogPreview(options = {}) {
       showcaseVariants.forEach((candidate, index) => {
         const option = document.createElement("option");
         option.value = String(index);
-        option.textContent = candidate.label || candidate.name || `Artwork ${index + 1}`;
+        option.textContent = candidate.label || candidate.name || candidate.model_label || `Artwork ${index + 1}`;
         option.selected = candidate === selected.showcase_media;
         modelSelect.append(option);
       });
