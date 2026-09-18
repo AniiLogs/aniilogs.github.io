@@ -7569,6 +7569,7 @@ function setSidebarView(view) {
   const previousView = state.sidebarView;
   const nextView = ENABLED_WORKSPACE_VIEWS.has(view) ? view : "map";
   state.sidebarView = nextView;
+  if (nextView !== "aniilog" && state.aniilogShowcaseMode) setAniilogShowcaseMode(false);
   if (nextView === "aniilog") void ensureAniilogData();
   updateWorkspaceTabs();
   refreshSelectionDetails();
