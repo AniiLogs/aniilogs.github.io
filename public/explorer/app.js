@@ -6819,8 +6819,9 @@ function renderCatalogPreview(options = {}) {
     showcaseButton.setAttribute("aria-pressed", String(state.aniilogShowcaseMode));
     showcaseButton.addEventListener("click", () => setAniilogShowcaseMode(!state.aniilogShowcaseMode));
     els.catalogPanel.querySelector(".catalog-heading")?.append(showcaseButton);
+    const selectedFamily = String(selected.base_id || selected.research_id || selected.name || "");
     const variants = (state.aniilogData?.entries || [])
-      .filter((candidate) => candidate?.aniimo_id && candidate.aniimo_id === selected.aniimo_id)
+      .filter((candidate) => String(candidate?.base_id || candidate?.research_id || candidate?.name || "") === selectedFamily)
       .sort((a, b) => String(a.form_label || a.form_name || "").localeCompare(String(b.form_label || b.form_name || "")));
     const artworkControls = document.createElement("div");
     artworkControls.className = "catalog-artwork-controls";
@@ -6839,7 +6840,7 @@ function renderCatalogPreview(options = {}) {
       variantSelect.setAttribute("aria-label", "Choose Aniimo variant");
       variants.forEach((candidate) => {
         const option = document.createElement("option");
-        option.value = candidate.id;
+        option.value = String(candidate.id);
         option.textContent = candidate.form_label || candidate.form_name || "Variant";
         option.selected = candidate.id === selected.id;
         variantSelect.append(option);
@@ -6855,7 +6856,7 @@ function renderCatalogPreview(options = {}) {
       formSelect.className = "catalog-showcase-variant-select catalog-artwork-form-select";
       formSelect.setAttribute("aria-label", "Choose Aniimo form");
       const option = document.createElement("option");
-      option.value = selected.id;
+      option.value = String(selected.id);
       option.textContent = selected.form_label || selected.form_name || "Current form";
       formSelect.append(option);
       formSelect.disabled = true;
@@ -6894,7 +6895,7 @@ function renderCatalogPreview(options = {}) {
         raritySelect.append(option);
       });
       raritySelect.hidden = !state.aniilogShowcaseMode;
-      addArtworkMenu("Rarity", raritySelect);
+      addArtworkMenu("Rarity (not extracted)", raritySelect);
     }
     if (artworkControls.children.length) {
       els.catalogPanel.querySelector(".catalog-heading")?.append(artworkControls);

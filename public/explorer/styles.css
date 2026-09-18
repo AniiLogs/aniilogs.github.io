@@ -7987,7 +7987,11 @@ button.catalog-item-reference {
 }
 
 .catalog-artwork-menu select {
+  width: 100%;
   min-width: 10.5rem;
+  min-height: 2.15rem;
+  padding: 0 2rem 0 0.7rem;
+  line-height: 1.2;
 }
 
 .catalog-showcase-variant-select {
