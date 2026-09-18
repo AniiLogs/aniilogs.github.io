@@ -2674,6 +2674,9 @@ function ensureAniilogData() {
         if (!mediaEntry?.video) throw new Error(`Aniilog media is missing form ${entry.form_id}`);
         entry.video = mediaEntry.video;
         entry.video_layout = mediaEntry.video_layout;
+        entry.showcase_variants = Array.isArray(mediaEntry.showcase_variants)
+          ? mediaEntry.showcase_variants
+          : [];
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
       state.aniilogData = payload;
@@ -5198,12 +5201,13 @@ function renderAniilogBossVariants(bossVariants) {
 
 function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  if (!entry.video || reduceMotion.matches) return;
+  const showcaseMedia = entry.showcase_media || entry;
+  if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");
   video.className = "catalog-aniimo-video-source";
   video.crossOrigin = "anonymous";
-  video.src = contentUrl(entry.video);
+  video.src = contentUrl(showcaseMedia.video);
   video.muted = true;
   video.loop = true;
   video.autoplay = true;
@@ -6827,6 +6831,27 @@ function renderCatalogPreview(options = {}) {
         renderCatalogPreview();
       });
       els.catalogPanel.querySelector(".catalog-heading")?.append(variantSelect);
+    }
+    const showcaseVariants = Array.isArray(selected.showcase_variants)
+      ? selected.showcase_variants.filter((candidate) => candidate && candidate.video)
+      : [];
+    if (showcaseVariants.length > 1) {
+      const modelSelect = document.createElement("select");
+      modelSelect.className = "catalog-showcase-variant-select catalog-showcase-media-select";
+      modelSelect.setAttribute("aria-label", "Choose artwork variant");
+      showcaseVariants.forEach((candidate, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = candidate.label || candidate.name || `Artwork ${index + 1}`;
+        option.selected = candidate === selected.showcase_media;
+        modelSelect.append(option);
+      });
+      modelSelect.hidden = !state.aniilogShowcaseMode;
+      modelSelect.addEventListener("change", () => {
+        selected.showcase_media = showcaseVariants[Number(modelSelect.value)] || null;
+        renderCatalogPreview();
+      });
+      els.catalogPanel.querySelector(".catalog-heading")?.append(modelSelect);
     }
     setAniilogShowcaseMode(state.aniilogShowcaseMode);
   }
