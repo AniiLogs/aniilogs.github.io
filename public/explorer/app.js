@@ -6822,9 +6822,20 @@ function renderCatalogPreview(options = {}) {
     const variants = (state.aniilogData?.entries || [])
       .filter((candidate) => candidate?.aniimo_id && candidate.aniimo_id === selected.aniimo_id)
       .sort((a, b) => String(a.form_label || a.form_name || "").localeCompare(String(b.form_label || b.form_name || "")));
+    const artworkControls = document.createElement("div");
+    artworkControls.className = "catalog-artwork-controls";
+    artworkControls.setAttribute("aria-label", "Artwork form and rarity controls");
+    const addArtworkMenu = (labelText, select) => {
+      const field = document.createElement("label");
+      field.className = "catalog-artwork-menu";
+      const label = document.createElement("span");
+      label.textContent = labelText;
+      field.append(label, select);
+      artworkControls.append(field);
+    };
     if (variants.length > 1) {
       const variantSelect = document.createElement("select");
-      variantSelect.className = "catalog-showcase-variant-select";
+      variantSelect.className = "catalog-showcase-variant-select catalog-artwork-form-select";
       variantSelect.setAttribute("aria-label", "Choose Aniimo variant");
       variants.forEach((candidate) => {
         const option = document.createElement("option");
@@ -6838,7 +6849,18 @@ function renderCatalogPreview(options = {}) {
         state.catalogSelection.aniilog = variantSelect.value;
         renderCatalogPreview();
       });
-      els.catalogPanel.querySelector(".catalog-heading")?.append(variantSelect);
+      addArtworkMenu("Form", variantSelect);
+    } else {
+      const formSelect = document.createElement("select");
+      formSelect.className = "catalog-showcase-variant-select catalog-artwork-form-select";
+      formSelect.setAttribute("aria-label", "Choose Aniimo form");
+      const option = document.createElement("option");
+      option.value = selected.id;
+      option.textContent = selected.form_label || selected.form_name || "Current form";
+      formSelect.append(option);
+      formSelect.disabled = true;
+      formSelect.hidden = !state.aniilogShowcaseMode;
+      addArtworkMenu("Form", formSelect);
     }
     const showcaseVariants = Array.isArray(selected.showcase_variants)
       ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
@@ -6859,7 +6881,23 @@ function renderCatalogPreview(options = {}) {
         selected.showcase_media = showcaseVariants[Number(modelSelect.value)] || null;
         renderCatalogPreview();
       });
-      els.catalogPanel.querySelector(".catalog-heading")?.append(modelSelect);
+      addArtworkMenu("Rarity / appearance", modelSelect);
+    } else {
+      const raritySelect = document.createElement("select");
+      raritySelect.className = "catalog-showcase-variant-select catalog-artwork-rarity-select";
+      raritySelect.setAttribute("aria-label", "Choose Aniimo rarity");
+      ["Common", ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((roman) => `Sparkling Type ${roman}`), "Dazzling Sparkling", "Shadow Sparkling"].forEach((label, index) => {
+        const option = document.createElement("option");
+        option.value = label;
+        option.textContent = label;
+        option.disabled = index !== 0;
+        raritySelect.append(option);
+      });
+      raritySelect.hidden = !state.aniilogShowcaseMode;
+      addArtworkMenu("Rarity", raritySelect);
+    }
+    if (artworkControls.children.length) {
+      els.catalogPanel.querySelector(".catalog-heading")?.append(artworkControls);
     }
     setAniilogShowcaseMode(state.aniilogShowcaseMode);
   }
@@ -6873,8 +6911,10 @@ function setAniilogShowcaseMode(enabled) {
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
   const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
   if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
-  const variantSelect = els.catalogPanel.querySelector(".catalog-showcase-variant-select");
-  if (variantSelect) variantSelect.hidden = !state.aniilogShowcaseMode;
+  els.catalogPanel.querySelectorAll(".catalog-showcase-variant-select").forEach((select) => {
+    select.hidden = !state.aniilogShowcaseMode;
+  });
+  els.catalogPanel.querySelector(".catalog-artwork-controls")?.classList.toggle("is-visible", state.aniilogShowcaseMode);
   document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
 }

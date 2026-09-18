@@ -7964,6 +7964,32 @@ button.catalog-item-reference {
   cursor: pointer;
 }
 
+.catalog-artwork-controls {
+  display: none;
+  align-items: end;
+  gap: 0.55rem;
+  margin-left: 0.35rem;
+}
+
+.catalog-artwork-controls.is-visible {
+  display: flex;
+}
+
+.catalog-artwork-menu {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 10.5rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.catalog-artwork-menu select {
+  min-width: 10.5rem;
+}
+
 .catalog-showcase-variant-select {
   min-width: 9rem;
   color: var(--text);
@@ -8038,6 +8064,25 @@ button.catalog-item-reference {
 
 .catalog-aniimo-model-canvas.is-load-error {
   display: none;
+}
+
+@media (max-width: 760px) {
+  .catalog-artwork-controls.is-visible {
+    width: 100%;
+    margin: 0.55rem 0 0;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .catalog-artwork-menu {
+    flex: 1 1 10rem;
+    min-width: min(10rem, calc(50vw - 1.25rem));
+  }
+
+  .catalog-artwork-menu select {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
