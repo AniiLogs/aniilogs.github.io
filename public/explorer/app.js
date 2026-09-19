@@ -6834,68 +6834,83 @@ function renderCatalogPreview(options = {}) {
       field.append(label, select);
       artworkControls.append(field);
     };
+    const createArtworkSelect = ({ label, options, value, onChange, disabled = false }) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "catalog-artwork-select catalog-showcase-variant-select";
+      wrapper.setAttribute("role", "combobox");
+      wrapper.setAttribute("aria-label", label);
+      wrapper.setAttribute("aria-expanded", "false");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "catalog-artwork-select-button";
+      button.disabled = disabled;
+      const menu = document.createElement("div");
+      menu.className = "catalog-artwork-select-menu";
+      menu.setAttribute("role", "listbox");
+      const close = () => {
+        menu.hidden = true;
+        wrapper.setAttribute("aria-expanded", "false");
+      };
+      const choose = (option) => {
+        button.textContent = option.label;
+        close();
+        onChange(option.value);
+      };
+      options.forEach((option) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "catalog-artwork-select-option";
+        item.setAttribute("role", "option");
+        item.textContent = option.label;
+        item.disabled = Boolean(option.disabled);
+        item.setAttribute("aria-selected", String(String(option.value) === String(value)));
+        item.addEventListener("click", () => choose(option));
+        menu.append(item);
+        if (String(option.value) === String(value)) button.textContent = option.label;
+      });
+      button.addEventListener("click", () => {
+        if (disabled) return;
+        const next = menu.hidden;
+        menu.hidden = !next;
+        wrapper.setAttribute("aria-expanded", String(next));
+      });
+      wrapper.append(button, menu);
+      return wrapper;
+    };
     if (variants.length > 1) {
-      const variantSelect = document.createElement("select");
-      variantSelect.className = "catalog-showcase-variant-select catalog-artwork-form-select";
-      variantSelect.setAttribute("aria-label", "Choose Aniimo variant");
-      variants.forEach((candidate) => {
-        const option = document.createElement("option");
-        option.value = String(candidate.id);
-        option.textContent = candidate.form_label || candidate.form_name || "Variant";
-        option.selected = candidate.id === selected.id;
-        variantSelect.append(option);
-      });
-      variantSelect.hidden = !state.aniilogShowcaseMode;
-      variantSelect.addEventListener("change", () => {
-        state.catalogSelection.aniilog = variantSelect.value;
-        renderCatalogPreview();
-      });
-      addArtworkMenu("Form", variantSelect);
+      addArtworkMenu("Form", createArtworkSelect({
+        label: "Choose Aniimo variant",
+        value: selected.id,
+        options: variants.map((candidate) => ({ value: candidate.id, label: candidate.form_label || candidate.form_name || "Variant" })),
+        onChange: (value) => { state.catalogSelection.aniilog = value; renderCatalogPreview(); },
+      }));
     } else {
-      const formSelect = document.createElement("select");
-      formSelect.className = "catalog-showcase-variant-select catalog-artwork-form-select";
-      formSelect.setAttribute("aria-label", "Choose Aniimo form");
-      const option = document.createElement("option");
-      option.value = String(selected.id);
-      option.textContent = selected.form_label || selected.form_name || "Current form";
-      formSelect.append(option);
-      formSelect.disabled = true;
-      formSelect.hidden = !state.aniilogShowcaseMode;
-      addArtworkMenu("Form", formSelect);
+      addArtworkMenu("Form", createArtworkSelect({
+        label: "Choose Aniimo form",
+        value: selected.id,
+        disabled: true,
+        options: [{ value: selected.id, label: selected.form_label || selected.form_name || "Current form" }],
+        onChange: () => {},
+      }));
     }
     const showcaseVariants = Array.isArray(selected.showcase_variants)
       ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
       : [];
     if (showcaseVariants.length > 1) {
-      const modelSelect = document.createElement("select");
-      modelSelect.className = "catalog-showcase-variant-select catalog-showcase-media-select";
-      modelSelect.setAttribute("aria-label", "Choose artwork variant");
-      showcaseVariants.forEach((candidate, index) => {
-        const option = document.createElement("option");
-        option.value = String(index);
-        option.textContent = candidate.label || candidate.name || candidate.model_label || `Artwork ${index + 1}`;
-        option.selected = candidate === selected.showcase_media;
-        modelSelect.append(option);
-      });
-      modelSelect.hidden = !state.aniilogShowcaseMode;
-      modelSelect.addEventListener("change", () => {
-        selected.showcase_media = showcaseVariants[Number(modelSelect.value)] || null;
-        renderCatalogPreview();
-      });
-      addArtworkMenu("Rarity / appearance", modelSelect);
+      addArtworkMenu("Rarity / appearance", createArtworkSelect({
+        label: "Choose artwork variant",
+        value: Math.max(0, showcaseVariants.indexOf(selected.showcase_media)),
+        options: showcaseVariants.map((candidate, index) => ({ value: index, label: candidate.label || candidate.name || candidate.model_label || `Artwork ${index + 1}` })),
+        onChange: (value) => { selected.showcase_media = showcaseVariants[Number(value)] || null; renderCatalogPreview(); },
+      }));
     } else {
-      const raritySelect = document.createElement("select");
-      raritySelect.className = "catalog-showcase-variant-select catalog-artwork-rarity-select";
-      raritySelect.setAttribute("aria-label", "Choose Aniimo rarity");
-      ["Common", ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((roman) => `Sparkling Type ${roman}`), "Dazzling Sparkling", "Shadow Sparkling"].forEach((label, index) => {
-        const option = document.createElement("option");
-        option.value = label;
-        option.textContent = label;
-        option.disabled = index !== 0;
-        raritySelect.append(option);
-      });
-      raritySelect.hidden = !state.aniilogShowcaseMode;
-      addArtworkMenu("Rarity (not extracted)", raritySelect);
+      const rarityOptions = ["Common", ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((roman) => `Sparkling Type ${roman}`), "Dazzling Sparkling", "Shadow Sparkling"];
+      addArtworkMenu("Rarity (metadata pending)", createArtworkSelect({
+        label: "Choose Aniimo rarity",
+        value: rarityOptions[0],
+        options: rarityOptions.map((label, index) => ({ value: label, label, disabled: index !== 0 })),
+        onChange: () => {},
+      }));
     }
     if (artworkControls.children.length) {
       els.catalogPanel.querySelector(".catalog-heading")?.append(artworkControls);

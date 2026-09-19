@@ -7982,6 +7982,89 @@ select option:hover {
   cursor: pointer;
 }
 
+.catalog-artwork-select {
+  position: relative;
+  min-width: 9rem;
+  padding: 0;
+  overflow: visible;
+}
+
+.catalog-artwork-select-button {
+  display: block;
+  width: 100%;
+  min-height: 2.15rem;
+  padding: 0.45rem 2rem 0.45rem 0.75rem;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.catalog-artwork-select-button::after {
+  content: "▾";
+  position: absolute;
+  top: 50%;
+  right: 0.7rem;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.catalog-artwork-select-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.catalog-artwork-select-menu {
+  position: absolute;
+  z-index: 240;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  width: max(100%, 15rem);
+  max-height: 15rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--accent-2);
+  border-radius: 0.65rem;
+  background: var(--panel, #121d21);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+}
+
+.catalog-artwork-select-menu[hidden] {
+  display: none;
+}
+
+.catalog-artwork-select-option {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  border-radius: 0.4rem;
+  color: var(--text, #f4f4e9);
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.catalog-artwork-select-option:hover,
+.catalog-artwork-select-option:focus-visible,
+.catalog-artwork-select-option[aria-selected="true"] {
+  color: var(--text, #f4f4e9);
+  background: color-mix(in srgb, var(--accent-strong, #2d9d82) 72%, var(--panel, #121d21));
+}
+
+.catalog-artwork-select-option:disabled {
+  color: var(--muted, #9bb5b2);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .catalog-artwork-controls {
   display: none;
   align-items: end;
@@ -8004,13 +8087,7 @@ select option:hover {
   text-transform: uppercase;
 }
 
-.catalog-artwork-menu select {
-  width: 100%;
-  min-width: 10.5rem;
-  min-height: 2.15rem;
-  padding: 0 2rem 0 0.7rem;
-  line-height: 1.2;
-}
+.catalog-artwork-menu .catalog-artwork-select { width: 100%; min-width: 10.5rem; }
 
 .catalog-showcase-variant-select {
   min-width: 9rem;
