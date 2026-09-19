@@ -34,19 +34,19 @@ const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1
 // applied as a material appearance in model-showcase.js rather than silently
 // reusing the Common material for every menu choice.
 const ANIIMO_RARITY_STYLES = Object.freeze([
-  { id: "0", label: "Common" },
-  { id: "1", label: "Sparkling Type I", tint: "#f4a7d8", emissive: "#d66bb8" },
-  { id: "2", label: "Sparkling Type II", tint: "#72d4ef", emissive: "#39a9d1" },
-  { id: "3", label: "Sparkling Type III", tint: "#f3c66f", emissive: "#e99042" },
-  { id: "4", label: "Sparkling Type IV", tint: "#d0a2f2", emissive: "#9a61d6" },
-  { id: "5", label: "Sparkling Type V", tint: "#8fd3a7", emissive: "#4faf78" },
-  { id: "6", label: "Sparkling Type VI", tint: "#f08c72", emissive: "#db5a46" },
-  { id: "7", label: "Sparkling Type VII", tint: "#70a9ef", emissive: "#427bd1" },
-  { id: "8", label: "Sparkling Type VIII", tint: "#f0d16f", emissive: "#d49e35" },
-  { id: "9", label: "Sparkling Type IX", tint: "#d895ef", emissive: "#a95acb" },
-  { id: "10", label: "Sparkling Type X", tint: "#78e5d4", emissive: "#38bda8" },
-  { id: "11", label: "Dazzling Sparkling", tint: "#d9e8ff", emissive: "#8db7ff", emissiveIntensity: 0.32 },
-  { id: "12", label: "Shadow Sparkling", tint: "#733d9f", emissive: "#4b1e73", emissiveIntensity: 0.28 },
+  { id: "0", label: "Common", filter: "none" },
+  { id: "1", label: "Sparkling Type I", filter: "hue-rotate(315deg) saturate(1.25)" },
+  { id: "2", label: "Sparkling Type II", filter: "hue-rotate(165deg) saturate(1.3)" },
+  { id: "3", label: "Sparkling Type III", filter: "hue-rotate(35deg) saturate(1.35)" },
+  { id: "4", label: "Sparkling Type IV", filter: "hue-rotate(265deg) saturate(1.3)" },
+  { id: "5", label: "Sparkling Type V", filter: "hue-rotate(95deg) saturate(1.2)" },
+  { id: "6", label: "Sparkling Type VI", filter: "hue-rotate(340deg) saturate(1.3)" },
+  { id: "7", label: "Sparkling Type VII", filter: "hue-rotate(205deg) saturate(1.35)" },
+  { id: "8", label: "Sparkling Type VIII", filter: "hue-rotate(45deg) saturate(1.25)" },
+  { id: "9", label: "Sparkling Type IX", filter: "hue-rotate(285deg) saturate(1.35)" },
+  { id: "10", label: "Sparkling Type X", filter: "hue-rotate(145deg) saturate(1.3)" },
+  { id: "11", label: "Dazzling Sparkling", filter: "brightness(1.18) saturate(1.15)" },
+  { id: "12", label: "Shadow Sparkling", filter: "brightness(0.68) saturate(1.35) hue-rotate(285deg)" },
 ]);
 
 function rarityShowcaseVariants(entry) {
@@ -55,12 +55,12 @@ function rarityShowcaseVariants(entry) {
     id: `rarity-${style.id}`,
     rarity_id: style.id,
     label: style.label,
-    model: entry.model,
-    appearance: style.tint ? {
-      tint: style.tint,
-      emissive: style.emissive,
-      emissiveIntensity: style.emissiveIntensity,
-    } : null,
+    // The packed moving media is the verified appearance for every current
+    // form, including Prismana. Keep the unreliable GLB out of this selector
+    // until a textured per-style export is available.
+    video: entry.video,
+    video_layout: entry.video_layout,
+    appearance: style.filter && style.filter !== "none" ? { filter: style.filter } : null,
   }));
 }
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
@@ -5265,6 +5265,7 @@ function attachPackedAniimoBackdrop(record, entry) {
 
   const canvas = document.createElement("canvas");
   canvas.className = "catalog-aniimo-video-backdrop";
+  if (showcaseMedia.appearance?.filter) canvas.style.filter = showcaseMedia.appearance.filter;
   canvas.width = 600;
   canvas.height = 600;
   canvas.tabIndex = -1;
@@ -6848,6 +6849,9 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
+  if (view === "aniilog" && selected.model && !selected.showcase_media) {
+    selected.showcase_media = rarityShowcaseVariants(selected)[0] || null;
+  }
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
   if (view === "aniilog") {
