@@ -74,8 +74,9 @@ export function attachModelShowcase(record, source, appearance = {}) {
         object.castShadow = false;
         object.receiveShadow = false;
         if (object.material) {
-          const materials = Array.isArray(object.material) ? object.material : [object.material];
-          object.material = materials.map((material) => {
+          const wasMaterialArray = Array.isArray(object.material);
+          const materials = wasMaterialArray ? object.material : [object.material];
+          const styledMaterials = materials.map((material) => {
             const clone = material.clone();
             clone.side = THREE.DoubleSide;
             if (appearance.tint && clone.color) {
@@ -90,7 +91,7 @@ export function attachModelShowcase(record, source, appearance = {}) {
             }
             return clone;
           });
-          if (!Array.isArray(object.material)) object.material = object.material[0];
+          object.material = wasMaterialArray ? styledMaterials : styledMaterials[0];
         }
       });
       frameModel(model);
