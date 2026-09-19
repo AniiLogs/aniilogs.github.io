@@ -5240,7 +5240,7 @@ function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const showcaseMedia = entry.showcase_media || entry;
   if (showcaseMedia.model) {
-    import("./model-showcase.js")
+    import(`./model-showcase.js?v=${encodeURIComponent(CONTENT_REVISION || "latest")}`)
       .then(({ attachModelShowcase }) => attachModelShowcase(
         record,
         contentUrl(showcaseMedia.model),
