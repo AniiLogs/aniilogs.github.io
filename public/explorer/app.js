@@ -5334,9 +5334,14 @@ function attachPackedAniimoBackdrop(record, entry) {
       vec3 color = texture2D(u_video, vec2(v_uv.x, 0.5 + v_uv.y * 0.5)).rgb;
       vec3 mask = texture2D(u_video, vec2(v_uv.x, v_uv.y * 0.5)).rgb;
       float alpha = clamp(dot(mask, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-      vec3 tinted = color * u_tint * 1.42;
-      color = mix(color, tinted, 0.62);
-      color += u_emissive * u_emissiveIntensity * 0.42;
+      // Preserve the captured form's shading/detail while applying the
+      // client-authored preset hue. A straight multiplication disappears on
+      // dark forms, so use luminance as the shared value and keep a small
+      // floor for the game's glowing material pass.
+      float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+      vec3 tinted = u_tint * max(luminance, 0.045) * 1.34;
+      color = mix(color, mix(vec3(luminance), tinted, 0.82), 0.76);
+      color += u_emissive * u_emissiveIntensity * (0.22 + luminance * 0.6);
       gl_FragColor = vec4(color * alpha, alpha);
     }
   `);
