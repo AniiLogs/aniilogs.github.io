@@ -50,7 +50,7 @@ const ANIIMO_RARITY_STYLES = Object.freeze([
 ]);
 
 function rarityShowcaseVariants(entry) {
-  if (!entry?.model) return [];
+  if (!entry?.model && !entry?.video) return [];
   return ANIIMO_RARITY_STYLES.map((style) => ({
     id: `rarity-${style.id}`,
     rarity_id: style.id,
@@ -5308,11 +5308,17 @@ function attachPackedAniimoBackdrop(record, entry) {
   const fragmentShader = compileShader(gl.FRAGMENT_SHADER, `
     precision mediump float;
     uniform sampler2D u_video;
+    uniform vec3 u_tint;
+    uniform vec3 u_emissive;
+    uniform float u_emissiveIntensity;
     varying vec2 v_uv;
     void main() {
       vec3 color = texture2D(u_video, vec2(v_uv.x, 0.5 + v_uv.y * 0.5)).rgb;
       vec3 mask = texture2D(u_video, vec2(v_uv.x, v_uv.y * 0.5)).rgb;
       float alpha = clamp(dot(mask, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+      vec3 tinted = color * u_tint * 1.42;
+      color = mix(color, tinted, 0.62);
+      color += u_emissive * u_emissiveIntensity * 0.42;
       gl_FragColor = vec4(color * alpha, alpha);
     }
   `);
@@ -5344,6 +5350,12 @@ function attachPackedAniimoBackdrop(record, entry) {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.useProgram(program);
   gl.uniform1i(gl.getUniformLocation(program, "u_video"), 0);
+  const appearance = showcaseMedia.appearance || {};
+  const tint = hexColorRgb(appearance.tint || "#ffffff").map((channel) => channel / 255);
+  const emissive = hexColorRgb(appearance.emissive || appearance.tint || "#000000").map((channel) => channel / 255);
+  gl.uniform3fv(gl.getUniformLocation(program, "u_tint"), new Float32Array(tint));
+  gl.uniform3fv(gl.getUniformLocation(program, "u_emissive"), new Float32Array(emissive));
+  gl.uniform1f(gl.getUniformLocation(program, "u_emissiveIntensity"), Number(appearance.emissiveIntensity || 0));
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
 
@@ -6856,7 +6868,7 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
-  if (view === "aniilog" && selected.model && !selected.showcase_media) {
+  if (view === "aniilog" && (selected.model || selected.video) && !selected.showcase_media) {
     const extracted = Array.isArray(selected.showcase_variants)
       ? selected.showcase_variants.filter((candidate) => candidate && (candidate.model || candidate.video))
       : [];
