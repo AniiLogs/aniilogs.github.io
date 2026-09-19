@@ -21,6 +21,11 @@ const ITEMLOG_DATA_URL =
   contentUrl("./data/itemlog_data.json");
 const ANIILOG_DATA_URL = contentUrl("./data/aniilog_data.json");
 const ANIILOG_MEDIA_URL = contentUrl("./data/aniilog_media.json");
+// The UI order and rare flags are extracted from the current client and kept
+// in the private R2 release alongside the media. The static table below keeps
+// the viewer usable during a transient manifest failure; when available, this
+// manifest is the authoritative source for labels/order.
+const ANIILOG_RARITY_MANIFEST_URL = contentUrl("./data/rarity-manifest.remote.json");
 const APP_VERSION = CONTENT_PACKAGE_VERSION
   ? `Game build ${CONTENT_PACKAGE_VERSION}`
   : "Game build unavailable";
@@ -54,10 +59,13 @@ const ANIIMO_RARITY_STYLES = Object.freeze([
 
 function rarityShowcaseVariants(entry) {
   if (!entry?.model && !entry?.video) return [];
+  const manifestStyles = new Map((state?.aniilogRarityManifest?.rarity_ui_order || [])
+    .map((style) => [String(style.id), style]));
   return ANIIMO_RARITY_STYLES.map((style) => ({
     id: `rarity-${style.id}`,
     rarity_id: style.id,
-    label: style.label,
+    label: manifestStyles.get(style.id)?.label || style.label,
+    source: manifestStyles.has(style.id) ? "client_rarity_manifest" : "static_client_fallback",
     // The packed moving media is the verified appearance for every current
     // form, including Prismana. Keep the unreliable GLB out of this selector
     // until a textured per-style export is available.
@@ -397,6 +405,7 @@ const state = {
   itemlogLoadError: "",
   itemlogLoadPromise: null,
   aniilogData: null,
+  aniilogRarityManifest: null,
   aniilogLoadError: "",
   aniilogLoadPromise: null,
   catalogSearch: {
@@ -2702,17 +2711,29 @@ function ensureAniilogData() {
   if (state.aniilogData) return Promise.resolve(state.aniilogData);
   if (state.aniilogLoadPromise) return state.aniilogLoadPromise;
 
-  state.aniilogLoadPromise = Promise.all([fetch(ANIILOG_DATA_URL), fetch(ANIILOG_MEDIA_URL)])
-    .then(async ([dataResponse, mediaResponse]) => {
+  state.aniilogLoadPromise = Promise.all([
+    fetch(ANIILOG_DATA_URL),
+    fetch(ANIILOG_MEDIA_URL),
+    fetch(ANIILOG_RARITY_MANIFEST_URL),
+  ])
+    .then(async ([dataResponse, mediaResponse, rarityResponse]) => {
       if (!dataResponse.ok) throw new Error(`Could not load ${ANIILOG_DATA_URL}`);
       if (!mediaResponse.ok) throw new Error(`Could not load ${ANIILOG_MEDIA_URL}`);
       const payload = await dataResponse.json();
       const media = await mediaResponse.json();
+      const rarityManifest = rarityResponse.ok ? await rarityResponse.json() : null;
       if (!Array.isArray(payload?.entries) || !payload?.totals) {
         throw new Error("Aniilog data has an invalid format");
       }
       if (!Array.isArray(media?.entries) || media.package_version !== payload.package_version) {
         throw new Error("Aniilog media has an invalid package identity");
+      }
+      if (rarityManifest && (
+        rarityManifest.source_release !== payload.package_version
+        || !Array.isArray(rarityManifest.rarity_ui_order)
+        || rarityManifest.rarity_ui_order.length !== ANIIMO_RARITY_STYLES.length + 0
+      )) {
+        throw new Error("Aniilog rarity manifest has an invalid source package");
       }
       const mediaByForm = new Map(media.entries.map((entry) => [String(entry.form_id || ""), entry]));
       if (mediaByForm.size !== payload.entries.length) {
@@ -2731,6 +2752,7 @@ function ensureAniilogData() {
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
       state.aniilogData = payload;
+      state.aniilogRarityManifest = rarityManifest;
       state.aniilogLoadError = "";
       return payload;
     })
