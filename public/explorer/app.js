@@ -6905,11 +6905,14 @@ function renderCatalogPreview(options = {}) {
       }));
     } else {
       const rarityOptions = ["Common", ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((roman) => `Sparkling Type ${roman}`), "Dazzling Sparkling", "Shadow Sparkling"];
-      addArtworkMenu("Rarity (metadata pending)", createArtworkSelect({
+      addArtworkMenu("Rarity", createArtworkSelect({
         label: "Choose Aniimo rarity",
-        value: rarityOptions[0],
-        options: rarityOptions.map((label, index) => ({ value: label, label, disabled: index !== 0 })),
-        onChange: () => {},
+        value: state.catalogSelection.rarity || rarityOptions[0],
+        options: rarityOptions.map((label) => ({ value: label, label })),
+        onChange: (value) => {
+          state.catalogSelection.rarity = value;
+          renderCatalogPreview();
+        },
       }));
     }
     if (artworkControls.children.length) {
