@@ -8310,6 +8310,33 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
   display: none;
 }
 
+/* The catalog index is a sibling of the artwork panel, so hiding only the
+   record still leaves the mobile Aniimo list underneath the viewer. Treat
+   artwork mode as a true mobile takeover at tablet widths as well. */
+@media (max-width: 760px) {
+  body.aniilog-artwork-mode .catalog-workspace {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
+  body.aniilog-artwork-mode .catalog-sidebar-content {
+    display: none !important;
+  }
+
+  body.aniilog-artwork-mode .catalog-panel {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+}
+
 @media (max-width: 760px) {
   .catalog-artwork-controls.is-visible {
     width: 100%;
