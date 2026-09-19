@@ -6950,9 +6950,15 @@ function renderCatalogPreview(options = {}) {
       ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
       : [];
     const generatedShowcaseVariants = rarityShowcaseVariants(selected);
-    const extractedIds = new Set(extractedShowcaseVariants.map((candidate) => String(candidate.rarity_id ?? candidate.id ?? "")));
+    const extractedById = new Map(extractedShowcaseVariants.map((candidate) => [
+      String(candidate.rarity_id ?? candidate.id ?? ""),
+      candidate,
+    ]));
+    const generatedIds = new Set(generatedShowcaseVariants.map((candidate) => String(candidate.rarity_id ?? candidate.id ?? "")));
     const showcaseVariants = extractedShowcaseVariants.length > 1
-      ? extractedShowcaseVariants.concat(generatedShowcaseVariants.filter((candidate) => !extractedIds.has(String(candidate.rarity_id ?? candidate.id ?? ""))))
+      ? generatedShowcaseVariants
+        .map((candidate) => extractedById.get(String(candidate.rarity_id ?? candidate.id ?? "")) || candidate)
+        .concat(extractedShowcaseVariants.filter((candidate) => !generatedIds.has(String(candidate.rarity_id ?? candidate.id ?? ""))))
       : generatedShowcaseVariants;
     if (showcaseVariants.length > 1) {
       addArtworkMenu("Rarity / appearance", createArtworkSelect({
