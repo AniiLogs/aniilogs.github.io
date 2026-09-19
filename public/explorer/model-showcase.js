@@ -27,7 +27,53 @@ export function attachModelShowcase(record, source, appearance = {}) {
   let mixer = null;
   let model = null;
   let disposed = false;
+  const rarityShaderUniforms = [];
   const clock = new THREE.Clock();
+  let elapsed = 0;
+
+  function hexColor(value) {
+    return new THREE.Color(String(value || "#ffffff"));
+  }
+
+  function attachRarityShader(material) {
+    const palette = Array.isArray(appearance.palette) ? appearance.palette.slice(0, 8) : [];
+    if (palette.length !== 8) return;
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uShinyTime = { value: 0 };
+      shader.uniforms.uShinyPalette = { value: palette.map(hexColor) };
+      shader.uniforms.uShinyMotion = { value: new THREE.Vector4(...(appearance.motion || [0.2, 0.3, 1, 5])) };
+      shader.uniforms.uShinyBreathing = { value: new THREE.Vector2(...(appearance.breathing || [0.6, 0.6])) };
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vShinyPosition;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvShinyPosition = position;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+          uniform float uShinyTime;
+          uniform vec3 uShinyPalette[8];
+          uniform vec4 uShinyMotion;
+          uniform vec2 uShinyBreathing;
+          varying vec3 vShinyPosition;
+          vec3 shinyPalette(float value) {
+            float scaled = fract(value) * 7.0;
+            if (scaled < 1.0) return mix(uShinyPalette[0], uShinyPalette[1], scaled);
+            if (scaled < 2.0) return mix(uShinyPalette[1], uShinyPalette[2], scaled - 1.0);
+            if (scaled < 3.0) return mix(uShinyPalette[2], uShinyPalette[3], scaled - 2.0);
+            if (scaled < 4.0) return mix(uShinyPalette[3], uShinyPalette[4], scaled - 3.0);
+            if (scaled < 5.0) return mix(uShinyPalette[4], uShinyPalette[5], scaled - 4.0);
+            if (scaled < 6.0) return mix(uShinyPalette[5], uShinyPalette[6], scaled - 5.0);
+            return mix(uShinyPalette[6], uShinyPalette[7], scaled - 6.0);
+          }`)
+        .replace("#include <dithering_fragment>", `
+          float shinyPhase = vShinyPosition.y * uShinyMotion.w + vShinyPosition.x * uShinyMotion.z + uShinyTime * uShinyMotion.y;
+          vec3 shinyColor = shinyPalette(shinyPhase);
+          float shinyBreath = mix(uShinyBreathing.x, uShinyBreathing.y, 0.5 + 0.5 * sin(uShinyTime * 2.0));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * (0.7 + shinyColor * 1.35) + shinyColor * 0.24, clamp(shinyBreath, 0.0, 1.0));
+          #include <dithering_fragment>`);
+      rarityShaderUniforms.push(shader.uniforms);
+    };
+    material.customProgramCacheKey = () => `aniilogs-shiny-${appearance.preset || palette.join("-")}`;
+    material.needsUpdate = true;
+  }
 
   function resize() {
     const width = Math.max(1, canvas.clientWidth || window.innerWidth);
@@ -58,6 +104,8 @@ export function attachModelShowcase(record, source, appearance = {}) {
     }
     resize();
     const delta = Math.min(clock.getDelta(), 0.05);
+    elapsed += delta;
+    rarityShaderUniforms.forEach((uniforms) => { uniforms.uShinyTime.value = elapsed; });
     if (mixer) mixer.update(delta);
     if (model) model.rotation.y += delta * 0.12;
     renderer.render(scene, camera);
@@ -79,7 +127,7 @@ export function attachModelShowcase(record, source, appearance = {}) {
           const styledMaterials = materials.map((material) => {
             const clone = material.clone();
             clone.side = THREE.DoubleSide;
-            if (appearance.tint && clone.color) {
+            if (appearance.tint && clone.color && !appearance.palette) {
               // The extracted Scorchhowl showcase mesh has a neutral base
               // material.  Apply the game's rarity style color at render time
               // so the style selector changes the actual artwork.
@@ -89,6 +137,7 @@ export function attachModelShowcase(record, source, appearance = {}) {
               clone.emissive.set(appearance.emissive);
               clone.emissiveIntensity = Number(appearance.emissiveIntensity || 0.18);
             }
+            attachRarityShader(clone);
             return clone;
           });
           object.material = wasMaterialArray ? styledMaterials : styledMaterials[0];

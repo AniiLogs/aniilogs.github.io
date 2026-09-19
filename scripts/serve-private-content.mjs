@@ -23,7 +23,7 @@ const contentTypes = new Map([
 
 createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
-  const prefix = "/releases/3509129/";
+  const prefix = "/releases/3535596/";
   if (!url.pathname.startsWith(prefix) || !["GET", "HEAD"].includes(request.method || "")) {
     response.writeHead(404).end();
     return;

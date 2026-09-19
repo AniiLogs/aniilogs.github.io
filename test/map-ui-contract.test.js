@@ -129,32 +129,17 @@ test("mobile artwork mode takes over the viewport and hides the Aniimo index", (
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
 });
 
-test("Aniimo rarity selector preserves the complete client preset table", () => {
-  for (const [id, preset] of [
-    ["1", "ShinyEffect_Color01_pink_PM.asset"],
-    ["2", "ShinyEffect_Color13_PM.asset"],
-    ["3", "ShinyEffect_Color14_PM.asset"],
-    ["4", "ShinyEffect_Color06_PM.asset"],
-    ["5", "ShinyEffect_Color02_PM.asset"],
-    ["6", "ShinyEffect_Red_Purple_PM.asset"],
-    ["7", "ShinyEffect_Color01_PM.asset"],
-    ["8", "ShinyEffect_Color08_PM.asset"],
-    ["9", "ShinyEffect_Color09_PinkBlue_PM.asset"],
-    ["10", "ShinyEffect_cyan_PM.asset"],
-    ["11", "White_Shiny_PM.asset"],
-    ["12", "Black_Shiny_PM.asset"],
-  ]) {
-    assert.match(explorer, new RegExp(`id: "${id}"[\\s\\S]{0,260}preset: "${preset.replaceAll(".", "\\.")}"`));
-  }
+test("Aniimo rarity selector loads extracted appearances only from private content", () => {
+  for (let id = 0; id <= 12; id += 1) assert.match(explorer, new RegExp(`id: "${id}"`));
   assert.match(explorer, /rarity-manifest\.remote\.json/u);
   assert.match(explorer, /client_rarity_manifest/u);
   assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
+  assert.match(explorer, /form_appearance_overrides/u);
+  assert.match(explorer, /manifestStyles\.get\(style\.id\)\?\.appearance/u);
   assert.match(explorer, /paletteColor\(float value\)/u);
   assert.match(explorer, /uniform vec3 u_palette\[8\]/u);
   assert.match(explorer, /u_paletteEnabled/u);
-  for (const color of ["#530220", "#d40050", "#a7c909", "#e90a0b"]) {
-    assert.match(explorer, new RegExp(color, "u"));
-  }
+  assert.doesNotMatch(explorer, /ShinyEffect_Color\d+[^\n]*\.asset/u);
 });
 
 test("core skills swap in place with a reduced-motion safe comparison", () => {

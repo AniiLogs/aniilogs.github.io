@@ -40,32 +40,46 @@ const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1
 // reusing the Common material for every menu choice.
 const ANIIMO_RARITY_STYLES = Object.freeze([
   { id: "0", label: "Common", filter: "none", preset: "common" },
-  { id: "1", label: "Sparkling Type I", preset: "ShinyEffect_Color01_pink_PM.asset", tint: "#ef7bd3", emissive: "#ff8fe7", emissiveIntensity: 0.34, palette: ["#530220", "#676c02", "#206772", "#02305d", "#720220", "#627202", "#905d72", "#8a0240"] },
-  { id: "2", label: "Sparkling Type II", preset: "ShinyEffect_Color13_PM.asset", tint: "#6fb2ff", emissive: "#6db9ff", emissiveIntensity: 0.3, palette: ["#6700c8", "#5959fc", "#c90940", "#fcc909", "#4000c8", "#595900", "#902267"] },
-  { id: "3", label: "Sparkling Type III", preset: "ShinyEffect_Color14_PM.asset", tint: "#b78aff", emissive: "#c08dff", emissiveIntensity: 0.32, palette: ["#d40050", "#770064", "#226700", "#c81960", "#00c879", "#640064", "#2267d4", "#005077"] },
-  { id: "4", label: "Sparkling Type IV", preset: "ShinyEffect_Color06_PM.asset", tint: "#ffb04d", emissive: "#ff9c3d", emissiveIntensity: 0.34, palette: ["#5b01f0", "#7f5b01", "#f07f29", "#015077", "#7503f0", "#707503", "#2074d6", "#03a08f"] },
-  { id: "5", label: "Sparkling Type V", preset: "ShinyEffect_Color02_PM.asset", tint: "#6ee6a7", emissive: "#66eaa8", emissiveIntensity: 0.3, palette: ["#e97e09", "#40ff0b", "#0d40ff", "#0b0d40", "#ff0b0d", "#40ff0b", "#0d4017", "#fe0f40"] },
-  { id: "6", label: "Sparkling Type VI", preset: "ShinyEffect_Red_Purple_PM.asset", tint: "#d34a9b", emissive: "#ff3c89", emissiveIntensity: 0.38, palette: ["#5b01f0", "#7f5b01", "#f07f29", "#015077", "#75eb01", "#407503", "#0040d6", "#03a08f"] },
-  { id: "7", label: "Sparkling Type VII", preset: "ShinyEffect_Color01_PM.asset", tint: "#ff5f65", emissive: "#ff7c70", emissiveIntensity: 0.32, palette: ["#720200", "#407202", "#004072", "#020040", "#720200", "#407202", "#004072", "#120740"] },
-  { id: "8", label: "Sparkling Type VIII", preset: "ShinyEffect_Color08_PM.asset", tint: "#ffdc54", emissive: "#ffe37b", emissiveIntensity: 0.34, palette: ["#a7c909", "#40a7c9", "#0940a7", "#c90940", "#ee02f0", "#7fee02", "#f07fee", "#02f07f"] },
-  { id: "9", label: "Sparkling Type IX", preset: "ShinyEffect_Color09_PinkBlue_PM.asset", tint: "#8c83ff", emissive: "#c493ff", emissiveIntensity: 0.35, palette: ["#ff0340", "#77ff03", "#9078ff", "#038077", "#00b0f8", "#7f00b0", "#f87f00", "#b0f87f"] },
-  { id: "10", label: "Sparkling Type X", preset: "ShinyEffect_cyan_PM.asset", tint: "#50e9e7", emissive: "#66ffff", emissiveIntensity: 0.36, palette: ["#e90a0b", "#40f2ff", "#0f40ff", "#530e40", "#00fc4f", "#6b00fc", "#1f6e00", "#fc7f6f"] },
+  { id: "1", label: "Sparkling Type I" },
+  { id: "2", label: "Sparkling Type II" },
+  { id: "3", label: "Sparkling Type III" },
+  { id: "4", label: "Sparkling Type IV" },
+  { id: "5", label: "Sparkling Type V" },
+  { id: "6", label: "Sparkling Type VI" },
+  { id: "7", label: "Sparkling Type VII" },
+  { id: "8", label: "Sparkling Type VIII" },
+  { id: "9", label: "Sparkling Type IX" },
+  { id: "10", label: "Sparkling Type X" },
   // The client material presets are white/black base passes with their own
   // bloom. These fallback colors keep the moving capture visibly distinct
   // when an exact per-form Dazzling/Shadow GLB is not available.
-  { id: "11", label: "Dazzling Sparkling", preset: "White_Shiny_PM.asset", tint: "#c4e5ff", emissive: "#f4fbff", emissiveIntensity: 0.28 },
-  { id: "12", label: "Shadow Sparkling", preset: "Black_Shiny_PM.asset", tint: "#37204f", emissive: "#9d5cff", emissiveIntensity: 0.22 },
+  { id: "11", label: "Dazzling Sparkling" },
+  { id: "12", label: "Shadow Sparkling" },
 ]);
+
+function normalizedRarityStyleId(value) {
+  const id = String(value ?? "");
+  if (id === "common") return "0";
+  const match = id.match(/^shiny-(\d+)$/u);
+  return match ? match[1] : id;
+}
 
 function rarityShowcaseVariants(entry) {
   if (!entry?.model && !entry?.video) return [];
-  const manifestStyles = new Map((state?.aniilogRarityManifest?.rarity_ui_order || [])
-    .map((style) => [String(style.id), style]));
-  return ANIIMO_RARITY_STYLES.map((style) => ({
-    id: `rarity-${style.id}`,
-    rarity_id: style.id,
-    label: manifestStyles.get(style.id)?.label || style.label,
-    source: manifestStyles.has(style.id) ? "client_rarity_manifest" : "static_client_fallback",
+  const manifest = state?.aniilogRarityManifest || {};
+  const manifestStyles = new Map((manifest.rarity_ui_order || [])
+    .map((style) => [normalizedRarityStyleId(style.id), style]));
+  const formOverrides = manifest.form_appearance_overrides?.[String(entry.form_id)] || {};
+  return ANIIMO_RARITY_STYLES.map((style) => {
+    const appearance = {
+      ...(manifestStyles.get(style.id)?.appearance || {}),
+      ...(formOverrides[style.id] || {}),
+    };
+    return {
+      id: `rarity-${style.id}`,
+      rarity_id: style.id,
+      label: manifestStyles.get(style.id)?.label || style.label,
+      source: manifestStyles.has(style.id) ? "client_rarity_manifest" : "static_client_fallback",
     // The packed moving media is the verified appearance for every current
     // form, including Prismana. Keep the unreliable GLB out of this selector
     // until a textured per-style export is available.
@@ -73,18 +87,12 @@ function rarityShowcaseVariants(entry) {
     // client. Use the packed moving source so the WebGL appearance pass can
     // apply those presets; exact extracted GLBs remain available as their own
     // model-backed variants.
-    model: style.id === "0" ? entry.model : null,
-    video: entry.video,
-    video_layout: entry.video_layout,
-    appearance: style.preset ? {
-      preset: style.preset,
-      tint: style.tint,
-      emissive: style.emissive,
-      emissiveIntensity: style.emissiveIntensity,
-      palette: style.palette,
-      filter: style.filter,
-    } : null,
-  }));
+      model: entry.model,
+      video: entry.video,
+      video_layout: entry.video_layout,
+      appearance: Object.keys(appearance).length ? appearance : null,
+    };
+  });
 }
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
@@ -5362,6 +5370,14 @@ function attachPackedAniimoBackdrop(record, entry) {
     uniform float u_emissiveIntensity;
     uniform vec3 u_palette[8];
     uniform float u_paletteEnabled;
+    uniform float u_effectEnabled;
+    uniform float u_channelRemapEnabled;
+    uniform vec3 u_magentaTarget;
+    uniform vec3 u_cyanTarget;
+    uniform vec3 u_highlightTarget;
+    uniform float u_time;
+    uniform vec4 u_motion;
+    uniform vec2 u_breathing;
     varying vec2 v_uv;
     vec3 paletteColor(float value) {
       float scaled = clamp(value, 0.0, 0.9999) * 7.0;
@@ -5382,10 +5398,22 @@ function attachPackedAniimoBackdrop(record, entry) {
       // dark forms, so use luminance as the shared value and keep a small
       // floor for the game's glowing material pass.
       float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-      if (u_paletteEnabled > 0.5) {
-        vec3 mapped = paletteColor(luminance);
-        color = mix(color, mapped * (0.35 + luminance * 1.2), 0.82);
-      } else {
+      if (u_channelRemapEnabled > 0.5) {
+        float magentaWeight = smoothstep(0.015, 0.24, min(color.r, color.b) - color.g);
+        float cyanWeight = smoothstep(0.015, 0.24, min(color.g, color.b) - color.r);
+        float highlightWeight = smoothstep(0.55, 0.96, luminance);
+        vec3 magentaHue = mix(u_magentaTarget, u_highlightTarget, highlightWeight);
+        vec3 cyanHue = mix(u_cyanTarget, u_highlightTarget, highlightWeight);
+        vec3 magentaMapped = magentaHue * (0.22 + luminance * 1.34);
+        vec3 cyanMapped = cyanHue * (0.22 + luminance * 1.34);
+        color = mix(color, magentaMapped, magentaWeight);
+        color = mix(color, cyanMapped, cyanWeight);
+      } else if (u_paletteEnabled > 0.5) {
+        float phase = v_uv.y * u_motion.w + v_uv.x * u_motion.z + u_time * u_motion.y + luminance * 0.35;
+        vec3 mapped = paletteColor(fract(phase));
+        float breath = mix(u_breathing.x, u_breathing.y, 0.5 + 0.5 * sin(u_time * 2.0));
+        color = mix(color, mapped * (0.35 + luminance * 1.2), clamp(breath, 0.0, 1.0));
+      } else if (u_effectEnabled > 0.5) {
         vec3 tinted = u_tint * max(luminance, 0.045) * 1.34;
         color = mix(color, mix(vec3(luminance), tinted, 0.82), 0.76);
       }
@@ -5422,6 +5450,7 @@ function attachPackedAniimoBackdrop(record, entry) {
   gl.useProgram(program);
   gl.uniform1i(gl.getUniformLocation(program, "u_video"), 0);
   const appearance = showcaseMedia.appearance || {};
+  const effectEnabled = Object.keys(appearance).length > 0;
   const tint = hexColorRgb(appearance.tint || "#ffffff").map((channel) => channel / 255);
   const emissive = hexColorRgb(appearance.emissive || appearance.tint || "#000000").map((channel) => channel / 255);
   const paletteSource = Array.isArray(appearance.palette) && appearance.palette.length
@@ -5436,10 +5465,25 @@ function attachPackedAniimoBackdrop(record, entry) {
   gl.uniform1f(gl.getUniformLocation(program, "u_emissiveIntensity"), Number(appearance.emissiveIntensity || 0));
   gl.uniform3fv(gl.getUniformLocation(program, "u_palette"), new Float32Array(palette.flat()));
   gl.uniform1f(gl.getUniformLocation(program, "u_paletteEnabled"), paletteSource.length ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(program, "u_effectEnabled"), effectEnabled ? 1 : 0);
+  const channelRemap = appearance.channelRemap || null;
+  gl.uniform1f(gl.getUniformLocation(program, "u_channelRemapEnabled"), channelRemap ? 1 : 0);
+  gl.uniform3fv(gl.getUniformLocation(program, "u_magentaTarget"), new Float32Array(
+    hexColorRgb(channelRemap?.magenta || "#ffffff").map((channel) => channel / 255),
+  ));
+  gl.uniform3fv(gl.getUniformLocation(program, "u_cyanTarget"), new Float32Array(
+    hexColorRgb(channelRemap?.cyan || "#ffffff").map((channel) => channel / 255),
+  ));
+  gl.uniform3fv(gl.getUniformLocation(program, "u_highlightTarget"), new Float32Array(
+    hexColorRgb(channelRemap?.highlight || channelRemap?.cyan || "#ffffff").map((channel) => channel / 255),
+  ));
+  gl.uniform4fv(gl.getUniformLocation(program, "u_motion"), new Float32Array(appearance.motion || [0.2, 0.3, 1, 5]));
+  gl.uniform2fv(gl.getUniformLocation(program, "u_breathing"), new Float32Array(appearance.breathing || [0.6, 0.6]));
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
 
   let stopped = false;
+  const startedAt = performance.now();
   const draw = () => {
     if (!canvas.isConnected || reduceMotion.matches) {
       stopped = true;
@@ -5447,6 +5491,7 @@ function attachPackedAniimoBackdrop(record, entry) {
       return;
     }
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      gl.uniform1f(gl.getUniformLocation(program, "u_time"), (performance.now() - startedAt) / 1000);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
