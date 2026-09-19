@@ -124,6 +124,11 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
+test("mobile artwork mode takes over the viewport and hides the Aniimo index", () => {
+  assert.match(explorerStyles, /@media \(max-width: 760px\) \{[\s\S]*body\.aniilog-artwork-mode \.catalog-workspace \{[\s\S]*position: fixed;[\s\S]*inset: 0;[\s\S]*body\.aniilog-artwork-mode \.catalog-sidebar-content \{[\s\S]*display: none !important;/u);
+  assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
+});
+
 test("core skills swap in place with a reduced-motion safe comparison", () => {
   assert.match(explorer, /const swapVariant = async \(\) =>/u);
   assert.match(explorer, /prefers-reduced-motion: reduce/u);
