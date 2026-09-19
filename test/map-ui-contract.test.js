@@ -129,6 +129,28 @@ test("mobile artwork mode takes over the viewport and hides the Aniimo index", (
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
 });
 
+test("Aniimo rarity selector preserves the complete client preset table", () => {
+  for (const [id, preset] of [
+    ["1", "ShinyEffect_Color01_pink_PM.asset"],
+    ["2", "ShinyEffect_Color13_PM.asset"],
+    ["3", "ShinyEffect_Color14_PM.asset"],
+    ["4", "ShinyEffect_Color06_PM.asset"],
+    ["5", "ShinyEffect_Color02_PM.asset"],
+    ["6", "ShinyEffect_Red_Purple_PM.asset"],
+    ["7", "ShinyEffect_Color01_PM.asset"],
+    ["8", "ShinyEffect_Color08_PM.asset"],
+    ["9", "ShinyEffect_Color09_PinkBlue_PM.asset"],
+    ["10", "ShinyEffect_cyan_PM.asset"],
+    ["11", "White_Shiny_PM.asset"],
+    ["12", "Black_Shiny_PM.asset"],
+  ]) {
+    assert.match(explorer, new RegExp(`id: "${id}"[\\s\\S]{0,260}preset: "${preset.replaceAll(".", "\\.")}"`));
+  }
+  assert.match(explorer, /rarity-manifest\.remote\.json/u);
+  assert.match(explorer, /client_rarity_manifest/u);
+  assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
+});
+
 test("core skills swap in place with a reduced-motion safe comparison", () => {
   assert.match(explorer, /const swapVariant = async \(\) =>/u);
   assert.match(explorer, /prefers-reduced-motion: reduce/u);
