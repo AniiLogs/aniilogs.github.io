@@ -34,19 +34,19 @@ const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1
 // applied as a material appearance in model-showcase.js rather than silently
 // reusing the Common material for every menu choice.
 const ANIIMO_RARITY_STYLES = Object.freeze([
-  { id: "0", label: "Common", filter: "none" },
-  { id: "1", label: "Sparkling Type I", filter: "hue-rotate(315deg) saturate(1.25)" },
-  { id: "2", label: "Sparkling Type II", filter: "hue-rotate(165deg) saturate(1.3)" },
-  { id: "3", label: "Sparkling Type III", filter: "hue-rotate(35deg) saturate(1.35)" },
-  { id: "4", label: "Sparkling Type IV", filter: "hue-rotate(265deg) saturate(1.3)" },
-  { id: "5", label: "Sparkling Type V", filter: "hue-rotate(95deg) saturate(1.2)" },
-  { id: "6", label: "Sparkling Type VI", filter: "hue-rotate(340deg) saturate(1.3)" },
-  { id: "7", label: "Sparkling Type VII", filter: "hue-rotate(205deg) saturate(1.35)" },
-  { id: "8", label: "Sparkling Type VIII", filter: "hue-rotate(45deg) saturate(1.25)" },
-  { id: "9", label: "Sparkling Type IX", filter: "hue-rotate(285deg) saturate(1.35)" },
-  { id: "10", label: "Sparkling Type X", filter: "hue-rotate(145deg) saturate(1.3)" },
-  { id: "11", label: "Dazzling Sparkling", filter: "brightness(1.18) saturate(1.15)" },
-  { id: "12", label: "Shadow Sparkling", filter: "brightness(0.68) saturate(1.35) hue-rotate(285deg)" },
+  { id: "0", label: "Common", filter: "none", preset: "common" },
+  { id: "1", label: "Sparkling Type I", preset: "ShinyEffect_Color01_pink_PM.asset", tint: "#ef7bd3", emissive: "#ff8fe7", emissiveIntensity: 0.34 },
+  { id: "2", label: "Sparkling Type II", preset: "ShinyEffect_Color13_PM.asset", tint: "#6fb2ff", emissive: "#6db9ff", emissiveIntensity: 0.3 },
+  { id: "3", label: "Sparkling Type III", preset: "ShinyEffect_Color14_PM.asset", tint: "#b78aff", emissive: "#c08dff", emissiveIntensity: 0.32 },
+  { id: "4", label: "Sparkling Type IV", preset: "ShinyEffect_Color06_PM.asset", tint: "#ffb04d", emissive: "#ff9c3d", emissiveIntensity: 0.34 },
+  { id: "5", label: "Sparkling Type V", preset: "ShinyEffect_Color02_PM.asset", tint: "#6ee6a7", emissive: "#66eaa8", emissiveIntensity: 0.3 },
+  { id: "6", label: "Sparkling Type VI", preset: "ShinyEffect_Red_Purple_PM.asset", tint: "#d34a9b", emissive: "#ff3c89", emissiveIntensity: 0.38 },
+  { id: "7", label: "Sparkling Type VII", preset: "ShinyEffect_Color01_PM.asset", tint: "#ff5f65", emissive: "#ff7c70", emissiveIntensity: 0.32 },
+  { id: "8", label: "Sparkling Type VIII", preset: "ShinyEffect_Color08_PM.asset", tint: "#ffdc54", emissive: "#ffe37b", emissiveIntensity: 0.34 },
+  { id: "9", label: "Sparkling Type IX", preset: "ShinyEffect_Color09_PinkBlue_PM.asset", tint: "#8c83ff", emissive: "#c493ff", emissiveIntensity: 0.35 },
+  { id: "10", label: "Sparkling Type X", preset: "ShinyEffect_cyan_PM.asset", tint: "#50e9e7", emissive: "#66ffff", emissiveIntensity: 0.36 },
+  { id: "11", label: "Dazzling Sparkling", preset: "White_Shiny_PM.asset", filter: "none" },
+  { id: "12", label: "Shadow Sparkling", preset: "Black_Shiny_PM.asset", filter: "none" },
 ]);
 
 function rarityShowcaseVariants(entry) {
@@ -58,9 +58,16 @@ function rarityShowcaseVariants(entry) {
     // The packed moving media is the verified appearance for every current
     // form, including Prismana. Keep the unreliable GLB out of this selector
     // until a textured per-style export is available.
+    model: entry.model,
     video: entry.video,
     video_layout: entry.video_layout,
-    appearance: style.filter && style.filter !== "none" ? { filter: style.filter } : null,
+    appearance: style.preset ? {
+      preset: style.preset,
+      tint: style.tint,
+      emissive: style.emissive,
+      emissiveIntensity: style.emissiveIntensity,
+      filter: style.filter,
+    } : null,
   }));
 }
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
@@ -6942,9 +6949,11 @@ function renderCatalogPreview(options = {}) {
     const extractedShowcaseVariants = Array.isArray(selected.showcase_variants)
       ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
       : [];
+    const generatedShowcaseVariants = rarityShowcaseVariants(selected);
+    const extractedIds = new Set(extractedShowcaseVariants.map((candidate) => String(candidate.rarity_id ?? candidate.id ?? "")));
     const showcaseVariants = extractedShowcaseVariants.length > 1
-      ? extractedShowcaseVariants
-      : rarityShowcaseVariants(selected);
+      ? extractedShowcaseVariants.concat(generatedShowcaseVariants.filter((candidate) => !extractedIds.has(String(candidate.rarity_id ?? candidate.id ?? ""))))
+      : generatedShowcaseVariants;
     if (showcaseVariants.length > 1) {
       addArtworkMenu("Rarity / appearance", createArtworkSelect({
         label: "Choose artwork variant",
