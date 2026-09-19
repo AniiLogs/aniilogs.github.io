@@ -6850,7 +6850,10 @@ function renderCatalogPreview(options = {}) {
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
   if (view === "aniilog" && selected.model && !selected.showcase_media) {
-    selected.showcase_media = rarityShowcaseVariants(selected)[0] || null;
+    const extracted = Array.isArray(selected.showcase_variants)
+      ? selected.showcase_variants.filter((candidate) => candidate && (candidate.model || candidate.video))
+      : [];
+    selected.showcase_media = extracted[0] || rarityShowcaseVariants(selected)[0] || null;
   }
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
