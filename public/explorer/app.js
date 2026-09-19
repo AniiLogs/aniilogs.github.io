@@ -40,16 +40,16 @@ const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1
 // reusing the Common material for every menu choice.
 const ANIIMO_RARITY_STYLES = Object.freeze([
   { id: "0", label: "Common", filter: "none", preset: "common" },
-  { id: "1", label: "Sparkling Type I", preset: "ShinyEffect_Color01_pink_PM.asset", tint: "#ef7bd3", emissive: "#ff8fe7", emissiveIntensity: 0.34 },
-  { id: "2", label: "Sparkling Type II", preset: "ShinyEffect_Color13_PM.asset", tint: "#6fb2ff", emissive: "#6db9ff", emissiveIntensity: 0.3 },
-  { id: "3", label: "Sparkling Type III", preset: "ShinyEffect_Color14_PM.asset", tint: "#b78aff", emissive: "#c08dff", emissiveIntensity: 0.32 },
-  { id: "4", label: "Sparkling Type IV", preset: "ShinyEffect_Color06_PM.asset", tint: "#ffb04d", emissive: "#ff9c3d", emissiveIntensity: 0.34 },
-  { id: "5", label: "Sparkling Type V", preset: "ShinyEffect_Color02_PM.asset", tint: "#6ee6a7", emissive: "#66eaa8", emissiveIntensity: 0.3 },
-  { id: "6", label: "Sparkling Type VI", preset: "ShinyEffect_Red_Purple_PM.asset", tint: "#d34a9b", emissive: "#ff3c89", emissiveIntensity: 0.38 },
-  { id: "7", label: "Sparkling Type VII", preset: "ShinyEffect_Color01_PM.asset", tint: "#ff5f65", emissive: "#ff7c70", emissiveIntensity: 0.32 },
-  { id: "8", label: "Sparkling Type VIII", preset: "ShinyEffect_Color08_PM.asset", tint: "#ffdc54", emissive: "#ffe37b", emissiveIntensity: 0.34 },
-  { id: "9", label: "Sparkling Type IX", preset: "ShinyEffect_Color09_PinkBlue_PM.asset", tint: "#8c83ff", emissive: "#c493ff", emissiveIntensity: 0.35 },
-  { id: "10", label: "Sparkling Type X", preset: "ShinyEffect_cyan_PM.asset", tint: "#50e9e7", emissive: "#66ffff", emissiveIntensity: 0.36 },
+  { id: "1", label: "Sparkling Type I", preset: "ShinyEffect_Color01_pink_PM.asset", tint: "#ef7bd3", emissive: "#ff8fe7", emissiveIntensity: 0.34, palette: ["#530220", "#676c02", "#206772", "#02305d", "#720220", "#627202", "#905d72", "#8a0240"] },
+  { id: "2", label: "Sparkling Type II", preset: "ShinyEffect_Color13_PM.asset", tint: "#6fb2ff", emissive: "#6db9ff", emissiveIntensity: 0.3, palette: ["#6700c8", "#5959fc", "#c90940", "#fcc909", "#4000c8", "#595900", "#902267"] },
+  { id: "3", label: "Sparkling Type III", preset: "ShinyEffect_Color14_PM.asset", tint: "#b78aff", emissive: "#c08dff", emissiveIntensity: 0.32, palette: ["#d40050", "#770064", "#226700", "#c81960", "#00c879", "#640064", "#2267d4", "#005077"] },
+  { id: "4", label: "Sparkling Type IV", preset: "ShinyEffect_Color06_PM.asset", tint: "#ffb04d", emissive: "#ff9c3d", emissiveIntensity: 0.34, palette: ["#5b01f0", "#7f5b01", "#f07f29", "#015077", "#7503f0", "#707503", "#2074d6", "#03a08f"] },
+  { id: "5", label: "Sparkling Type V", preset: "ShinyEffect_Color02_PM.asset", tint: "#6ee6a7", emissive: "#66eaa8", emissiveIntensity: 0.3, palette: ["#e97e09", "#40ff0b", "#0d40ff", "#0b0d40", "#ff0b0d", "#40ff0b", "#0d4017", "#fe0f40"] },
+  { id: "6", label: "Sparkling Type VI", preset: "ShinyEffect_Red_Purple_PM.asset", tint: "#d34a9b", emissive: "#ff3c89", emissiveIntensity: 0.38, palette: ["#5b01f0", "#7f5b01", "#f07f29", "#015077", "#75eb01", "#407503", "#0040d6", "#03a08f"] },
+  { id: "7", label: "Sparkling Type VII", preset: "ShinyEffect_Color01_PM.asset", tint: "#ff5f65", emissive: "#ff7c70", emissiveIntensity: 0.32, palette: ["#720200", "#407202", "#004072", "#020040", "#720200", "#407202", "#004072", "#120740"] },
+  { id: "8", label: "Sparkling Type VIII", preset: "ShinyEffect_Color08_PM.asset", tint: "#ffdc54", emissive: "#ffe37b", emissiveIntensity: 0.34, palette: ["#a7c909", "#40a7c9", "#0940a7", "#c90940", "#ee02f0", "#7fee02", "#f07fee", "#02f07f"] },
+  { id: "9", label: "Sparkling Type IX", preset: "ShinyEffect_Color09_PinkBlue_PM.asset", tint: "#8c83ff", emissive: "#c493ff", emissiveIntensity: 0.35, palette: ["#ff0340", "#77ff03", "#9078ff", "#038077", "#00b0f8", "#7f00b0", "#f87f00", "#b0f87f"] },
+  { id: "10", label: "Sparkling Type X", preset: "ShinyEffect_cyan_PM.asset", tint: "#50e9e7", emissive: "#66ffff", emissiveIntensity: 0.36, palette: ["#e90a0b", "#40f2ff", "#0f40ff", "#530e40", "#00fc4f", "#6b00fc", "#1f6e00", "#fc7f6f"] },
   // The client material presets are white/black base passes with their own
   // bloom. These fallback colors keep the moving capture visibly distinct
   // when an exact per-form Dazzling/Shadow GLB is not available.
@@ -81,6 +81,7 @@ function rarityShowcaseVariants(entry) {
       tint: style.tint,
       emissive: style.emissive,
       emissiveIntensity: style.emissiveIntensity,
+      palette: style.palette,
       filter: style.filter,
     } : null,
   }));
@@ -5359,7 +5360,19 @@ function attachPackedAniimoBackdrop(record, entry) {
     uniform vec3 u_tint;
     uniform vec3 u_emissive;
     uniform float u_emissiveIntensity;
+    uniform vec3 u_palette[8];
+    uniform float u_paletteEnabled;
     varying vec2 v_uv;
+    vec3 paletteColor(float value) {
+      float scaled = clamp(value, 0.0, 0.9999) * 7.0;
+      if (scaled < 1.0) return mix(u_palette[0], u_palette[1], scaled);
+      if (scaled < 2.0) return mix(u_palette[1], u_palette[2], scaled - 1.0);
+      if (scaled < 3.0) return mix(u_palette[2], u_palette[3], scaled - 2.0);
+      if (scaled < 4.0) return mix(u_palette[3], u_palette[4], scaled - 3.0);
+      if (scaled < 5.0) return mix(u_palette[4], u_palette[5], scaled - 4.0);
+      if (scaled < 6.0) return mix(u_palette[5], u_palette[6], scaled - 5.0);
+      return mix(u_palette[6], u_palette[7], scaled - 6.0);
+    }
     void main() {
       vec3 color = texture2D(u_video, vec2(v_uv.x, 0.5 + v_uv.y * 0.5)).rgb;
       vec3 mask = texture2D(u_video, vec2(v_uv.x, v_uv.y * 0.5)).rgb;
@@ -5369,8 +5382,13 @@ function attachPackedAniimoBackdrop(record, entry) {
       // dark forms, so use luminance as the shared value and keep a small
       // floor for the game's glowing material pass.
       float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-      vec3 tinted = u_tint * max(luminance, 0.045) * 1.34;
-      color = mix(color, mix(vec3(luminance), tinted, 0.82), 0.76);
+      if (u_paletteEnabled > 0.5) {
+        vec3 mapped = paletteColor(luminance);
+        color = mix(color, mapped * (0.35 + luminance * 1.2), 0.82);
+      } else {
+        vec3 tinted = u_tint * max(luminance, 0.045) * 1.34;
+        color = mix(color, mix(vec3(luminance), tinted, 0.82), 0.76);
+      }
       color += u_emissive * u_emissiveIntensity * (0.22 + luminance * 0.6);
       gl_FragColor = vec4(color * alpha, alpha);
     }
@@ -5406,9 +5424,18 @@ function attachPackedAniimoBackdrop(record, entry) {
   const appearance = showcaseMedia.appearance || {};
   const tint = hexColorRgb(appearance.tint || "#ffffff").map((channel) => channel / 255);
   const emissive = hexColorRgb(appearance.emissive || appearance.tint || "#000000").map((channel) => channel / 255);
+  const paletteSource = Array.isArray(appearance.palette) && appearance.palette.length
+    ? appearance.palette
+    : [];
+  const paletteFallback = appearance.tint || "#ffffff";
+  const palette = Array.from({ length: 8 }, (_, index) => hexColorRgb(
+    paletteSource[index] || paletteSource[paletteSource.length - 1] || paletteFallback,
+  ).map((channel) => channel / 255));
   gl.uniform3fv(gl.getUniformLocation(program, "u_tint"), new Float32Array(tint));
   gl.uniform3fv(gl.getUniformLocation(program, "u_emissive"), new Float32Array(emissive));
   gl.uniform1f(gl.getUniformLocation(program, "u_emissiveIntensity"), Number(appearance.emissiveIntensity || 0));
+  gl.uniform3fv(gl.getUniformLocation(program, "u_palette"), new Float32Array(palette.flat()));
+  gl.uniform1f(gl.getUniformLocation(program, "u_paletteEnabled"), paletteSource.length ? 1 : 0);
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
 

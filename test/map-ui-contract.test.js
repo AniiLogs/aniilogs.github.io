@@ -149,6 +149,12 @@ test("Aniimo rarity selector preserves the complete client preset table", () => 
   assert.match(explorer, /rarity-manifest\.remote\.json/u);
   assert.match(explorer, /client_rarity_manifest/u);
   assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
+  assert.match(explorer, /paletteColor\(float value\)/u);
+  assert.match(explorer, /uniform vec3 u_palette\[8\]/u);
+  assert.match(explorer, /u_paletteEnabled/u);
+  for (const color of ["#530220", "#d40050", "#a7c909", "#e90a0b"]) {
+    assert.match(explorer, new RegExp(color, "u"));
+  }
 });
 
 test("core skills swap in place with a reduced-motion safe comparison", () => {
