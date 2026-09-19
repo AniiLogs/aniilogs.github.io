@@ -5257,7 +5257,18 @@ function attachPackedAniimoBackdrop(record, entry) {
         contentUrl(showcaseMedia.model),
         showcaseMedia.appearance || {},
       ))
-      .catch(() => {});
+      .catch(() => {
+        // Keep the showcase usable when a private GLB is unavailable or a
+        // browser cannot decode it. The packed game capture is still a
+        // verified moving representation of the same form and style.
+        record.querySelector(".catalog-aniimo-model-canvas")?.remove();
+        if (showcaseMedia.video) {
+          attachPackedAniimoBackdrop(record, {
+            ...entry,
+            showcase_media: { ...showcaseMedia, model: null },
+          });
+        }
+      });
     return;
   }
   if (!showcaseMedia.video || reduceMotion.matches) return;
