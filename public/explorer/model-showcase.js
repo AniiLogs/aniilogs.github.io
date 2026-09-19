@@ -63,7 +63,7 @@ export function attachModelShowcase(record, source, appearance = {}) {
     renderer.render(scene, camera);
   }
 
-  new GLTFLoader().load(
+  const loadPromise = new Promise((resolve, reject) => new GLTFLoader().load(
     source,
     (gltf) => {
       if (disposed) return;
@@ -101,13 +101,15 @@ export function attachModelShowcase(record, source, appearance = {}) {
         const preferred = gltf.animations.find((clip) => /Idle/i.test(clip.name)) || gltf.animations[0];
         mixer.clipAction(preferred).play();
       }
+      resolve();
     },
     undefined,
-    () => {
+    (error) => {
       canvas.classList.add("is-load-error");
       canvas.setAttribute("aria-label", "Aniimo model artwork unavailable");
+      reject(error || new Error("Unable to load Aniimo model"));
     },
-  );
+  ));
 
   const observer = new ResizeObserver(resize);
   observer.observe(record);
@@ -116,4 +118,5 @@ export function attachModelShowcase(record, source, appearance = {}) {
     observer.disconnect();
     mixer?.stopAllAction();
   };
+  return loadPromise;
 }
