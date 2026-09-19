@@ -5526,6 +5526,24 @@ button.catalog-item-reference {
   color: var(--text);
 }
 
+/* Keep native select popups readable in every theme. Chromium can otherwise
+   fall back to a light OS menu even when the page itself is dark. */
+select,
+select option {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: var(--panel, #121d21);
+  color: var(--text, #f4f4e9);
+}
+
+select option:checked,
+select option:hover {
+  background-color: color-mix(in srgb, var(--accent-strong, #2d9d82) 72%, var(--panel, #121d21));
+  color: var(--text, #f4f4e9);
+}
+
 .catalog-rv-upgrade-costs {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
 }
