@@ -58,7 +58,11 @@ function rarityShowcaseVariants(entry) {
     // The packed moving media is the verified appearance for every current
     // form, including Prismana. Keep the unreliable GLB out of this selector
     // until a textured per-style export is available.
-    model: entry.model,
+    // Numeric sparkling styles are authored as material/preset changes in the
+    // client. Use the packed moving source so the WebGL appearance pass can
+    // apply those presets; exact extracted GLBs remain available as their own
+    // model-backed variants.
+    model: style.id === "0" ? entry.model : null,
     video: entry.video,
     video_layout: entry.video_layout,
     appearance: style.preset ? {
