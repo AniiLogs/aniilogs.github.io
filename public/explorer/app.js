@@ -28,6 +28,41 @@ const GITHUB_COMMITS_URL = "https://api.github.com/repos/AniiLogs/aniilogs.githu
 const CHANGELOG_INTERNAL_MARKER_RE = /\[(?:skip changelog|internal)\]/i;
 const CHANGELOG_PUBLIC_ENTRY_LIMIT = 12;
 const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1";
+
+// These IDs and labels come from the current client's pet_shiny_style_data
+// table. The model export is shared between styles, so the selected style is
+// applied as a material appearance in model-showcase.js rather than silently
+// reusing the Common material for every menu choice.
+const ANIIMO_RARITY_STYLES = Object.freeze([
+  { id: "0", label: "Common" },
+  { id: "1", label: "Sparkling Type I", tint: "#f4a7d8", emissive: "#d66bb8" },
+  { id: "2", label: "Sparkling Type II", tint: "#72d4ef", emissive: "#39a9d1" },
+  { id: "3", label: "Sparkling Type III", tint: "#f3c66f", emissive: "#e99042" },
+  { id: "4", label: "Sparkling Type IV", tint: "#d0a2f2", emissive: "#9a61d6" },
+  { id: "5", label: "Sparkling Type V", tint: "#8fd3a7", emissive: "#4faf78" },
+  { id: "6", label: "Sparkling Type VI", tint: "#f08c72", emissive: "#db5a46" },
+  { id: "7", label: "Sparkling Type VII", tint: "#70a9ef", emissive: "#427bd1" },
+  { id: "8", label: "Sparkling Type VIII", tint: "#f0d16f", emissive: "#d49e35" },
+  { id: "9", label: "Sparkling Type IX", tint: "#d895ef", emissive: "#a95acb" },
+  { id: "10", label: "Sparkling Type X", tint: "#78e5d4", emissive: "#38bda8" },
+  { id: "11", label: "Dazzling Sparkling", tint: "#d9e8ff", emissive: "#8db7ff", emissiveIntensity: 0.32 },
+  { id: "12", label: "Shadow Sparkling", tint: "#733d9f", emissive: "#4b1e73", emissiveIntensity: 0.28 },
+]);
+
+function rarityShowcaseVariants(entry) {
+  if (!entry?.model) return [];
+  return ANIIMO_RARITY_STYLES.map((style) => ({
+    id: `rarity-${style.id}`,
+    rarity_id: style.id,
+    label: style.label,
+    model: entry.model,
+    appearance: style.tint ? {
+      tint: style.tint,
+      emissive: style.emissive,
+      emissiveIntensity: style.emissiveIntensity,
+    } : null,
+  }));
+}
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
 const LOCAL_TRACKING_STORAGE_KEY = "aniilogs:explorer:tracking:v1";
@@ -5206,7 +5241,11 @@ function attachPackedAniimoBackdrop(record, entry) {
   const showcaseMedia = entry.showcase_media || entry;
   if (showcaseMedia.model) {
     import("./model-showcase.js")
-      .then(({ attachModelShowcase }) => attachModelShowcase(record, contentUrl(showcaseMedia.model)))
+      .then(({ attachModelShowcase }) => attachModelShowcase(
+        record,
+        contentUrl(showcaseMedia.model),
+        showcaseMedia.appearance || {},
+      ))
       .catch(() => {});
     return;
   }
@@ -6893,18 +6932,30 @@ function renderCatalogPreview(options = {}) {
         onChange: () => {},
       }));
     }
-    const showcaseVariants = Array.isArray(selected.showcase_variants)
+    const extractedShowcaseVariants = Array.isArray(selected.showcase_variants)
       ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
       : [];
+    const showcaseVariants = extractedShowcaseVariants.length > 1
+      ? extractedShowcaseVariants
+      : rarityShowcaseVariants(selected);
     if (showcaseVariants.length > 1) {
       addArtworkMenu("Rarity / appearance", createArtworkSelect({
         label: "Choose artwork variant",
-        value: Math.max(0, showcaseVariants.indexOf(selected.showcase_media)),
+        value: Math.max(0, showcaseVariants.findIndex((candidate) => (
+          candidate.id === selected.showcase_media?.id
+          || candidate.rarity_id === selected.showcase_media?.rarity_id
+          || candidate.label === state.catalogSelection.rarity
+        ))),
         options: showcaseVariants.map((candidate, index) => ({ value: index, label: candidate.label || candidate.name || candidate.model_label || `Artwork ${index + 1}` })),
-        onChange: (value) => { selected.showcase_media = showcaseVariants[Number(value)] || null; renderCatalogPreview(); },
+        onChange: (value) => {
+          const variant = showcaseVariants[Number(value)] || showcaseVariants[0];
+          selected.showcase_media = variant || null;
+          state.catalogSelection.rarity = variant?.label || "Common";
+          renderCatalogPreview();
+        },
       }));
     } else {
-      const rarityOptions = ["Common", ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((roman) => `Sparkling Type ${roman}`), "Dazzling Sparkling", "Shadow Sparkling"];
+      const rarityOptions = ANIIMO_RARITY_STYLES.map((style) => style.label);
       addArtworkMenu("Rarity", createArtworkSelect({
         label: "Choose Aniimo rarity",
         value: state.catalogSelection.rarity || rarityOptions[0],

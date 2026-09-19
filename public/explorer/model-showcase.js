@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 
-export function attachModelShowcase(record, source) {
+export function attachModelShowcase(record, source, appearance = {}) {
   const canvas = document.createElement("canvas");
   canvas.className = "catalog-aniimo-model-canvas";
   canvas.setAttribute("aria-label", "Animated Aniimo model artwork");
@@ -73,7 +73,25 @@ export function attachModelShowcase(record, source) {
         object.frustumCulled = false;
         object.castShadow = false;
         object.receiveShadow = false;
-        if (object.material) object.material.side = THREE.DoubleSide;
+        if (object.material) {
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          object.material = materials.map((material) => {
+            const clone = material.clone();
+            clone.side = THREE.DoubleSide;
+            if (appearance.tint && clone.color) {
+              // The extracted Scorchhowl showcase mesh has a neutral base
+              // material.  Apply the game's rarity style color at render time
+              // so the style selector changes the actual artwork.
+              clone.color.set(appearance.tint);
+            }
+            if (appearance.emissive && clone.emissive) {
+              clone.emissive.set(appearance.emissive);
+              clone.emissiveIntensity = Number(appearance.emissiveIntensity || 0.18);
+            }
+            return clone;
+          });
+          if (!Array.isArray(object.material)) object.material = object.material[0];
+        }
       });
       frameModel(model);
       scene.add(model);
