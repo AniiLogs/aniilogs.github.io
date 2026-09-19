@@ -45,8 +45,11 @@ const ANIIMO_RARITY_STYLES = Object.freeze([
   { id: "8", label: "Sparkling Type VIII", preset: "ShinyEffect_Color08_PM.asset", tint: "#ffdc54", emissive: "#ffe37b", emissiveIntensity: 0.34 },
   { id: "9", label: "Sparkling Type IX", preset: "ShinyEffect_Color09_PinkBlue_PM.asset", tint: "#8c83ff", emissive: "#c493ff", emissiveIntensity: 0.35 },
   { id: "10", label: "Sparkling Type X", preset: "ShinyEffect_cyan_PM.asset", tint: "#50e9e7", emissive: "#66ffff", emissiveIntensity: 0.36 },
-  { id: "11", label: "Dazzling Sparkling", preset: "White_Shiny_PM.asset", filter: "none" },
-  { id: "12", label: "Shadow Sparkling", preset: "Black_Shiny_PM.asset", filter: "none" },
+  // The client material presets are white/black base passes with their own
+  // bloom. These fallback colors keep the moving capture visibly distinct
+  // when an exact per-form Dazzling/Shadow GLB is not available.
+  { id: "11", label: "Dazzling Sparkling", preset: "White_Shiny_PM.asset", tint: "#c4e5ff", emissive: "#f4fbff", emissiveIntensity: 0.28 },
+  { id: "12", label: "Shadow Sparkling", preset: "Black_Shiny_PM.asset", tint: "#37204f", emissive: "#9d5cff", emissiveIntensity: 0.22 },
 ]);
 
 function rarityShowcaseVariants(entry) {
