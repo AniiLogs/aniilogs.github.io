@@ -75,6 +75,18 @@ export function attachModelShowcase(record, source, appearance = {}) {
     material.needsUpdate = true;
   }
 
+  function rendererAppearance(object) {
+    const config = appearance.rendererConfig;
+    if (!config || typeof config !== "object") return null;
+    let current = object;
+    while (current) {
+      const name = String(current.name || "").replace(/_\d+$/, "");
+      if (Object.prototype.hasOwnProperty.call(config, name)) return config[name];
+      current = current.parent;
+    }
+    return null;
+  }
+
   function resize() {
     const width = Math.max(1, canvas.clientWidth || window.innerWidth);
     const height = Math.max(1, canvas.clientHeight || window.innerHeight);
@@ -118,6 +130,12 @@ export function attachModelShowcase(record, source, appearance = {}) {
       model = gltf.scene;
       model.traverse((object) => {
         if (!object.isMesh) return;
+        const rendererStyle = rendererAppearance(object);
+        if (appearance.rendererConfig && !rendererStyle) return;
+        if (rendererStyle?.enabled === false) {
+          object.visible = false;
+          return;
+        }
         object.frustumCulled = false;
         object.castShadow = false;
         object.receiveShadow = false;

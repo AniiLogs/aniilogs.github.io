@@ -10,6 +10,7 @@ const landingHtml = await readFile(new URL("../public/index.html", import.meta.u
 const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
 const themeShell = await readFile(new URL("../public/theme-shell.js", import.meta.url), "utf8");
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
+const modelShowcase = await readFile(new URL("../public/explorer/model-showcase.js", import.meta.url), "utf8");
 
 test("procedural and withheld maps stay out of the public map navigator", () => {
   assert.match(explorer, /HIDDEN_MAP_IDS = new Set\(\["egg-heist", "egg-heist-team"\]\)/u);
@@ -139,6 +140,9 @@ test("Aniimo rarity selector loads extracted appearances only from private conte
   assert.match(explorer, /paletteColor\(float value\)/u);
   assert.match(explorer, /uniform vec3 u_palette\[8\]/u);
   assert.match(explorer, /u_paletteEnabled/u);
+  assert.match(modelShowcase, /appearance\.rendererConfig/u);
+  assert.match(modelShowcase, /rendererStyle\?\.enabled === false/u);
+  assert.match(modelShowcase, /if \(appearance\.rendererConfig && !rendererStyle\) return;/u);
   assert.doesNotMatch(explorer, /ShinyEffect_Color\d+[^\n]*\.asset/u);
 });
 
@@ -371,7 +375,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20260919-build3535596-pawney-rarity-r51"/u);
+  assert.match(explorerConfig, /contentRevision = "20260920-build3535596-pawney-authoritative-r52"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
