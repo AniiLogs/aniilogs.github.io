@@ -146,13 +146,11 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
-test("game-authored full-frame captures bypass the legacy packed-mask shader", () => {
-  assert.match(explorer, /model: appearance\.video \? null : \(appearance\.model \|\| entry\.model\)/u);
-  assert.match(explorer, /video: appearance\.video \|\| entry\.video/u);
-  assert.match(explorer, /video_layout: appearance\.video_layout \|\| entry\.video_layout/u);
-  assert.match(explorer, /showcaseMedia\.video_layout === "full-frame"/u);
-  assert.match(explorer, /catalog-aniimo-video-backdrop--full-frame/u);
-  assert.match(explorer, /record\.append\(video\);[\s\S]*?video\.play\(\)\.catch\(\(\) => \{\}\);[\s\S]*?return;/u);
+test("public Aniimo artwork stays on the verified Pet Manual videos", () => {
+  const body = explorer.slice(explorer.indexOf("function attachPackedAniimoBackdrop("), explorer.indexOf("function renderEvolutionSection("));
+  assert.match(body, /const showcaseMedia = entry;/u);
+  assert.doesNotMatch(body, /attachModelShowcase/u);
+  assert.match(explorer, /if \(view === "aniilog"\) selected\.showcase_media = null;/u);
 });
 
 test("mobile artwork mode takes over the viewport and hides the Aniimo index", () => {
@@ -407,7 +405,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20260921-build3535596-pawney-game-authored-r58"/u);
+  assert.match(explorerConfig, /contentRevision = "20260921-build3535596-stable-petmanual-video-r59"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

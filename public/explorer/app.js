@@ -5336,37 +5336,10 @@ function renderAniilogBossVariants(bossVariants) {
 
 function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const showcaseMedia = entry.showcase_media || entry;
-  if (showcaseMedia.model) {
-    // Start the packed capture immediately.  Private GLB exports are best
-    // effort (some Unity materials/animation bindings cannot be decoded by a
-    // browser); waiting for the importer before painting left the artwork
-    // pane empty for Prismana and sparkling selections.  The capture is the
-    // verified moving representation and is removed only after the GLB is
-    // actually attached successfully.
-    attachPackedAniimoBackdrop(record, {
-      ...entry,
-      showcase_media: { ...showcaseMedia, model: null },
-    });
-    import(`./model-showcase.js?v=${encodeURIComponent(CONTENT_REVISION || "latest")}`)
-      .then(({ attachModelShowcase }) => attachModelShowcase(
-        record,
-        contentUrl(showcaseMedia.model),
-        showcaseMedia.appearance || {},
-        contentUrl,
-      ))
-      .then(() => {
-        // Prefer the exact extracted model once it is ready, but never leave
-        // the record blank while it loads.
-        record.querySelector(".catalog-aniimo-video-backdrop")?.remove();
-        record.querySelector(".catalog-aniimo-video-source")?.remove();
-      })
-      .catch(() => {
-        // The packed capture remains in the record as the reliable fallback.
-        record.querySelector(".catalog-aniimo-model-canvas")?.remove();
-      });
-    return;
-  }
+  // The extracted Pet Manual video is the only verified public artwork
+  // source. Experimental model and rarity overrides remain private until the
+  // client-native runtime assets can be reproduced faithfully.
+  const showcaseMedia = entry;
   if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");
@@ -7092,13 +7065,7 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
-  if (view === "aniilog" && (selected.model || selected.video)) {
-    const variants = mergedRarityShowcaseVariants(selected);
-    selected.showcase_media = variants.find((candidate) => candidate.label === state.catalogSelection.rarity)
-      || selected.showcase_media
-      || variants[0]
-      || null;
-  }
+  if (view === "aniilog") selected.showcase_media = null;
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
   if (view === "aniilog") {
@@ -7182,35 +7149,6 @@ function renderCatalogPreview(options = {}) {
         disabled: true,
         options: [{ value: selected.id, label: selected.form_label || selected.form_name || "Current form" }],
         onChange: () => {},
-      }));
-    }
-    const showcaseVariants = mergedRarityShowcaseVariants(selected);
-    if (showcaseVariants.length > 1) {
-      addArtworkMenu("Rarity / appearance", createArtworkSelect({
-        label: "Choose artwork variant",
-        value: Math.max(0, showcaseVariants.findIndex((candidate) => (
-          candidate.id === selected.showcase_media?.id
-          || candidate.rarity_id === selected.showcase_media?.rarity_id
-          || candidate.label === state.catalogSelection.rarity
-        ))),
-        options: showcaseVariants.map((candidate, index) => ({ value: index, label: candidate.label || candidate.name || candidate.model_label || `Artwork ${index + 1}` })),
-        onChange: (value) => {
-          const variant = showcaseVariants[Number(value)] || showcaseVariants[0];
-          selected.showcase_media = variant || null;
-          state.catalogSelection.rarity = variant?.label || "Common";
-          renderCatalogPreview();
-        },
-      }));
-    } else {
-      const rarityOptions = ANIIMO_RARITY_STYLES.map((style) => style.label);
-      addArtworkMenu("Rarity", createArtworkSelect({
-        label: "Choose Aniimo rarity",
-        value: state.catalogSelection.rarity || rarityOptions[0],
-        options: rarityOptions.map((label) => ({ value: label, label })),
-        onChange: (value) => {
-          state.catalogSelection.rarity = value;
-          renderCatalogPreview();
-        },
       }));
     }
     if (artworkControls.children.length) {
