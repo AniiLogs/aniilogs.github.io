@@ -12,6 +12,15 @@ const themeShell = await readFile(new URL("../public/theme-shell.js", import.met
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
 const modelShowcase = await readFile(new URL("../public/explorer/model-showcase.js", import.meta.url), "utf8");
 
+test("prefab-scoped appearance cannot leak to a different form", () => {
+  const body = explorer.slice(explorer.indexOf('function appearanceForForm('), explorer.indexOf('function rarityShowcaseVariants('));
+  const select = new Function(`${body}; return appearanceForForm;`)();
+  const appearance = { mappingPrefab: 'P_Parmon_fixtureA.prefab', rendererConfig: { fixture: {} } };
+  assert.equal(select(appearance, 'fixtureA'), appearance);
+  assert.deepEqual(select(appearance, 'fixtureB'), {});
+  assert.deepEqual(select(null, 'fixtureB'), {});
+});
+
 test("procedural and withheld maps stay out of the public map navigator", () => {
   assert.match(explorer, /HIDDEN_MAP_IDS = new Set\(\["egg-heist", "egg-heist-team"\]\)/u);
   assert.match(explorer, /!String\(map\.id \|\| ""\)\.startsWith\("procedural-"\)/u);
@@ -125,6 +134,15 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
+test("game-authored full-frame captures bypass the legacy packed-mask shader", () => {
+  assert.match(explorer, /model: appearance\.video \? null : \(appearance\.model \|\| entry\.model\)/u);
+  assert.match(explorer, /video: appearance\.video \|\| entry\.video/u);
+  assert.match(explorer, /video_layout: appearance\.video_layout \|\| entry\.video_layout/u);
+  assert.match(explorer, /showcaseMedia\.video_layout === "full-frame"/u);
+  assert.match(explorer, /catalog-aniimo-video-backdrop--full-frame/u);
+  assert.match(explorer, /record\.append\(video\);[\s\S]*?video\.play\(\)\.catch\(\(\) => \{\}\);[\s\S]*?return;/u);
+});
+
 test("mobile artwork mode takes over the viewport and hides the Aniimo index", () => {
   assert.match(explorerStyles, /@media \(max-width: 760px\) \{[\s\S]*body\.aniilog-artwork-mode \.catalog-workspace \{[\s\S]*position: fixed;[\s\S]*inset: 0;[\s\S]*body\.aniilog-artwork-mode \.catalog-sidebar-content \{[\s\S]*display: none !important;/u);
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
@@ -142,7 +160,9 @@ test("Aniimo rarity selector loads extracted appearances only from private conte
   assert.match(explorer, /u_paletteEnabled/u);
   assert.match(modelShowcase, /appearance\.rendererConfig/u);
   assert.match(modelShowcase, /rendererStyle\?\.enabled === false/u);
-  assert.match(modelShowcase, /if \(appearance\.rendererConfig && !rendererStyle\) return;/u);
+  assert.match(modelShowcase, /if \(appearance\.rendererConfig && !rendererStyle\) \{[\s\S]*object\.visible = false;/u);
+  assert.match(modelShowcase, /materialIsAuthoredForStyle/u);
+  assert.match(modelShowcase, /clone\.visible = false;/u);
   assert.doesNotMatch(explorer, /ShinyEffect_Color\d+[^\n]*\.asset/u);
 });
 
@@ -375,7 +395,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20260920-build3535596-pawney-mask-remap-r53"/u);
+  assert.match(explorerConfig, /contentRevision = "20260920-build3535596-pawney-game-authored-r57"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

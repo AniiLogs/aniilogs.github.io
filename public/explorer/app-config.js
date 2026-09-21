@@ -5,7 +5,7 @@
   const contentBaseUrl = isLocalPreview
     ? "http://127.0.0.1:8788/releases/3535596"
     : "https://aniilogs-api.pages.dev/api/content/releases/3535596";
-  const contentRevision = "20260920-build3535596-pawney-mask-remap-r53";
+  const contentRevision = "20260920-build3535596-pawney-game-authored-r57";
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,

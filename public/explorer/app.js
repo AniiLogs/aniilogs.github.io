@@ -64,16 +64,23 @@ function normalizedRarityStyleId(value) {
   return match ? match[1] : id;
 }
 
+function appearanceForForm(appearance, formId) {
+  if (!appearance) return {};
+  const prefab = appearance.mappingPrefab;
+  if (prefab && prefab !== `P_Parmon_${String(formId)}.prefab`) return {};
+  return appearance;
+}
+
 function rarityShowcaseVariants(entry) {
   if (!entry?.model && !entry?.video) return [];
   const manifest = state?.aniilogRarityManifest || {};
   const manifestStyles = new Map((manifest.rarity_ui_order || [])
     .map((style) => [normalizedRarityStyleId(style.id), style]));
   const formOverrides = manifest.form_appearance_overrides?.[String(entry.form_id)] || {};
-  return ANIIMO_RARITY_STYLES.map((style) => {
+  const variants = ANIIMO_RARITY_STYLES.map((style) => {
     const appearance = {
-      ...(manifestStyles.get(style.id)?.appearance || {}),
-      ...(formOverrides[style.id] || {}),
+      ...appearanceForForm(manifestStyles.get(style.id)?.appearance, entry.form_id),
+      ...appearanceForForm(formOverrides[style.id], entry.form_id),
     };
     return {
       id: `rarity-${style.id}`,
@@ -87,12 +94,39 @@ function rarityShowcaseVariants(entry) {
     // client. Use the packed moving source so the WebGL appearance pass can
     // apply those presets; exact extracted GLBs remain available as their own
     // model-backed variants.
-      model: entry.model,
-      video: entry.video,
-      video_layout: entry.video_layout,
+      model: appearance.video ? null : (appearance.model || entry.model),
+      video: appearance.video || entry.video,
+      video_layout: appearance.video_layout || entry.video_layout,
       appearance: Object.keys(appearance).length ? appearance : null,
     };
   });
+  return variants;
+}
+
+function mergedRarityShowcaseVariants(entry) {
+  const extracted = Array.isArray(entry?.showcase_variants)
+    ? entry.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
+    : [];
+  const generated = rarityShowcaseVariants(entry);
+  const extractedById = new Map(extracted.map((candidate) => [
+    normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? ""),
+    candidate,
+  ]));
+  const generatedIds = new Set(generated.map((candidate) => normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? "")));
+  return generated.map((candidate) => {
+    const key = normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? "");
+    const matching = extractedById.get(key);
+    if (!matching) return candidate;
+    return {
+      ...candidate,
+      ...matching,
+      model: candidate.model || matching.model,
+      appearance: {
+        ...(matching.appearance || {}),
+        ...(candidate.appearance || {}),
+      },
+    };
+  }).concat(extracted.filter((candidate) => !generatedIds.has(normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? ""))));
 }
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
@@ -142,6 +176,11 @@ const HIDDEN_MAP_IDS = new Set(["egg-heist", "egg-heist-team"]);
 const REQUESTED_WORKSPACE_VIEW = ENABLED_WORKSPACE_VIEWS.has(INITIAL_URL_PARAMS.get("view"))
   ? INITIAL_URL_PARAMS.get("view")
   : "map";
+const REQUESTED_ANIIMO_FORM_ID = /^\d+$/u.test(INITIAL_URL_PARAMS.get("aniimo") || "")
+  ? INITIAL_URL_PARAMS.get("aniimo")
+  : "";
+const REQUESTED_ANIIMO_RARITY = INITIAL_URL_PARAMS.get("rarity") || "";
+const REQUESTED_ANIIMO_ARTWORK = INITIAL_URL_PARAMS.get("artwork") === "1";
 const REQUESTED_SHARED_PIN_SELECTION = parseSharedPinSelection(INITIAL_URL_PARAMS.get(SHARED_PINS_PARAM));
 const REQUESTED_SHORT_SHARE_ID = SHORT_SHARE_CODE_PATTERN.test(INITIAL_URL_PARAMS.get(SHORT_SHARE_PARAM) || "")
   ? INITIAL_URL_PARAMS.get(SHORT_SHARE_PARAM)
@@ -430,8 +469,9 @@ const state = {
   },
   catalogStickyFrame: 0,
   catalogSelection: {
-    aniilog: "aniimo:1005100",
+    aniilog: REQUESTED_ANIIMO_FORM_ID ? `aniimo:${REQUESTED_ANIIMO_FORM_ID}` : "aniimo:1005100",
     itemlog: "item:4010132",
+    rarity: REQUESTED_ANIIMO_RARITY,
   },
   catalogCategory: {
     aniilog: "all",
@@ -443,7 +483,7 @@ const state = {
     tier: "all",
   },
   aniilogFiltersOpen: false,
-  aniilogShowcaseMode: false,
+  aniilogShowcaseMode: REQUESTED_ANIIMO_ARTWORK && REQUESTED_WORKSPACE_VIEW === "aniilog",
   aniilogFilterSectionsOpen: new Set(["classes"]),
   aniilogFilterScroll: 0,
   aniilogFilters: {
@@ -5300,6 +5340,7 @@ function attachPackedAniimoBackdrop(record, entry) {
         record,
         contentUrl(showcaseMedia.model),
         showcaseMedia.appearance || {},
+        contentUrl,
       ))
       .then(() => {
         // Prefer the exact extracted model once it is ready, but never leave
@@ -5326,6 +5367,19 @@ function attachPackedAniimoBackdrop(record, entry) {
   video.preload = "metadata";
   video.tabIndex = -1;
   video.setAttribute("aria-hidden", "true");
+
+  // New game-authored captures are ordinary full-frame videos from the
+  // Field Notes camera. They already contain the final materials, rarity
+  // effects, lighting and background, so display them directly and never run
+  // them through the legacy PetManual color/mask unpacking shader.
+  if (showcaseMedia.video_layout === "full-frame") {
+    video.className = "catalog-aniimo-video-backdrop catalog-aniimo-video-backdrop--full-frame";
+    if (showcaseMedia.appearance?.filter) video.style.filter = showcaseMedia.appearance.filter;
+    video.addEventListener("error", () => video.remove(), { once: true });
+    record.append(video);
+    video.play().catch(() => {});
+    return;
+  }
 
   const canvas = document.createElement("canvas");
   canvas.className = "catalog-aniimo-video-backdrop";
@@ -5370,6 +5424,7 @@ function attachPackedAniimoBackdrop(record, entry) {
     uniform float u_emissiveIntensity;
     uniform vec3 u_palette[8];
     uniform float u_paletteEnabled;
+    uniform float u_gameShinyEnabled;
     uniform float u_effectEnabled;
     uniform float u_channelRemapEnabled;
     uniform vec3 u_magentaTarget;
@@ -5389,6 +5444,17 @@ function attachPackedAniimoBackdrop(record, entry) {
       if (scaled < 6.0) return mix(u_palette[5], u_palette[6], scaled - 5.0);
       return mix(u_palette[6], u_palette[7], scaled - 6.0);
     }
+    float rgbHue(vec3 value) {
+      float high = max(value.r, max(value.g, value.b));
+      float low = min(value.r, min(value.g, value.b));
+      float chroma = high - low;
+      if (chroma < 0.0001) return 0.0;
+      float hue;
+      if (high == value.r) hue = mod((value.g - value.b) / chroma, 6.0);
+      else if (high == value.g) hue = ((value.b - value.r) / chroma) + 2.0;
+      else hue = ((value.r - value.g) / chroma) + 4.0;
+      return fract(hue / 6.0);
+    }
     void main() {
       vec3 color = texture2D(u_video, vec2(v_uv.x, 0.5 + v_uv.y * 0.5)).rgb;
       vec3 mask = texture2D(u_video, vec2(v_uv.x, v_uv.y * 0.5)).rgb;
@@ -5398,7 +5464,22 @@ function attachPackedAniimoBackdrop(record, entry) {
       // dark forms, so use luminance as the shared value and keep a small
       // floor for the game's glowing material pass.
       float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-      if (u_channelRemapEnabled > 0.5) {
+      if (u_gameShinyEnabled > 0.5) {
+        float high = max(color.r, max(color.g, color.b));
+        float low = min(color.r, min(color.g, color.b));
+        float chroma = high - low;
+        float materialMask = smoothstep(0.055, 0.24, chroma) * smoothstep(0.025, 0.16, high);
+        // The packed Common capture retains the animated material regions.
+        // Its hue is the stable per-pixel phase carrier; feed that phase into
+        // the exact game-authored RGB10A2 palette instead of using screen UV.
+        float phase = fract(rgbHue(color) + u_time * u_motion.x * 0.08);
+        vec3 mappedLinear = max(paletteColor(phase), vec3(0.0));
+        vec3 mapped = pow(mappedLinear, vec3(0.45454545));
+        float sourceValue = max(high, 0.08);
+        float breath = mix(u_breathing.x, u_breathing.y, 0.5 + 0.5 * sin(u_time * 2.0));
+        vec3 authored = mapped * (0.18 + sourceValue * 1.08) * max(breath, 0.35);
+        color = mix(color, authored, materialMask);
+      } else if (u_channelRemapEnabled > 0.5) {
         float magentaWeight = smoothstep(0.015, 0.24, min(color.r, color.b) - color.g);
         float cyanWeight = smoothstep(0.015, 0.24, min(color.g, color.b) - color.r);
         float highlightWeight = smoothstep(0.55, 0.96, luminance);
@@ -5453,18 +5534,23 @@ function attachPackedAniimoBackdrop(record, entry) {
   const effectEnabled = Object.keys(appearance).length > 0;
   const tint = hexColorRgb(appearance.tint || "#ffffff").map((channel) => channel / 255);
   const emissive = hexColorRgb(appearance.emissive || appearance.tint || "#000000").map((channel) => channel / 255);
-  const paletteSource = Array.isArray(appearance.palette) && appearance.palette.length
-    ? appearance.palette
+  const linearPaletteSource = Array.isArray(appearance.paletteLinear) && appearance.paletteLinear.length
+    ? appearance.paletteLinear
     : [];
+  const paletteSource = Array.isArray(appearance.palette) && appearance.palette.length ? appearance.palette : [];
   const paletteFallback = appearance.tint || "#ffffff";
-  const palette = Array.from({ length: 8 }, (_, index) => hexColorRgb(
-    paletteSource[index] || paletteSource[paletteSource.length - 1] || paletteFallback,
-  ).map((channel) => channel / 255));
+  const palette = Array.from({ length: 8 }, (_, index) => {
+    const linear = linearPaletteSource[index] || linearPaletteSource[linearPaletteSource.length - 1];
+    if (Array.isArray(linear)) return linear.slice(0, 3).map((channel) => Number(channel) || 0);
+    return hexColorRgb(paletteSource[index] || paletteSource[paletteSource.length - 1] || paletteFallback)
+      .map((channel) => channel / 255);
+  });
   gl.uniform3fv(gl.getUniformLocation(program, "u_tint"), new Float32Array(tint));
   gl.uniform3fv(gl.getUniformLocation(program, "u_emissive"), new Float32Array(emissive));
   gl.uniform1f(gl.getUniformLocation(program, "u_emissiveIntensity"), Number(appearance.emissiveIntensity || 0));
   gl.uniform3fv(gl.getUniformLocation(program, "u_palette"), new Float32Array(palette.flat()));
-  gl.uniform1f(gl.getUniformLocation(program, "u_paletteEnabled"), paletteSource.length ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(program, "u_paletteEnabled"), (linearPaletteSource.length || paletteSource.length) ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(program, "u_gameShinyEnabled"), appearance.gameShiny && linearPaletteSource.length ? 1 : 0);
   gl.uniform1f(gl.getUniformLocation(program, "u_effectEnabled"), effectEnabled ? 1 : 0);
   const channelRemap = appearance.channelRemap || null;
   gl.uniform1f(gl.getUniformLocation(program, "u_channelRemapEnabled"), channelRemap ? 1 : 0);
@@ -6993,11 +7079,12 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
-  if (view === "aniilog" && (selected.model || selected.video) && !selected.showcase_media) {
-    const extracted = Array.isArray(selected.showcase_variants)
-      ? selected.showcase_variants.filter((candidate) => candidate && (candidate.model || candidate.video))
-      : [];
-    selected.showcase_media = extracted[0] || rarityShowcaseVariants(selected)[0] || null;
+  if (view === "aniilog" && (selected.model || selected.video)) {
+    const variants = mergedRarityShowcaseVariants(selected);
+    selected.showcase_media = variants.find((candidate) => candidate.label === state.catalogSelection.rarity)
+      || selected.showcase_media
+      || variants[0]
+      || null;
   }
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
@@ -7037,6 +7124,7 @@ function renderCatalogPreview(options = {}) {
       const menu = document.createElement("div");
       menu.className = "catalog-artwork-select-menu";
       menu.setAttribute("role", "listbox");
+      menu.hidden = true;
       const close = () => {
         menu.hidden = true;
         wrapper.setAttribute("aria-expanded", "false");
@@ -7083,20 +7171,7 @@ function renderCatalogPreview(options = {}) {
         onChange: () => {},
       }));
     }
-    const extractedShowcaseVariants = Array.isArray(selected.showcase_variants)
-      ? selected.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
-      : [];
-    const generatedShowcaseVariants = rarityShowcaseVariants(selected);
-    const extractedById = new Map(extractedShowcaseVariants.map((candidate) => [
-      String(candidate.rarity_id ?? candidate.id ?? ""),
-      candidate,
-    ]));
-    const generatedIds = new Set(generatedShowcaseVariants.map((candidate) => String(candidate.rarity_id ?? candidate.id ?? "")));
-    const showcaseVariants = extractedShowcaseVariants.length > 1
-      ? generatedShowcaseVariants
-        .map((candidate) => extractedById.get(String(candidate.rarity_id ?? candidate.id ?? "")) || candidate)
-        .concat(extractedShowcaseVariants.filter((candidate) => !generatedIds.has(String(candidate.rarity_id ?? candidate.id ?? ""))))
-      : generatedShowcaseVariants;
+    const showcaseVariants = mergedRarityShowcaseVariants(selected);
     if (showcaseVariants.length > 1) {
       addArtworkMenu("Rarity / appearance", createArtworkSelect({
         label: "Choose artwork variant",

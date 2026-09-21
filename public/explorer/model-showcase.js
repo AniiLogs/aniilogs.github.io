@@ -1,7 +1,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 
-export function attachModelShowcase(record, source, appearance = {}) {
+export function attachModelShowcase(record, source, appearance = {}, resolveContentUrl = value => value) {
   const canvas = document.createElement("canvas");
   canvas.className = "catalog-aniimo-model-canvas";
   canvas.setAttribute("aria-label", "Animated Aniimo model artwork");
@@ -11,6 +11,8 @@ export function attachModelShowcase(record, source, appearance = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.72;
   renderer.setAnimationLoop(render);
 
   const scene = new THREE.Scene();
@@ -29,46 +31,76 @@ export function attachModelShowcase(record, source, appearance = {}) {
   let disposed = false;
   const rarityShaderUniforms = [];
   const clock = new THREE.Clock();
-  let elapsed = 0;
-
-  function hexColor(value) {
-    return new THREE.Color(String(value || "#ffffff"));
-  }
+  let elapsed = Number(appearance.capturedShaderTime || 0);
+  const materialTime = { value: elapsed };
+  // Display-only framing must remain separate from asset-space coordinates.
+  const materialDisplayScale = { value: 1 };
+  const materialCleanups = [];
 
   function attachRarityShader(material) {
-    const palette = Array.isArray(appearance.palette) ? appearance.palette.slice(0, 8) : [];
-    if (palette.length !== 8) return;
+    const linearPalette = Array.isArray(appearance.paletteLinear) ? appearance.paletteLinear.slice(0, 8) : [];
+    const palette = linearPalette.length === 6
+      ? linearPalette.map((value) => new THREE.Color().setRGB(
+        Number(value?.[0] || 0),
+        Number(value?.[1] || 0),
+        Number(value?.[2] || 0),
+      ))
+      : (Array.isArray(appearance.palette) ? appearance.palette.slice(0, 6).map((value) => new THREE.Color(String(value || "#ffffff"))) : []);
+    if (palette.length !== 6) return;
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uShinyTime = { value: 0 };
-      shader.uniforms.uShinyPalette = { value: palette.map(hexColor) };
+      shader.uniforms.uShinyPalette = { value: palette };
+      shader.uniforms.uShinyCore = { value: new THREE.Vector4(...(appearance.core || [0, 2, 1, 0])) };
       shader.uniforms.uShinyMotion = { value: new THREE.Vector4(...(appearance.motion || [0.2, 0.3, 1, 5])) };
+      shader.uniforms.uShinyLighting = { value: new THREE.Vector4(...(appearance.lighting || [0, 5, 0.5, 0])) };
       shader.uniforms.uShinyBreathing = { value: new THREE.Vector2(...(appearance.breathing || [0.6, 0.6])) };
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vShinyPosition;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvShinyPosition = position;");
+        .replace("#include <common>", "#include <common>\nvarying vec2 vShinyUv;\nvarying vec3 vShinyGeometricNormal;")
+        .replace("#include <uv_vertex>", "#include <uv_vertex>\nvShinyUv = uv;")
+        .replace("#include <defaultnormal_vertex>", "#include <defaultnormal_vertex>\nvShinyGeometricNormal = normalize(transformedNormal);");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
           uniform float uShinyTime;
-          uniform vec3 uShinyPalette[8];
+          uniform vec3 uShinyPalette[6];
+          uniform vec4 uShinyCore;
           uniform vec4 uShinyMotion;
+          uniform vec4 uShinyLighting;
           uniform vec2 uShinyBreathing;
-          varying vec3 vShinyPosition;
+          varying vec2 vShinyUv;
+          varying vec3 vShinyGeometricNormal;
           vec3 shinyPalette(float value) {
-            float scaled = fract(value) * 7.0;
+            // The client reconstructs six RGB10A2 HDR colors from its two
+            // packed float4 properties, then traverses them cyclically.
+            float scaled = fract(value) * 6.0;
             if (scaled < 1.0) return mix(uShinyPalette[0], uShinyPalette[1], scaled);
             if (scaled < 2.0) return mix(uShinyPalette[1], uShinyPalette[2], scaled - 1.0);
             if (scaled < 3.0) return mix(uShinyPalette[2], uShinyPalette[3], scaled - 2.0);
             if (scaled < 4.0) return mix(uShinyPalette[3], uShinyPalette[4], scaled - 3.0);
             if (scaled < 5.0) return mix(uShinyPalette[4], uShinyPalette[5], scaled - 4.0);
-            if (scaled < 6.0) return mix(uShinyPalette[5], uShinyPalette[6], scaled - 5.0);
-            return mix(uShinyPalette[6], uShinyPalette[7], scaled - 6.0);
+            return mix(uShinyPalette[5], uShinyPalette[0], scaled - 5.0);
           }`)
-        .replace("#include <dithering_fragment>", `
-          float shinyPhase = vShinyPosition.y * uShinyMotion.w + vShinyPosition.x * uShinyMotion.z + uShinyTime * uShinyMotion.y;
+        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
+          float shinyPhase = fract(vShinyUv.x + uShinyTime * uShinyMotion.x);
           vec3 shinyColor = shinyPalette(shinyPhase);
-          float shinyBreath = mix(uShinyBreathing.x, uShinyBreathing.y, 0.5 + 0.5 * sin(uShinyTime * 2.0));
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * (0.7 + shinyColor * 1.35) + shinyColor * 0.24, clamp(shinyBreath, 0.0, 1.0));
-          #include <dithering_fragment>`);
+          float viewDot = clamp(abs(dot(normalize(vShinyGeometricNormal), normalize(vViewPosition))), 0.0, 1.0);
+          float shinyRange = uShinyCore.w - uShinyCore.z;
+          float shinyLinear = clamp((viewDot - uShinyCore.z) / (abs(shinyRange) < 0.00001 ? 0.00001 : shinyRange), 0.0, 1.0);
+          float shinyMask = shinyLinear * shinyLinear * (3.0 - 2.0 * shinyLinear);
+          shinyMask = pow(max(shinyMask, 0.000001), max(uShinyCore.y, 0.01));
+          float breathPhase = fract(vShinyUv.x + uShinyTime * uShinyMotion.y);
+          float breathShape = 1.0 - clamp(abs(breathPhase - 0.5) / max(uShinyLighting.z, 0.0001), 0.0, 1.0);
+          float breath = 1.0 + 0.5 * uShinyLighting.y * breathShape;
+          // The shipped program keeps the decoded RGB10A2 values in linear
+          // HDR and lets tone mapping handle their display energy.
+          shinyColor *= breath * max(uShinyBreathing.x, uShinyBreathing.y);
+          shinyColor = mix(shinyColor, totalEmissiveRadiance, clamp(uShinyLighting.x, 0.0, 1.0));
+          // Exact final two-instruction form in the shipped DXBC:
+          //   delta = shiny * intensity - authoredEmission
+          //   authoredEmission += fresnelMask * delta
+          // i.e. a masked blend, not additive emission.
+          // Blend emission before lighting composition. Blending gl_FragColor
+          // here would incorrectly replace the lit base/armor with the effect.
+          totalEmissiveRadiance = mix(totalEmissiveRadiance, shinyColor, shinyMask);`);
       rarityShaderUniforms.push(shader.uniforms);
     };
     material.customProgramCacheKey = () => `aniilogs-shiny-${appearance.preset || palette.join("-")}`;
@@ -87,6 +119,97 @@ export function attachModelShowcase(record, source, appearance = {}) {
     return null;
   }
 
+  function materialAppearance(rendererStyle, material) {
+    const configured = rendererStyle?.materials;
+    if (!configured || typeof configured !== "object") return [];
+    const materialName = String(material?.name || "");
+    const matching = Object.entries(configured).find(([name]) => materialName.includes(name));
+    if (!matching) return [];
+    return Object.values(matching[1] || {}).filter((value) => value && typeof value === "object");
+  }
+
+  function materialIsAuthoredForStyle(rendererStyle, material) {
+    if (!rendererStyle || typeof rendererStyle !== "object") return false;
+    const materialName = String(material?.name || "");
+    const configured = Object.keys(rendererStyle.materials || {})
+      .some((name) => materialName.includes(name));
+    const substituted = Object.keys(rendererStyle.materialEffects || {})
+      .some((name) => materialName.includes(name));
+    return configured || substituted;
+  }
+
+  function colorProperty(properties, names) {
+    const colors = properties?.colors || {};
+    for (const name of names) {
+      const value = colors[name];
+      if (Array.isArray(value) && value.length >= 3) return value;
+    }
+    return null;
+  }
+
+  function applyExtractedPresets(material, presets) {
+    let baseColor = null;
+    let emissiveColor = null;
+    let emissiveStrength = 0;
+    presets.forEach((preset) => {
+      const properties = preset.properties || {};
+      baseColor ||= colorProperty(properties, ["_BaseColor", "_MainTex_Color_Front"]);
+      const directEmission = colorProperty(properties, [
+        "_EmissiveColor",
+        "_EmissiveFlowColor",
+        "_FresnelColor",
+        "_VFXFresnelPluginModel_FresnelColor",
+        "_MainTex_Color_Front",
+      ]);
+      // ParmonDye colors are inputs to the game's mask/gradient plugin, not
+      // ordinary PBR emissive colors. Keep them for the dedicated dye shader;
+      // only apply material properties that the authored preset sets directly.
+      const candidate = directEmission;
+      if (candidate) {
+        emissiveColor = candidate;
+        emissiveStrength = Math.max(emissiveStrength, ...candidate.slice(0, 3).map(Number));
+      }
+    });
+    if (baseColor && material.color) {
+      material.color.setRGB(Number(baseColor[0]), Number(baseColor[1]), Number(baseColor[2]));
+    }
+    if (emissiveColor && material.emissive) {
+      const peak = Math.max(1, ...emissiveColor.slice(0, 3).map(Number));
+      material.emissive.setRGB(
+        Number(emissiveColor[0]) / peak,
+        Number(emissiveColor[1]) / peak,
+        Number(emissiveColor[2]) / peak,
+      );
+      material.emissiveIntensity = Math.max(0.2, Math.min(8, emissiveStrength));
+    }
+  }
+
+  function applyRuntimeMaterialOverride(material) {
+    const overrides = appearance.runtimeMaterialOverrides;
+    if (!overrides || typeof overrides !== "object") return;
+    const materialName = String(material?.name || "");
+    const match = Object.entries(overrides).find(([name]) => materialName.includes(name));
+    const properties = match?.[1]?.properties;
+    if (!properties) return;
+    const base = properties._BaseColor;
+    if (Array.isArray(base) && material.color) {
+      material.color.setRGB(Number(base[0]), Number(base[1]), Number(base[2]));
+      material.opacity = Number(base[3] ?? material.opacity);
+    }
+    const emissive = properties._EmissiveColor;
+    if (Array.isArray(emissive) && material.emissive) {
+      const peak = Math.max(1, ...emissive.slice(0, 3).map(Number));
+      material.emissive.setRGB(
+        Number(emissive[0]) / peak,
+        Number(emissive[1]) / peak,
+        Number(emissive[2]) / peak,
+      );
+      material.emissiveIntensity = peak;
+    }
+    if (Array.isArray(properties._Metallic)) material.metalness = Number(properties._Metallic[0]);
+    if (Array.isArray(properties._Roughness)) material.roughness = Number(properties._Roughness[0]);
+  }
+
   function resize() {
     const width = Math.max(1, canvas.clientWidth || window.innerWidth);
     const height = Math.max(1, canvas.clientHeight || window.innerHeight);
@@ -103,6 +226,7 @@ export function attachModelShowcase(record, source, appearance = {}) {
     root.position.sub(center);
     root.position.y += height * 0.5;
     const scale = 2.1 / height;
+    materialDisplayScale.value = scale;
     root.scale.setScalar(scale);
     camera.position.set(0, height * scale * 0.42, Math.max(3.1, height * scale * 2.1));
     camera.lookAt(0, height * scale * 0.48, 0);
@@ -117,21 +241,40 @@ export function attachModelShowcase(record, source, appearance = {}) {
     resize();
     const delta = Math.min(clock.getDelta(), 0.05);
     elapsed += delta;
+    materialTime.value = elapsed;
     rarityShaderUniforms.forEach((uniforms) => { uniforms.uShinyTime.value = elapsed; });
     if (mixer) mixer.update(delta);
-    if (model) model.rotation.y += delta * 0.12;
     renderer.render(scene, camera);
   }
 
   const loadPromise = new Promise((resolve, reject) => new GLTFLoader().load(
     source,
-    (gltf) => {
+    async (gltf) => {
+      try {
       if (disposed) return;
+      const materialTasks = [];
+      const dyeAdapter = appearance.dyeShaderModule
+        ? await import(resolveContentUrl(appearance.dyeShaderModule)) : null;
+      const authoredAdapter = appearance.authoredShaderModule
+        ? await import(resolveContentUrl(appearance.authoredShaderModule)) : null;
+      const authoredRuntime = appearance.authoredRuntime
+        ? await fetch(resolveContentUrl(appearance.authoredRuntime)).then((response) => {
+          if (!response.ok) throw new Error(`Unable to load authored runtime (${response.status})`);
+          return response.json();
+        }) : null;
+      const authoredRuntimeUrl = appearance.authoredRuntime
+        ? new URL(resolveContentUrl(appearance.authoredRuntime), window.location.href) : null;
       model = gltf.scene;
       model.traverse((object) => {
         if (!object.isMesh) return;
         const rendererStyle = rendererAppearance(object);
-        if (appearance.rendererConfig && !rendererStyle) return;
+        if (appearance.rendererConfig && !rendererStyle) {
+          // ParmonDyeData is an allow-list for the selected style. Returning
+          // without hiding this renderer left mutually exclusive form parts
+          // stacked together, which made most Pawney rarities look alike.
+          object.visible = false;
+          return;
+        }
         if (rendererStyle?.enabled === false) {
           object.visible = false;
           return;
@@ -144,6 +287,12 @@ export function attachModelShowcase(record, source, appearance = {}) {
           const materials = wasMaterialArray ? object.material : [object.material];
           const styledMaterials = materials.map((material) => {
             const clone = material.clone();
+            if (appearance.rendererConfig && !materialIsAuthoredForStyle(rendererStyle, material)) {
+              // A renderer can contain multiple GLB primitives, while the
+              // game's style plan activates only selected material slots.
+              clone.visible = false;
+              return clone;
+            }
             clone.side = THREE.DoubleSide;
             if (appearance.tint && clone.color && !appearance.palette) {
               // The extracted Scorchhowl showcase mesh has a neutral base
@@ -155,12 +304,51 @@ export function attachModelShowcase(record, source, appearance = {}) {
               clone.emissive.set(appearance.emissive);
               clone.emissiveIntensity = Number(appearance.emissiveIntensity || 0.18);
             }
-            attachRarityShader(clone);
+            const presets = materialAppearance(rendererStyle, material);
+            if (!appearance.authoredRuntime) {
+              applyExtractedPresets(clone, presets);
+            }
+            // Captured runtime overrides are part of the authoritative base
+            // surface that the dye stage receives. Only the older extracted
+            // preset approximation is bypassed for authored runtimes.
+            applyRuntimeMaterialOverride(clone);
+            // Do not apply the former whole-material palette approximation.
+            // The game-authored renderer/material plan below already carries
+            // each appearance's per-plugin dye and emission parameters. The
+            // broad overlay ignored those masks and turned armor, crystal,
+            // eyes, and translucent parts into the same neon color.
+            const dyeBinding = Object.entries(rendererStyle?.resolvedDyeBindings || {})
+              .find(([name]) => String(material.name || '').includes(name))?.[1];
+            if (authoredAdapter && authoredRuntime) {
+              materialTasks.push(authoredAdapter.createAuthoredMaterial({
+                THREE,
+                object,
+                fallbackMaterial: clone,
+                runtime: authoredRuntime,
+                runtimeUrl: authoredRuntimeUrl,
+                rarityId: appearance.authoredRuntimeVariant || appearance.rarityId || appearance.id || 'common',
+              }).then((authoredMaterial) => {
+                if (disposed || !authoredMaterial) return;
+                const current = Array.isArray(object.material) ? object.material : [object.material];
+                const index = current.indexOf(clone);
+                if (index < 0) return;
+                current[index] = authoredMaterial;
+                object.material = wasMaterialArray ? current : current[0];
+              }));
+            } else if (dyeBinding) {
+              if (!dyeAdapter) throw new Error('Authored dye adapter is missing');
+              materialTasks.push(dyeAdapter.attachDye(THREE, clone, dyeBinding, resolveContentUrl, {
+                time: materialTime, displayScale: materialDisplayScale, object, root: model,
+              })
+                .then(cleanup => { if (disposed) cleanup(); else materialCleanups.push(cleanup); }));
+            }
             return clone;
           });
           object.material = wasMaterialArray ? styledMaterials : styledMaterials[0];
         }
       });
+      await Promise.all(materialTasks);
+      if (disposed) return;
       frameModel(model);
       scene.add(model);
       if (gltf.animations?.length) {
@@ -169,6 +357,9 @@ export function attachModelShowcase(record, source, appearance = {}) {
         mixer.clipAction(preferred).play();
       }
       resolve();
+      } catch (error) {
+        reject(error);
+      }
     },
     undefined,
     (error) => {
@@ -184,6 +375,7 @@ export function attachModelShowcase(record, source, appearance = {}) {
     disposed = true;
     observer.disconnect();
     mixer?.stopAllAction();
+    materialCleanups.forEach(cleanup => cleanup());
   };
   return loadPromise;
 }
