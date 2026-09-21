@@ -10,28 +10,6 @@ const landingHtml = await readFile(new URL("../public/index.html", import.meta.u
 const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
 const themeShell = await readFile(new URL("../public/theme-shell.js", import.meta.url), "utf8");
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
-const modelShowcase = await readFile(new URL("../public/explorer/model-showcase.js", import.meta.url), "utf8");
-
-test("prefab-scoped appearance cannot leak to a different form", () => {
-  const body = explorer.slice(explorer.indexOf('function appearanceForForm('), explorer.indexOf('function rarityShowcaseVariants('));
-  const select = new Function(`${body}; return appearanceForForm;`)();
-  const appearance = { mappingPrefab: 'P_Parmon_fixtureA.prefab', rendererConfig: { fixture: {} } };
-  assert.equal(select(appearance, 'fixtureA'), appearance);
-  assert.deepEqual(select(appearance, 'fixtureB'), {});
-  assert.deepEqual(select({
-    ...appearance,
-    video: './game-authored/fixture-b.mp4',
-    video_layout: 'full-frame',
-    renderSource: 'game-authored-field-notes-camera',
-    renderVerified: true,
-  }, 'fixtureB'), {
-    video: './game-authored/fixture-b.mp4',
-    video_layout: 'full-frame',
-    renderSource: 'game-authored-field-notes-camera',
-    renderVerified: true,
-  });
-  assert.deepEqual(select(null, 'fixtureB'), {});
-});
 
 test("procedural and withheld maps stay out of the public map navigator", () => {
   assert.match(explorer, /HIDDEN_MAP_IDS = new Set\(\["egg-heist", "egg-heist-team"\]\)/u);
@@ -146,11 +124,51 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
-test("public Aniimo artwork stays on the verified Pet Manual videos", () => {
+test("public Aniimo artwork accepts only approved verified Pet Manual videos", () => {
   const body = explorer.slice(explorer.indexOf("function attachPackedAniimoBackdrop("), explorer.indexOf("function renderEvolutionSection("));
-  assert.match(body, /const showcaseMedia = entry;/u);
+  assert.match(body, /entry\.showcase_media\?\.renderVerified === true/u);
   assert.doesNotMatch(body, /attachModelShowcase/u);
-  assert.match(explorer, /if \(view === "aniilog"\) selected\.showcase_media = null;/u);
+  assert.match(explorer, /reviewStatus !== "approved"/u);
+  assert.match(explorer, /renderVerified === true/u);
+  assert.match(explorer, /video_layout === "rgb-alpha-vertical"/u);
+  assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
+  assert.match(explorer, /aniilogAppearanceSelection/u);
+  assert.match(explorer, /entry\.showcase_variants = approvedVariants;/u);
+  assert.doesNotMatch(explorer, /entry\.showcase_variants = Array\.isArray\(mediaEntry\.showcase_variants\)/u);
+});
+
+test("Pet Manual artwork manifest validation fails closed", () => {
+  const body = explorer.slice(
+    explorer.indexOf("function approvedPetManualVariants("),
+    explorer.indexOf("const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY"),
+  );
+  const approve = new Function(`${body}; return approvedPetManualVariants;`)();
+  const entry = { form_id: "1002600" };
+  const variant = {
+    id: "sparkling-03",
+    style: 3,
+    label: "Sparkling Type III",
+    video: "./media/aniimo/petmanual/1002600/sparkling-03.mp4",
+    video_layout: "rgb-alpha-vertical",
+    renderVerified: true,
+  };
+  const manifest = {
+    schema: "aniilogs.private.petmanual-artwork-manifest.v1",
+    sourcePackage: 3544783,
+    reviewStatus: "approved",
+    forms: { "1002600": { formId: 1002600, variants: [variant] } },
+  };
+  assert.equal(approve(manifest, entry, 3544783).length, 1);
+  assert.deepEqual(approve({ ...manifest, reviewStatus: "staged-unapproved" }, entry, 3544783), []);
+  assert.deepEqual(approve({ ...manifest, sourcePackage: 3535596 }, entry, 3544783), []);
+  assert.deepEqual(approve({
+    ...manifest,
+    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, video: "../leak.mp4" }] } },
+  }, entry, 3544783), []);
+  assert.deepEqual(approve({
+    ...manifest,
+    forms: { "1002600": { formId: 1, variants: [variant] } },
+  }, entry, 3544783), []);
 });
 
 test("mobile artwork mode takes over the viewport and hides the Aniimo index", () => {
@@ -161,18 +179,12 @@ test("mobile artwork mode takes over the viewport and hides the Aniimo index", (
 test("Aniimo rarity selector loads extracted appearances only from private content", () => {
   for (let id = 0; id <= 12; id += 1) assert.match(explorer, new RegExp(`id: "${id}"`));
   assert.match(explorer, /rarity-manifest\.remote\.json/u);
-  assert.match(explorer, /client_rarity_manifest/u);
   assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
-  assert.match(explorer, /form_appearance_overrides/u);
-  assert.match(explorer, /manifestStyles\.get\(style\.id\)\?\.appearance/u);
-  assert.match(explorer, /paletteColor\(float value\)/u);
-  assert.match(explorer, /uniform vec3 u_palette\[8\]/u);
-  assert.match(explorer, /u_paletteEnabled/u);
-  assert.match(modelShowcase, /appearance\.rendererConfig/u);
-  assert.match(modelShowcase, /rendererStyle\?\.enabled === false/u);
-  assert.match(modelShowcase, /if \(appearance\.rendererConfig && !rendererStyle\) \{[\s\S]*object\.visible = false;/u);
-  assert.match(modelShowcase, /materialIsAuthoredForStyle/u);
-  assert.match(modelShowcase, /clone\.visible = false;/u);
+  assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
+  assert.match(explorer, /approvedPetManualVariants/u);
+  assert.doesNotMatch(explorer, /paletteColor\(float value\)/u);
+  assert.doesNotMatch(explorer, /u_paletteEnabled|u_gameShinyEnabled|u_channelRemapEnabled/u);
+  assert.doesNotMatch(explorer, /client_rarity_manifest|form_appearance_overrides/u);
   assert.doesNotMatch(explorer, /ShinyEffect_Color\d+[^\n]*\.asset/u);
 });
 

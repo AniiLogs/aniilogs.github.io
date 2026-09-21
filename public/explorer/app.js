@@ -26,6 +26,7 @@ const ANIILOG_MEDIA_URL = contentUrl("./data/aniilog_media.json");
 // the viewer usable during a transient manifest failure; when available, this
 // manifest is the authoritative source for labels/order.
 const ANIILOG_RARITY_MANIFEST_URL = contentUrl("./data/rarity-manifest.remote.json");
+const ANIILOG_ARTWORK_MANIFEST_URL = contentUrl("./data/petmanual-artwork-manifest.remote.json");
 const APP_VERSION = CONTENT_PACKAGE_VERSION
   ? `Game build ${CONTENT_PACKAGE_VERSION}`
   : "Game build unavailable";
@@ -35,9 +36,8 @@ const CHANGELOG_PUBLIC_ENTRY_LIMIT = 12;
 const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1";
 
 // These IDs and labels come from the current client's pet_shiny_style_data
-// table. The model export is shared between styles, so the selected style is
-// applied as a material appearance in model-showcase.js rather than silently
-// reusing the Common material for every menu choice.
+// table. They validate manifest order only; the browser never recreates their
+// materials. Each selectable appearance must arrive as reviewed packed media.
 const ANIIMO_RARITY_STYLES = Object.freeze([
   { id: "0", label: "Common", filter: "none", preset: "common" },
   { id: "1", label: "Sparkling Type I" },
@@ -57,89 +57,31 @@ const ANIIMO_RARITY_STYLES = Object.freeze([
   { id: "12", label: "Shadow Sparkling" },
 ]);
 
-function normalizedRarityStyleId(value) {
-  const id = String(value ?? "");
-  if (id === "common") return "0";
-  const match = id.match(/^shiny-(\d+)$/u);
-  return match ? match[1] : id;
-}
-
-function appearanceForForm(appearance, formId) {
-  if (!appearance) return {};
-  const prefab = appearance.mappingPrefab;
-  if (prefab && prefab !== `P_Parmon_${String(formId)}.prefab`) {
-    // A game-authored capture is already the final rendered output for this
-    // manifest slot. Keep that media even when legacy material-probe metadata
-    // embedded beside it names a different source prefab.
-    if (appearance.renderVerified && appearance.video) {
-      return {
-        video: appearance.video,
-        video_layout: appearance.video_layout,
-        renderSource: appearance.renderSource,
-        renderVerified: true,
-      };
-    }
-    return {};
-  }
-  return appearance;
-}
-
-function rarityShowcaseVariants(entry) {
-  if (!entry?.model && !entry?.video) return [];
-  const manifest = state?.aniilogRarityManifest || {};
-  const manifestStyles = new Map((manifest.rarity_ui_order || [])
-    .map((style) => [normalizedRarityStyleId(style.id), style]));
-  const formOverrides = manifest.form_appearance_overrides?.[String(entry.form_id)] || {};
-  const variants = ANIIMO_RARITY_STYLES.map((style) => {
-    const appearance = {
-      ...appearanceForForm(manifestStyles.get(style.id)?.appearance, entry.form_id),
-      ...appearanceForForm(formOverrides[style.id], entry.form_id),
-    };
-    return {
-      id: `rarity-${style.id}`,
-      rarity_id: style.id,
-      label: manifestStyles.get(style.id)?.label || style.label,
-      source: manifestStyles.has(style.id) ? "client_rarity_manifest" : "static_client_fallback",
-    // The packed moving media is the verified appearance for every current
-    // form, including Prismana. Keep the unreliable GLB out of this selector
-    // until a textured per-style export is available.
-    // Numeric sparkling styles are authored as material/preset changes in the
-    // client. Use the packed moving source so the WebGL appearance pass can
-    // apply those presets; exact extracted GLBs remain available as their own
-    // model-backed variants.
-      model: appearance.video ? null : (appearance.model || entry.model),
-      video: appearance.video || entry.video,
-      video_layout: appearance.video_layout || entry.video_layout,
-      appearance: Object.keys(appearance).length ? appearance : null,
-    };
-  });
-  return variants;
-}
-
-function mergedRarityShowcaseVariants(entry) {
-  const extracted = Array.isArray(entry?.showcase_variants)
-    ? entry.showcase_variants.filter((candidate) => candidate && (candidate.video || candidate.model))
-    : [];
-  const generated = rarityShowcaseVariants(entry);
-  const extractedById = new Map(extracted.map((candidate) => [
-    normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? ""),
-    candidate,
-  ]));
-  const generatedIds = new Set(generated.map((candidate) => normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? "")));
-  return generated.map((candidate) => {
-    const key = normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? "");
-    const matching = extractedById.get(key);
-    if (!matching) return candidate;
-    return {
-      ...candidate,
-      ...matching,
-      model: candidate.model || matching.model,
-      appearance: {
-        ...(matching.appearance || {}),
-        ...(candidate.appearance || {}),
-      },
-    };
-  }).concat(extracted.filter((candidate) => !generatedIds.has(normalizedRarityStyleId(candidate.rarity_id ?? candidate.id ?? ""))));
+function approvedPetManualVariants(manifest, entry, packageVersion) {
+  if (
+    manifest?.schema !== "aniilogs.private.petmanual-artwork-manifest.v1"
+    || manifest?.reviewStatus !== "approved"
+    || String(manifest?.sourcePackage ?? "") !== String(packageVersion ?? "")
+    || !manifest?.forms
+  ) return [];
+  const form = manifest.forms[String(entry?.form_id ?? "")];
+  if (!form || String(form.formId ?? "") !== String(entry?.form_id ?? "")) return [];
+  const variants = Array.isArray(form.variants) ? form.variants : [];
+  return variants.filter((variant) => {
+    const video = String(variant?.video || "");
+    return variant?.renderVerified === true
+      && variant?.video_layout === "rgb-alpha-vertical"
+      && /^\.\/media\/aniimo\/petmanual\/[\w-]+\/[\w-]+\.mp4$/u.test(video)
+      && !video.includes("..");
+  }).map((variant) => ({
+    id: String(variant.id || ""),
+    rarity_id: String(variant.style ?? variant.id ?? ""),
+    label: String(variant.label || variant.id || "Appearance"),
+    video: variant.video,
+    video_layout: variant.video_layout,
+    renderSource: variant.renderSource,
+    renderVerified: true,
+  }));
 }
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
@@ -467,6 +409,8 @@ const state = {
   itemlogLoadPromise: null,
   aniilogData: null,
   aniilogRarityManifest: null,
+  aniilogArtworkManifest: null,
+  aniilogAppearanceSelection: {},
   aniilogLoadError: "",
   aniilogLoadPromise: null,
   catalogSearch: {
@@ -2777,13 +2721,17 @@ function ensureAniilogData() {
     fetch(ANIILOG_DATA_URL),
     fetch(ANIILOG_MEDIA_URL),
     fetch(ANIILOG_RARITY_MANIFEST_URL),
+    fetch(ANIILOG_ARTWORK_MANIFEST_URL),
   ])
-    .then(async ([dataResponse, mediaResponse, rarityResponse]) => {
+    .then(async ([dataResponse, mediaResponse, rarityResponse, artworkResponse]) => {
       if (!dataResponse.ok) throw new Error(`Could not load ${ANIILOG_DATA_URL}`);
       if (!mediaResponse.ok) throw new Error(`Could not load ${ANIILOG_MEDIA_URL}`);
       const payload = await dataResponse.json();
       const media = await mediaResponse.json();
       const rarityManifest = rarityResponse.ok ? await rarityResponse.json() : null;
+      const artworkCandidate = artworkResponse.ok
+        ? await artworkResponse.json().catch(() => null)
+        : null;
       if (!Array.isArray(payload?.entries) || !payload?.totals) {
         throw new Error("Aniilog data has an invalid format");
       }
@@ -2808,13 +2756,17 @@ function ensureAniilogData() {
         entry.video_layout = mediaEntry.video_layout;
         entry.model = mediaEntry.model || "";
         entry.model_label = mediaEntry.model_label || "";
-        entry.showcase_variants = Array.isArray(mediaEntry.showcase_variants)
-          ? mediaEntry.showcase_variants
-          : [];
+        const approvedVariants = approvedPetManualVariants(artworkCandidate, entry, payload.package_version);
+        entry.showcase_variants = approvedVariants;
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
       state.aniilogData = payload;
       state.aniilogRarityManifest = rarityManifest;
+      state.aniilogArtworkManifest = artworkCandidate?.schema === "aniilogs.private.petmanual-artwork-manifest.v1"
+        && artworkCandidate?.reviewStatus === "approved"
+        && String(artworkCandidate?.sourcePackage ?? "") === String(payload.package_version ?? "")
+        ? artworkCandidate
+        : null;
       state.aniilogLoadError = "";
       return payload;
     })
@@ -5339,7 +5291,9 @@ function attachPackedAniimoBackdrop(record, entry) {
   // The extracted Pet Manual video is the only verified public artwork
   // source. Experimental model and rarity overrides remain private until the
   // client-native runtime assets can be reproduced faithfully.
-  const showcaseMedia = entry;
+  const showcaseMedia = entry.showcase_media?.renderVerified === true
+    ? entry.showcase_media
+    : entry;
   if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");
@@ -5354,22 +5308,8 @@ function attachPackedAniimoBackdrop(record, entry) {
   video.tabIndex = -1;
   video.setAttribute("aria-hidden", "true");
 
-  // New game-authored captures are ordinary full-frame videos from the
-  // Field Notes camera. They already contain the final materials, rarity
-  // effects, lighting and background, so display them directly and never run
-  // them through the legacy PetManual color/mask unpacking shader.
-  if (showcaseMedia.video_layout === "full-frame") {
-    video.className = "catalog-aniimo-video-backdrop catalog-aniimo-video-backdrop--full-frame";
-    if (showcaseMedia.appearance?.filter) video.style.filter = showcaseMedia.appearance.filter;
-    video.addEventListener("error", () => video.remove(), { once: true });
-    record.append(video);
-    video.play().catch(() => {});
-    return;
-  }
-
   const canvas = document.createElement("canvas");
   canvas.className = "catalog-aniimo-video-backdrop";
-  if (showcaseMedia.appearance?.filter) canvas.style.filter = showcaseMedia.appearance.filter;
   canvas.width = 600;
   canvas.height = 600;
   canvas.tabIndex = -1;
@@ -5405,86 +5345,11 @@ function attachPackedAniimoBackdrop(record, entry) {
   const fragmentShader = compileShader(gl.FRAGMENT_SHADER, `
     precision mediump float;
     uniform sampler2D u_video;
-    uniform vec3 u_tint;
-    uniform vec3 u_emissive;
-    uniform float u_emissiveIntensity;
-    uniform vec3 u_palette[8];
-    uniform float u_paletteEnabled;
-    uniform float u_gameShinyEnabled;
-    uniform float u_effectEnabled;
-    uniform float u_channelRemapEnabled;
-    uniform vec3 u_magentaTarget;
-    uniform vec3 u_cyanTarget;
-    uniform vec3 u_highlightTarget;
-    uniform float u_time;
-    uniform vec4 u_motion;
-    uniform vec2 u_breathing;
     varying vec2 v_uv;
-    vec3 paletteColor(float value) {
-      float scaled = clamp(value, 0.0, 0.9999) * 7.0;
-      if (scaled < 1.0) return mix(u_palette[0], u_palette[1], scaled);
-      if (scaled < 2.0) return mix(u_palette[1], u_palette[2], scaled - 1.0);
-      if (scaled < 3.0) return mix(u_palette[2], u_palette[3], scaled - 2.0);
-      if (scaled < 4.0) return mix(u_palette[3], u_palette[4], scaled - 3.0);
-      if (scaled < 5.0) return mix(u_palette[4], u_palette[5], scaled - 4.0);
-      if (scaled < 6.0) return mix(u_palette[5], u_palette[6], scaled - 5.0);
-      return mix(u_palette[6], u_palette[7], scaled - 6.0);
-    }
-    float rgbHue(vec3 value) {
-      float high = max(value.r, max(value.g, value.b));
-      float low = min(value.r, min(value.g, value.b));
-      float chroma = high - low;
-      if (chroma < 0.0001) return 0.0;
-      float hue;
-      if (high == value.r) hue = mod((value.g - value.b) / chroma, 6.0);
-      else if (high == value.g) hue = ((value.b - value.r) / chroma) + 2.0;
-      else hue = ((value.r - value.g) / chroma) + 4.0;
-      return fract(hue / 6.0);
-    }
     void main() {
       vec3 color = texture2D(u_video, vec2(v_uv.x, 0.5 + v_uv.y * 0.5)).rgb;
       vec3 mask = texture2D(u_video, vec2(v_uv.x, v_uv.y * 0.5)).rgb;
       float alpha = clamp(dot(mask, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-      // Preserve the captured form's shading/detail while applying the
-      // client-authored preset hue. A straight multiplication disappears on
-      // dark forms, so use luminance as the shared value and keep a small
-      // floor for the game's glowing material pass.
-      float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-      if (u_gameShinyEnabled > 0.5) {
-        float high = max(color.r, max(color.g, color.b));
-        float low = min(color.r, min(color.g, color.b));
-        float chroma = high - low;
-        float materialMask = smoothstep(0.055, 0.24, chroma) * smoothstep(0.025, 0.16, high);
-        // The packed Common capture retains the animated material regions.
-        // Its hue is the stable per-pixel phase carrier; feed that phase into
-        // the exact game-authored RGB10A2 palette instead of using screen UV.
-        float phase = fract(rgbHue(color) + u_time * u_motion.x * 0.08);
-        vec3 mappedLinear = max(paletteColor(phase), vec3(0.0));
-        vec3 mapped = pow(mappedLinear, vec3(0.45454545));
-        float sourceValue = max(high, 0.08);
-        float breath = mix(u_breathing.x, u_breathing.y, 0.5 + 0.5 * sin(u_time * 2.0));
-        vec3 authored = mapped * (0.18 + sourceValue * 1.08) * max(breath, 0.35);
-        color = mix(color, authored, materialMask);
-      } else if (u_channelRemapEnabled > 0.5) {
-        float magentaWeight = smoothstep(0.015, 0.24, min(color.r, color.b) - color.g);
-        float cyanWeight = smoothstep(0.015, 0.24, min(color.g, color.b) - color.r);
-        float highlightWeight = smoothstep(0.55, 0.96, luminance);
-        vec3 magentaHue = mix(u_magentaTarget, u_highlightTarget, highlightWeight);
-        vec3 cyanHue = mix(u_cyanTarget, u_highlightTarget, highlightWeight);
-        vec3 magentaMapped = magentaHue * (0.22 + luminance * 1.34);
-        vec3 cyanMapped = cyanHue * (0.22 + luminance * 1.34);
-        color = mix(color, magentaMapped, magentaWeight);
-        color = mix(color, cyanMapped, cyanWeight);
-      } else if (u_paletteEnabled > 0.5) {
-        float phase = v_uv.y * u_motion.w + v_uv.x * u_motion.z + u_time * u_motion.y + luminance * 0.35;
-        vec3 mapped = paletteColor(fract(phase));
-        float breath = mix(u_breathing.x, u_breathing.y, 0.5 + 0.5 * sin(u_time * 2.0));
-        color = mix(color, mapped * (0.35 + luminance * 1.2), clamp(breath, 0.0, 1.0));
-      } else if (u_effectEnabled > 0.5) {
-        vec3 tinted = u_tint * max(luminance, 0.045) * 1.34;
-        color = mix(color, mix(vec3(luminance), tinted, 0.82), 0.76);
-      }
-      color += u_emissive * u_emissiveIntensity * (0.22 + luminance * 0.6);
       gl_FragColor = vec4(color * alpha, alpha);
     }
   `);
@@ -5516,41 +5381,6 @@ function attachPackedAniimoBackdrop(record, entry) {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.useProgram(program);
   gl.uniform1i(gl.getUniformLocation(program, "u_video"), 0);
-  const appearance = showcaseMedia.appearance || {};
-  const effectEnabled = Object.keys(appearance).length > 0;
-  const tint = hexColorRgb(appearance.tint || "#ffffff").map((channel) => channel / 255);
-  const emissive = hexColorRgb(appearance.emissive || appearance.tint || "#000000").map((channel) => channel / 255);
-  const linearPaletteSource = Array.isArray(appearance.paletteLinear) && appearance.paletteLinear.length
-    ? appearance.paletteLinear
-    : [];
-  const paletteSource = Array.isArray(appearance.palette) && appearance.palette.length ? appearance.palette : [];
-  const paletteFallback = appearance.tint || "#ffffff";
-  const palette = Array.from({ length: 8 }, (_, index) => {
-    const linear = linearPaletteSource[index] || linearPaletteSource[linearPaletteSource.length - 1];
-    if (Array.isArray(linear)) return linear.slice(0, 3).map((channel) => Number(channel) || 0);
-    return hexColorRgb(paletteSource[index] || paletteSource[paletteSource.length - 1] || paletteFallback)
-      .map((channel) => channel / 255);
-  });
-  gl.uniform3fv(gl.getUniformLocation(program, "u_tint"), new Float32Array(tint));
-  gl.uniform3fv(gl.getUniformLocation(program, "u_emissive"), new Float32Array(emissive));
-  gl.uniform1f(gl.getUniformLocation(program, "u_emissiveIntensity"), Number(appearance.emissiveIntensity || 0));
-  gl.uniform3fv(gl.getUniformLocation(program, "u_palette"), new Float32Array(palette.flat()));
-  gl.uniform1f(gl.getUniformLocation(program, "u_paletteEnabled"), (linearPaletteSource.length || paletteSource.length) ? 1 : 0);
-  gl.uniform1f(gl.getUniformLocation(program, "u_gameShinyEnabled"), appearance.gameShiny && linearPaletteSource.length ? 1 : 0);
-  gl.uniform1f(gl.getUniformLocation(program, "u_effectEnabled"), effectEnabled ? 1 : 0);
-  const channelRemap = appearance.channelRemap || null;
-  gl.uniform1f(gl.getUniformLocation(program, "u_channelRemapEnabled"), channelRemap ? 1 : 0);
-  gl.uniform3fv(gl.getUniformLocation(program, "u_magentaTarget"), new Float32Array(
-    hexColorRgb(channelRemap?.magenta || "#ffffff").map((channel) => channel / 255),
-  ));
-  gl.uniform3fv(gl.getUniformLocation(program, "u_cyanTarget"), new Float32Array(
-    hexColorRgb(channelRemap?.cyan || "#ffffff").map((channel) => channel / 255),
-  ));
-  gl.uniform3fv(gl.getUniformLocation(program, "u_highlightTarget"), new Float32Array(
-    hexColorRgb(channelRemap?.highlight || channelRemap?.cyan || "#ffffff").map((channel) => channel / 255),
-  ));
-  gl.uniform4fv(gl.getUniformLocation(program, "u_motion"), new Float32Array(appearance.motion || [0.2, 0.3, 1, 5]));
-  gl.uniform2fv(gl.getUniformLocation(program, "u_breathing"), new Float32Array(appearance.breathing || [0.6, 0.6]));
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
 
@@ -7065,7 +6895,15 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
-  if (view === "aniilog") selected.showcase_media = null;
+  if (view === "aniilog") {
+    const approvedVariants = Array.isArray(selected.showcase_variants)
+      ? selected.showcase_variants.filter((variant) => variant?.renderVerified === true)
+      : [];
+    const requestedAppearance = state.aniilogAppearanceSelection[String(selected.form_id || "")];
+    selected.showcase_media = approvedVariants.find((variant) => variant.id === requestedAppearance)
+      || approvedVariants.find((variant) => variant.id === "common")
+      || null;
+  }
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
   if (view === "aniilog") {
@@ -7149,6 +6987,24 @@ function renderCatalogPreview(options = {}) {
         disabled: true,
         options: [{ value: selected.id, label: selected.form_label || selected.form_name || "Current form" }],
         onChange: () => {},
+      }));
+    }
+    const approvedAppearances = Array.isArray(selected.showcase_variants)
+      ? selected.showcase_variants.filter((variant) => variant?.renderVerified === true)
+      : [];
+    if (approvedAppearances.length > 1) {
+      const activeAppearance = selected.showcase_media?.id || approvedAppearances[0].id;
+      addArtworkMenu("Rarity / appearance", createArtworkSelect({
+        label: "Choose game-authored rarity appearance",
+        value: activeAppearance,
+        options: approvedAppearances.map((appearance) => ({
+          value: appearance.id,
+          label: appearance.label,
+        })),
+        onChange: (value) => {
+          state.aniilogAppearanceSelection[String(selected.form_id || "")] = value;
+          renderCatalogPreview();
+        },
       }));
     }
     if (artworkControls.children.length) {
