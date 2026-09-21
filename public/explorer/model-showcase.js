@@ -1,30 +1,50 @@
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { clone as cloneSkeleton } from "./vendor/utils/SkeletonUtils.js";
+
+const modelAssetCache = new Map();
+
+function loadModelAsset(source) {
+  if (!modelAssetCache.has(source)) {
+    const pending = new Promise((resolve, reject) => {
+      new GLTFLoader().load(source, resolve, undefined, reject);
+    }).catch((error) => {
+      modelAssetCache.delete(source);
+      throw error;
+    });
+    modelAssetCache.set(source, pending);
+  }
+  return modelAssetCache.get(source);
+}
 
 export function attachModelShowcase(record, source, appearance = {}, resolveContentUrl = value => value) {
   const canvas = document.createElement("canvas");
   canvas.className = "catalog-aniimo-model-canvas";
-  canvas.setAttribute("aria-label", "Animated Aniimo model artwork");
-  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "Animated Aniimo model artwork. Drag left or right to rotate.");
+  canvas.setAttribute("role", "application");
+  canvas.tabIndex = 0;
   record.append(canvas);
 
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.72;
+  renderer.toneMappingExposure = 1.08;
   renderer.setAnimationLoop(render);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 1000);
   camera.position.set(0, 0.8, 4.2);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x182033, 2.4));
-  const key = new THREE.DirectionalLight(0xffffff, 3.2);
-  key.position.set(2.5, 4, 4);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x52607a, 3.1));
+  const key = new THREE.DirectionalLight(0xfff8ed, 4.2);
+  key.position.set(2.5, 4, 4.5);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0x8bb9ff, 1.4);
-  fill.position.set(-3, 1, 2);
+  const fill = new THREE.DirectionalLight(0xaecbff, 2.35);
+  fill.position.set(-3.5, 1.5, 3);
   scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xf3d9ff, 1.25);
+  rim.position.set(0, 3, -3);
+  scene.add(rim);
 
   let mixer = null;
   let model = null;
@@ -37,6 +57,47 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
   const materialDisplayScale = { value: 1 };
   const materialCleanups = [];
   let framedSize = null;
+  let dragPointerId = null;
+  let dragStartX = 0;
+  let dragStartRotation = 0;
+
+  function rotateModelBy(delta) {
+    if (!model) return;
+    model.rotation.y += delta;
+  }
+
+  function handlePointerDown(event) {
+    if (!model || dragPointerId !== null) return;
+    dragPointerId = event.pointerId;
+    dragStartX = event.clientX;
+    dragStartRotation = model.rotation.y;
+    canvas.setPointerCapture?.(event.pointerId);
+    canvas.classList.add("is-rotating");
+  }
+
+  function handlePointerMove(event) {
+    if (!model || event.pointerId !== dragPointerId) return;
+    model.rotation.y = dragStartRotation + (event.clientX - dragStartX) * 0.012;
+  }
+
+  function finishPointerRotation(event) {
+    if (event.pointerId !== dragPointerId) return;
+    canvas.releasePointerCapture?.(event.pointerId);
+    dragPointerId = null;
+    canvas.classList.remove("is-rotating");
+  }
+
+  function handleKeyDown(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    rotateModelBy(event.key === "ArrowLeft" ? -Math.PI / 12 : Math.PI / 12);
+  }
+
+  canvas.addEventListener("pointerdown", handlePointerDown);
+  canvas.addEventListener("pointermove", handlePointerMove);
+  canvas.addEventListener("pointerup", finishPointerRotation);
+  canvas.addEventListener("pointercancel", finishPointerRotation);
+  canvas.addEventListener("keydown", handleKeyDown);
 
   function updateCameraFrame() {
     if (!framedSize) return;
@@ -234,8 +295,25 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
     updateCameraFrame();
   }
 
+  function visibleModelBounds(root) {
+    const bounds = new THREE.Box3();
+    const meshBounds = new THREE.Box3();
+    root.updateWorldMatrix(true, true);
+    root.traverse((object) => {
+      if (!object.visible || !object.isMesh || !object.geometry) return;
+      if (object.isSkinnedMesh && typeof object.computeBoundingBox === "function") {
+        object.computeBoundingBox();
+        if (object.boundingBox) bounds.union(meshBounds.copy(object.boundingBox).applyMatrix4(object.matrixWorld));
+        return;
+      }
+      if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+      if (object.geometry.boundingBox) bounds.union(meshBounds.copy(object.geometry.boundingBox).applyMatrix4(object.matrixWorld));
+    });
+    return bounds.isEmpty() ? new THREE.Box3().setFromObject(root) : bounds;
+  }
+
   function frameModel(root) {
-    const bounds = new THREE.Box3().setFromObject(root);
+    const bounds = visibleModelBounds(root);
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
     const height = Math.max(size.y, 0.01);
@@ -267,10 +345,12 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
     renderer.render(scene, camera);
   }
 
-  const loadPromise = new Promise((resolve, reject) => new GLTFLoader().load(
-    source,
-    async (gltf) => {
-      try {
+  const loadPromise = loadModelAsset(source)
+    .then(async (asset) => {
+      const gltf = {
+        scene: cloneSkeleton(asset.scene),
+        animations: asset.animations,
+      };
       if (disposed) return;
       const materialTasks = [];
       const dyeAdapter = appearance.dyeShaderModule
@@ -374,25 +454,20 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
       });
       await Promise.all(materialTasks);
       if (disposed) return;
-      frameModel(model);
       scene.add(model);
       if (gltf.animations?.length) {
         mixer = new THREE.AnimationMixer(model);
         const preferred = gltf.animations.find((clip) => /Idle/i.test(clip.name)) || gltf.animations[0];
         mixer.clipAction(preferred).play();
+        mixer.update(1 / 60);
       }
-      resolve();
-      } catch (error) {
-        reject(error);
-      }
-    },
-    undefined,
-    (error) => {
+      frameModel(model);
+    })
+    .catch((error) => {
       canvas.classList.add("is-load-error");
       canvas.setAttribute("aria-label", "Aniimo model artwork unavailable");
-      reject(error || new Error("Unable to load Aniimo model"));
-    },
-  ));
+      throw error || new Error("Unable to load Aniimo model");
+    });
 
   const observer = new ResizeObserver(resize);
   observer.observe(record);
@@ -401,6 +476,11 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
     observer.disconnect();
     mixer?.stopAllAction();
     materialCleanups.forEach(cleanup => cleanup());
+    canvas.removeEventListener("pointerdown", handlePointerDown);
+    canvas.removeEventListener("pointermove", handlePointerMove);
+    canvas.removeEventListener("pointerup", finishPointerRotation);
+    canvas.removeEventListener("pointercancel", finishPointerRotation);
+    canvas.removeEventListener("keydown", handleKeyDown);
   };
   return loadPromise;
 }

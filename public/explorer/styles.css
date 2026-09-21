@@ -8164,7 +8164,13 @@ select option:hover {
   width: 100%;
   height: 100%;
   display: block;
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: pan-y;
+  cursor: grab;
+}
+
+.catalog-aniimo-model-canvas.is-rotating {
+  cursor: grabbing;
 }
 
 .catalog-aniimo-model-canvas.is-load-error {

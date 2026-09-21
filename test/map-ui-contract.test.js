@@ -210,6 +210,11 @@ test("Aniimo rarity selector loads reviewed videos or mask runtimes only from pr
   assert.match(modelShowcase, /authoredRuntimeCompositor !== 'deferred-mrt'/u);
   assert.match(modelShowcase, /const previous = material\.onBeforeCompile/u);
   assert.match(modelShowcase, /updateCameraFrame\(\)/u);
+  assert.match(modelShowcase, /const modelAssetCache = new Map\(\)/u);
+  assert.match(modelShowcase, /cloneSkeleton\(asset\.scene\)/u);
+  assert.match(modelShowcase, /if \(!object\.visible \|\| !object\.isMesh/u);
+  assert.match(modelShowcase, /Drag left or right to rotate/u);
+  assert.match(modelShowcase, /model\.rotation\.y = dragStartRotation/u);
   assert.doesNotMatch(explorer, /paletteColor\(float value\)/u);
   assert.doesNotMatch(explorer, /u_paletteEnabled|u_gameShinyEnabled|u_channelRemapEnabled/u);
   assert.doesNotMatch(explorer, /client_rarity_manifest/u);
