@@ -393,7 +393,9 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
               clone.visible = false;
               return clone;
             }
-            clone.side = THREE.DoubleSide;
+            // Preserve the GLB's authored face culling. Forcing every Pawney
+            // material to DoubleSide exposes interior/back-facing armor and
+            // makes the body appear hollow when the viewer is rotated.
             if (appearance.tint && clone.color && !appearance.palette) {
               // The extracted Scorchhowl showcase mesh has a neutral base
               // material.  Apply the game's rarity style color at render time
