@@ -139,14 +139,14 @@ function securityHeaders(headers = new Headers(), localPreview = false) {
   headers.set("content-security-policy", [
     "default-src 'self'",
     "base-uri 'none'",
-    `connect-src 'self' https://api.github.com https://aniilogs-api.pages.dev${localContentOrigin}`,
+    `connect-src 'self' blob: https://api.github.com https://aniilogs-api.pages.dev${localContentOrigin}`,
     "font-src 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    `img-src 'self' data: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com${localContentOrigin}`,
+    `img-src 'self' data: blob: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com${localContentOrigin}`,
     `media-src 'self' https://aniilogs-api.pages.dev${localContentOrigin}`,
     "object-src 'none'",
-    "script-src 'self'",
+    `script-src 'self' https://aniilogs-api.pages.dev${localContentOrigin}`,
     "style-src 'self'",
   ].join("; "));
   headers.set("referrer-policy", "strict-origin-when-cross-origin");

@@ -98,6 +98,41 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
     renderVerified: true,
   }));
 }
+
+function approvedMaskRuntimeVariants(manifest, entry, packageVersion) {
+  if (
+    manifest?.schema !== "aniilogs.private.aniimo-appearance-runtime.v1"
+    || String(manifest?.source_release ?? "") !== String(packageVersion ?? "")
+    || !manifest?.form_appearance_overrides
+  ) return [];
+  const appearances = manifest.form_appearance_overrides[String(entry?.form_id ?? "")];
+  if (!appearances || typeof appearances !== "object") return [];
+  return ANIIMO_RARITY_STYLES.flatMap((style) => {
+    const appearance = appearances[String(style.id)];
+    const model = String(appearance?.model || "");
+    const isCommon = String(style.id) === "0";
+    const valid = appearance?.renderVerified === true
+      && appearance?.renderSource === "game-authored-mask-runtime"
+      && /^\.\/media\/aniimo\/[\w/-]+\.glb$/u.test(model)
+      && !model.includes("..")
+      && !isCommon
+      && (
+        appearance?.gameShiny === true
+        && typeof appearance?.rendererConfig === "object"
+        && String(appearance?.dyeShaderModule || "") === "./media/aniimo/defaultlit-dye.mjs"
+      );
+    if (!valid) return [];
+    return [{
+      id: `sparkling-${String(style.id).padStart(2, "0")}`,
+      rarity_id: String(style.id),
+      label: style.label,
+      model,
+      appearance,
+      renderSource: "game-authored-mask-runtime",
+      renderVerified: true,
+    }];
+  });
+}
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
 const LOCAL_TRACKING_STORAGE_KEY = "aniilogs:explorer:tracking:v1";
@@ -425,7 +460,9 @@ const state = {
   aniilogData: null,
   aniilogRarityManifest: null,
   aniilogArtworkManifest: null,
-  aniilogAppearanceSelection: {},
+  aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY
+    ? { [REQUESTED_ANIIMO_FORM_ID]: REQUESTED_ANIIMO_RARITY }
+    : {},
   aniilogLoadError: "",
   aniilogLoadPromise: null,
   catalogSearch: {
@@ -2771,8 +2808,20 @@ function ensureAniilogData() {
         entry.video_layout = mediaEntry.video_layout;
         entry.model = mediaEntry.model || "";
         entry.model_label = mediaEntry.model_label || "";
-        const approvedVariants = approvedPetManualVariants(artworkCandidate, entry, payload.package_version);
-        entry.showcase_variants = approvedVariants;
+        const runtimeVariants = approvedMaskRuntimeVariants(rarityManifest, entry, payload.package_version);
+        const videoVariants = approvedPetManualVariants(artworkCandidate, entry, payload.package_version);
+        const shippedCommon = videoVariants.find((variant) => variant.id === "common") || {
+          id: "common",
+          rarity_id: "0",
+          label: "Common",
+          video: mediaEntry.video,
+          video_layout: mediaEntry.video_layout,
+          renderSource: "shipped-petmanual",
+          renderVerified: true,
+        };
+        entry.showcase_variants = runtimeVariants.length
+          ? [shippedCommon, ...runtimeVariants]
+          : videoVariants;
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
       state.aniilogData = payload;
@@ -5303,12 +5352,26 @@ function renderAniilogBossVariants(bossVariants) {
 
 function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  // The extracted Pet Manual video is the only verified public artwork
-  // source. Experimental model and rarity overrides remain private until the
-  // client-native runtime assets can be reproduced faithfully.
   const showcaseMedia = entry.showcase_media?.renderVerified === true
     ? entry.showcase_media
     : entry;
+  if (showcaseMedia.renderSource === "game-authored-mask-runtime"
+    && showcaseMedia.model
+    && showcaseMedia.appearance) {
+    import("./model-showcase.js")
+      .then(({ attachModelShowcase }) => attachModelShowcase(
+        record,
+        contentUrl(showcaseMedia.model),
+        showcaseMedia.appearance,
+        contentUrl,
+      ))
+      .catch((error) => {
+        console.error("Unable to load the game-authored Aniimo appearance", error);
+      });
+    return;
+  }
+  // Shipped packed Pet Manual video remains the verified fallback for forms
+  // that do not yet have a reviewed mask-runtime package.
   if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");

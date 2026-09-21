@@ -10,6 +10,8 @@ const landingHtml = await readFile(new URL("../public/index.html", import.meta.u
 const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
 const themeShell = await readFile(new URL("../public/theme-shell.js", import.meta.url), "utf8");
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
+const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+const modelShowcase = await readFile(new URL("../public/explorer/model-showcase.js", import.meta.url), "utf8");
 
 test("procedural and withheld maps stay out of the public map navigator", () => {
   assert.match(explorer, /HIDDEN_MAP_IDS = new Set\(\["egg-heist", "egg-heist-team"\]\)/u);
@@ -124,16 +126,18 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
-test("public Aniimo artwork accepts only approved verified Pet Manual videos", () => {
+test("public Aniimo artwork accepts only approved video or game-authored mask runtimes", () => {
   const body = explorer.slice(explorer.indexOf("function attachPackedAniimoBackdrop("), explorer.indexOf("function renderEvolutionSection("));
   assert.match(body, /entry\.showcase_media\?\.renderVerified === true/u);
-  assert.doesNotMatch(body, /attachModelShowcase/u);
+  assert.match(body, /renderSource === "game-authored-mask-runtime"/u);
+  assert.match(body, /import\("\.\/model-showcase\.js"\)/u);
+  assert.match(body, /attachModelShowcase/u);
   assert.match(explorer, /reviewStatus !== "approved"/u);
   assert.match(explorer, /renderVerified === true/u);
   assert.match(explorer, /video_layout === "rgb-alpha-vertical"/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /aniilogAppearanceSelection/u);
-  assert.match(explorer, /entry\.showcase_variants = approvedVariants;/u);
+  assert.match(explorer, /entry\.showcase_variants = runtimeVariants\.length[\s\S]*\[shippedCommon, \.\.\.runtimeVariants\][\s\S]*videoVariants;/u);
   assert.doesNotMatch(explorer, /entry\.showcase_variants = Array\.isArray\(mediaEntry\.showcase_variants\)/u);
 });
 
@@ -190,15 +194,25 @@ test("mobile artwork mode takes over the viewport and hides the Aniimo index", (
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
 });
 
-test("Aniimo rarity selector loads extracted appearances only from private content", () => {
+test("Aniimo rarity selector loads reviewed videos or mask runtimes only from private content", () => {
   for (let id = 0; id <= 12; id += 1) assert.match(explorer, new RegExp(`id: "${id}"`));
   assert.match(explorer, /rarity-manifest\.remote\.json/u);
   assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /approvedPetManualVariants/u);
+  assert.match(explorer, /approvedMaskRuntimeVariants/u);
+  assert.match(explorer, /aniilogs\.private\.aniimo-appearance-runtime\.v1/u);
+  assert.match(explorer, /aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY/u);
+  assert.match(explorer, /\[shippedCommon, \.\.\.runtimeVariants\]/u);
+  assert.match(worker, /connect-src 'self' blob:/u);
+  assert.match(worker, /img-src 'self' data: blob:/u);
+  assert.match(worker, /script-src 'self' https:\/\/aniilogs-api\.pages\.dev/u);
+  assert.match(modelShowcase, /authoredRuntimeCompositor !== 'deferred-mrt'/u);
+  assert.match(modelShowcase, /const previous = material\.onBeforeCompile/u);
+  assert.match(modelShowcase, /updateCameraFrame\(\)/u);
   assert.doesNotMatch(explorer, /paletteColor\(float value\)/u);
   assert.doesNotMatch(explorer, /u_paletteEnabled|u_gameShinyEnabled|u_channelRemapEnabled/u);
-  assert.doesNotMatch(explorer, /client_rarity_manifest|form_appearance_overrides/u);
+  assert.doesNotMatch(explorer, /client_rarity_manifest/u);
   assert.doesNotMatch(explorer, /ShinyEffect_Color\d+[^\n]*\.asset/u);
 });
 
@@ -431,7 +445,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20260921-build3535596-stable-petmanual-video-r59"/u);
+  assert.match(explorerConfig, /contentRevision = "20260921-build3535596-pawney-mask-runtime-r62"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

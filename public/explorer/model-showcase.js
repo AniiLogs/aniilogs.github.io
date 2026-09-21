@@ -36,6 +36,18 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
   // Display-only framing must remain separate from asset-space coordinates.
   const materialDisplayScale = { value: 1 };
   const materialCleanups = [];
+  let framedSize = null;
+
+  function updateCameraFrame() {
+    if (!framedSize) return;
+    const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+    const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+    const verticalDistance = framedSize.height / (2 * Math.tan(verticalFov / 2));
+    const horizontalDistance = framedSize.width / (2 * Math.tan(horizontalFov / 2));
+    const distance = Math.max(verticalDistance, horizontalDistance) * 1.12;
+    camera.position.set(0, framedSize.lookY, Math.max(3.1, distance));
+    camera.lookAt(0, framedSize.lookY, 0);
+  }
 
   function attachRarityShader(material) {
     const linearPalette = Array.isArray(appearance.paletteLinear) ? appearance.paletteLinear.slice(0, 8) : [];
@@ -47,7 +59,10 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
       ))
       : (Array.isArray(appearance.palette) ? appearance.palette.slice(0, 6).map((value) => new THREE.Color(String(value || "#ffffff"))) : []);
     if (palette.length !== 6) return;
+    const previous = material.onBeforeCompile;
+    const previousKey = material.customProgramCacheKey();
     material.onBeforeCompile = (shader) => {
+      previous.call(material, shader, renderer);
       shader.uniforms.uShinyTime = { value: 0 };
       shader.uniforms.uShinyPalette = { value: palette };
       shader.uniforms.uShinyCore = { value: new THREE.Vector4(...(appearance.core || [0, 2, 1, 0])) };
@@ -103,7 +118,7 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
           totalEmissiveRadiance = mix(totalEmissiveRadiance, shinyColor, shinyMask);`);
       rarityShaderUniforms.push(shader.uniforms);
     };
-    material.customProgramCacheKey = () => `aniilogs-shiny-${appearance.preset || palette.join("-")}`;
+    material.customProgramCacheKey = () => `${previousKey}-aniilogs-shiny-${appearance.preset || palette.join("-")}`;
     material.needsUpdate = true;
   }
 
@@ -216,6 +231,7 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    updateCameraFrame();
   }
 
   function frameModel(root) {
@@ -228,8 +244,12 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
     const scale = 2.1 / height;
     materialDisplayScale.value = scale;
     root.scale.setScalar(scale);
-    camera.position.set(0, height * scale * 0.42, Math.max(3.1, height * scale * 2.1));
-    camera.lookAt(0, height * scale * 0.48, 0);
+    framedSize = {
+      height: height * scale,
+      width: Math.max(size.x * scale, 0.01),
+      lookY: height * scale * 0.48,
+    };
+    updateCameraFrame();
   }
 
   function render() {
@@ -319,7 +339,16 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
             // eyes, and translucent parts into the same neon color.
             const dyeBinding = Object.entries(rendererStyle?.resolvedDyeBindings || {})
               .find(([name]) => String(material.name || '').includes(name))?.[1];
-            if (authoredAdapter && authoredRuntime) {
+            if (dyeBinding) {
+              if (!dyeAdapter) throw new Error('Authored dye adapter is missing');
+              materialTasks.push(dyeAdapter.attachDye(THREE, clone, dyeBinding, resolveContentUrl, {
+                time: materialTime, displayScale: materialDisplayScale, object, root: model,
+              })
+                .then(cleanup => {
+                  if (appearance.gameShiny) attachRarityShader(clone);
+                  if (disposed) cleanup(); else materialCleanups.push(cleanup);
+                }));
+            } else if (authoredAdapter && authoredRuntime && appearance.authoredRuntimeCompositor !== 'deferred-mrt') {
               materialTasks.push(authoredAdapter.createAuthoredMaterial({
                 THREE,
                 object,
@@ -335,12 +364,8 @@ export function attachModelShowcase(record, source, appearance = {}, resolveCont
                 current[index] = authoredMaterial;
                 object.material = wasMaterialArray ? current : current[0];
               }));
-            } else if (dyeBinding) {
-              if (!dyeAdapter) throw new Error('Authored dye adapter is missing');
-              materialTasks.push(dyeAdapter.attachDye(THREE, clone, dyeBinding, resolveContentUrl, {
-                time: materialTime, displayScale: materialDisplayScale, object, root: model,
-              })
-                .then(cleanup => { if (disposed) cleanup(); else materialCleanups.push(cleanup); }));
+            } else if (appearance.gameShiny) {
+              attachRarityShader(clone);
             }
             return clone;
           });

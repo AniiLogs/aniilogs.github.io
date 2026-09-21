@@ -16,6 +16,8 @@ if (!option("--root") || !Number.isInteger(port)) {
 
 const contentTypes = new Map([
   [".json", "application/json; charset=utf-8"],
+  [".mjs", "text/javascript; charset=utf-8"],
+  [".glb", "model/gltf-binary"],
   [".png", "image/png"],
   [".webp", "image/webp"],
   [".mp4", "video/mp4"],
