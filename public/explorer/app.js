@@ -67,7 +67,20 @@ function normalizedRarityStyleId(value) {
 function appearanceForForm(appearance, formId) {
   if (!appearance) return {};
   const prefab = appearance.mappingPrefab;
-  if (prefab && prefab !== `P_Parmon_${String(formId)}.prefab`) return {};
+  if (prefab && prefab !== `P_Parmon_${String(formId)}.prefab`) {
+    // A game-authored capture is already the final rendered output for this
+    // manifest slot. Keep that media even when legacy material-probe metadata
+    // embedded beside it names a different source prefab.
+    if (appearance.renderVerified && appearance.video) {
+      return {
+        video: appearance.video,
+        video_layout: appearance.video_layout,
+        renderSource: appearance.renderSource,
+        renderVerified: true,
+      };
+    }
+    return {};
+  }
   return appearance;
 }
 

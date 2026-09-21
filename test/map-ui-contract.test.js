@@ -18,6 +18,18 @@ test("prefab-scoped appearance cannot leak to a different form", () => {
   const appearance = { mappingPrefab: 'P_Parmon_fixtureA.prefab', rendererConfig: { fixture: {} } };
   assert.equal(select(appearance, 'fixtureA'), appearance);
   assert.deepEqual(select(appearance, 'fixtureB'), {});
+  assert.deepEqual(select({
+    ...appearance,
+    video: './game-authored/fixture-b.mp4',
+    video_layout: 'full-frame',
+    renderSource: 'game-authored-field-notes-camera',
+    renderVerified: true,
+  }, 'fixtureB'), {
+    video: './game-authored/fixture-b.mp4',
+    video_layout: 'full-frame',
+    renderSource: 'game-authored-field-notes-camera',
+    renderVerified: true,
+  });
   assert.deepEqual(select(null, 'fixtureB'), {});
 });
 
@@ -395,7 +407,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20260920-build3535596-pawney-game-authored-r57"/u);
+  assert.match(explorerConfig, /contentRevision = "20260921-build3535596-pawney-game-authored-r58"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
