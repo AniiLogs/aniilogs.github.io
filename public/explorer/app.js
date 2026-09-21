@@ -67,12 +67,27 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
   const form = manifest.forms[String(entry?.form_id ?? "")];
   if (!form || String(form.formId ?? "") !== String(entry?.form_id ?? "")) return [];
   const variants = Array.isArray(form.variants) ? form.variants : [];
+  const approvedIds = new Set();
   return variants.filter((variant) => {
+    const id = String(variant?.id || "");
     const video = String(variant?.video || "");
-    return variant?.renderVerified === true
+    const style = variant?.style;
+    const isCommon = id === "common" && (style === null || style === undefined);
+    const isRarity = /^sparkling-(?:0[1-9]|1[0-2])$/u.test(id)
+      && Number.isInteger(style)
+      && style >= 1
+      && style <= 12;
+    const expectedSource = isCommon ? "shipped-petmanual" : "client-authored-capture";
+    const valid = variant?.renderVerified === true
       && variant?.video_layout === "rgb-alpha-vertical"
+      && (isCommon || isRarity)
+      && variant?.renderSource === expectedSource
+      && /^[a-f0-9]{64}$/iu.test(String(variant?.representativeHash || ""))
       && /^\.\/media\/aniimo\/petmanual\/[\w-]+\/[\w-]+\.mp4$/u.test(video)
-      && !video.includes("..");
+      && !video.includes("..")
+      && !approvedIds.has(id);
+    if (valid) approvedIds.add(id);
+    return valid;
   }).map((variant) => ({
     id: String(variant.id || ""),
     rarity_id: String(variant.style ?? variant.id ?? ""),

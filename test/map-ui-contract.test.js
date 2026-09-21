@@ -150,7 +150,9 @@ test("Pet Manual artwork manifest validation fails closed", () => {
     label: "Sparkling Type III",
     video: "./media/aniimo/petmanual/1002600/sparkling-03.mp4",
     video_layout: "rgb-alpha-vertical",
+    renderSource: "client-authored-capture",
     renderVerified: true,
+    representativeHash: "a".repeat(64),
   };
   const manifest = {
     schema: "aniilogs.private.petmanual-artwork-manifest.v1",
@@ -168,6 +170,18 @@ test("Pet Manual artwork manifest validation fails closed", () => {
   assert.deepEqual(approve({
     ...manifest,
     forms: { "1002600": { formId: 1, variants: [variant] } },
+  }, entry, 3544783), []);
+  assert.deepEqual(approve({
+    ...manifest,
+    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, renderSource: "browser-reconstruction" }] } },
+  }, entry, 3544783), []);
+  assert.deepEqual(approve({
+    ...manifest,
+    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, representativeHash: "not-a-capture-hash" }] } },
+  }, entry, 3544783), []);
+  assert.deepEqual(approve({
+    ...manifest,
+    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, style: 13 }] } },
   }, entry, 3544783), []);
 });
 
