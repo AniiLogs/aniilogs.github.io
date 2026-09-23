@@ -73,7 +73,8 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
     const video = String(variant?.video || "");
     const style = variant?.style;
     const isCommon = id === "common" && (style === null || style === undefined);
-    const isRarity = /^sparkling-(?:0[1-9]|1[0-2])$/u.test(id)
+    const isRarity = entry?.form_key === "rainbow"
+      && /^sparkling-(?:0[1-9]|1[0-2])$/u.test(id)
       && Number.isInteger(style)
       && style >= 1
       && style <= 12;
@@ -99,39 +100,12 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
   }));
 }
 
-function approvedMaskRuntimeVariants(manifest, entry, packageVersion) {
-  if (
-    manifest?.schema !== "aniilogs.private.aniimo-appearance-runtime.v1"
-    || String(manifest?.source_release ?? "") !== String(packageVersion ?? "")
-    || !manifest?.form_appearance_overrides
-  ) return [];
-  const appearances = manifest.form_appearance_overrides[String(entry?.form_id ?? "")];
-  if (!appearances || typeof appearances !== "object") return [];
-  return ANIIMO_RARITY_STYLES.flatMap((style) => {
-    const appearance = appearances[String(style.id)];
-    const model = String(appearance?.model || "");
-    const isCommon = String(style.id) === "0";
-    const valid = appearance?.renderVerified === true
-      && appearance?.renderSource === "game-authored-mask-runtime"
-      && /^\.\/media\/aniimo\/[\w/-]+\.glb$/u.test(model)
-      && !model.includes("..")
-      && !isCommon
-      && (
-        appearance?.gameShiny === true
-        && typeof appearance?.rendererConfig === "object"
-        && String(appearance?.dyeShaderModule || "") === "./media/aniimo/defaultlit-dye.mjs"
-      );
-    if (!valid) return [];
-    return [{
-      id: `sparkling-${String(style.id).padStart(2, "0")}`,
-      rarity_id: String(style.id),
-      label: style.label,
-      model,
-      appearance,
-      renderSource: "game-authored-mask-runtime",
-      renderVerified: true,
-    }];
-  });
+function approvedMaskRuntimeVariants() {
+  // The deployed v1 mask runtime is a browser reconstruction, not the game's
+  // shader/postprocess pipeline. Its `renderVerified` flag was incorrectly
+  // used as proof of visual fidelity. Keep all of those variants unavailable
+  // until an exact, independently checked model runtime replaces them.
+  return [];
 }
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;

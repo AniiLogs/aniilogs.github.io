@@ -126,7 +126,7 @@ test("named and custom themes share one site-wide preference", () => {
   assert.doesNotMatch(landingApp, /COLOR_MODE_STORAGE_KEY/u);
 });
 
-test("public Aniimo artwork accepts only approved video or game-authored mask runtimes", () => {
+test("public Aniimo artwork keeps a shipped video fallback while unverified runtimes are gated", () => {
   const body = explorer.slice(explorer.indexOf("function attachPackedAniimoBackdrop("), explorer.indexOf("function renderEvolutionSection("));
   assert.match(body, /entry\.showcase_media\?\.renderVerified === true/u);
   assert.match(body, /renderSource === "game-authored-mask-runtime"/u);
@@ -147,12 +147,12 @@ test("Pet Manual artwork manifest validation fails closed", () => {
     explorer.indexOf("const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY"),
   );
   const approve = new Function(`${body}; return approvedPetManualVariants;`)();
-  const entry = { form_id: "1002600" };
+  const entry = { form_id: "1002603", form_key: "rainbow" };
   const variant = {
     id: "sparkling-03",
     style: 3,
     label: "Sparkling Type III",
-    video: "./media/aniimo/petmanual/1002600/sparkling-03.mp4",
+    video: "./media/aniimo/petmanual/1002603/sparkling-03.mp4",
     video_layout: "rgb-alpha-vertical",
     renderSource: "client-authored-capture",
     renderVerified: true,
@@ -162,30 +162,31 @@ test("Pet Manual artwork manifest validation fails closed", () => {
     schema: "aniilogs.private.petmanual-artwork-manifest.v1",
     sourcePackage: 3544783,
     reviewStatus: "approved",
-    forms: { "1002600": { formId: 1002600, variants: [variant] } },
+    forms: { "1002603": { formId: 1002603, variants: [variant] } },
   };
   assert.equal(approve(manifest, entry, 3544783).length, 1);
+  assert.deepEqual(approve(manifest, { ...entry, form_key: "basic" }, 3544783), []);
   assert.deepEqual(approve({ ...manifest, reviewStatus: "staged-unapproved" }, entry, 3544783), []);
   assert.deepEqual(approve({ ...manifest, sourcePackage: 3535596 }, entry, 3544783), []);
   assert.deepEqual(approve({
     ...manifest,
-    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, video: "../leak.mp4" }] } },
+    forms: { "1002603": { formId: 1002603, variants: [{ ...variant, video: "../leak.mp4" }] } },
   }, entry, 3544783), []);
   assert.deepEqual(approve({
     ...manifest,
-    forms: { "1002600": { formId: 1, variants: [variant] } },
+    forms: { "1002603": { formId: 1, variants: [variant] } },
   }, entry, 3544783), []);
   assert.deepEqual(approve({
     ...manifest,
-    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, renderSource: "browser-reconstruction" }] } },
+    forms: { "1002603": { formId: 1002603, variants: [{ ...variant, renderSource: "browser-reconstruction" }] } },
   }, entry, 3544783), []);
   assert.deepEqual(approve({
     ...manifest,
-    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, representativeHash: "not-a-capture-hash" }] } },
+    forms: { "1002603": { formId: 1002603, variants: [{ ...variant, representativeHash: "not-a-capture-hash" }] } },
   }, entry, 3544783), []);
   assert.deepEqual(approve({
     ...manifest,
-    forms: { "1002600": { formId: 1002600, variants: [{ ...variant, style: 13 }] } },
+    forms: { "1002603": { formId: 1002603, variants: [{ ...variant, style: 13 }] } },
   }, entry, 3544783), []);
 });
 
@@ -194,14 +195,19 @@ test("mobile artwork mode takes over the viewport and hides the Aniimo index", (
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
 });
 
-test("Aniimo rarity selector loads reviewed videos or mask runtimes only from private content", () => {
+test("Aniimo rarity selector accepts reviewed videos but rejects the unverified mask runtime", () => {
   for (let id = 0; id <= 12; id += 1) assert.match(explorer, new RegExp(`id: "${id}"`));
   assert.match(explorer, /rarity-manifest\.remote\.json/u);
   assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /approvedPetManualVariants/u);
   assert.match(explorer, /approvedMaskRuntimeVariants/u);
-  assert.match(explorer, /aniilogs\.private\.aniimo-appearance-runtime\.v1/u);
+  assert.match(explorer, /function approvedMaskRuntimeVariants\(\)\s*\{[\s\S]*?return \[\];\s*\}/u);
+  const approveRuntime = new Function(`${explorer.slice(
+    explorer.indexOf("function approvedMaskRuntimeVariants("),
+    explorer.indexOf("const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY"),
+  )}; return approvedMaskRuntimeVariants;`)();
+  assert.deepEqual(approveRuntime({ renderVerified: true }, { form_id: "1002603", form_key: "rainbow" }, 3535596), []);
   assert.match(explorer, /aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY/u);
   assert.match(explorer, /\[shippedCommon, \.\.\.runtimeVariants\]/u);
   assert.match(worker, /connect-src 'self' blob:/u);
