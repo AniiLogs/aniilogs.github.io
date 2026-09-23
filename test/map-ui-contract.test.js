@@ -137,7 +137,7 @@ test("public Aniimo artwork keeps a shipped video fallback while unverified runt
   assert.match(explorer, /video_layout === "rgb-alpha-vertical"/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /aniilogAppearanceSelection/u);
-  assert.match(explorer, /entry\.showcase_variants = runtimeVariants\.length[\s\S]*\[shippedCommon, \.\.\.runtimeVariants\][\s\S]*videoVariants;/u);
+  assert.match(explorer, /entry\.showcase_variants = \[[\s\S]*shippedCommon,[\s\S]*runtimeVariants\.length[\s\S]*videoVariants\.filter\(\(variant\) => variant\.id !== "common"\)/u);
   assert.doesNotMatch(explorer, /entry\.showcase_variants = Array\.isArray\(mediaEntry\.showcase_variants\)/u);
 });
 
@@ -209,7 +209,7 @@ test("Aniimo rarity selector accepts reviewed videos but rejects the unverified 
   )}; return approvedMaskRuntimeVariants;`)();
   assert.deepEqual(approveRuntime({ renderVerified: true }, { form_id: "1002603", form_key: "rainbow" }, 3535596), []);
   assert.match(explorer, /aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY/u);
-  assert.match(explorer, /\[shippedCommon, \.\.\.runtimeVariants\]/u);
+  assert.match(explorer, /entry\.showcase_variants = \[[\s\S]*shippedCommon,[\s\S]*runtimeVariants\.length/u);
   assert.match(worker, /connect-src 'self' blob:/u);
   assert.match(worker, /img-src 'self' data: blob:/u);
   assert.match(worker, /script-src 'self' https:\/\/aniilogs-api\.pages\.dev/u);

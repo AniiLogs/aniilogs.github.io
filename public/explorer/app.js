@@ -2793,9 +2793,12 @@ function ensureAniilogData() {
           renderSource: "shipped-petmanual",
           renderVerified: true,
         };
-        entry.showcase_variants = runtimeVariants.length
-          ? [shippedCommon, ...runtimeVariants]
-          : videoVariants;
+        entry.showcase_variants = [
+          shippedCommon,
+          ...(runtimeVariants.length
+            ? runtimeVariants
+            : videoVariants.filter((variant) => variant.id !== "common")),
+        ];
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
       state.aniilogData = payload;
