@@ -100,13 +100,6 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
   }));
 }
 
-function approvedMaskRuntimeVariants() {
-  // The deployed v1 mask runtime is a browser reconstruction, not the game's
-  // shader/postprocess pipeline. Its `renderVerified` flag was incorrectly
-  // used as proof of visual fidelity. Keep all of those variants unavailable
-  // until an exact, independently checked model runtime replaces them.
-  return [];
-}
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
 const LOCAL_TRACKING_STORAGE_KEY = "aniilogs:explorer:tracking:v1";
@@ -2782,7 +2775,6 @@ function ensureAniilogData() {
         entry.video_layout = mediaEntry.video_layout;
         entry.model = mediaEntry.model || "";
         entry.model_label = mediaEntry.model_label || "";
-        const runtimeVariants = approvedMaskRuntimeVariants(rarityManifest, entry, payload.package_version);
         const videoVariants = approvedPetManualVariants(artworkCandidate, entry, payload.package_version);
         const shippedCommon = videoVariants.find((variant) => variant.id === "common") || {
           id: "common",
@@ -2795,9 +2787,7 @@ function ensureAniilogData() {
         };
         entry.showcase_variants = [
           shippedCommon,
-          ...(runtimeVariants.length
-            ? runtimeVariants
-            : videoVariants.filter((variant) => variant.id !== "common")),
+          ...videoVariants.filter((variant) => variant.id !== "common"),
         ];
       }
       window.AniipediaI18n.registerDisplay(payload.localizations);
@@ -5332,23 +5322,8 @@ function attachPackedAniimoBackdrop(record, entry) {
   const showcaseMedia = entry.showcase_media?.renderVerified === true
     ? entry.showcase_media
     : entry;
-  if (showcaseMedia.renderSource === "game-authored-mask-runtime"
-    && showcaseMedia.model
-    && showcaseMedia.appearance) {
-    import("./model-showcase.js")
-      .then(({ attachModelShowcase }) => attachModelShowcase(
-        record,
-        contentUrl(showcaseMedia.model),
-        showcaseMedia.appearance,
-        contentUrl,
-      ))
-      .catch((error) => {
-        console.error("Unable to load the game-authored Aniimo appearance", error);
-      });
-    return;
-  }
-  // Shipped packed Pet Manual video remains the verified fallback for forms
-  // that do not yet have a reviewed mask-runtime package.
+  // Only game-authored packed video is approved for the public artwork view.
+  // The old browser model reconstruction cannot reproduce the game's shaders.
   if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");

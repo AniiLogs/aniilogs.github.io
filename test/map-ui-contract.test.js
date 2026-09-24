@@ -11,7 +11,6 @@ const landingStyles = await readFile(new URL("../public/styles.css", import.meta
 const themeShell = await readFile(new URL("../public/theme-shell.js", import.meta.url), "utf8");
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
 const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-const modelShowcase = await readFile(new URL("../public/explorer/model-showcase.js", import.meta.url), "utf8");
 
 test("procedural and withheld maps stay out of the public map navigator", () => {
   assert.match(explorer, /HIDDEN_MAP_IDS = new Set\(\["egg-heist", "egg-heist-team"\]\)/u);
@@ -129,15 +128,14 @@ test("named and custom themes share one site-wide preference", () => {
 test("public Aniimo artwork keeps a shipped video fallback while unverified runtimes are gated", () => {
   const body = explorer.slice(explorer.indexOf("function attachPackedAniimoBackdrop("), explorer.indexOf("function renderEvolutionSection("));
   assert.match(body, /entry\.showcase_media\?\.renderVerified === true/u);
-  assert.match(body, /renderSource === "game-authored-mask-runtime"/u);
-  assert.match(body, /import\("\.\/model-showcase\.js"\)/u);
-  assert.match(body, /attachModelShowcase/u);
+  assert.doesNotMatch(body, /model-showcase|attachModelShowcase|game-authored-mask-runtime/u);
+  assert.match(body, /showcaseMedia\.video/u);
   assert.match(explorer, /reviewStatus !== "approved"/u);
   assert.match(explorer, /renderVerified === true/u);
   assert.match(explorer, /video_layout === "rgb-alpha-vertical"/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /aniilogAppearanceSelection/u);
-  assert.match(explorer, /entry\.showcase_variants = \[[\s\S]*shippedCommon,[\s\S]*runtimeVariants\.length[\s\S]*videoVariants\.filter\(\(variant\) => variant\.id !== "common"\)/u);
+  assert.match(explorer, /entry\.showcase_variants = \[[\s\S]*shippedCommon,[\s\S]*videoVariants\.filter\(\(variant\) => variant\.id !== "common"\)/u);
   assert.doesNotMatch(explorer, /entry\.showcase_variants = Array\.isArray\(mediaEntry\.showcase_variants\)/u);
 });
 
@@ -201,27 +199,12 @@ test("Aniimo rarity selector accepts reviewed videos but rejects the unverified 
   assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /approvedPetManualVariants/u);
-  assert.match(explorer, /approvedMaskRuntimeVariants/u);
-  assert.match(explorer, /function approvedMaskRuntimeVariants\(\)\s*\{[\s\S]*?return \[\];\s*\}/u);
-  const approveRuntime = new Function(`${explorer.slice(
-    explorer.indexOf("function approvedMaskRuntimeVariants("),
-    explorer.indexOf("const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY"),
-  )}; return approvedMaskRuntimeVariants;`)();
-  assert.deepEqual(approveRuntime({ renderVerified: true }, { form_id: "1002603", form_key: "rainbow" }, 3535596), []);
+  assert.doesNotMatch(explorer, /approvedMaskRuntimeVariants|import\("\.\/model-showcase\.js"\)/u);
   assert.match(explorer, /aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY/u);
-  assert.match(explorer, /entry\.showcase_variants = \[[\s\S]*shippedCommon,[\s\S]*runtimeVariants\.length/u);
+  assert.match(explorer, /entry\.showcase_variants = \[[\s\S]*shippedCommon,[\s\S]*videoVariants\.filter/u);
   assert.match(worker, /connect-src 'self' blob:/u);
   assert.match(worker, /img-src 'self' data: blob:/u);
   assert.match(worker, /script-src 'self' https:\/\/aniilogs-api\.pages\.dev/u);
-  assert.match(modelShowcase, /authoredRuntimeCompositor !== 'deferred-mrt'/u);
-  assert.match(modelShowcase, /const previous = material\.onBeforeCompile/u);
-  assert.match(modelShowcase, /updateCameraFrame\(\)/u);
-  assert.match(modelShowcase, /const modelAssetCache = new Map\(\)/u);
-  assert.match(modelShowcase, /cloneSkeleton\(asset\.scene\)/u);
-  assert.match(modelShowcase, /if \(!object\.visible \|\| !object\.isMesh/u);
-  assert.match(modelShowcase, /Drag left or right to rotate/u);
-  assert.match(modelShowcase, /model\.rotation\.y = dragStartRotation/u);
-  assert.doesNotMatch(modelShowcase, /clone\.side = THREE\.DoubleSide/u);
   assert.doesNotMatch(explorer, /paletteColor\(float value\)/u);
   assert.doesNotMatch(explorer, /u_paletteEnabled|u_gameShinyEnabled|u_channelRemapEnabled/u);
   assert.doesNotMatch(explorer, /client_rarity_manifest/u);
