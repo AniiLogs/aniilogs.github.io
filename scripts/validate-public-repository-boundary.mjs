@@ -59,6 +59,9 @@ let largestFilePath = "";
 const directoryEntryCounts = new Map();
 for await (const file of files(root)) {
   const repoPath = relative(root, file.path).replaceAll("\\", "/");
+  if (repoPath === "public/explorer/model-showcase.js") {
+    throw new Error("Private Aniimo renderer source must not be published by GitHub Pages.");
+  }
   if (repoPath.startsWith("public/explorer/data/") || repoPath.startsWith("public/explorer/assets/")) {
     throw new Error(`Game-derived content must be stored in private R2, not GitHub: ${repoPath}`);
   }

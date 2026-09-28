@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -11,6 +12,11 @@ const landingStyles = await readFile(new URL("../public/styles.css", import.meta
 const themeShell = await readFile(new URL("../public/theme-shell.js", import.meta.url), "utf8");
 const localContentServer = await readFile(new URL("../scripts/serve-private-content.mjs", import.meta.url), "utf8");
 const worker = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
+
+test("private Aniimo renderer code is not in the public site", () => {
+  assert.equal(existsSync(new URL("../public/explorer/model-showcase.js", import.meta.url)), false);
+  assert.doesNotMatch(explorer, /model-showcase|attachModelShowcase/u);
+});
 
 test("procedural and withheld maps stay out of the public map navigator", () => {
   assert.match(explorer, /HIDDEN_MAP_IDS = new Set\(\["egg-heist", "egg-heist-team"\]\)/u);
