@@ -193,6 +193,55 @@ test("yaw viewer loads frames on demand and supports touch and keyboard rotation
   assert.equal(viewer.pointerCapture, null);
 });
 
+test("cached drag views appear immediately while nearby prefetch stays bounded", async () => {
+  const { attach, requests, FakeElement } = viewerFixture();
+  const record = new FakeElement();
+  record.classList.add("is-showcase");
+  attach(record, entry, { ...videoVariant, turntable });
+  const viewer = record.children[0];
+  viewer.start();
+  requests[0].onload();
+  await new Promise(setImmediate);
+  assert.deepEqual(requests.map((frame) => frame.url.match(/frame-(\d{3})/u)[1]), ["000", "001", "035"]);
+
+  requests[1].onload();
+  await new Promise(setImmediate);
+  assert.equal(requests.length, 4, "the next nearby frame starts after a prefetch slot opens");
+  viewer.dispatch("pointerdown", {
+    pointerId: 9, pointerType: "touch", button: 0, clientX: 100, preventDefault() {},
+  });
+  viewer.dispatch("pointermove", { pointerId: 9, clientX: 110 });
+  await new Promise(setImmediate);
+  assert.match(viewer.children[0].src, /frame-001\.webp$/u, "a cached frame does not wait for the drag timer");
+  assert.equal(requests.length, 4, "drag prefetch waits for an available background slot");
+
+  requests[2].onload();
+  await new Promise(setImmediate);
+  assert.match(requests[4].url, /frame-003\.webp$/u, "the next request follows drag direction");
+  viewer.dispatch("pointerup", { pointerId: 9 });
+});
+
+test("cold drag retargets queued downloads toward the new view", async () => {
+  const { attach, requests, FakeElement } = viewerFixture();
+  const record = new FakeElement();
+  record.classList.add("is-showcase");
+  attach(record, entry, { ...videoVariant, turntable });
+  const viewer = record.children[0];
+  viewer.start();
+  requests[0].onload();
+  await new Promise(setImmediate);
+  viewer.dispatch("pointerdown", {
+    pointerId: 10, pointerType: "touch", button: 0, clientX: 100, preventDefault() {},
+  });
+  viewer.dispatch("pointermove", { pointerId: 10, clientX: 130 });
+  assert.equal(viewer.getAttribute("aria-valuenow"), "3");
+  assert.equal(requests.length, 3, "a cold drag does not launch unbounded requests");
+  requests[1].onload();
+  await new Promise(setImmediate);
+  assert.match(requests[3].url, /frame-004\.webp$/u, "the free prefetch slot follows the new drag position");
+  viewer.dispatch("pointerup", { pointerId: 10 });
+});
+
 test("a missing reviewed frame restores the approved MP4", async () => {
   const { attach, requests, fallbacks, FakeElement } = viewerFixture();
   const record = new FakeElement();

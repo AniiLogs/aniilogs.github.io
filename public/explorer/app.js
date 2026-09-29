@@ -5373,12 +5373,17 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
   record.append(viewer);
 
   const pendingFrames = new Map();
+  const readyFrames = new Set();
+  const prefetchQueue = [];
+  let activePrefetches = 0;
   let selectedIndex = 0;
   let requestNumber = 0;
   let failed = false;
   let activePointer = null;
   let lastX = 0;
+  let pixelsPerFrame = 10;
   let dragDistance = 0;
+  let dragDirection = 0;
   let started = false;
   let dragLoadTimer = null;
 
@@ -5388,12 +5393,45 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
       pendingFrames.set(index, new Promise((resolve, reject) => {
         const frame = new Image();
         frame.decoding = "async";
-        frame.onload = () => resolve(url);
+        frame.onload = () => {
+          Promise.resolve().then(() => frame.decode?.()).catch(() => {}).then(() => {
+            readyFrames.add(index);
+            resolve(url);
+          });
+        };
         frame.onerror = () => reject(new Error("A reviewed artwork frame could not load."));
         frame.src = url;
       }));
     }
     return pendingFrames.get(index);
+  };
+
+  const pumpPrefetch = () => {
+    if (failed || !viewer.isConnected) {
+      prefetchQueue.length = 0;
+      return;
+    }
+    while (activePrefetches < 2 && prefetchQueue.length) {
+      const index = prefetchQueue.shift();
+      if (pendingFrames.has(index)) continue;
+      activePrefetches += 1;
+      void loadFrame(index).catch(() => {}).finally(() => {
+        activePrefetches -= 1;
+        pumpPrefetch();
+      });
+    }
+  };
+
+  const prefetchNearby = (index) => {
+    const offsets = activePointer === null || dragDirection === 0
+      ? [1, -1, 2, -2]
+      : [dragDirection, -dragDirection, dragDirection * 2, dragDirection * 3];
+    prefetchQueue.length = 0;
+    for (const offset of offsets) {
+      const neighbor = (index + offset + turntable.frameCount) % turntable.frameCount;
+      if (!pendingFrames.has(neighbor)) prefetchQueue.push(neighbor);
+    }
+    pumpPrefetch();
   };
 
   const fallBackToVideo = () => {
@@ -5419,11 +5457,7 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
     loadFrame(index).then((url) => {
       if (failed || currentRequest !== requestNumber || !viewer.isConnected) return;
       image.src = url;
-      if (activePointer === null) {
-        // Preload adjacent views only when the user is not rapidly dragging.
-        void loadFrame((index + 1) % turntable.frameCount).catch(() => {});
-        void loadFrame((index + turntable.frameCount - 1) % turntable.frameCount).catch(() => {});
-      }
+      prefetchNearby(index);
     }).catch(() => {
       if (currentRequest === requestNumber) fallBackToVideo();
     });
@@ -5435,7 +5469,8 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
     viewer.setAttribute("aria-valuenow", String(selectedIndex));
     viewer.setAttribute("aria-valuetext", `${Math.round(selectedIndex * 360 / turntable.frameCount)} degrees`);
     requestNumber += 1;
-    if (duringDrag) {
+    if (duringDrag && readyFrames.size) prefetchNearby(selectedIndex);
+    if (duringDrag && !readyFrames.has(selectedIndex)) {
       if (dragLoadTimer === null) dragLoadTimer = setTimeout(() => {
         dragLoadTimer = null;
         loadSelectedFrame();
@@ -5451,7 +5486,9 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
     if (failed || !record.classList.contains("is-showcase") || (event.pointerType === "mouse" && event.button !== 0)) return;
     activePointer = event.pointerId;
     lastX = event.clientX;
+    pixelsPerFrame = Math.max(4, Math.min(14, viewer.clientWidth / turntable.frameCount));
     dragDistance = 0;
+    dragDirection = 0;
     viewer.classList.add("is-rotating");
     viewer.setPointerCapture(event.pointerId);
     viewer.focus({ preventScroll: true });
@@ -5461,15 +5498,16 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
     if (event.pointerId !== activePointer) return;
     dragDistance += event.clientX - lastX;
     lastX = event.clientX;
-    const pixelsPerFrame = Math.max(4, Math.min(14, viewer.clientWidth / turntable.frameCount));
     const steps = Math.trunc(dragDistance / pixelsPerFrame);
     if (!steps) return;
     dragDistance -= steps * pixelsPerFrame;
+    dragDirection = Math.sign(steps);
     showFrame(selectedIndex + steps, true);
   });
   const stopDragging = (event) => {
     if (event.pointerId !== activePointer) return;
     activePointer = null;
+    dragDirection = 0;
     viewer.classList.remove("is-rotating");
     if (viewer.hasPointerCapture(event.pointerId)) viewer.releasePointerCapture(event.pointerId);
     showFrame(selectedIndex);
