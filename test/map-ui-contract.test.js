@@ -197,6 +197,7 @@ test("Pet Manual artwork manifest validation fails closed", () => {
 test("mobile artwork mode takes over the viewport and hides the Aniimo index", () => {
   assert.match(explorerStyles, /@media \(max-width: 760px\) \{[\s\S]*body\.aniilog-artwork-mode \.catalog-workspace \{[\s\S]*position: fixed;[\s\S]*inset: 0;[\s\S]*body\.aniilog-artwork-mode \.catalog-sidebar-content \{[\s\S]*display: none !important;/u);
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.catalog-panel \{[\s\S]*position: fixed;[\s\S]*width: 100vw;[\s\S]*height: 100dvh;/u);
+  assert.match(explorerStyles, /@media \(max-width: 760px\) \{[\s\S]*body\.aniilog-artwork-mode #sidebar,[\s\S]*display: none !important;[\s\S]*body\.aniilog-artwork-mode \.map-panel,[\s\S]*width: 100vw;[\s\S]*body\.aniilog-artwork-mode \.catalog-aniilog-record\.is-showcase \.catalog-identity \{[\s\S]*left: 0\.75rem;/u);
 });
 
 test("Aniimo rarity selector accepts reviewed videos but rejects the unverified mask runtime", () => {
