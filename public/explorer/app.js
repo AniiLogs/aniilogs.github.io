@@ -57,10 +57,32 @@ const ANIIMO_RARITY_STYLES = Object.freeze([
   { id: "12", label: "Shadow Sparkling" },
 ]);
 
+function approvedYawFrames(variant, entry, id) {
+  const frames = variant?.turntable;
+  const formId = String(entry?.form_id ?? "");
+  const expectedBasePath = `./assets/aniimo-turntables/${formId}/${id}`;
+  if (
+    !/^\d+$/u.test(formId)
+    || frames?.renderVerified !== true
+    || frames?.transparentBackground !== true
+    || frames?.basePath !== expectedBasePath
+    || !Number.isInteger(frames?.frameCount)
+    || frames.frameCount < 12
+    || frames.frameCount > 120
+    || !["webp", "png"].includes(frames?.format)
+  ) return null;
+  return {
+    basePath: expectedBasePath,
+    frameCount: frames.frameCount,
+    format: frames.format,
+  };
+}
+
 function approvedPetManualVariants(manifest, entry, packageVersion) {
   if (
     manifest?.schema !== "aniilogs.private.petmanual-artwork-manifest.v1"
     || manifest?.reviewStatus !== "approved"
+    || !/^\d+$/u.test(String(packageVersion ?? ""))
     || String(manifest?.sourcePackage ?? "") !== String(packageVersion ?? "")
     || !manifest?.forms
   ) return [];
@@ -79,13 +101,15 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
       && style >= 1
       && style <= 12;
     const expectedSource = isCommon ? "shipped-petmanual" : "client-authored-capture";
-    const valid = variant?.renderVerified === true
-      && variant?.video_layout === "rgb-alpha-vertical"
-      && (isCommon || isRarity)
+    const reviewedFrames = approvedYawFrames(variant, entry, id);
+    const reviewedVideo = variant?.video_layout === "rgb-alpha-vertical"
       && variant?.renderSource === expectedSource
-      && /^[a-f0-9]{64}$/iu.test(String(variant?.representativeHash || ""))
       && /^\.\/media\/aniimo\/petmanual\/[\w-]+\/[\w-]+\.mp4$/u.test(video)
-      && !video.includes("..")
+      && !video.includes("..");
+    const valid = variant?.renderVerified === true
+      && (isCommon || isRarity)
+      && /^[a-f0-9]{64}$/iu.test(String(variant?.representativeHash || ""))
+      && (reviewedVideo || (reviewedFrames && variant?.renderSource === "offline-game-render" && !video))
       && !approvedIds.has(id);
     if (valid) approvedIds.add(id);
     return valid;
@@ -93,10 +117,11 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
     id: String(variant.id || ""),
     rarity_id: String(variant.style ?? variant.id ?? ""),
     label: String(variant.label || variant.id || "Appearance"),
-    video: variant.video,
-    video_layout: variant.video_layout,
+    video: variant.video || "",
+    video_layout: variant.video_layout || "",
     renderSource: variant.renderSource,
     renderVerified: true,
+    turntable: approvedYawFrames(variant, entry, String(variant.id || "")),
   }));
 }
 
@@ -2776,7 +2801,12 @@ function ensureAniilogData() {
         entry.model = mediaEntry.model || "";
         entry.model_label = mediaEntry.model_label || "";
         const videoVariants = approvedPetManualVariants(artworkCandidate, entry, payload.package_version);
-        const shippedCommon = videoVariants.find((variant) => variant.id === "common") || {
+        const reviewedCommon = videoVariants.find((variant) => variant.id === "common");
+        const shippedCommon = reviewedCommon ? {
+          ...reviewedCommon,
+          video: reviewedCommon.video || mediaEntry.video,
+          video_layout: reviewedCommon.video_layout || mediaEntry.video_layout,
+        } : {
           id: "common",
           rarity_id: "0",
           label: "Common",
@@ -5317,13 +5347,163 @@ function renderAniilogBossVariants(bossVariants) {
   return section;
 }
 
+function attachYawFrameViewer(record, entry, showcaseMedia) {
+  const turntable = showcaseMedia.turntable;
+  if (!turntable) return false;
+
+  const viewer = document.createElement("div");
+  viewer.className = "catalog-aniimo-turntable";
+  viewer.setAttribute("role", "slider");
+  viewer.setAttribute("aria-orientation", "horizontal");
+  viewer.setAttribute("aria-label", `Rotate ${entry.name} ${entry.form_label || ""} artwork. Drag or use the left and right arrow keys.`);
+  viewer.setAttribute("aria-valuemin", "0");
+  viewer.setAttribute("aria-valuemax", String(turntable.frameCount - 1));
+  viewer.setAttribute("aria-hidden", "true");
+  viewer.tabIndex = -1;
+
+  const image = document.createElement("img");
+  image.className = "catalog-aniimo-turntable-frame";
+  image.alt = "";
+  image.draggable = false;
+  image.setAttribute("aria-hidden", "true");
+  const hint = document.createElement("span");
+  hint.className = "catalog-aniimo-turntable-hint";
+  hint.textContent = "Drag to rotate · ← → keys";
+  viewer.append(image, hint);
+  record.append(viewer);
+
+  const pendingFrames = new Map();
+  let selectedIndex = 0;
+  let requestNumber = 0;
+  let failed = false;
+  let activePointer = null;
+  let lastX = 0;
+  let dragDistance = 0;
+  let started = false;
+  let dragLoadTimer = null;
+
+  const loadFrame = (index) => {
+    if (!pendingFrames.has(index)) {
+      const url = contentUrl(`${turntable.basePath}/frame-${String(index).padStart(3, "0")}.${turntable.format}`);
+      pendingFrames.set(index, new Promise((resolve, reject) => {
+        const frame = new Image();
+        frame.decoding = "async";
+        frame.onload = () => resolve(url);
+        frame.onerror = () => reject(new Error("A reviewed artwork frame could not load."));
+        frame.src = url;
+      }));
+    }
+    return pendingFrames.get(index);
+  };
+
+  const fallBackToVideo = () => {
+    if (failed || !viewer.isConnected) return;
+    failed = true;
+    if (showcaseMedia.video) {
+      viewer.remove();
+      attachPackedAniimoBackdrop(record, {
+        ...entry,
+        showcase_media: { ...showcaseMedia, turntable: null },
+      });
+    } else {
+      viewer.classList.add("is-unavailable");
+      viewer.setAttribute("role", "status");
+      hint.textContent = "This appearance could not load. Choose another rarity or form.";
+    }
+  };
+
+  const loadSelectedFrame = () => {
+    if (failed || !viewer.isConnected) return;
+    const index = selectedIndex;
+    const currentRequest = requestNumber;
+    loadFrame(index).then((url) => {
+      if (failed || currentRequest !== requestNumber || !viewer.isConnected) return;
+      image.src = url;
+      if (activePointer === null) {
+        // Preload adjacent views only when the user is not rapidly dragging.
+        void loadFrame((index + 1) % turntable.frameCount).catch(() => {});
+        void loadFrame((index + turntable.frameCount - 1) % turntable.frameCount).catch(() => {});
+      }
+    }).catch(() => {
+      if (currentRequest === requestNumber) fallBackToVideo();
+    });
+  };
+
+  const showFrame = (index, duringDrag = false) => {
+    if (failed) return;
+    selectedIndex = ((index % turntable.frameCount) + turntable.frameCount) % turntable.frameCount;
+    viewer.setAttribute("aria-valuenow", String(selectedIndex));
+    viewer.setAttribute("aria-valuetext", `${Math.round(selectedIndex * 360 / turntable.frameCount)} degrees`);
+    requestNumber += 1;
+    if (duringDrag) {
+      if (dragLoadTimer === null) dragLoadTimer = setTimeout(() => {
+        dragLoadTimer = null;
+        loadSelectedFrame();
+      }, 40);
+    } else {
+      if (dragLoadTimer !== null) clearTimeout(dragLoadTimer);
+      dragLoadTimer = null;
+      loadSelectedFrame();
+    }
+  };
+
+  viewer.addEventListener("pointerdown", (event) => {
+    if (failed || !record.classList.contains("is-showcase") || (event.pointerType === "mouse" && event.button !== 0)) return;
+    activePointer = event.pointerId;
+    lastX = event.clientX;
+    dragDistance = 0;
+    viewer.classList.add("is-rotating");
+    viewer.setPointerCapture(event.pointerId);
+    viewer.focus({ preventScroll: true });
+    event.preventDefault();
+  });
+  viewer.addEventListener("pointermove", (event) => {
+    if (event.pointerId !== activePointer) return;
+    dragDistance += event.clientX - lastX;
+    lastX = event.clientX;
+    const pixelsPerFrame = Math.max(4, Math.min(14, viewer.clientWidth / turntable.frameCount));
+    const steps = Math.trunc(dragDistance / pixelsPerFrame);
+    if (!steps) return;
+    dragDistance -= steps * pixelsPerFrame;
+    showFrame(selectedIndex + steps, true);
+  });
+  const stopDragging = (event) => {
+    if (event.pointerId !== activePointer) return;
+    activePointer = null;
+    viewer.classList.remove("is-rotating");
+    if (viewer.hasPointerCapture(event.pointerId)) viewer.releasePointerCapture(event.pointerId);
+    showFrame(selectedIndex);
+  };
+  viewer.addEventListener("pointerup", stopDragging);
+  viewer.addEventListener("pointercancel", stopDragging);
+  viewer.addEventListener("keydown", (event) => {
+    if (failed || !record.classList.contains("is-showcase")) return;
+    const next = {
+      ArrowLeft: selectedIndex - 1,
+      ArrowRight: selectedIndex + 1,
+      Home: 0,
+      End: turntable.frameCount - 1,
+    }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    showFrame(next);
+  });
+
+  viewer.start = () => {
+    if (started) return;
+    started = true;
+    showFrame(0);
+  };
+  return true;
+}
+
 function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const showcaseMedia = entry.showcase_media?.renderVerified === true
     ? entry.showcase_media
     : entry;
-  // Only game-authored packed video is approved for the public artwork view.
-  // The old browser model reconstruction cannot reproduce the game's shaders.
+  if (showcaseMedia.turntable && attachYawFrameViewer(record, entry, showcaseMedia)) return;
+  // The shipped game-authored packed video remains the artwork fallback.
   if (!showcaseMedia.video || reduceMotion.matches) return;
 
   const video = document.createElement("video");
@@ -7050,6 +7230,12 @@ function setAniilogShowcaseMode(enabled) {
   document.body.classList.toggle("aniilog-artwork-mode", state.aniilogShowcaseMode);
   const record = els.catalogPanel.querySelector(".catalog-aniilog-record");
   record?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
+  const turntable = record?.querySelector(".catalog-aniimo-turntable");
+  if (turntable) {
+    turntable.tabIndex = state.aniilogShowcaseMode ? 0 : -1;
+    turntable.setAttribute("aria-hidden", String(!state.aniilogShowcaseMode));
+    if (state.aniilogShowcaseMode) turntable.start();
+  }
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
   const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
   if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";

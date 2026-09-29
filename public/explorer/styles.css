@@ -7875,7 +7875,7 @@ select option:hover {
   }
 }
 
-.catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas) {
+.catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable) {
   position: relative;
   z-index: 1;
 }
@@ -8116,11 +8116,26 @@ select option:hover {
   filter: none;
 }
 
+.catalog-aniilog-record.is-showcase .catalog-aniimo-turntable {
+  opacity: 1;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+}
+
+.catalog-aniilog-record.is-showcase .catalog-aniimo-turntable.is-rotating {
+  cursor: grabbing;
+}
+
+.catalog-aniilog-record.is-showcase .catalog-aniimo-turntable-hint {
+  display: block;
+}
+
 .catalog-aniilog-record.is-showcase .catalog-locate-button {
   display: none;
 }
 
-.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-identity) {
+.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-identity) {
   display: none;
 }
 
@@ -8153,6 +8168,58 @@ select option:hover {
   pointer-events: none;
 }
 
+.catalog-aniimo-turntable {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+  outline: none;
+}
+
+.catalog-aniimo-turntable:focus-visible {
+  outline: 3px solid var(--accent-2);
+  outline-offset: -5px;
+}
+
+.catalog-aniimo-turntable-frame {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  user-select: none;
+  pointer-events: none;
+}
+
+.catalog-aniimo-turntable-hint {
+  position: absolute;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: 50%;
+  display: none;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--background) 78%, transparent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.catalog-aniimo-turntable.is-unavailable .catalog-aniimo-turntable-hint {
+  top: 50%;
+  bottom: auto;
+  max-width: min(28rem, calc(100vw - 2rem));
+  text-align: center;
+  white-space: normal;
+  transform: translate(-50%, -50%);
+}
+
 .catalog-aniilog-record::after {
   display: none;
 }
@@ -8177,8 +8244,7 @@ select option:hover {
   display: none;
 }
 
-/* Artwork mode is an actual viewer, not another section in the catalog. Keep
-   the model on a clean viewport and leave only the compact viewer controls. */
+/* Artwork mode fills the viewport and keeps only the compact viewer controls. */
 body.aniilog-artwork-mode {
   overflow: hidden;
 }
@@ -8312,7 +8378,7 @@ body.aniilog-artwork-mode .catalog-aniilog-record {
   background: transparent;
 }
 
-body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-identity) {
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-identity) {
   display: none;
 }
 

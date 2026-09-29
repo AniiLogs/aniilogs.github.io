@@ -147,7 +147,7 @@ test("public Aniimo artwork keeps a shipped video fallback while unverified runt
 
 test("Pet Manual artwork manifest validation fails closed", () => {
   const body = explorer.slice(
-    explorer.indexOf("function approvedPetManualVariants("),
+    explorer.indexOf("function approvedYawFrames("),
     explorer.indexOf("const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY"),
   );
   const approve = new Function(`${body}; return approvedPetManualVariants;`)();
