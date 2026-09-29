@@ -83,7 +83,7 @@ test("reviewed frame-only output is accepted without inventing a rarity video", 
     ...videoVariant,
     video: "",
     video_layout: "",
-    renderSource: "offline-game-render",
+    renderSource: "client-authored-capture",
   };
   const candidate = {
     ...manifest,
@@ -99,6 +99,10 @@ test("reviewed frame-only output is accepted without inventing a rarity video", 
   assert.deepEqual(approve({
     ...candidate,
     forms: { "1002603": { formId: 1002603, variants: [{ ...frameOnly, renderSource: "browser-reconstruction" }] } },
+  }, entry, 3535596), []);
+  assert.deepEqual(approve({
+    ...candidate,
+    forms: { "1002603": { formId: 1002603, variants: [{ ...frameOnly, renderSource: "offline-game-render" }] } },
   }, entry, 3535596), []);
 });
 

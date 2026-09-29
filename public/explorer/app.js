@@ -109,7 +109,7 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
     const valid = variant?.renderVerified === true
       && (isCommon || isRarity)
       && /^[a-f0-9]{64}$/iu.test(String(variant?.representativeHash || ""))
-      && (reviewedVideo || (reviewedFrames && variant?.renderSource === "offline-game-render" && !video))
+      && (reviewedVideo || (reviewedFrames && variant?.renderSource === "client-authored-capture" && !video))
       && !approvedIds.has(id);
     if (valid) approvedIds.add(id);
     return valid;
