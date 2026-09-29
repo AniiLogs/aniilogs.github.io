@@ -11,6 +11,20 @@ const CONTENT_RELEASE = "3535596";
 const ASSET_FALLBACK_RELEASE = "3509129";
 const CONTENT_PATH_PREFIX = `/api/content/releases/${CONTENT_RELEASE}/`;
 const RELEASE_PATCH_KEY = `releases/${CONTENT_RELEASE}/data/release_patch.json.gz`;
+const PUBLIC_RELEASE_DATA = new Set([
+  "aniilog_data.json",
+  "aniilog_media.json",
+  "checklist_data.json",
+  "itemlog_data.json",
+  "map_site_data.json",
+  "petmanual-artwork-manifest.remote.json",
+  "rarity-manifest.remote.json",
+]);
+const PRIVATE_RELEASE_SEGMENTS = new Set([
+  "qa", "private", "private-extract", "source", "src", "renderer", "shader", "shaders",
+  "authored-runtime", "material-textures", "resources", "asset-bundles", "asset-packages",
+  "game-files", "captures", "raw-captures",
+]);
 
 const encoder = new TextEncoder();
 
@@ -183,13 +197,33 @@ function validContentKey(pathname) {
   return `releases/${CONTENT_RELEASE}/${key}`;
 }
 
+function publicReleaseContentKey(key) {
+  const relative = key.slice(`releases/${CONTENT_RELEASE}/`.length);
+  const segments = relative.toLowerCase().split("/");
+  if (segments.some((segment) => PRIVATE_RELEASE_SEGMENTS.has(segment)
+    || /^(?:private|source|shader|renderer|asset-package|qa)[-_.]/u.test(segment)
+    || segment.startsWith("."))) return false;
+
+  if (segments[0] === "data") {
+    const dataPath = segments.slice(1).join("/");
+    return PUBLIC_RELEASE_DATA.has(dataPath)
+      || /^(?:i18n|maps)\/[a-z0-9-]+\.json$/u.test(dataPath);
+  }
+  // The only reviewed files under media are finished Pet Manual captures.
+  if (segments[0] === "media") {
+    return /^media\/aniimo\/petmanual\/[0-9]+\/[\w-]+\.mp4$/u.test(segments.join("/"));
+  }
+  if (segments[0] !== "assets") return false;
+  return /\.(?:png|webp|jpe?g|mp4|glb)$/iu.test(relative);
+}
+
 async function getReleaseContent(request, env) {
   if (String(env.CONTENT_RELEASE_ENABLED || "").toLowerCase() !== "true") {
     return json({ error: "Release content is unavailable pending review." }, 404);
   }
   if (!env.CONTENT) return json({ error: "Content storage is unavailable." }, 503);
   const key = validContentKey(new URL(request.url).pathname);
-  if (!key) return json({ error: "Not found" }, 404);
+  if (!key || !publicReleaseContentKey(key)) return json({ error: "Not found" }, 404);
   const read = (objectKey) => request.method === "HEAD" ? env.CONTENT.head(objectKey) : env.CONTENT.get(objectKey);
   let object = await read(key);
   const rootReleaseData = new RegExp(`^releases/${CONTENT_RELEASE}/data/[^/]+\\.json$`, "u");

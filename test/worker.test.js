@@ -326,6 +326,90 @@ test("release content is served from the private R2 binding without directory li
   assert.equal(traversalResponse.status, 404);
 });
 
+test("release relay rejects private renderer and QA files before reading R2", async () => {
+  const requestedKeys = [];
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(["get", key]);
+        return { body: new Uint8Array([1]), size: 1 };
+      },
+      async head(key) {
+        requestedKeys.push(["head", key]);
+        return { size: 1 };
+      },
+    },
+  };
+  const privatePaths = [
+    "qa/pawney-geometry/index.html",
+    "qa%2Faniimo-10173/private-extract/shader.bin",
+    "source-gbuffer-qa.html",
+    "media/aniimo/defaultlit-dye.mjs",
+    "media/aniimo/pawney/prismana/pawney-prismana-idle-special.glb",
+    "media/aniimo/pawney/prismana/authored-runtime/resources/textures/body.png",
+    "media/aniimo/prismana/preview.glb",
+    "assets/shaders/program.glsl",
+    "assets/asset-packages/game.glb",
+    "assets/models/private/source.glb",
+    "data/release_patch.json.gz",
+    "data/i18n/en.private.json",
+    "data/aniilog_media.variants.json",
+    "data/rarity-manifest.mask-runtime.json",
+    "data/rarity-manifest.remote.full-backup.json",
+  ];
+  for (const method of ["GET", "HEAD"]) {
+    for (const path of privatePaths) {
+      const response = await worker.fetch(new Request(
+        `https://api.aniilogs.example/api/content/releases/3535596/${path}`,
+        { method },
+      ), env);
+      assert.equal(response.status, 404, `${method} ${path}`);
+    }
+  }
+  assert.deepEqual(requestedKeys, []);
+});
+
+test("release relay preserves reviewed data, image, video, and model outputs", async () => {
+  const requestedKeys = [];
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(["get", key]);
+        return { body: new Uint8Array([1]), size: 1 };
+      },
+      async head(key) {
+        requestedKeys.push(["head", key]);
+        return { size: 1 };
+      },
+    },
+  };
+  const publicPaths = [
+    "data/aniilog_data.json",
+    "data/rarity-manifest.remote.json",
+    "data/i18n/en.json",
+    "data/maps/country-of-time.json",
+    "assets/icons/aniimo.png",
+    "assets/aniimo-videos/1001100.mp4",
+    "assets/models/1005100/emberpup-body-common-rigged-full.glb",
+    "media/aniimo/petmanual/1002603/common.mp4",
+  ];
+  for (const method of ["GET", "HEAD"]) {
+    for (const path of publicPaths) {
+      const response = await worker.fetch(new Request(
+        `https://api.aniilogs.example/api/content/releases/3535596/${path}`,
+        { method },
+      ), env);
+      assert.equal(response.status, 200, `${method} ${path}`);
+    }
+  }
+  assert.deepEqual(requestedKeys, [
+    ...publicPaths.map((path) => ["get", `releases/3535596/${path}`]),
+    ...publicPaths.map((path) => ["head", `releases/3535596/${path}`]),
+  ]);
+});
+
 test("release video content receives a safe MP4 type when R2 metadata is absent", async () => {
   const bytes = new Uint8Array([0, 0, 0, 24]);
   const env = {
@@ -370,6 +454,30 @@ test("release map shards fall back to the reviewed asset release", async () => {
   assert.deepEqual(requestedKeys, [
     "releases/3535596/data/maps/country-of-time.json",
     "releases/3509129/data/maps/country-of-time.json",
+  ]);
+});
+
+test("release model output falls back to the reviewed asset release", async () => {
+  const path = "assets/models/1005100/emberpup-body-common-rigged-full.glb";
+  const requestedKeys = [];
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(key);
+        return key === `releases/3509129/${path}`
+          ? { body: new Uint8Array([1]), size: 1 }
+          : null;
+      },
+    },
+  };
+  const response = await worker.fetch(new Request(
+    `https://api.aniilogs.example/api/content/releases/3535596/${path}`,
+  ), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual(requestedKeys, [
+    `releases/3535596/${path}`,
+    `releases/3509129/${path}`,
   ]);
 });
 
