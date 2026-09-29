@@ -46,6 +46,10 @@ test("normal Aniilog video preview remains visible while unopened frame output s
   assert.match(explorer, /if \(state\.aniilogShowcaseMode\) turntable\.start\(\);/u);
 });
 
+test("desktop artwork rotation stays centered beside the visible Aniimo index", () => {
+  assert.match(styles, /@media \(min-width: 821px\) and \(pointer: fine\) \{\s*body\.aniilog-artwork-mode \.app-shell:not\(\.is-sidebar-collapsed\) \.catalog-aniimo-turntable \{\s*left: 360px;\s*width: calc\(100vw - 360px\);/u);
+});
+
 test("only package-matched, approved transparent frame outputs reach the viewer", () => {
   const approved = approve(manifest, entry, 3535596);
   assert.deepEqual(approved[0].turntable, {

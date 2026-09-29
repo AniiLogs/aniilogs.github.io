@@ -8184,6 +8184,13 @@ select option:hover {
   outline: none;
 }
 
+@media (min-width: 821px) and (pointer: fine) {
+  body.aniilog-artwork-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniimo-turntable {
+    left: 360px;
+    width: calc(100vw - 360px);
+  }
+}
+
 .catalog-aniimo-turntable:focus-visible {
   outline: 3px solid var(--accent-2);
   outline-offset: -5px;
