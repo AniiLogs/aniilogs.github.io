@@ -42,6 +42,7 @@ const manifest = {
 test("normal Aniilog video preview remains visible while unopened frame output stays hidden", () => {
   assert.match(styles, /\.catalog-aniimo-video-backdrop \{[^}]*opacity: 0\.24;/u);
   assert.match(styles, /\.catalog-aniimo-turntable \{[^}]*opacity: 0;/u);
+  assert.match(styles, /\.catalog-aniimo-turntable \{[^}]*grid-template-rows: minmax\(0, 1fr\);/u);
   assert.match(explorer, /if \(state\.aniilogShowcaseMode\) turntable\.start\(\);/u);
 });
 
