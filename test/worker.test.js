@@ -370,6 +370,64 @@ test("release relay rejects private renderer and QA files before reading R2", as
   assert.deepEqual(requestedKeys, []);
 });
 
+test("turntable frame URLs require a reviewed matching release manifest", async () => {
+  const path = "assets/aniimo-turntables/1002603/sparkling-03/frame-003.webp";
+  const manifestKey = "releases/3535596/data/petmanual-artwork-manifest.remote.json";
+  const frameKey = `releases/3535596/${path}`;
+  const requestedKeys = [];
+  const manifest = {
+    schema: "aniilogs.private.petmanual-artwork-manifest.v1",
+    sourcePackage: 3535596,
+    reviewStatus: "approved",
+    forms: { "1002603": { formId: 1002603, variants: [{
+      id: "sparkling-03",
+      style: 3,
+      renderVerified: true,
+      representativeHash: "a".repeat(64),
+      turntable: {
+        renderVerified: true,
+        transparentBackground: true,
+        basePath: "./assets/aniimo-turntables/1002603/sparkling-03",
+        frameCount: 36,
+        format: "webp",
+      },
+    }] } },
+  };
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(["get", key]);
+        if (key === manifestKey) return { body: JSON.stringify(manifest) };
+        if (key === frameKey) return { body: new Uint8Array([1]), size: 1 };
+        return null;
+      },
+      async head(key) {
+        requestedKeys.push(["head", key]);
+        return key === frameKey ? { size: 1 } : null;
+      },
+    },
+  };
+  const url = `https://api.aniilogs.example/api/content/releases/3535596/${path}`;
+  manifest.reviewStatus = "staged-unapproved";
+  assert.equal((await worker.fetch(new Request(url), env)).status, 404);
+  assert.deepEqual(requestedKeys, [["get", manifestKey]]);
+
+  requestedKeys.length = 0;
+  manifest.reviewStatus = "approved";
+  assert.equal((await worker.fetch(new Request(url), env)).status, 200);
+  assert.deepEqual(requestedKeys, [["get", manifestKey], ["get", frameKey]]);
+
+  requestedKeys.length = 0;
+  assert.equal((await worker.fetch(new Request(url, { method: "HEAD" }), env)).status, 200);
+  assert.deepEqual(requestedKeys, [["get", manifestKey], ["head", frameKey]]);
+
+  requestedKeys.length = 0;
+  const outOfRange = url.replace("frame-003", "frame-036");
+  assert.equal((await worker.fetch(new Request(outOfRange), env)).status, 404);
+  assert.deepEqual(requestedKeys, [["get", manifestKey]]);
+});
+
 test("release relay preserves reviewed data, image, video, and model outputs", async () => {
   const requestedKeys = [];
   const env = {

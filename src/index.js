@@ -25,6 +25,7 @@ const PRIVATE_RELEASE_SEGMENTS = new Set([
   "authored-runtime", "material-textures", "resources", "asset-bundles", "asset-packages",
   "game-files", "captures", "raw-captures",
 ]);
+const TURNTABLE_FRAME_PATH = /^assets\/aniimo-turntables\/([0-9]+)\/(common|sparkling-(?:0[1-9]|1[0-2]))\/frame-([0-9]{3})\.(png|webp)$/u;
 
 const encoder = new TextEncoder();
 
@@ -214,7 +215,44 @@ function publicReleaseContentKey(key) {
     return /^media\/aniimo\/petmanual\/[0-9]+\/[\w-]+\.mp4$/u.test(segments.join("/"));
   }
   if (segments[0] !== "assets") return false;
+  if (segments[1] === "aniimo-turntables") return TURNTABLE_FRAME_PATH.test(relative);
   return /\.(?:png|webp|jpe?g|mp4|glb)$/iu.test(relative);
+}
+
+async function approvedTurntableFrame(key, env) {
+  const relative = key.slice(`releases/${CONTENT_RELEASE}/`.length);
+  if (!relative.startsWith("assets/aniimo-turntables/")) return true;
+  const match = TURNTABLE_FRAME_PATH.exec(relative);
+  if (!match) return false;
+  const [, formId, appearanceId, frameNumber, format] = match;
+  const manifestKey = `releases/${CONTENT_RELEASE}/data/petmanual-artwork-manifest.remote.json`;
+  const manifestObject = await env.CONTENT.get(manifestKey);
+  if (!manifestObject) return false;
+  let manifest;
+  try {
+    manifest = await new Response(manifestObject.body).json();
+  } catch {
+    return false;
+  }
+  if (manifest?.schema !== "aniilogs.private.petmanual-artwork-manifest.v1"
+    || manifest.reviewStatus !== "approved"
+    || String(manifest.sourcePackage ?? "") !== CONTENT_RELEASE) return false;
+  const form = manifest.forms?.[formId];
+  if (String(form?.formId ?? "") !== formId) return false;
+  const variant = form.variants?.find?.((entry) => entry?.id === appearanceId);
+  const expectedStyle = appearanceId === "common" ? null : Number(appearanceId.slice(-2));
+  if (!variant || variant.renderVerified !== true
+    || (expectedStyle === null ? variant.style != null : variant.style !== expectedStyle)
+    || !/^[a-f0-9]{64}$/iu.test(String(variant.representativeHash || ""))) return false;
+  const frames = variant.turntable;
+  return frames?.renderVerified === true
+    && frames.transparentBackground === true
+    && frames.basePath === `./assets/aniimo-turntables/${formId}/${appearanceId}`
+    && frames.format === format
+    && Number.isInteger(frames.frameCount)
+    && frames.frameCount >= 12
+    && frames.frameCount <= 120
+    && Number(frameNumber) < frames.frameCount;
 }
 
 async function getReleaseContent(request, env) {
@@ -224,6 +262,7 @@ async function getReleaseContent(request, env) {
   if (!env.CONTENT) return json({ error: "Content storage is unavailable." }, 503);
   const key = validContentKey(new URL(request.url).pathname);
   if (!key || !publicReleaseContentKey(key)) return json({ error: "Not found" }, 404);
+  if (!await approvedTurntableFrame(key, env)) return json({ error: "Not found" }, 404);
   const read = (objectKey) => request.method === "HEAD" ? env.CONTENT.head(objectKey) : env.CONTENT.get(objectKey);
   let object = await read(key);
   const rootReleaseData = new RegExp(`^releases/${CONTENT_RELEASE}/data/[^/]+\\.json$`, "u");
@@ -236,7 +275,8 @@ async function getReleaseContent(request, env) {
       `releases/${ASSET_FALLBACK_RELEASE}/data/`,
     ));
   }
-  if (!object && key.startsWith(`releases/${CONTENT_RELEASE}/assets/`)) {
+  if (!object && key.startsWith(`releases/${CONTENT_RELEASE}/assets/`)
+    && !key.includes("/assets/aniimo-turntables/")) {
     object = await read(key.replace(
       `releases/${CONTENT_RELEASE}/assets/`,
       `releases/${ASSET_FALLBACK_RELEASE}/assets/`,
