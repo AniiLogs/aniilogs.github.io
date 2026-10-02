@@ -343,6 +343,10 @@ test("release relay rejects private renderer and QA files before reading R2", as
   };
   const privatePaths = [
     "qa/pawney-geometry/index.html",
+    "qa/pawney-game-color-3584014/private-extract/pawney-live-canvas.private.html",
+    "qa/pawney-game-color-3584014/tools/source-gbuffer-multidraw-qa.mjs",
+    "qa/pawney-game-color-3584014/private-extract/program.wgsl",
+    "qa/pawney-game-color-3584014/private-extract/geometry.bin",
     "qa%2Faniimo-10173/private-extract/shader.bin",
     "source-gbuffer-qa.html",
     "media/aniimo/defaultlit-dye.mjs",
@@ -360,6 +364,87 @@ test("release relay rejects private renderer and QA files before reading R2", as
   ];
   for (const method of ["GET", "HEAD"]) {
     for (const path of privatePaths) {
+      const response = await worker.fetch(new Request(
+        `https://api.aniilogs.example/api/content/releases/3535596/${path}`,
+        { method },
+      ), env);
+      assert.equal(response.status, 404, `${method} ${path}`);
+    }
+  }
+  assert.deepEqual(requestedKeys, []);
+});
+
+test("private Pawney game-color QA assets cannot be relayed publicly", async () => {
+  const requestedKeys = [];
+  const bytes = new Uint8Array([1, 2, 3]);
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(["get", key]);
+        return {
+          body: bytes,
+          size: bytes.byteLength,
+          writeHttpMetadata(headers) {
+            headers.set("content-type", "application/octet-stream");
+            headers.set("content-disposition", "attachment");
+          },
+        };
+      },
+      async head(key) {
+        requestedKeys.push(["head", key]);
+        return { size: bytes.byteLength };
+      },
+    },
+  };
+  const root = "https://api.aniilogs.example/api/content/releases/3535596/qa/pawney-game-color-3584014/";
+  const contentTypes = new Map([
+    ["private-extract/pawney-live-canvas.private.html", "text/html; charset=utf-8"],
+    ["private-extract/pawney-live-canvas.private.css", "text/css; charset=utf-8"],
+    ["tools/source-gbuffer-multidraw-qa.mjs", "text/javascript; charset=utf-8"],
+    ["private-extract/runtime.private.json", "application/json; charset=utf-8"],
+    ["private-extract/program.wgsl", "text/plain; charset=utf-8"],
+    ["private-extract/texture.dds", "application/octet-stream"],
+    ["private-extract/geometry.bin", "application/octet-stream"],
+    ["private-extract/texture.dds.gz", "application/octet-stream"],
+  ]);
+  for (const [path] of contentTypes) {
+    const response = await worker.fetch(new Request(`${root}${path}`), env);
+    assert.equal(response.status, 404, path);
+  }
+  const headResponse = await worker.fetch(new Request(`${root}private-extract/geometry.bin`, { method: "HEAD" }), env);
+  assert.equal(headResponse.status, 404);
+  assert.deepEqual(requestedKeys, []);
+});
+
+test("Pawney pilot exception does not expose adjacent QA or private release paths", async () => {
+  const requestedKeys = [];
+  const env = {
+    CONTENT_RELEASE_ENABLED: "true",
+    CONTENT: {
+      async get(key) {
+        requestedKeys.push(key);
+        return { body: new Uint8Array([1]), size: 1 };
+      },
+      async head(key) {
+        requestedKeys.push(key);
+        return { size: 1 };
+      },
+    },
+  };
+  const denied = [
+    "qa/pawney-game-color-3584014/",
+    "qa/pawney-game-color-3584014/README.md",
+    "qa/pawney-game-color-3584014/private-extract/archive.zip",
+    "qa/pawney-game-color-3584014/private-extract/%25encoded.bin",
+    "qa/pawney-game-color-3584014/source/config.json",
+    "qa/pawney-game-color-3584014-extra/private-extract/model.bin",
+    "qa/pawney-geometry/private-extract/model.bin",
+    "qa/other-preview/private-extract/model.bin",
+    "assets/shaders/program.wgsl",
+  ];
+  for (const method of ["GET", "HEAD"]) {
+    for (const path of denied) {
       const response = await worker.fetch(new Request(
         `https://api.aniilogs.example/api/content/releases/3535596/${path}`,
         { method },

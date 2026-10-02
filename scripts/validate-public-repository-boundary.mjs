@@ -65,6 +65,10 @@ for await (const file of files(root)) {
   if (repoPath.startsWith("public/explorer/data/") || repoPath.startsWith("public/explorer/assets/")) {
     throw new Error(`Game-derived content must be stored in private R2, not GitHub: ${repoPath}`);
   }
+  if (repoPath.startsWith("public/explorer/") &&
+      /\.(?:mp4|webm|glb|gltf|wgsl|dxbc|uab|assetbundle)$/iu.test(repoPath)) {
+    throw new Error(`Game media, models, and shader programs must be hosted on Cloudflare: ${repoPath}`);
+  }
   const segments = repoPath.split("/").map((part) => part.toLowerCase());
   if (segments.some((part) => forbiddenSegments.has(part))) {
     throw new Error(`Private directory segment is present in the repository: ${repoPath}`);
