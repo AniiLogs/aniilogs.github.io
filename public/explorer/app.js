@@ -27,6 +27,32 @@ const ANIILOG_MEDIA_URL = contentUrl("./data/aniilog_media.json");
 // manifest is the authoritative source for labels/order.
 const ANIILOG_RARITY_MANIFEST_URL = contentUrl("./data/rarity-manifest.remote.json");
 const ANIILOG_ARTWORK_MANIFEST_URL = contentUrl("./data/petmanual-artwork-manifest.remote.json");
+// A dedicated Pages origin is set only after its reviewed viewer deployment is live.
+// The R2 content API intentionally cannot serve framed runtime HTML or scripts.
+const LIVE_VIEWER_ORIGIN = (() => {
+  const origin = String(SITE_CONFIG.liveViewerOrigin || "");
+  if (!/^https:\/\/[a-z0-9-]+\.pages\.dev$/u.test(origin)) return "";
+  return origin === new URL(CONTENT_BASE_URL, window.location.href).origin ? "" : origin;
+})();
+const LIVE_VIEWER_MANIFEST_URL = LIVE_VIEWER_ORIGIN && /^\d+$/u.test(CONTENT_PACKAGE_VERSION)
+  ? `${LIVE_VIEWER_ORIGIN}/releases/${CONTENT_PACKAGE_VERSION}/live-viewer-manifest.json`
+  : "";
+async function loadOptionalLiveViewerManifest() {
+  if (!LIVE_VIEWER_MANIFEST_URL) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetch(LIVE_VIEWER_MANIFEST_URL, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 const APP_VERSION = CONTENT_PACKAGE_VERSION
   ? `Game build ${CONTENT_PACKAGE_VERSION}`
   : "Game build unavailable";
@@ -123,6 +149,35 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
     renderVerified: true,
     turntable: approvedYawFrames(variant, entry, String(variant.id || "")),
   }));
+}
+
+function approvedLiveViewer(manifest, entry, showcaseMedia, packageVersion) {
+  const sourcePackage = String(packageVersion ?? "");
+  const formId = String(entry?.form_id ?? "");
+  const appearanceId = String(showcaseMedia?.id ?? "");
+  if (
+    !LIVE_VIEWER_ORIGIN
+    || !/^\d+$/u.test(sourcePackage)
+    || sourcePackage !== CONTENT_PACKAGE_VERSION
+    || !/^\d+$/u.test(formId)
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(appearanceId)
+    || appearanceId.length > 64
+    || showcaseMedia?.renderVerified !== true
+    || manifest?.schema !== "aniilogs.public.live-viewer-manifest.v1"
+    || manifest?.reviewStatus !== "approved"
+    || String(manifest?.sourcePackage ?? "") !== sourcePackage
+  ) return null;
+  const form = manifest.forms?.[formId];
+  if (String(form?.formId ?? "") !== formId) return null;
+  const appearance = form.appearances?.[appearanceId];
+  if (appearance?.renderVerified !== true || appearance?.transparentBackground !== true) return null;
+  return {
+    origin: LIVE_VIEWER_ORIGIN,
+    url: `${LIVE_VIEWER_ORIGIN}/releases/${sourcePackage}/forms/${formId}/${appearanceId}/index.html`,
+    packageVersion: sourcePackage,
+    formId,
+    appearanceId,
+  };
 }
 
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
@@ -452,6 +507,7 @@ const state = {
   aniilogData: null,
   aniilogRarityManifest: null,
   aniilogArtworkManifest: null,
+  aniilogLiveViewerManifest: null,
   aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY
     ? { [REQUESTED_ANIIMO_FORM_ID]: REQUESTED_ANIIMO_RARITY }
     : {},
@@ -2766,8 +2822,9 @@ function ensureAniilogData() {
     fetch(ANIILOG_MEDIA_URL),
     fetch(ANIILOG_RARITY_MANIFEST_URL),
     fetch(ANIILOG_ARTWORK_MANIFEST_URL),
+    loadOptionalLiveViewerManifest(),
   ])
-    .then(async ([dataResponse, mediaResponse, rarityResponse, artworkResponse]) => {
+    .then(async ([dataResponse, mediaResponse, rarityResponse, artworkResponse, liveViewerCandidate]) => {
       if (!dataResponse.ok) throw new Error(`Could not load ${ANIILOG_DATA_URL}`);
       if (!mediaResponse.ok) throw new Error(`Could not load ${ANIILOG_MEDIA_URL}`);
       const payload = await dataResponse.json();
@@ -2827,6 +2884,11 @@ function ensureAniilogData() {
         && artworkCandidate?.reviewStatus === "approved"
         && String(artworkCandidate?.sourcePackage ?? "") === String(payload.package_version ?? "")
         ? artworkCandidate
+        : null;
+      state.aniilogLiveViewerManifest = liveViewerCandidate?.schema === "aniilogs.public.live-viewer-manifest.v1"
+        && liveViewerCandidate?.reviewStatus === "approved"
+        && String(liveViewerCandidate?.sourcePackage ?? "") === String(payload.package_version ?? "")
+        ? liveViewerCandidate
         : null;
       state.aniilogLoadError = "";
       return payload;
@@ -5535,6 +5597,106 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
   return true;
 }
 
+function attachLiveAniimoViewer(record, entry, showcaseMedia) {
+  const viewer = approvedLiveViewer(
+    state.aniilogLiveViewerManifest,
+    entry,
+    showcaseMedia,
+    state.aniilogData?.package_version,
+  );
+  if (!viewer) return false;
+
+  const host = document.createElement("div");
+  host.className = "catalog-aniimo-live-viewer";
+  host.setAttribute("role", "group");
+  host.setAttribute("aria-label", `${entry.name} ${entry.form_label || ""} live artwork`);
+  host.setAttribute("aria-hidden", "true");
+  record.append(host);
+
+  let frame = null;
+  let timeout = null;
+  let started = false;
+  let nonce = "";
+  const fallback = () => record.querySelector(".catalog-aniimo-turntable");
+  const stop = () => {
+    if (timeout !== null) clearTimeout(timeout);
+    timeout = null;
+    window.removeEventListener("message", onMessage);
+    const focusWasInFrame = frame && document.activeElement === frame;
+    frame?.remove();
+    frame = null;
+    started = false;
+    host.classList.remove("is-ready");
+    host.setAttribute("aria-hidden", "true");
+    record.classList.remove("is-live-ready");
+    const turntable = fallback();
+    if (turntable) {
+      const visible = record.classList.contains("is-showcase");
+      turntable.tabIndex = visible ? 0 : -1;
+      turntable.setAttribute("aria-hidden", String(!visible));
+      if (focusWasInFrame && visible) turntable.focus({ preventScroll: true });
+    }
+  };
+  // The Pages runtime echoes these public IDs and the URL nonce only after its
+  // first usable transparent frame; it may send the same envelope with an error.
+  const onMessage = (event) => {
+    if (!started || !frame || !record.isConnected || !record.classList.contains("is-showcase")) {
+      stop();
+      return;
+    }
+    const message = event.data;
+    if (
+      event.origin !== viewer.origin
+      || event.source !== frame.contentWindow
+      || message?.nonce !== nonce
+      || String(message?.packageVersion ?? "") !== viewer.packageVersion
+      || String(message?.formId ?? "") !== viewer.formId
+      || message?.appearanceId !== viewer.appearanceId
+    ) return;
+    if (message.type === "aniilogs.live-viewer.error.v1") {
+      stop();
+    } else if (message.type === "aniilogs.live-viewer.ready.v1") {
+      if (timeout !== null) clearTimeout(timeout);
+      timeout = null;
+      host.classList.add("is-ready");
+      host.setAttribute("aria-hidden", "false");
+      frame.tabIndex = 0;
+      record.classList.add("is-live-ready");
+      const turntable = fallback();
+      if (turntable) {
+        const transferFocus = document.activeElement === turntable;
+        turntable.tabIndex = -1;
+        turntable.setAttribute("aria-hidden", "true");
+        if (transferFocus) frame.focus({ preventScroll: true });
+      }
+    }
+  };
+  host.start = () => {
+    if (started || !record.isConnected || !record.classList.contains("is-showcase")) return;
+    nonce = window.crypto?.randomUUID?.() || "";
+    if (!nonce) return;
+    const url = new URL(viewer.url);
+    url.searchParams.set("nonce", nonce);
+    frame = document.createElement("iframe");
+    frame.className = "catalog-aniimo-live-frame";
+    frame.title = `Rotate and animate ${entry.name} ${entry.form_label || ""} ${showcaseMedia.label || ""} artwork`;
+    // The dedicated cross-origin host needs its real origin for module assets
+    // and the checked postMessage handshake. No form, popup, or top navigation.
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    frame.setAttribute("allow", "webgpu");
+    frame.referrerPolicy = "no-referrer";
+    frame.tabIndex = -1;
+    frame.addEventListener("error", stop, { once: true });
+    started = true;
+    window.addEventListener("message", onMessage);
+    timeout = setTimeout(stop, 12000);
+    host.append(frame);
+    frame.src = url.toString();
+  };
+  host.stop = stop;
+  return true;
+}
+
 function attachPackedAniimoBackdrop(record, entry) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const showcaseMedia = entry.showcase_media?.renderVerified === true
@@ -5669,6 +5831,7 @@ function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
   attachPackedAniimoBackdrop(record, entry);
+  attachLiveAniimoViewer(record, entry, entry.showcase_media);
 
   const identity = document.createElement("header");
   identity.className = "catalog-identity";
@@ -7052,6 +7215,7 @@ function renderCatalogPreview(options = {}) {
   const sidebarTitle = view === "aniilog" ? "Filters" : "Items";
   const currentIndex = els.catalogSidebarContent.querySelector(".catalog-index");
   if (currentIndex?.dataset.catalogView === view) state.catalogIndexScroll[view] = currentIndex.scrollTop;
+  els.catalogPanel.querySelector(".catalog-aniimo-live-viewer")?.stop();
   els.catalogPanel.textContent = "";
   els.catalogPanel.setAttribute("aria-label", `${title} catalogue`);
 
@@ -7274,6 +7438,9 @@ function setAniilogShowcaseMode(enabled) {
     turntable.setAttribute("aria-hidden", String(!state.aniilogShowcaseMode));
     if (state.aniilogShowcaseMode) turntable.start();
   }
+  const liveViewer = record?.querySelector(".catalog-aniimo-live-viewer");
+  if (state.aniilogShowcaseMode) liveViewer?.start();
+  else liveViewer?.stop();
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
   const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
   if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";

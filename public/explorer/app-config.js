@@ -14,5 +14,10 @@
     aniilogAvailable: true,
     contentBaseUrl,
     contentRevision,
+    // Deployment gate: set only after a dedicated Pages origin serves the
+    // reviewed manifest with CORS and transparent viewer HTML that allows this
+    // site's iframe in frame-ancestors (without X-Frame-Options: DENY). Its
+    // runtime must post the matching ready message after its first usable frame.
+    liveViewerOrigin: "",
   });
 })();
