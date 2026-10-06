@@ -683,6 +683,9 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
   const account = await currentAccount(request, env);
   if (!account?.developerAdminAvailable) return json({ error: "Developer administrator access required." }, 403);
   if (!/^\d{15,22}$/u.test(discordId)) return json({ error: "A valid Discord user ID is required." }, 400);
+  if (administratorAccountAllowed(discordId, env)) {
+    return json({ error: "Owner access is configured separately and cannot be changed here." }, 403);
+  }
   const now = Math.floor(Date.now() / 1000);
   if (enabled) {
     await env.DB.prepare(

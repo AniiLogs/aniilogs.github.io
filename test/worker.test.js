@@ -272,6 +272,14 @@ test("only private administrators can grant and revoke developer access", async 
   }), env);
   assert.equal(denied.status, 403);
 
+  const ownerRevoke = await worker.fetch(apiRequest(`/api/admin/developers/${state.discordIds.owner}`, state.tokens.owner, {
+    method: "DELETE",
+    body: "{}",
+  }), env);
+  assert.equal(ownerRevoke.status, 403);
+  const ownerAccount = await worker.fetch(apiRequest("/api/auth/me", state.tokens.owner), env);
+  assert.equal((await ownerAccount.json()).account.developerAdminAvailable, true);
+
   const revoke = await worker.fetch(apiRequest(`/api/admin/developers/${state.discordIds.other}`, state.tokens.owner, {
     method: "DELETE",
     body: "{}",
