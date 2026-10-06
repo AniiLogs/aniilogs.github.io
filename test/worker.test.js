@@ -33,6 +33,7 @@ async function authenticatedTestDatabase() {
   const progress = new Map();
   const shares = new Map();
   const handoffs = new Set([discordIds.owner, discordIds.other]);
+  const previewHandoffs = new Map();
   const developers = new Set();
   const accounts = new Map([
     [discordIds.owner, { discordId: discordIds.owner, discordUsername: "owner", discordGlobalName: "Owner", discordAvatarHash: null }],
@@ -61,6 +62,7 @@ async function authenticatedTestDatabase() {
               }
               if (sql.startsWith("SELECT display_name")) return profiles.get(values[0]) || null;
               if (sql.includes("FROM developer_roles")) return developers.has(values[0]) ? { discordId: values[0] } : null;
+              if (sql.includes("FROM developer_preview_handoffs")) return previewHandoffs.get(values[0]) || null;
               if (sql.startsWith("SELECT selection_json")) {
                 const row = shares.get(values[0]);
                 return row ? { selectionJson: row.selectionJson, expiresAt: row.expiresAt } : null;
@@ -75,6 +77,16 @@ async function authenticatedTestDatabase() {
               }
               if (sql.startsWith("INSERT INTO developer_roles")) {
                 developers.add(values[0]);
+                return { meta: { changes: 1 } };
+              }
+              if (sql.startsWith("INSERT INTO developer_preview_handoffs")) {
+                previewHandoffs.set(values[0], { discordId: values[1], expiresAt: values[3] });
+                return { meta: { changes: 1 } };
+              }
+              if (sql.startsWith("DELETE FROM developer_preview_handoffs")) {
+                const row = previewHandoffs.get(values[0]);
+                if (!row || row.expiresAt <= values[1]) return { meta: { changes: 0 } };
+                previewHandoffs.delete(values[0]);
                 return { meta: { changes: 1 } };
               }
               if (sql === "DELETE FROM developer_roles WHERE discord_id = ?") {
@@ -138,13 +150,24 @@ async function authenticatedTestDatabase() {
             },
           };
         },
+        async all() {
+          if (sql.includes("FROM users") && sql.includes("LEFT JOIN developer_roles")) {
+            return { results: [...accounts.values()].map((account) => ({
+              discordId: account.discordId,
+              discordUsername: account.discordUsername,
+              discordGlobalName: account.discordGlobalName,
+              grantedDeveloperId: developers.has(account.discordId) ? account.discordId : null,
+            })) };
+          }
+          throw new Error(`Unexpected all: ${sql}`);
+        },
       };
     },
     async batch(statements) {
       return Promise.all(statements.map((statement) => statement.run()));
     },
   };
-  return { DB, tokens, discordIds, accounts, sessions, profiles, progress, shares, handoffs, developers };
+  return { DB, tokens, discordIds, accounts, sessions, profiles, progress, shares, handoffs, previewHandoffs, developers };
 }
 
 function apiRequest(path, token, options = {}) {
@@ -255,6 +278,89 @@ test("only private administrators can grant and revoke developer access", async 
   assert.equal(state.developers.has(state.discordIds.other), false);
 });
 
+test("only the owner administrator can list bounded Discord logins for developer grants", async () => {
+  const state = await authenticatedTestDatabase();
+  const env = {
+    DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io",
+    ADMIN_DISCORD_IDS: state.discordIds.owner,
+  };
+  const unauthenticated = await worker.fetch(apiRequest("/api/admin/developers", null), env);
+  assert.equal(unauthenticated.status, 403);
+  const ordinary = await worker.fetch(apiRequest("/api/admin/developers", state.tokens.other), env);
+  assert.equal(ordinary.status, 403);
+  state.developers.add(state.discordIds.other);
+  const developer = await worker.fetch(apiRequest("/api/admin/developers", state.tokens.other), env);
+  assert.equal(developer.status, 403);
+  const owner = await worker.fetch(apiRequest("/api/admin/developers", state.tokens.owner), env);
+  assert.equal(owner.status, 200);
+  const payload = await owner.json();
+  assert.equal(payload.truncated, false);
+  assert.deepEqual(payload.accounts, [
+    {
+      discordId: state.discordIds.owner, discordUsername: "owner", discordGlobalName: "Owner",
+      developerModeAvailable: true, developerAdminAvailable: true,
+    },
+    {
+      discordId: state.discordIds.other, discordUsername: "other", discordGlobalName: "Other",
+      developerModeAvailable: true, developerAdminAvailable: false,
+    },
+  ]);
+  assert.equal("sessionHash" in payload.accounts[0], false);
+  assert.equal("bio" in payload.accounts[0], false);
+});
+
+test("developer preview ticket requires Discord developer role and service bridge secret", async () => {
+  const state = await authenticatedTestDatabase();
+  const base = { DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io" };
+  const request = (token) => apiRequest("/api/dev-preview/ticket", token, { method: "POST" });
+  assert.equal((await worker.fetch(request(state.tokens.owner), base)).status, 503);
+  const env = { ...base, QA_BRIDGE_SECRET: "s".repeat(48) };
+  assert.equal((await worker.fetch(request(state.tokens.other), env)).status, 403);
+  const adminEnv = { ...env, ADMIN_DISCORD_IDS: state.discordIds.owner };
+  const issued = await worker.fetch(request(state.tokens.owner), adminEnv);
+  assert.equal(issued.status, 200);
+  const payload = await issued.json();
+  assert.equal(payload.launchUrl, "https://aniilogs-renderer-qa-3634150.pages.dev/qa/current3634150/redeem");
+  assert.equal(payload.expiresInSeconds, 60);
+  assert.equal(payload.ticket.includes(state.tokens.owner), false);
+  state.developers.add(state.discordIds.other);
+  assert.equal((await worker.fetch(request(state.tokens.other), env)).status, 200);
+  const evil = new Request("https://api.aniilogs.example/api/dev-preview/ticket", {
+    method: "POST", headers: { origin: "https://evil.example", authorization: `Bearer ${state.tokens.owner}` },
+  });
+  assert.equal((await worker.fetch(evil, adminEnv)).status, 403);
+});
+
+test("isolated QA project redeems one-time ticket server-to-server without public asset route", async () => {
+  const state = await authenticatedTestDatabase();
+  const env = {
+    DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io",
+    ADMIN_DISCORD_IDS: state.discordIds.owner, QA_BRIDGE_SECRET: "s".repeat(48),
+  };
+  const issue = await worker.fetch(apiRequest("/api/dev-preview/ticket", state.tokens.owner, { method: "POST" }), env);
+  const { ticket } = await issue.json();
+  const redeem = (secret = env.QA_BRIDGE_SECRET) => {
+    const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
+    return new Request("https://api.aniilogs.example/api/dev-preview/redeem", {
+      method: "POST", headers, body: JSON.stringify({ ticket }),
+    });
+  };
+  assert.equal((await worker.fetch(redeem("incorrect"), env)).status, 403);
+  const accepted = await worker.fetch(redeem(), env);
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).discordId, state.discordIds.owner);
+  assert.equal((await worker.fetch(redeem(), env)).status, 403);
+  assert.equal((await worker.fetch(apiRequest("/api/content/releases/3535596/qa/pawney/prismana/review.html", null), env)).status, 404);
+
+  const grant = await worker.fetch(apiRequest("/api/dev-preview/ticket", state.tokens.owner, { method: "POST" }), env);
+  const secondTicket = (await grant.json()).ticket;
+  env.ADMIN_DISCORD_IDS = "";
+  const revoked = await worker.fetch(new Request("https://api.aniilogs.example/api/dev-preview/redeem", {
+    method: "POST", headers: { authorization: `Bearer ${env.QA_BRIDGE_SECRET}`, "content-type": "application/json" },
+    body: JSON.stringify({ ticket: secondTicket }),
+  }), env);
+  assert.equal(revoked.status, 403);
+});
 test("API preflights expose CORS only to the exact configured site", async () => {
   const env = { PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io" };
   const allowed = await worker.fetch(new Request("https://api.aniilogs.example/api/progress", {

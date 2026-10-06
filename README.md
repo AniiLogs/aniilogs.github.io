@@ -59,6 +59,16 @@ The Discord application redirect URI must exactly match:
 https://aniilogs-api.pages.dev/api/auth/discord/callback
 ```
 
+Developer-only model QA uses the existing Discord account roles, not a public
+preview password. The API issues a 60-second, one-time handoff to the isolated
+Cloudflare renderer-QA Pages project only for an authenticated developer. The
+QA project redeems it server-to-server using `QA_BRIDGE_SECRET` (a separate
+secret configured on both projects), then uses its own signed, HttpOnly,
+15-minute first-party cookie for each private asset request. Role changes take
+effect at new handoff issuance/redeem; an already issued QA cookie remains
+valid for at most 15 minutes. No website session token or game-derived preview
+asset is sent through the public API content route.
+
 Apply reviewed production migrations explicitly with:
 
 ```powershell

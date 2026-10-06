@@ -1,6 +1,8 @@
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
+const DEV_PREVIEW_TICKET_SECONDS = 60;
+const DEV_PREVIEW_COOKIE_SECONDS = 15 * 60;
 const OAUTH_LIFETIME_SECONDS = 10 * 60;
 const AUTH_HANDOFF_LIFETIME_SECONDS = 5 * 60;
 const SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
@@ -147,6 +149,64 @@ function cookie(name, value, maxAge) {
 
 function clearCookie(name) {
   return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function developerPreviewBridgeSecret(env) {
+  const secret = String(env.QA_BRIDGE_SECRET || "");
+  return secret.length >= 32 ? secret : null;
+}
+
+async function issueDeveloperPreviewTicket(request, env) {
+  const secret = developerPreviewBridgeSecret(env);
+  if (!secret || !env.DB) return json({ error: "Developer preview is unavailable." }, 503);
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account?.developerModeAvailable) return json({ error: "Developer access required." }, 403);
+  const nonce = randomToken(32);
+  const ticket = `${nonce}.${await hmac(nonce, secret)}`;
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO developer_preview_handoffs (ticket_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+  ).bind(await sha256(ticket), account.discordId, now, now + DEV_PREVIEW_TICKET_SECONDS).run();
+  return json({
+    ticket,
+    launchUrl: "https://aniilogs-renderer-qa-3634150.pages.dev/qa/current3634150/redeem",
+    expiresInSeconds: DEV_PREVIEW_TICKET_SECONDS,
+  });
+}
+
+async function redeemDeveloperPreviewTicket(request, env) {
+  const secret = developerPreviewBridgeSecret(env);
+  if (!secret || !env.DB) return json({ error: "Developer preview is unavailable." }, 503);
+  const authorization = request.headers.get("authorization") || "";
+  const suppliedSecret = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!constantTimeEqual(suppliedSecret, secret)) return json({ error: "Service authorization required." }, 403);
+  const body = await readJsonBody(request, 2048);
+  const ticket = String(body?.ticket || "");
+  const [nonce, signature, ...extra] = ticket.split(".");
+  if (!nonce || !signature || extra.length || !/^[A-Za-z0-9_-]{32,128}$/u.test(nonce)
+    || !constantTimeEqual(signature, await hmac(nonce, secret))) {
+    return json({ error: "Invalid or expired preview handoff." }, 403);
+  }
+  const ticketHash = await sha256(ticket);
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare(
+    "SELECT discord_id AS discordId, expires_at AS expiresAt FROM developer_preview_handoffs WHERE ticket_hash = ? LIMIT 1",
+  ).bind(ticketHash).first();
+  if (!row || Number(row.expiresAt) <= now) return json({ error: "Invalid or expired preview handoff." }, 403);
+  const consumed = await env.DB.prepare(
+    "DELETE FROM developer_preview_handoffs WHERE ticket_hash = ? AND expires_at > ?",
+  ).bind(ticketHash, now).run();
+  if (Number(consumed?.meta?.changes) !== 1) return json({ error: "Preview handoff already used." }, 403);
+  const discordId = String(row.discordId);
+  let developer = developerAccountAllowed(discordId, env);
+  if (!developer) {
+    developer = Boolean(await env.DB.prepare(
+      "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
+    ).bind(discordId).first());
+  }
+  if (!developer) return json({ error: "Developer access revoked." }, 403);
+  return json({ ok: true, discordId, maxSessionSeconds: DEV_PREVIEW_COOKIE_SECONDS });
 }
 
 function securityHeaders(headers = new Headers(), localPreview = false) {
@@ -636,6 +696,37 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
   return json({ ok: true, discordId, developer: enabled });
 }
 
+async function listDeveloperAccounts(request, env) {
+  const account = await currentAccount(request, env);
+  if (!account?.developerAdminAvailable) return json({ error: "Developer administrator access required." }, 403);
+  const result = await env.DB.prepare(
+    `SELECT users.discord_id AS discordId,
+            users.discord_username AS discordUsername,
+            users.discord_global_name AS discordGlobalName,
+            developer_roles.discord_id AS grantedDeveloperId
+       FROM users
+       LEFT JOIN developer_roles ON developer_roles.discord_id = users.discord_id
+      ORDER BY users.updated_at DESC, users.discord_id ASC
+      LIMIT 201`,
+  ).all();
+  const rows = result?.results || [];
+  return json({
+    accounts: rows.slice(0, 200).map((row) => {
+      const discordId = String(row.discordId);
+      const developerAdminAvailable = administratorAccountAllowed(discordId, env);
+      return {
+        discordId,
+        discordUsername: String(row.discordUsername),
+        discordGlobalName: row.discordGlobalName ? String(row.discordGlobalName) : null,
+        developerModeAvailable: Boolean(row.grantedDeveloperId)
+          || developerAccountAllowed(discordId, env),
+        developerAdminAvailable,
+      };
+    }),
+    truncated: rows.length > 200,
+  });
+}
+
 export function sameOriginWrite(request) {
   const origin = request.headers.get("origin");
   const site = request.headers.get("sec-fetch-site");
@@ -908,6 +999,12 @@ async function deleteOwnAccount(request, env) {
 async function api(request, env) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders() });
+  if (url.pathname === "/api/dev-preview/ticket" && request.method === "POST") {
+    return issueDeveloperPreviewTicket(request, env);
+  }
+  if (url.pathname === "/api/dev-preview/redeem" && request.method === "POST") {
+    return redeemDeveloperPreviewTicket(request, env);
+  }
   if (url.pathname.startsWith(CONTENT_PATH_PREFIX) && (request.method === "GET" || request.method === "HEAD")) {
     return getReleaseContent(request, env);
   }
@@ -935,6 +1032,9 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);
+  if (url.pathname === "/api/admin/developers" && request.method === "GET") {
+    return listDeveloperAccounts(request, env);
+  }
   const developerRoleMatch = url.pathname.match(/^\/api\/admin\/developers\/(\d{15,22})$/u);
   if (developerRoleMatch && request.method === "PUT") {
     return updateDeveloperRole(request, env, developerRoleMatch[1], true);
