@@ -547,6 +547,15 @@ const state = {
   developerModeAvailable: false,
   developerAdminAvailable: false,
   developerRoleStatus: "",
+  developerAccounts: [],
+  developerAccountsLoaded: false,
+  developerAccountsLoading: false,
+  developerAccountsRequestId: 0,
+  developerAccountsOwnerId: "",
+  developerAccountsError: "",
+  developerAccountsTruncated: false,
+  developerAccountSearch: "",
+  developerRoleBusyId: "",
   cloudSyncHydrating: false,
   cloudSyncTimer: 0,
   preferences: defaultPreferences(),
@@ -1571,6 +1580,15 @@ function clearAuthSession() {
   state.cloudSyncAuthenticated = false;
   state.developerModeAvailable = false;
   state.developerAdminAvailable = false;
+  state.developerAccounts = [];
+  state.developerAccountsLoaded = false;
+  state.developerAccountsLoading = false;
+  state.developerAccountsRequestId += 1;
+  state.developerAccountsOwnerId = "";
+  state.developerAccountsError = "";
+  state.developerAccountsTruncated = false;
+  state.developerAccountSearch = "";
+  state.developerRoleBusyId = "";
   applyDeveloperVisibility();
 }
 
@@ -1763,6 +1781,15 @@ async function hydrateCloudProgress() {
     }
     state.cloudSyncAuthenticated = true;
     const accountIdentity = account.account || account;
+    if (state.developerAccountsOwnerId !== String(accountIdentity.discordId || "")) {
+      state.developerAccounts = [];
+      state.developerAccountsLoaded = false;
+      state.developerAccountsLoading = false;
+      state.developerAccountsRequestId += 1;
+      state.developerAccountsError = "";
+      state.developerAccountsTruncated = false;
+      state.developerAccountsOwnerId = String(accountIdentity.discordId || "");
+    }
     state.developerModeAvailable = Boolean(accountIdentity.developerModeAvailable);
     state.developerAdminAvailable = Boolean(accountIdentity.developerAdminAvailable);
     configureTopbarAccount(accountIdentity);
@@ -2325,7 +2352,48 @@ function appendSettingsStorageError(container) {
   ));
 }
 
-async function updateDeveloperAccess(discordId, enabled) {
+async function loadDeveloperAccounts({ force = false } = {}) {
+  if (!state.developerAdminAvailable || state.developerAccountsLoading || (state.developerAccountsLoaded && !force)) return;
+  state.developerAccountsLoading = true;
+  state.developerAccountsError = "";
+  const requestId = ++state.developerAccountsRequestId;
+  renderSettings();
+  try {
+    const response = await apiFetch("/admin/developers");
+    if (!response.ok) throw new Error(`Developer account list returned ${response.status}`);
+    const payload = await response.json();
+    if (!Array.isArray(payload.accounts)) throw new Error("Developer account list is invalid");
+    if (requestId !== state.developerAccountsRequestId || !state.developerAdminAvailable) return;
+    state.developerAccounts = payload.accounts
+      .filter((account) => /^\d{15,22}$/u.test(String(account?.discordId || "")))
+      .map((account) => ({
+        discordId: String(account.discordId),
+        discordUsername: String(account.discordUsername || ""),
+        discordGlobalName: String(account.discordGlobalName || ""),
+        developerModeAvailable: Boolean(account.developerModeAvailable),
+        developerAdminAvailable: Boolean(account.developerAdminAvailable),
+      }))
+      .sort((left, right) => Number(right.developerAdminAvailable) - Number(left.developerAdminAvailable)
+        || String(left.discordGlobalName || left.discordUsername || left.discordId).localeCompare(
+          String(right.discordGlobalName || right.discordUsername || right.discordId),
+        ));
+    state.developerAccountsTruncated = Boolean(payload.truncated);
+  } catch (error) {
+    if (requestId !== state.developerAccountsRequestId || !state.developerAdminAvailable) return;
+    console.error("Could not load developer accounts", error);
+    state.developerAccountsError = "Could not load signed-in Discord accounts. Try refreshing the list.";
+  } finally {
+    if (requestId !== state.developerAccountsRequestId || !state.developerAdminAvailable) return;
+    state.developerAccountsLoaded = true;
+    state.developerAccountsLoading = false;
+    renderSettings();
+  }
+}
+
+async function updateDeveloperAccess(account, enabled) {
+  if (!state.developerAdminAvailable || account.developerAdminAvailable || state.developerRoleBusyId) return;
+  const discordId = account.discordId;
+  state.developerRoleBusyId = discordId;
   state.developerRoleStatus = enabled ? "Granting developer access..." : "Revoking developer access...";
   renderSettings();
   try {
@@ -2336,13 +2404,79 @@ async function updateDeveloperAccess(discordId, enabled) {
     });
     if (!response.ok) throw new Error(`Developer role update returned ${response.status}`);
     state.developerRoleStatus = enabled
-      ? `Developer access granted to Discord user ${discordId}.`
-      : `Developer access revoked from Discord user ${discordId}.`;
+      ? `Developer access granted to ${account.discordGlobalName || account.discordUsername || discordId}.`
+      : `Developer access revoked from ${account.discordGlobalName || account.discordUsername || discordId}.`;
+    await loadDeveloperAccounts({ force: true });
   } catch (error) {
     console.error("Could not update developer access", error);
-    state.developerRoleStatus = "Developer access was not changed. Verify the Discord user ID and try again.";
+    state.developerRoleStatus = "Developer access was not changed. Please try again.";
+  } finally {
+    state.developerRoleBusyId = "";
+    renderSettings();
   }
-  renderSettings();
+}
+
+function renderDeveloperAccountRows(container) {
+  container.textContent = "";
+  if (state.developerAccountsLoading) {
+    const loading = document.createElement("p");
+    loading.className = "settings-language-note";
+    loading.textContent = "Loading signed-in Discord accounts...";
+    container.append(loading);
+    return;
+  }
+  if (state.developerAccountsError) {
+    const error = document.createElement("p");
+    error.className = "settings-language-note";
+    error.textContent = state.developerAccountsError;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = "Retry account list";
+    retry.addEventListener("click", () => void loadDeveloperAccounts({ force: true }));
+    container.append(error, retry);
+    return;
+  }
+  const query = state.developerAccountSearch.trim().toLocaleLowerCase();
+  const matches = state.developerAccounts.filter((account) => !query || [
+    account.discordGlobalName,
+    account.discordUsername,
+    account.discordId,
+  ].some((value) => value.toLocaleLowerCase().includes(query)));
+  if (!matches.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-language-note";
+    empty.textContent = query ? "No signed-in accounts match this search." : "No Discord accounts have signed in yet.";
+    container.append(empty);
+    return;
+  }
+  matches.forEach((account) => {
+    const row = document.createElement("div");
+    row.className = "developer-account-row";
+    const identity = document.createElement("div");
+    identity.className = "developer-account-identity";
+    const name = document.createElement("strong");
+    name.textContent = account.discordGlobalName || account.discordUsername || `Discord user ${account.discordId}`;
+    const detail = document.createElement("small");
+    detail.textContent = `${account.discordUsername ? `@${account.discordUsername} · ` : ""}${account.discordId}`;
+    const role = document.createElement("span");
+    role.className = "developer-account-role";
+    role.textContent = account.developerAdminAvailable
+      ? "Owner/admin · developer access protected"
+      : account.developerModeAvailable ? "Developer access" : "Standard account";
+    identity.append(name, detail, role);
+    row.append(identity);
+    if (!account.developerAdminAvailable) {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = account.developerModeAvailable ? "settings-danger" : "";
+      action.textContent = account.developerModeAvailable ? "Revoke" : "Grant";
+      action.setAttribute("aria-label", `${action.textContent} developer access for ${name.textContent}`);
+      action.disabled = Boolean(state.developerRoleBusyId);
+      action.addEventListener("click", () => void updateDeveloperAccess(account, !account.developerModeAvailable));
+      row.append(action);
+    }
+    container.append(row);
+  });
 }
 
 function renderDeveloperSettings(container) {
@@ -2388,40 +2522,32 @@ function renderDeveloperSettings(container) {
   const accessTitle = document.createElement("strong");
   accessTitle.textContent = "Developer access";
   const accessDetail = document.createElement("small");
-  accessDetail.textContent = "Grant or revoke the role using an exact Discord user ID.";
+  accessDetail.textContent = "Choose a Discord account that has signed in to AniiLogs. Owner/admin access cannot be revoked here.";
   accessCopy.append(accessTitle, accessDetail);
   const field = document.createElement("label");
-  field.className = "settings-language-field";
+  field.className = "developer-account-search";
   const fieldLabel = document.createElement("span");
-  fieldLabel.textContent = "Discord user ID";
-  const userId = document.createElement("input");
-  userId.type = "text";
-  userId.inputMode = "numeric";
-  userId.pattern = "[0-9]{15,22}";
-  userId.placeholder = "123456789012345678";
-  field.append(fieldLabel, userId);
-  const actions = document.createElement("div");
-  actions.className = "settings-actions";
-  const grant = document.createElement("button");
-  grant.type = "button";
-  grant.textContent = "Grant developer";
-  const revoke = document.createElement("button");
-  revoke.type = "button";
-  revoke.className = "settings-danger";
-  revoke.textContent = "Revoke developer";
-  const submit = (enabled) => {
-    const id = userId.value.trim();
-    if (!/^\d{15,22}$/u.test(id)) {
-      state.developerRoleStatus = "Enter an exact Discord user ID (15 to 22 digits).";
-      renderSettings();
-      return;
-    }
-    void updateDeveloperAccess(id, enabled);
-  };
-  grant.addEventListener("click", () => submit(true));
-  revoke.addEventListener("click", () => submit(false));
-  actions.append(grant, revoke);
-  accessCard.append(accessCopy, field, actions);
+  fieldLabel.textContent = "Search signed-in accounts";
+  const search = document.createElement("input");
+  search.type = "search";
+  search.autocomplete = "off";
+  search.placeholder = "Name, username, or Discord ID";
+  search.value = state.developerAccountSearch;
+  const accountRows = document.createElement("div");
+  accountRows.className = "developer-account-list";
+  search.addEventListener("input", () => {
+    state.developerAccountSearch = search.value;
+    renderDeveloperAccountRows(accountRows);
+  });
+  field.append(fieldLabel, search);
+  accessCard.append(accessCopy, field, accountRows);
+  renderDeveloperAccountRows(accountRows);
+  if (state.developerAccountsTruncated) {
+    const truncated = document.createElement("p");
+    truncated.className = "settings-language-note";
+    truncated.textContent = "Only the most recent signed-in accounts are shown.";
+    accessCard.append(truncated);
+  }
   if (state.developerRoleStatus) {
     const status = document.createElement("p");
     status.className = "settings-language-note";
@@ -2430,6 +2556,7 @@ function renderDeveloperSettings(container) {
     accessCard.append(status);
   }
   container.append(accessCard);
+  if (!state.developerAccountsLoaded && !state.developerAccountsLoading) void loadDeveloperAccounts();
 }
 
 function renderSettings() {

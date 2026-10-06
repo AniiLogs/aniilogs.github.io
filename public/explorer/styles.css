@@ -2783,6 +2783,75 @@ button[aria-pressed="true"] {
   background: rgba(229, 111, 95, 0.12);
 }
 
+.developer-account-search {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.developer-account-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 7px 10px;
+}
+
+.developer-account-search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.developer-account-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(45vh, 370px);
+  overflow-y: auto;
+}
+
+.developer-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  padding: 9px;
+}
+
+.developer-account-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.developer-account-identity small,
+.developer-account-role {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.developer-account-row button {
+  width: auto;
+  min-width: 76px;
+}
+
+@media (max-width: 470px) {
+  .developer-account-row {
+    grid-template-columns: 1fr;
+  }
+
+  .developer-account-row button {
+    width: 100%;
+  }
+}
+
 .settings-theme-card {
   gap: 10px;
 }

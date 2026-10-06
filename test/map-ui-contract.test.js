@@ -340,6 +340,19 @@ test("developer diagnostics and role controls are server-entitlement gated", () 
   assert.match(explorer, /\/admin\/developers\//u);
 });
 
+test("owner can choose signed-in Discord accounts for developer access", () => {
+  assert.match(explorer, /if \(!state\.developerAdminAvailable\) return;\s*const accessCard/u);
+  assert.match(explorer, /apiFetch\("\/admin\/developers"\)/u);
+  assert.match(explorer, /payload\.accounts/u);
+  assert.match(explorer, /Search signed-in accounts/u);
+  assert.match(explorer, /account\.discordGlobalName,\s*account\.discordUsername,\s*account\.discordId/u);
+  assert.match(explorer, /account\.developerAdminAvailable\s*\? "Owner\/admin · developer access protected"/u);
+  assert.match(explorer, /if \(!account\.developerAdminAvailable\) \{/u);
+  assert.match(explorer, /updateDeveloperAccess\(account, !account\.developerModeAvailable\)/u);
+  assert.doesNotMatch(explorer, /Enter an exact Discord user ID/u);
+  assert.match(explorerStyles, /\.developer-account-list\s*\{[^}]*overflow-y: auto;/u);
+});
+
 test("light and dark themes avoid whole-control opacity and dark-only text colors", () => {
   assert.match(landingStyles, /:root\[data-color-mode="light"\] \.site-header/u);
   assert.match(landingStyles, /:root:not\(\[data-color-mode="light"\]\) \.primary-button/u);
