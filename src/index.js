@@ -163,10 +163,10 @@ async function issueDeveloperPreviewTicket(request, env) {
   const account = await currentAccount(request, env);
   if (!account?.developerModeAvailable) return json({ error: "Developer access required." }, 403);
   const nonce = randomToken(32);
-  const ticket = `${nonce}.${await hmac(nonce, secret)}`;
+  const ticket = `${nonce}.${await hmac(`aniilogs-qa-preview-v1:${nonce}`, secret)}`;
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
-    "INSERT INTO developer_preview_handoffs (ticket_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
   ).bind(await sha256(ticket), account.discordId, now, now + DEV_PREVIEW_TICKET_SECONDS).run();
   return json({
     ticket,
@@ -185,17 +185,17 @@ async function redeemDeveloperPreviewTicket(request, env) {
   const ticket = String(body?.ticket || "");
   const [nonce, signature, ...extra] = ticket.split(".");
   if (!nonce || !signature || extra.length || !/^[A-Za-z0-9_-]{32,128}$/u.test(nonce)
-    || !constantTimeEqual(signature, await hmac(nonce, secret))) {
+    || !constantTimeEqual(signature, await hmac(`aniilogs-qa-preview-v1:${nonce}`, secret))) {
     return json({ error: "Invalid or expired preview handoff." }, 403);
   }
   const ticketHash = await sha256(ticket);
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, expires_at AS expiresAt FROM developer_preview_handoffs WHERE ticket_hash = ? LIMIT 1",
+    "SELECT discord_id AS discordId, expires_at AS expiresAt FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
   ).bind(ticketHash).first();
   if (!row || Number(row.expiresAt) <= now) return json({ error: "Invalid or expired preview handoff." }, 403);
   const consumed = await env.DB.prepare(
-    "DELETE FROM developer_preview_handoffs WHERE ticket_hash = ? AND expires_at > ?",
+    "DELETE FROM auth_handoffs WHERE handoff_hash = ? AND expires_at > ?",
   ).bind(ticketHash, now).run();
   if (Number(consumed?.meta?.changes) !== 1) return json({ error: "Preview handoff already used." }, 403);
   const discordId = String(row.discordId);

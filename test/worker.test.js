@@ -62,7 +62,9 @@ async function authenticatedTestDatabase() {
               }
               if (sql.startsWith("SELECT display_name")) return profiles.get(values[0]) || null;
               if (sql.includes("FROM developer_roles")) return developers.has(values[0]) ? { discordId: values[0] } : null;
-              if (sql.includes("FROM developer_preview_handoffs")) return previewHandoffs.get(values[0]) || null;
+              if (sql.includes("FROM auth_handoffs") && sql.includes("WHERE handoff_hash = ?")) {
+                return previewHandoffs.get(values[0]) || null;
+              }
               if (sql.startsWith("SELECT selection_json")) {
                 const row = shares.get(values[0]);
                 return row ? { selectionJson: row.selectionJson, expiresAt: row.expiresAt } : null;
@@ -79,11 +81,11 @@ async function authenticatedTestDatabase() {
                 developers.add(values[0]);
                 return { meta: { changes: 1 } };
               }
-              if (sql.startsWith("INSERT INTO developer_preview_handoffs")) {
+              if (sql.startsWith("INSERT INTO auth_handoffs")) {
                 previewHandoffs.set(values[0], { discordId: values[1], expiresAt: values[3] });
                 return { meta: { changes: 1 } };
               }
-              if (sql.startsWith("DELETE FROM developer_preview_handoffs")) {
+              if (sql.startsWith("DELETE FROM auth_handoffs WHERE handoff_hash = ? AND expires_at > ?")) {
                 const row = previewHandoffs.get(values[0]);
                 if (!row || row.expiresAt <= values[1]) return { meta: { changes: 0 } };
                 previewHandoffs.delete(values[0]);
@@ -339,6 +341,12 @@ test("isolated QA project redeems one-time ticket server-to-server without publi
   };
   const issue = await worker.fetch(apiRequest("/api/dev-preview/ticket", state.tokens.owner, { method: "POST" }), env);
   const { ticket } = await issue.json();
+  assert.match(ticket, /^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/u);
+  const wrongExchange = await worker.fetch(apiRequest("/api/auth/exchange", null, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ handoff: ticket }),
+  }), env);
+  assert.equal(wrongExchange.status, 400);
   const redeem = (secret = env.QA_BRIDGE_SECRET) => {
     const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
     return new Request("https://api.aniilogs.example/api/dev-preview/redeem", {
