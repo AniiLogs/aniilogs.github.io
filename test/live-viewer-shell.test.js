@@ -25,8 +25,18 @@ const makeApproval = (allowedOrigin = origin) => new Function(
   "LIVE_VIEWER_ORIGIN", "CONTENT_PACKAGE_VERSION",
   `${validationSource}; return approvedLiveViewer;`,
 )(allowedOrigin, "3535596");
+const makeGenderOptions = () => new Function(
+  "LIVE_VIEWER_ORIGIN", "CONTENT_PACKAGE_VERSION",
+  `${validationSource}; return approvedLiveViewerGenderOptions;`,
+)(origin, "3535596");
+const retainGender = new Function(
+  "LIVE_VIEWER_ORIGIN", "CONTENT_PACKAGE_VERSION",
+  `${validationSource}; return retainedLiveViewerGender;`,
+)(origin, "3535596");
 const entry = { form_id: "1002603", name: "Test Aniimo", form_label: "Rainbow" };
 const media = { id: "sparkling-03", label: "Sparkling Type III", renderVerified: true };
+const genderEntry = { form_id: "42", name: "Fixture Aniimo", form_label: "Basic" };
+const genderMedia = { id: "common", label: "Common", renderVerified: true };
 const manifest = {
   schema: "aniilogs.public.live-viewer-manifest.v1",
   reviewStatus: "approved",
@@ -38,6 +48,36 @@ const manifest = {
     },
   },
 };
+const genderChoices = {
+  default: null,
+  choices: [
+    {
+      value: "male",
+      renderKey: "male-model",
+      viewerPath: "./forms/42/common/genders/male-model/index.html",
+      renderVerified: true,
+      transparentBackground: true,
+    },
+    {
+      value: "female",
+      renderKey: "female-model",
+      viewerPath: "./forms/42/common/genders/female-model/index.html",
+      renderVerified: true,
+      transparentBackground: true,
+    },
+  ],
+};
+const withGenderChoices = (choices = genderChoices) => ({
+  ...manifest,
+  forms: { "42": {
+    formId: 42,
+    appearances: { common: {
+      renderVerified: true,
+      transparentBackground: true,
+      genderVariants: choices,
+    } },
+  } },
+});
 
 test("live artwork remains disabled until a dedicated Pages origin is configured", () => {
   assert.match(config, /liveViewerOrigin: ""/u);
@@ -85,7 +125,45 @@ test("the reviewed manifest matches package, form, appearance, and transparency"
   assert.equal(approve(specialManifest, entry, specialAppearance, 3535596)?.appearanceId, "prismana");
 });
 
-function shellFixture() {
+test("gender choices require two distinct approved output paths and switch the render URL", () => {
+  const approve = makeApproval();
+  const options = makeGenderOptions();
+  const genderManifest = withGenderChoices();
+  assert.deepEqual(options(genderManifest, genderEntry, genderMedia, 3535596)?.choices.map((choice) => choice.value), ["male", "female"]);
+  assert.equal(approve(genderManifest, genderEntry, genderMedia, 3535596)?.url,
+    `${origin}/releases/3535596/forms/42/common/genders/male-model/index.html`,
+    "the viewer chooses approved Male artwork first without claiming a native default");
+  assert.deepEqual(approve(genderManifest, genderEntry, genderMedia, 3535596, "female"), {
+    origin,
+    url: `${origin}/releases/3535596/forms/42/common/genders/female-model/index.html`,
+    packageVersion: "3535596",
+    formId: "42",
+    appearanceId: "common",
+    gender: "female",
+    renderKey: "female-model",
+  });
+  assert.equal(approve(genderManifest, genderEntry, genderMedia, 3535596, "unknown"), null);
+  assert.equal(retainGender(options(genderManifest, genderEntry, genderMedia, 3535596), "female"), "female");
+  assert.equal(retainGender(options(genderManifest, genderEntry, genderMedia, 3535596), ""), "male");
+  assert.equal(retainGender(null, "female"), "", "switching to an ordinary form clears the prior choice");
+  assert.equal(options(manifest, entry, media, 3535596), null, "ordinary appearances have no gender menu");
+  assert.equal(approve(manifest, entry, media, 3535596, "male"), null);
+  for (const incomplete of [
+    { ...genderChoices, default: "female" },
+    { ...genderChoices, choices: [genderChoices.choices[0]] },
+    { ...genderChoices, choices: [genderChoices.choices[0], { ...genderChoices.choices[1], renderVerified: false }] },
+    { ...genderChoices, choices: [genderChoices.choices[0], { ...genderChoices.choices[1], renderKey: "male-model" }] },
+    { ...genderChoices, choices: [genderChoices.choices[0], { ...genderChoices.choices[1], viewerPath: "./forms/42/common/genders/../male-model/index.html" }] },
+  ]) {
+    assert.equal(options(withGenderChoices(incomplete), genderEntry, genderMedia, 3535596), null);
+    assert.equal(approve(withGenderChoices(incomplete), genderEntry, genderMedia, 3535596, "male"), null);
+  }
+  assert.match(explorer, /addArtworkMenu\("Gender", createArtworkSelect\(/u);
+  assert.match(explorer, /state\.aniilogGenderSelection = value;\s*renderCatalogPreview\(\);/u);
+  assert.match(explorer, /artworkControls\.classList\.toggle\("has-three-menus", artworkControls\.children\.length === 3\)/u);
+});
+
+function shellFixture(viewerManifest = manifest) {
   const listeners = new Map();
   const timers = new Map();
   let nextTimer = 1;
@@ -131,7 +209,7 @@ function shellFixture() {
     },
     message: (event) => listeners.get("message")?.(event),
   };
-  const state = { aniilogLiveViewerManifest: manifest, aniilogData: { package_version: 3535596 } };
+  const state = { aniilogLiveViewerManifest: viewerManifest, aniilogData: { package_version: 3535596 } };
   const shellSource = explorer.slice(
     explorer.indexOf("function attachLiveAniimoViewer("),
     explorer.indexOf("function attachPackedAniimoBackdrop("),
@@ -181,6 +259,34 @@ test("the fallback stays active until an exact origin, source, identity, and non
   assert.equal(frame.isConnected, false);
 });
 
+test("gendered iframe accepts readiness only for its selected render key", () => {
+  const { attach, record, window } = shellFixture(withGenderChoices());
+  assert.equal(attach(record, genderEntry, genderMedia), true, "approved Male artwork is the initial viewer choice");
+  const host = record.children[0];
+  host.start();
+  const frame = host.children.find((child) => child.tag === "iframe");
+  const status = host.children.find((child) => child.tag === "p");
+  assert.match(frame.src, /\/genders\/male-model\/index\.html\?nonce=test-nonce$/u);
+  assert.match(status.textContent, /Male artwork is loading\. Showing standard artwork\./u);
+  assert.equal(record.turntable.tabIndex, 0, "reviewed fallback stays available until the selected render is ready");
+  const ready = {
+    type: "aniilogs.live-viewer.ready.v1", nonce: "test-nonce",
+    packageVersion: "3535596", formId: "42", appearanceId: "common",
+    gender: "male", renderKey: "male-model",
+  };
+  window.message({ origin, source: frame.contentWindow, data: { ...ready, gender: "female" } });
+  window.message({ origin, source: frame.contentWindow, data: { ...ready, renderKey: "female-model" } });
+  assert.equal(record.classList.contains("is-live-ready"), false);
+  window.message({ origin, source: frame.contentWindow, data: ready });
+  assert.equal(record.classList.contains("is-live-ready"), true);
+  assert.equal(status.hidden, true);
+  assert.equal(record.turntable.tabIndex, -1);
+  window.message({ origin, source: frame.contentWindow, data: { ...ready, type: "aniilogs.live-viewer.error.v1" } });
+  assert.equal(record.classList.contains("is-live-ready"), false);
+  assert.match(status.textContent, /Male artwork could not load\. Showing standard artwork\./u);
+  assert.equal(record.turntable.tabIndex, 0);
+});
+
 test("a stalled frame times out to approved artwork and changing form stops the old frame", () => {
   const { attach, record, timers, listeners } = shellFixture();
   attach(record, entry, media);
@@ -204,6 +310,10 @@ test("the live layer follows the existing mobile fullscreen and desktop index la
   assert.match(styles, /\.catalog-aniimo-live-viewer \{[^}]*position: fixed;[^}]*opacity: 0;[^}]*pointer-events: none;/u);
   assert.match(styles, /\.catalog-aniilog-record\.is-showcase \.catalog-aniimo-live-viewer\.is-ready \{[^}]*opacity: 1;/u);
   assert.match(styles, /\.catalog-aniilog-record\.is-live-ready \.catalog-aniimo-turntable,\s*\.catalog-aniilog-record\.is-live-ready \.catalog-aniimo-video-backdrop/u);
+  assert.match(styles, /\.catalog-aniimo-live-viewer\.is-gender-selected:not\(\.is-ready\) \.catalog-aniimo-live-frame \{\s*opacity: 0;/u);
   assert.match(styles, /body\.aniilog-artwork-mode \.app-shell:not\(\.is-sidebar-collapsed\) \.catalog-aniimo-live-viewer \{\s*left: 360px;/u);
   assert.match(explorer, /if \(state\.aniilogShowcaseMode\) liveViewer\?\.start\(\);\s*else liveViewer\?\.stop\(\);/u);
+  assert.match(styles, /\.catalog-artwork-menu:nth-child\(even\) \.catalog-artwork-select-menu \{\s*right: 0;\s*left: auto;/u);
+  assert.match(styles, /\.catalog-artwork-controls\.is-visible\.has-three-menus \{\s*display: grid;\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/u);
+  assert.match(styles, /\.catalog-artwork-controls\.has-three-menus \.catalog-artwork-menu:last-child \.catalog-artwork-select-menu \{\s*right: 0;\s*left: auto;/u);
 });

@@ -129,7 +129,7 @@ function approvedPetManualVariants(manifest, entry, packageVersion) {
   }));
 }
 
-function approvedLiveViewer(manifest, entry, showcaseMedia, packageVersion) {
+function approvedLiveViewer(manifest, entry, showcaseMedia, packageVersion, requestedGender = "") {
   const sourcePackage = String(packageVersion ?? "");
   const formId = String(entry?.form_id ?? "");
   const appearanceId = String(showcaseMedia?.id ?? "");
@@ -149,13 +149,69 @@ function approvedLiveViewer(manifest, entry, showcaseMedia, packageVersion) {
   if (String(form?.formId ?? "") !== formId) return null;
   const appearance = form.appearances?.[appearanceId];
   if (appearance?.renderVerified !== true || appearance?.transparentBackground !== true) return null;
+  const genders = approvedLiveViewerGenders(appearance.genderVariants, formId, appearanceId);
+  // Male is the viewer's initial presentation choice, not a claim about the
+  // game's native default. It is used only after both outputs pass review.
+  const gender = genders?.choices.find((choice) => choice.value === (requestedGender || "male")) || null;
+  if (requestedGender && !gender) return null;
+  const baseUrl = `${LIVE_VIEWER_ORIGIN}/releases/${sourcePackage}/forms/${formId}/${appearanceId}`;
   return {
     origin: LIVE_VIEWER_ORIGIN,
-    url: `${LIVE_VIEWER_ORIGIN}/releases/${sourcePackage}/forms/${formId}/${appearanceId}/index.html`,
+    url: gender
+      ? `${LIVE_VIEWER_ORIGIN}/releases/${sourcePackage}/${gender.viewerPath.slice(2)}`
+      : `${baseUrl}/index.html`,
     packageVersion: sourcePackage,
     formId,
     appearanceId,
+    ...(gender ? { gender: gender.value, renderKey: gender.renderKey } : {}),
   };
+}
+
+// A source gender difference alone does not make a selectable viewer. The
+// reviewed Pages manifest must describe two distinct, working render outputs.
+function approvedLiveViewerGenders(genderVariants, formId, appearanceId) {
+  const choices = genderVariants?.choices;
+  if (!Array.isArray(choices) || choices.length !== 2) return null;
+  const values = new Set(choices.map((choice) => choice?.value));
+  const renderKeys = new Set(choices.map((choice) => choice?.renderKey));
+  const viewerPaths = new Set(choices.map((choice) => choice?.viewerPath));
+  if (
+    !values.has("male") || !values.has("female") || values.size !== 2
+    || genderVariants.default != null
+    || renderKeys.size !== 2
+    || viewerPaths.size !== 2
+    || choices.some((choice) => choice?.renderVerified !== true
+      || choice?.transparentBackground !== true
+      || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(String(choice?.renderKey ?? ""))
+      || choice.renderKey.length > 64
+      || choice.viewerPath !== `./forms/${formId}/${appearanceId}/genders/${choice.renderKey}/index.html`)
+  ) return null;
+  return {
+    choices: choices.map((choice) => ({
+      value: choice.value,
+      label: choice.value === "male" ? "Male" : "Female",
+      renderKey: choice.renderKey,
+      viewerPath: choice.viewerPath,
+    })),
+  };
+}
+
+function approvedLiveViewerGenderOptions(manifest, entry, showcaseMedia, packageVersion) {
+  const formId = String(entry?.form_id ?? "");
+  const appearanceId = String(showcaseMedia?.id ?? "");
+  const genders = approvedLiveViewerGenders(
+    manifest?.forms?.[formId]?.appearances?.[appearanceId]?.genderVariants,
+    formId,
+    appearanceId,
+  );
+  if (!genders) return null;
+  const viewer = approvedLiveViewer(manifest, entry, showcaseMedia, packageVersion);
+  return viewer?.gender ? genders : null;
+}
+
+function retainedLiveViewerGender(options, selection) {
+  if (!options) return "";
+  return options.choices.some((choice) => choice.value === selection) ? selection : "male";
 }
 
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
@@ -210,6 +266,10 @@ const REQUESTED_ANIIMO_FORM_ID = /^\d+$/u.test(INITIAL_URL_PARAMS.get("aniimo") 
   ? INITIAL_URL_PARAMS.get("aniimo")
   : "";
 const REQUESTED_ANIIMO_RARITY = INITIAL_URL_PARAMS.get("rarity") || "";
+const REQUESTED_ANIIMO_GENDER = REQUESTED_ANIIMO_FORM_ID
+  && ["male", "female"].includes(INITIAL_URL_PARAMS.get("gender"))
+  ? INITIAL_URL_PARAMS.get("gender")
+  : "";
 const REQUESTED_ANIIMO_ARTWORK = INITIAL_URL_PARAMS.get("artwork") === "1";
 const REQUESTED_SHARED_PIN_SELECTION = parseSharedPinSelection(INITIAL_URL_PARAMS.get(SHARED_PINS_PARAM));
 const REQUESTED_SHORT_SHARE_ID = SHORT_SHARE_CODE_PATTERN.test(INITIAL_URL_PARAMS.get(SHORT_SHARE_PARAM) || "")
@@ -489,6 +549,7 @@ const state = {
   aniilogAppearanceSelection: REQUESTED_ANIIMO_FORM_ID && REQUESTED_ANIIMO_RARITY
     ? { [REQUESTED_ANIIMO_FORM_ID]: REQUESTED_ANIIMO_RARITY }
     : {},
+  aniilogGenderSelection: REQUESTED_ANIIMO_GENDER,
   aniilogLoadError: "",
   aniilogLoadPromise: null,
   catalogSearch: {
@@ -5707,27 +5768,39 @@ function attachYawFrameViewer(record, entry, showcaseMedia) {
   return true;
 }
 
-function attachLiveAniimoViewer(record, entry, showcaseMedia) {
+function attachLiveAniimoViewer(record, entry, showcaseMedia, requestedGender = "") {
   const viewer = approvedLiveViewer(
     state.aniilogLiveViewerManifest,
     entry,
     showcaseMedia,
     state.aniilogData?.package_version,
+    requestedGender,
   );
   if (!viewer) return false;
+  const genderLabel = viewer.gender === "male" ? "Male" : viewer.gender === "female" ? "Female" : "";
+  const fallback = () => record.querySelector(".catalog-aniimo-turntable");
+  const hasStandardArtwork = Boolean(fallback() || record.querySelector(".catalog-aniimo-video-backdrop"));
+  const genderStatusText = (failed) => `${genderLabel} artwork ${failed ? "could not load" : "is loading"}.${hasStandardArtwork ? " Showing standard artwork." : ""}`;
 
   const host = document.createElement("div");
   host.className = "catalog-aniimo-live-viewer";
   host.setAttribute("role", "group");
-  host.setAttribute("aria-label", `${entry.name} ${entry.form_label || ""} live artwork`);
+  host.setAttribute("aria-label", `${entry.name} ${entry.form_label || ""} ${genderLabel} live artwork`.replace(/\s+/gu, " ").trim());
   host.setAttribute("aria-hidden", "true");
   record.append(host);
+  const genderStatus = viewer.gender ? document.createElement("p") : null;
+  if (genderStatus) {
+    host.classList.add("is-gender-selected");
+    genderStatus.className = "catalog-aniimo-live-status";
+    genderStatus.setAttribute("role", "status");
+    genderStatus.textContent = genderStatusText(false);
+    host.append(genderStatus);
+  }
 
   let frame = null;
   let timeout = null;
   let started = false;
   let nonce = "";
-  const fallback = () => record.querySelector(".catalog-aniimo-turntable");
   const stop = () => {
     if (timeout !== null) clearTimeout(timeout);
     timeout = null;
@@ -5737,7 +5810,12 @@ function attachLiveAniimoViewer(record, entry, showcaseMedia) {
     frame = null;
     started = false;
     host.classList.remove("is-ready");
-    host.setAttribute("aria-hidden", "true");
+    const showGenderError = Boolean(genderStatus && record.isConnected && record.classList.contains("is-showcase"));
+    if (genderStatus) {
+      genderStatus.hidden = !showGenderError;
+      if (showGenderError) genderStatus.textContent = genderStatusText(true);
+    }
+    host.setAttribute("aria-hidden", String(!showGenderError));
     record.classList.remove("is-live-ready");
     const turntable = fallback();
     if (turntable) {
@@ -5762,6 +5840,7 @@ function attachLiveAniimoViewer(record, entry, showcaseMedia) {
       || String(message?.packageVersion ?? "") !== viewer.packageVersion
       || String(message?.formId ?? "") !== viewer.formId
       || message?.appearanceId !== viewer.appearanceId
+      || (viewer.gender && (message?.gender !== viewer.gender || message?.renderKey !== viewer.renderKey))
     ) return;
     if (message.type === "aniilogs.live-viewer.error.v1") {
       stop();
@@ -5770,6 +5849,7 @@ function attachLiveAniimoViewer(record, entry, showcaseMedia) {
       timeout = null;
       host.classList.add("is-ready");
       host.setAttribute("aria-hidden", "false");
+      if (genderStatus) genderStatus.hidden = true;
       frame.tabIndex = 0;
       record.classList.add("is-live-ready");
       const turntable = fallback();
@@ -5785,11 +5865,16 @@ function attachLiveAniimoViewer(record, entry, showcaseMedia) {
     if (started || !record.isConnected || !record.classList.contains("is-showcase")) return;
     nonce = window.crypto?.randomUUID?.() || "";
     if (!nonce) return;
+    if (genderStatus) {
+      genderStatus.textContent = genderStatusText(false);
+      genderStatus.hidden = false;
+      host.setAttribute("aria-hidden", "false");
+    }
     const url = new URL(viewer.url);
     url.searchParams.set("nonce", nonce);
     frame = document.createElement("iframe");
     frame.className = "catalog-aniimo-live-frame";
-    frame.title = `Rotate and animate ${entry.name} ${entry.form_label || ""} ${showcaseMedia.label || ""} artwork`;
+    frame.title = `Rotate and animate ${entry.name} ${entry.form_label || ""} ${genderLabel} ${showcaseMedia.label || ""} artwork`.replace(/\s+/gu, " ").trim();
     // The dedicated cross-origin host needs its real origin for module assets
     // and the checked postMessage handshake. No form, popup, or top navigation.
     frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
@@ -5941,7 +6026,7 @@ function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
   attachPackedAniimoBackdrop(record, entry);
-  attachLiveAniimoViewer(record, entry, entry.showcase_media);
+  attachLiveAniimoViewer(record, entry, entry.showcase_media, state.aniilogGenderSelection);
 
   const identity = document.createElement("header");
   identity.className = "catalog-identity";
@@ -7417,6 +7502,7 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
+  let approvedGenders = null;
   if (view === "aniilog") {
     const approvedVariants = Array.isArray(selected.showcase_variants)
       ? selected.showcase_variants.filter((variant) => variant?.renderVerified === true)
@@ -7425,6 +7511,13 @@ function renderCatalogPreview(options = {}) {
     selected.showcase_media = approvedVariants.find((variant) => variant.id === requestedAppearance)
       || approvedVariants.find((variant) => variant.id === "common")
       || null;
+    approvedGenders = approvedLiveViewerGenderOptions(
+      state.aniilogLiveViewerManifest,
+      selected,
+      selected.showcase_media,
+      state.aniilogData?.package_version,
+    );
+    state.aniilogGenderSelection = retainedLiveViewerGender(approvedGenders, state.aniilogGenderSelection);
   }
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
@@ -7442,7 +7535,7 @@ function renderCatalogPreview(options = {}) {
       .sort((a, b) => String(a.form_label || a.form_name || "").localeCompare(String(b.form_label || b.form_name || "")));
     const artworkControls = document.createElement("div");
     artworkControls.className = "catalog-artwork-controls";
-    artworkControls.setAttribute("aria-label", "Artwork form and rarity controls");
+    artworkControls.setAttribute("aria-label", "Artwork form, rarity, and gender controls");
     const addArtworkMenu = (labelText, select) => {
       const field = document.createElement("label");
       field.className = "catalog-artwork-menu";
@@ -7529,6 +7622,18 @@ function renderCatalogPreview(options = {}) {
         },
       }));
     }
+    if (approvedGenders) {
+      addArtworkMenu("Gender", createArtworkSelect({
+        label: "Choose Aniimo gender appearance",
+        value: state.aniilogGenderSelection,
+        options: approvedGenders.choices,
+        onChange: (value) => {
+          state.aniilogGenderSelection = value;
+          renderCatalogPreview();
+        },
+      }));
+    }
+    artworkControls.classList.toggle("has-three-menus", artworkControls.children.length === 3);
     if (artworkControls.children.length) {
       els.catalogPanel.querySelector(".catalog-heading")?.append(artworkControls);
     }

@@ -8268,6 +8268,34 @@ select option:hover {
   pointer-events: auto;
 }
 
+.catalog-aniilog-record.is-showcase .catalog-aniimo-live-viewer.is-gender-selected {
+  opacity: 1;
+}
+
+.catalog-aniimo-live-viewer.is-gender-selected:not(.is-ready) .catalog-aniimo-live-frame {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.catalog-aniimo-live-status {
+  position: absolute;
+  inset: auto 1rem 1rem auto;
+  z-index: 1;
+  max-width: min(24rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.75rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  font-size: 0.85rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.catalog-aniimo-live-status[hidden] {
+  display: none;
+}
+
 .catalog-aniimo-live-frame {
   display: block;
   width: 100%;
@@ -8532,9 +8560,49 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     flex-wrap: wrap;
   }
 
+  .catalog-artwork-controls.is-visible.has-three-menus {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .catalog-artwork-controls.has-three-menus .catalog-artwork-menu {
+    min-width: 0;
+  }
+
+  .catalog-artwork-controls.has-three-menus .catalog-artwork-select {
+    min-width: 0;
+  }
+
+  .catalog-artwork-controls.has-three-menus .catalog-artwork-menu > span,
+  .catalog-artwork-controls.has-three-menus .catalog-artwork-select-button {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .catalog-artwork-menu {
     flex: 1 1 10rem;
     min-width: min(10rem, calc(50vw - 1.25rem));
+  }
+
+  .catalog-artwork-select-menu {
+    max-width: calc(100vw - 1.5rem);
+  }
+
+  .catalog-artwork-menu:nth-child(even) .catalog-artwork-select-menu {
+    right: 0;
+    left: auto;
+  }
+
+  .catalog-artwork-controls.has-three-menus .catalog-artwork-menu:nth-child(2) .catalog-artwork-select-menu {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .catalog-artwork-controls.has-three-menus .catalog-artwork-menu:last-child .catalog-artwork-select-menu {
+    right: 0;
+    left: auto;
   }
 
   .catalog-artwork-menu select {
