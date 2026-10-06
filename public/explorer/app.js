@@ -61,28 +61,6 @@ const CHANGELOG_INTERNAL_MARKER_RE = /\[(?:skip changelog|internal)\]/i;
 const CHANGELOG_PUBLIC_ENTRY_LIMIT = 12;
 const ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "aniilogs:aniilog:expanded-groups:v1";
 
-// These IDs and labels come from the current client's pet_shiny_style_data
-// table. They validate manifest order only; the browser never recreates their
-// materials. Each selectable appearance must arrive as reviewed packed media.
-const ANIIMO_RARITY_STYLES = Object.freeze([
-  { id: "0", label: "Common", filter: "none", preset: "common" },
-  { id: "1", label: "Sparkling Type I" },
-  { id: "2", label: "Sparkling Type II" },
-  { id: "3", label: "Sparkling Type III" },
-  { id: "4", label: "Sparkling Type IV" },
-  { id: "5", label: "Sparkling Type V" },
-  { id: "6", label: "Sparkling Type VI" },
-  { id: "7", label: "Sparkling Type VII" },
-  { id: "8", label: "Sparkling Type VIII" },
-  { id: "9", label: "Sparkling Type IX" },
-  { id: "10", label: "Sparkling Type X" },
-  // The client material presets are white/black base passes with their own
-  // bloom. These fallback colors keep the moving capture visibly distinct
-  // when an exact per-form Dazzling/Shadow GLB is not available.
-  { id: "11", label: "Dazzling Sparkling" },
-  { id: "12", label: "Shadow Sparkling" },
-]);
-
 function approvedYawFrames(variant, entry, id) {
   const frames = variant?.turntable;
   const formId = String(entry?.form_id ?? "");
@@ -2839,10 +2817,15 @@ function ensureAniilogData() {
       if (!Array.isArray(media?.entries) || media.package_version !== payload.package_version) {
         throw new Error("Aniilog media has an invalid package identity");
       }
+      const rarityRows = rarityManifest?.rarity_ui_order;
       if (rarityManifest && (
         rarityManifest.source_release !== payload.package_version
-        || !Array.isArray(rarityManifest.rarity_ui_order)
-        || rarityManifest.rarity_ui_order.length !== ANIIMO_RARITY_STYLES.length + 0
+        || !Array.isArray(rarityRows)
+        || rarityRows.length < 1
+        || rarityRows.length > 64
+        || rarityRows.some((row) => !/^[a-z0-9-]{1,64}$/u.test(String(row?.id || ""))
+          || typeof row?.label !== "string" || !row.label.trim() || row.label.length > 120)
+        || new Set(rarityRows.map((row) => row.id)).size !== rarityRows.length
       )) {
         throw new Error("Aniilog rarity manifest has an invalid source package");
       }

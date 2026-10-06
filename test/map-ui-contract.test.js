@@ -200,10 +200,11 @@ test("mobile artwork mode takes over the viewport and hides the Aniimo index", (
   assert.match(explorerStyles, /@media \(max-width: 760px\) \{[\s\S]*body\.aniilog-artwork-mode #sidebar,[\s\S]*display: none !important;[\s\S]*body\.aniilog-artwork-mode \.map-panel,[\s\S]*width: 100vw;[\s\S]*body\.aniilog-artwork-mode \.catalog-panel \.catalog-aniilog-record\.is-showcase > \.catalog-identity \{[\s\S]*left: 0\.75rem;/u);
 });
 
-test("Aniimo rarity selector accepts reviewed videos but rejects the unverified mask runtime", () => {
-  for (let id = 0; id <= 12; id += 1) assert.match(explorer, new RegExp(`id: "${id}"`));
+test("Aniimo rarity metadata stays in Cloudflare while reviewed videos remain gated", () => {
+  assert.doesNotMatch(explorer, /ANIIMO_RARITY_STYLES/u);
   assert.match(explorer, /rarity-manifest\.remote\.json/u);
-  assert.match(explorer, /rarity_ui_order\.length !== ANIIMO_RARITY_STYLES\.length/u);
+  assert.match(explorer, /const rarityRows = rarityManifest\?\.rarity_ui_order/u);
+  assert.match(explorer, /new Set\(rarityRows\.map\(\(row\) => row\.id\)\)\.size !== rarityRows\.length/u);
   assert.match(explorer, /petmanual-artwork-manifest\.remote\.json/u);
   assert.match(explorer, /approvedPetManualVariants/u);
   assert.doesNotMatch(explorer, /approvedMaskRuntimeVariants|import\("\.\/model-showcase\.js"\)/u);
