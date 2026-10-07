@@ -1661,6 +1661,44 @@ async function apiFetch(path, options = {}) {
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
+async function openDeveloperModelPreview(button) {
+  if (!developerModeEnabled() || !state.cloudSyncAuthenticated) return;
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = "Opening preview…";
+  try {
+    const response = await apiFetch("/dev-preview/ticket", { method: "POST" });
+    if (!response.ok) throw new Error("Developer preview is unavailable right now.");
+    const { ticket, launchUrl } = await response.json();
+    const destination = new URL(String(launchUrl || ""));
+    if (!/^[A-Za-z0-9_-]{32,128}\.[A-Za-z0-9_-]{43}$/u.test(String(ticket || ""))
+      || destination.protocol !== "https:"
+      || !/^aniilogs-renderer-qa-\d+\.pages\.dev$/u.test(destination.hostname)
+      || !/^\/qa\/current\d+\/redeem$/u.test(destination.pathname)
+      || destination.port || destination.username || destination.password
+      || destination.search || destination.hash) {
+      throw new Error("Developer preview handoff was invalid.");
+    }
+    // The one-use ticket travels in a POST body, never a URL or website asset.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = destination.href;
+    form.hidden = true;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "ticket";
+    input.value = ticket;
+    form.append(input);
+    document.body.append(form);
+    form.submit();
+    form.remove();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = originalLabel;
+    window.alert(error?.message || "Developer preview could not be opened.");
+  }
+}
+
 function signInReturnUrl() {
   const returnUrl = new URL(window.location.href);
   returnUrl.hash = "";
@@ -2559,6 +2597,7 @@ function renderDeveloperSettings(container) {
     state.preferences.developerMode = input.checked;
     persistLocalTracking();
     applyDeveloperVisibility();
+    previewButton.hidden = !developerModeEnabled();
     if (state.sidebarView === "itemlog" || state.sidebarView === "aniilog") renderCatalogPreview();
   });
   const toggleCopy = document.createElement("span");
@@ -2573,6 +2612,13 @@ function renderDeveloperSettings(container) {
   audit.className = "database-meta developer-audit-summary";
   audit.textContent = els.mapMeta.textContent;
   visibilityCard.append(audit);
+  const previewButton = document.createElement("button");
+  previewButton.type = "button";
+  previewButton.className = "catalog-showcase-button developer-preview-button";
+  previewButton.textContent = "Open in-progress Aniimo viewer";
+  previewButton.hidden = !developerModeEnabled();
+  previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton));
+  visibilityCard.append(previewButton);
   container.append(visibilityCard);
 
   if (!state.developerAdminAvailable) return;
@@ -7528,7 +7574,18 @@ function renderCatalogPreview(options = {}) {
     showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
     showcaseButton.setAttribute("aria-pressed", String(state.aniilogShowcaseMode));
     showcaseButton.addEventListener("click", () => setAniilogShowcaseMode(!state.aniilogShowcaseMode));
-    els.catalogPanel.querySelector(".catalog-heading")?.append(showcaseButton);
+    const headingActions = document.createElement("div");
+    headingActions.className = "catalog-heading-actions";
+    headingActions.append(showcaseButton);
+    if (developerModeEnabled()) {
+      const previewButton = document.createElement("button");
+      previewButton.type = "button";
+      previewButton.className = "catalog-showcase-button developer-preview-button";
+      previewButton.textContent = "Work-in-progress viewer";
+      previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton));
+      headingActions.append(previewButton);
+    }
+    els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
     const selectedFamily = String(selected.base_id || selected.research_id || selected.name || "");
     const variants = (state.aniilogData?.entries || [])
       .filter((candidate) => String(candidate?.base_id || candidate?.research_id || candidate?.name || "") === selectedFamily)

@@ -8051,6 +8051,16 @@ select option:hover {
   cursor: pointer;
 }
 
+.developer-preview-button {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+.developer-preview-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .catalog-artwork-select {
   position: relative;
   min-width: 9rem;
@@ -8494,6 +8504,10 @@ body.aniilog-artwork-mode .sidebar-collapse-button {
 body.aniilog-artwork-mode .catalog-showcase-button {
   flex: 0 0 auto;
   margin: 0;
+}
+
+body.aniilog-artwork-mode .developer-preview-button {
+  display: none;
 }
 
 body.aniilog-artwork-mode .catalog-artwork-controls.is-visible {
