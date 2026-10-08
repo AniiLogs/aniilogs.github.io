@@ -1661,41 +1661,104 @@ async function apiFetch(path, options = {}) {
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
-async function openDeveloperModelPreview(button) {
+const PAWNEY_PREWARM_DESKTOP = window.matchMedia("(min-width: 1024px) and (hover: hover) and (pointer: fine)");
+let pawneyPrewarmController = null;
+let pawneyPrewarmImport = null;
+
+function pawneyPrewarmEligible() {
+  if (!PAWNEY_PREWARM_DESKTOP.matches || !state.cloudSyncAuthenticated
+      || !developerModeEnabled() || !authSessionToken()
+      || state.sidebarView !== "aniilog") return false;
+  const selected = catalogEntriesForView("aniilog")
+    .find((entry) => entry.id === state.catalogSelection.aniilog);
+  return String(selected?.form_id ?? "") === "1002603";
+}
+
+function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
+  const destination = new URL(String(launchUrl || ""));
+  if (!/^[A-Za-z0-9_-]{32,128}\.[A-Za-z0-9_-]{43}$/u.test(String(ticket || ""))
+    || destination.protocol !== "https:"
+    || !/^aniilogs-renderer-qa-\d+\.pages\.dev$/u.test(destination.hostname)
+    || !/^\/qa\/current\d+\/redeem$/u.test(destination.pathname)
+    || destination.port || destination.username || destination.password
+    || destination.search || destination.hash) {
+    throw new Error("Developer preview handoff was invalid.");
+  }
+  // The one-use ticket travels in a POST body, never a URL or website asset.
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = destination.href;
+  form.hidden = true;
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "ticket";
+  input.value = ticket;
+  form.append(input);
+  document.body.append(form);
+  form.submit();
+  form.remove();
+}
+
+function loadPawneyPrewarm() {
+  if (!pawneyPrewarmImport) {
+    pawneyPrewarmImport = import("./pawney-embed-prewarm.js").then(({ createPawneyEmbedPrewarm }) => {
+      pawneyPrewarmController = createPawneyEmbedPrewarm({
+        apiFetch,
+        eligible: pawneyPrewarmEligible,
+        submitDirect: ({ ticket, url }) => submitDeveloperPreviewHandoff({ ticket, launchUrl: url }),
+      });
+      return pawneyPrewarmController;
+    });
+  }
+  return pawneyPrewarmImport;
+}
+
+function syncPawneyPrewarm() {
+  if (!pawneyPrewarmEligible()) {
+    pawneyPrewarmController?.stop();
+    return;
+  }
+  void loadPawneyPrewarm().then((controller) => {
+    if (pawneyPrewarmEligible() && controller.state.status === "idle") return controller.start();
+    return null;
+  }).catch(() => {
+    // The original direct one-use handoff remains available on click.
+  });
+}
+
+if (typeof PAWNEY_PREWARM_DESKTOP.addEventListener === "function") {
+  PAWNEY_PREWARM_DESKTOP.addEventListener("change", syncPawneyPrewarm);
+} else {
+  PAWNEY_PREWARM_DESKTOP.addListener?.(syncPawneyPrewarm);
+}
+window.addEventListener("pagehide", () => pawneyPrewarmController?.stop());
+window.addEventListener("pageshow", syncPawneyPrewarm);
+
+async function openDeveloperModelPreview(button, formId = "") {
   if (!developerModeEnabled() || !state.cloudSyncAuthenticated) return;
   button.disabled = true;
   const originalLabel = button.textContent;
   button.textContent = "Opening preview…";
   try {
+    if (String(formId) === "1002603" && pawneyPrewarmEligible()) {
+      let controller = null;
+      try { controller = await loadPawneyPrewarm(); } catch { /* Direct handoff below. */ }
+      if (controller) {
+        if (pawneyPrewarmEligible()) {
+          await controller.show();
+          return;
+        }
+        if (!developerModeEnabled() || !state.cloudSyncAuthenticated) return;
+      }
+    }
     const response = await apiFetch("/dev-preview/ticket", { method: "POST" });
     if (!response.ok) throw new Error("Developer preview is unavailable right now.");
-    const { ticket, launchUrl } = await response.json();
-    const destination = new URL(String(launchUrl || ""));
-    if (!/^[A-Za-z0-9_-]{32,128}\.[A-Za-z0-9_-]{43}$/u.test(String(ticket || ""))
-      || destination.protocol !== "https:"
-      || !/^aniilogs-renderer-qa-\d+\.pages\.dev$/u.test(destination.hostname)
-      || !/^\/qa\/current\d+\/redeem$/u.test(destination.pathname)
-      || destination.port || destination.username || destination.password
-      || destination.search || destination.hash) {
-      throw new Error("Developer preview handoff was invalid.");
-    }
-    // The one-use ticket travels in a POST body, never a URL or website asset.
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = destination.href;
-    form.hidden = true;
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "ticket";
-    input.value = ticket;
-    form.append(input);
-    document.body.append(form);
-    form.submit();
-    form.remove();
+    submitDeveloperPreviewHandoff(await response.json());
   } catch (error) {
+    window.alert(error?.message || "Developer preview could not be opened.");
+  } finally {
     button.disabled = false;
     button.textContent = originalLabel;
-    window.alert(error?.message || "Developer preview could not be opened.");
   }
 }
 
@@ -1751,6 +1814,7 @@ function applyDeveloperVisibility() {
   const enabled = developerModeEnabled();
   if (els.mapMeta) els.mapMeta.hidden = !enabled;
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
+  syncPawneyPrewarm();
 }
 
 async function logoutCloudAccount() {
@@ -7451,6 +7515,7 @@ function renderCatalogSidebar(view, title, allEntries, entries, selectedId, stat
 
 function renderCatalogPreview(options = {}) {
   if (!isCatalogView()) return;
+  syncPawneyPrewarm();
   const view = state.sidebarView;
   const title = view === "aniilog" ? "Aniilog" : "Item-log";
   const sidebarTitle = view === "aniilog" ? "Filters" : "Items";
@@ -7548,6 +7613,7 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
+  syncPawneyPrewarm();
   let approvedGenders = null;
   if (view === "aniilog") {
     const approvedVariants = Array.isArray(selected.showcase_variants)
@@ -7582,7 +7648,7 @@ function renderCatalogPreview(options = {}) {
       previewButton.type = "button";
       previewButton.className = "catalog-showcase-button developer-preview-button";
       previewButton.textContent = "Work-in-progress viewer";
-      previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton));
+      previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton, selected.form_id));
       headingActions.append(previewButton);
     }
     els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
@@ -8373,6 +8439,7 @@ function setSidebarView(view) {
   const previousView = state.sidebarView;
   const nextView = ENABLED_WORKSPACE_VIEWS.has(view) ? view : "map";
   state.sidebarView = nextView;
+  syncPawneyPrewarm();
   if (nextView !== "aniilog" && state.aniilogShowcaseMode) setAniilogShowcaseMode(false);
   if (nextView === "aniilog") void ensureAniilogData();
   updateWorkspaceTabs();
