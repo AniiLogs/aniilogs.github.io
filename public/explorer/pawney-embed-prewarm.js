@@ -5,10 +5,11 @@ const directPath='/qa/current3634150/redeem';
 const embedPath='/qa/current3634150/redeem-embed';
 const ticketPattern=/^[A-Za-z0-9_-]{32,128}\.[A-Za-z0-9_-]{43}$/u;
 
-export function createPawneyEmbedPrewarm({apiFetch,eligible,
+export function createPawneyEmbedPrewarm({apiFetch,eligible,visibleEligible=eligible,
   qaOrigin=defaultQaOrigin,doc=globalThis.document,
   onStatus=()=>{},submitDirect=null}={}){
-  if(typeof apiFetch!=='function'||typeof eligible!=='function'||!doc)
+  if(typeof apiFetch!=='function'||typeof eligible!=='function'||
+      typeof visibleEligible!=='function'||!doc)
     throw Error('Aniilog API, eligibility and document required');
   const parsed=new URL(qaOrigin);
   if(parsed.protocol!=='https:'||parsed.hostname!==
@@ -151,6 +152,7 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,
   }
   async function directFallback(){
     const oneUse=await ticket();
+    if(disposed||!visibleEligible())return false;
     if(submitDirect){submitDirect({ticket:oneUse,url:qaOrigin+directPath});return}
     const form=doc.createElement('form');
     form.method='POST';form.action=qaOrigin+directPath;form.hidden=true;
@@ -159,16 +161,16 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,
     form.append(input);doc.body.append(form);form.submit();form.remove();
   }
   async function show(){
-    if(disposed||!eligible())return false;
+    if(disposed||!visibleEligible())return false;
     if(state.status==='failed'){
       await directFallback();return false;
     }
     if(!state.frame){
       try{await start()}
-      catch{if(eligible())await directFallback();return false}
+      catch{if(visibleEligible())await directFallback();return false}
     }
     // A route/auth change can happen while the one-use ticket is pending.
-    if(!eligible())return false;
+    if(!visibleEligible())return false;
     if(!state.frame){await directFallback();return false}
     open=true;state.openedAt=performance.now();
     onscreen();

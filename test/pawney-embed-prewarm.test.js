@@ -23,6 +23,7 @@ function functionSource(name){
 
 function fixture(){
   const switches={dev:true,token:'local-test-token'};
+  const saved=new Map();
   const controller={state:{status:'idle'},starts:0,stops:0,hides:0,
     start(){this.starts++;this.state.status='loading';return Promise.resolve(true)},
     hide(){this.hides++},
@@ -31,7 +32,11 @@ function fixture(){
     PAWNEY_PREWARM_DESKTOP:{matches:true},
     pawneyPrewarmController:controller,
     state:{cloudSyncAuthenticated:true,sidebarView:'aniilog',
+      developerAdminAvailable:true,developerAccountsOwnerId:'owner-1',
       catalogSelection:{aniilog:'pawney-form'}},
+    PAWNEY_EARLY_PREWARM_STORAGE_KEY:'aniilogs:pawney-early-prewarm-owner',
+    window:{localStorage:{getItem:key=>saved.get(key)??null,
+      setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)}},
     developerModeEnabled:()=>switches.dev,
     authSessionToken:()=>switches.token,
     catalogEntriesForView:()=>[
@@ -44,9 +49,11 @@ function fixture(){
   vm.createContext(context);
   vm.runInContext(functionSource('pawneyPrewarmRetainEligible')+'\n'+
     functionSource('pawneyPrewarmEligible')+'\n'+
+    functionSource('pawneyEarlyPrewarmEnabled')+'\n'+
+    functionSource('pawneyPrewarmStartEligible')+'\n'+
     functionSource('pawneyPreviewSelectionActive')+'\n'+
     functionSource('syncPawneyPrewarm'),context);
-  return {context,controller,switches};
+  return {context,controller,switches,saved};
 }
 
 test('Pawney prewarm starts on authenticated desktop Dev Mode Aniilog entry and survives selection changes',async()=>{
@@ -97,6 +104,24 @@ test('route changes retain loading or ready scene without starting a new one',as
   }
 });
 
+test('owner/admin per-browser opt-in prepares on Map but never displays there',async()=>{
+  const {context,controller,saved}=fixture();
+  context.state.sidebarView='map';
+  assert.equal(context.pawneyPrewarmStartEligible(),false);
+  saved.set(context.PAWNEY_EARLY_PREWARM_STORAGE_KEY,'owner-1');
+  assert.equal(context.pawneyPrewarmStartEligible(),true);
+  context.syncPawneyPrewarm();
+  await setImmediate();
+  assert.equal(controller.starts,1);
+  assert.equal(controller.hides,1);
+  assert.equal(context.pawneyPrewarmEligible(),false,'Map cannot reveal the viewer');
+  context.state.developerAccountsOwnerId='other-owner';
+  assert.equal(context.pawneyPrewarmStartEligible(),false,'opt-in cannot cross accounts');
+  context.state.developerAccountsOwnerId='owner-1';
+  context.state.developerAdminAvailable=false;
+  assert.equal(context.pawneyPrewarmStartEligible(),false,'developer account cannot opt in');
+});
+
 test('Dev Mode, logout and desktop changes dispose a scene even on another route',async()=>{
   const {context,controller,switches}=fixture();
   const cases=[
@@ -131,7 +156,8 @@ test('UI transition hooks and direct one-use fallback remain wired',()=>{
   assert.match(explorer,/openDeveloperModelPreview\(previewButton, selected\.form_id\)/u);
   assert.match(explorer,/window\.addEventListener\("pagehide", \(\) => pawneyPrewarmController\?\.stop\(\)\)/u);
   assert.match(explorer,/window\.addEventListener\("pageshow", syncPawneyPrewarm\)/u);
-  assert.match(explorer,/eligible: pawneyPrewarmEligible/u);
+  assert.match(explorer,/eligible: pawneyPrewarmStartEligible/u);
+  assert.match(explorer,/visibleEligible: pawneyPrewarmEligible/u);
   assert.match(explorer,/submitDeveloperPreviewHandoff\(await response\.json\(\)\)/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
@@ -272,5 +298,33 @@ test('leaving Aniilog while ticket is pending cancels reveal and direct fallback
   assert.equal(requests,1);
   assert.equal(directSubmits,0);
   assert.equal(controller.state.frame,null);
+  controller.destroy();
+});
+
+test('early Map eligibility cannot reveal a click that left Aniilog during ticket fetch',async()=>{
+  const qa='https://aniilogs-renderer-qa-3634150.pages.dev';
+  const ticket='a'.repeat(32)+'.'+'b'.repeat(43);
+  let releaseTicket,visible=true,directSubmits=0;
+  const element=tag=>({tag,style:{},children:[],attributes:new Map(),
+    setAttribute(name,value){this.attributes.set(name,value)},
+    addEventListener(){},append(...children){this.children.push(...children)},
+    remove(){this.removed=true},submit(){this.submitted=true},
+    ...(tag==='iframe'?{contentWindow:{postMessage(){}}}:{})});
+  const doc={body:element('body'),createElement:element,defaultView:{
+    addEventListener(){},removeEventListener(){},
+  }};
+  const controller=createPawneyEmbedPrewarm({doc,eligible:()=>true,
+    visibleEligible:()=>visible,
+    apiFetch:()=>new Promise(resolve=>{releaseTicket=resolve}),
+    submitDirect:()=>{directSubmits++},
+  });
+  const showing=controller.show();
+  visible=false;
+  controller.hide();
+  releaseTicket({ok:true,json:async()=>({ticket,launchUrl:qa+'/qa/current3634150/redeem'})});
+  assert.equal(await showing,false);
+  assert.equal(controller.state.panel.style.opacity,'0');
+  assert.equal(controller.state.panel.inert,true);
+  assert.equal(directSubmits,0);
   controller.destroy();
 });

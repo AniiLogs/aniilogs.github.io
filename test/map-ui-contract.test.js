@@ -351,7 +351,8 @@ test("in-progress model QA opens only through active developer mode and a one-us
 });
 
 test("owner can choose signed-in Discord accounts for developer access", () => {
-  assert.match(explorer, /if \(!state\.developerAdminAvailable\) return;\s*const accessCard/u);
+  assert.match(explorer, /if \(!state\.developerAdminAvailable\) return;\s*const fastViewerCard/u);
+  assert.match(explorer, /container\.append\(fastViewerCard\);\s*const accessCard/u);
   assert.match(explorer, /apiFetch\("\/admin\/developers"\)/u);
   assert.match(explorer, /payload\.accounts/u);
   assert.match(explorer, /Search signed-in accounts/u);
