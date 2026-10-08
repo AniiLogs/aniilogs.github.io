@@ -40,14 +40,15 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,
   const offscreen=()=>{
     if(!state.panel)return;
     // Chrome deprioritizes the nested cross-site GPU frame if it is fully
-    // outside the viewport. A small visible, inert Dev Mode preview keeps the
-    // same full-size browsing context and GPU device warm for reveal.
+    // outside the viewport or clipped. Keep its browsing context in view,
+    // transparent and inert, so the same GPU device is ready for reveal.
     state.panel.style.left='auto';
     state.panel.style.top='auto';
     state.panel.style.right='12px';
     state.panel.style.bottom='12px';
     state.panel.style.transform='scale(.28)';
     state.panel.style.transformOrigin='bottom right';
+    state.panel.style.opacity='0';
     state.panel.style.pointerEvents='none';
     state.panel.setAttribute('aria-hidden','true');
     state.panel.inert=true;
@@ -61,6 +62,7 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,
     state.panel.style.bottom='auto';
     state.panel.style.transform='translate(-50%, -50%)';
     state.panel.style.transformOrigin='center center';
+    state.panel.style.opacity='1';
     state.panel.style.pointerEvents='auto';
     state.panel.setAttribute('aria-hidden','false');
     state.panel.inert=false;
@@ -105,6 +107,7 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,
       Object.assign(host.style,{position:'fixed',left:'auto',top:'auto',
         right:'12px',bottom:'12px',transform:'scale(.28)',
         transformOrigin:'bottom right',pointerEvents:'none',
+        opacity:'0',
         width:'min(96vw,800px)',height:'min(94vh,960px)',zIndex:'99999',
         background:'#151520',color:'#f5f0ed',overflow:'hidden',
         boxShadow:'0 4px 24px #0009'});

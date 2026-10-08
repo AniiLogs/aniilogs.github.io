@@ -1666,9 +1666,12 @@ let pawneyPrewarmController = null;
 let pawneyPrewarmImport = null;
 
 function pawneyPrewarmEligible() {
-  if (!PAWNEY_PREWARM_DESKTOP.matches || !state.cloudSyncAuthenticated
-      || !developerModeEnabled() || !authSessionToken()
-      || state.sidebarView !== "aniilog") return false;
+  return PAWNEY_PREWARM_DESKTOP.matches && state.cloudSyncAuthenticated
+    && developerModeEnabled() && Boolean(authSessionToken())
+    && state.sidebarView === "aniilog";
+}
+
+function pawneyPreviewSelectionActive() {
   const selected = catalogEntriesForView("aniilog")
     .find((entry) => entry.id === state.catalogSelection.aniilog);
   return String(selected?.form_id ?? "") === "1002603";
@@ -1701,7 +1704,7 @@ function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
 
 function loadPawneyPrewarm() {
   if (!pawneyPrewarmImport) {
-    pawneyPrewarmImport = import("./pawney-embed-prewarm.js").then(({ createPawneyEmbedPrewarm }) => {
+    pawneyPrewarmImport = import("./pawney-embed-prewarm.js?v=0.17.11-invisible-prewarm").then(({ createPawneyEmbedPrewarm }) => {
       pawneyPrewarmController = createPawneyEmbedPrewarm({
         apiFetch,
         eligible: pawneyPrewarmEligible,
@@ -1740,11 +1743,12 @@ async function openDeveloperModelPreview(button, formId = "") {
   const originalLabel = button.textContent;
   button.textContent = "Opening preview…";
   try {
-    if (String(formId) === "1002603" && pawneyPrewarmEligible()) {
+    if (String(formId) === "1002603" && pawneyPrewarmEligible()
+        && pawneyPreviewSelectionActive()) {
       let controller = null;
       try { controller = await loadPawneyPrewarm(); } catch { /* Direct handoff below. */ }
       if (controller) {
-        if (pawneyPrewarmEligible()) {
+        if (pawneyPrewarmEligible() && pawneyPreviewSelectionActive()) {
           await controller.show();
           return;
         }

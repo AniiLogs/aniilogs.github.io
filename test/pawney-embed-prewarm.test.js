@@ -41,29 +41,37 @@ function fixture(){
   };
   vm.createContext(context);
   vm.runInContext(functionSource('pawneyPrewarmEligible')+'\n'+
+    functionSource('pawneyPreviewSelectionActive')+'\n'+
     functionSource('syncPawneyPrewarm'),context);
   return {context,controller,switches};
 }
 
-test('Pawney prewarm starts only for an authenticated desktop Dev Mode Pawney selection',async()=>{
+test('Pawney prewarm starts on authenticated desktop Dev Mode Aniilog entry and survives selection changes',async()=>{
   const {context,controller,switches}=fixture();
+  context.state.catalogSelection.aniilog='other-form';
   assert.equal(context.pawneyPrewarmEligible(),true);
+  assert.equal(context.pawneyPreviewSelectionActive(),false);
   context.syncPawneyPrewarm();
   await setImmediate();
   assert.equal(controller.starts,1);
+  context.state.catalogSelection.aniilog='pawney-form';
+  assert.equal(context.pawneyPreviewSelectionActive(),true);
   context.syncPawneyPrewarm();
   await setImmediate();
   assert.equal(controller.starts,1,'re-render must not create a second GPU scene');
+  context.state.catalogSelection.aniilog='other-form';
+  context.syncPawneyPrewarm();
+  assert.equal(controller.stops,0,'Aniilog selection changes retain the prepared scene');
   switches.token='';
   assert.equal(context.pawneyPrewarmEligible(),false);
 });
 
-test('Dev Mode, logout, selection, page and desktop changes dispose the existing scene',async()=>{
+test('Dev Mode, logout, page and desktop changes dispose the existing scene',async()=>{
   const {context,controller,switches}=fixture();
   const cases=[
     ()=>{switches.dev=false},
     ()=>{context.state.cloudSyncAuthenticated=false},
-    ()=>{context.state.catalogSelection.aniilog='other-form'},
+    ()=>{switches.token=''},
     ()=>{context.state.sidebarView='map'},
     ()=>{context.PAWNEY_PREWARM_DESKTOP.matches=false},
   ];
@@ -75,6 +83,7 @@ test('Dev Mode, logout, selection, page and desktop changes dispose the existing
     context.syncPawneyPrewarm();
     assert.equal(controller.stops,before+1);
     switches.dev=true;
+    switches.token='local-test-token';
     context.state.cloudSyncAuthenticated=true;
     context.state.catalogSelection.aniilog='pawney-form';
     context.state.sidebarView='aniilog';
@@ -102,7 +111,8 @@ async function runEligibilityRace(revokeDevMode){
   const context={
     state:{cloudSyncAuthenticated:true},
     developerModeEnabled:()=>switches.dev,
-    pawneyPrewarmEligible:()=>switches.pawney,
+    pawneyPrewarmEligible:()=>true,
+    pawneyPreviewSelectionActive:()=>switches.pawney,
     loadPawneyPrewarm:()=>new Promise(resolve=>{resolveImport=resolve}),
     apiFetch:async()=>{apiCalls++;return {ok:true,
       json:async()=>({ticket:'test',launchUrl:'https://example.test/redeem'})}},
@@ -140,6 +150,54 @@ test('legacy MediaQueryList listeners keep the public app bootable',()=>{
   vm.createContext(context);
   vm.runInContext(explorer.slice(start,end),context);
   assert.equal(registered,true);
+});
+
+test('background iframe stays invisible and inert, then reveals the same frame',async()=>{
+  const qa='https://aniilogs-renderer-qa-3634150.pages.dev';
+  const ticket='a'.repeat(32)+'.'+'b'.repeat(43);
+  const posts=[];
+  const element=tag=>({
+    tag,style:{},children:[],attributes:new Map(),removed:false,
+    setAttribute(name,value){this.attributes.set(name,value)},
+    getAttribute(name){return this.attributes.get(name)},
+    addEventListener(){},
+    append(...children){this.children.push(...children)},
+    remove(){this.removed=true},
+    submit(){this.submitted=true},
+    ...(tag==='iframe'?{contentWindow:{postMessage:(message,origin)=>
+      posts.push({message,origin})}}:{}),
+  });
+  const body=element('body');
+  const doc={body,createElement:element,defaultView:{
+    addEventListener(){},removeEventListener(){},
+  }};
+  let requests=0;
+  const controller=createPawneyEmbedPrewarm({doc,eligible:()=>true,
+    apiFetch:async()=>{requests++;return {ok:true,
+      json:async()=>({ticket,launchUrl:qa+'/qa/current3634150/redeem'})}},
+  });
+  assert.equal(await controller.start(),true);
+  const {panel,frame}=controller.state;
+  assert.equal(requests,1);
+  assert.equal(controller.state.status,'loading');
+  assert.equal(panel.style.opacity,'0');
+  assert.equal(panel.style.pointerEvents,'none');
+  assert.equal(panel.inert,true);
+  assert.equal(panel.getAttribute('aria-hidden'),'true');
+  assert.equal(body.children[0].hidden,true,'background backdrop stays hidden');
+  assert.equal(await controller.show(),true);
+  assert.equal(controller.state.frame,frame);
+  assert.equal(panel.style.opacity,'1');
+  assert.equal(panel.inert,false);
+  assert.equal(body.children[0].hidden,false);
+  controller.hide();
+  assert.equal(panel.style.opacity,'0');
+  assert.equal(panel.inert,true);
+  assert.equal(body.children[0].hidden,true);
+  assert.equal(posts.at(-1).message.type,'pawney-qa-hide');
+  controller.destroy();
+  assert.equal(panel.removed,true);
+  assert.equal(frame.removed,true);
 });
 
 test('failed embed uses a fresh one-use direct POST handoff',async()=>{
