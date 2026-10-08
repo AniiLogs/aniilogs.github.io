@@ -1665,10 +1665,13 @@ const PAWNEY_PREWARM_DESKTOP = window.matchMedia("(min-width: 1024px) and (hover
 let pawneyPrewarmController = null;
 let pawneyPrewarmImport = null;
 
-function pawneyPrewarmEligible() {
+function pawneyPrewarmRetainEligible() {
   return PAWNEY_PREWARM_DESKTOP.matches && state.cloudSyncAuthenticated
-    && developerModeEnabled() && Boolean(authSessionToken())
-    && state.sidebarView === "aniilog";
+    && developerModeEnabled() && Boolean(authSessionToken());
+}
+
+function pawneyPrewarmEligible() {
+  return pawneyPrewarmRetainEligible() && state.sidebarView === "aniilog";
 }
 
 function pawneyPreviewSelectionActive() {
@@ -1704,7 +1707,7 @@ function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
 
 function loadPawneyPrewarm() {
   if (!pawneyPrewarmImport) {
-    pawneyPrewarmImport = import("./pawney-embed-prewarm.js?v=0.17.11-invisible-prewarm").then(({ createPawneyEmbedPrewarm }) => {
+    pawneyPrewarmImport = import("./pawney-embed-prewarm.js?v=0.17.12-route-retain").then(({ createPawneyEmbedPrewarm }) => {
       pawneyPrewarmController = createPawneyEmbedPrewarm({
         apiFetch,
         eligible: pawneyPrewarmEligible,
@@ -1717,8 +1720,14 @@ function loadPawneyPrewarm() {
 }
 
 function syncPawneyPrewarm() {
-  if (!pawneyPrewarmEligible()) {
+  if (!pawneyPrewarmRetainEligible()) {
     pawneyPrewarmController?.stop();
+    return;
+  }
+  if (!pawneyPrewarmEligible()) {
+    // Keep an existing GPU scene across routes, but never leave it running
+    // or start a new one outside the Aniilog view.
+    pawneyPrewarmController?.hide();
     return;
   }
   void loadPawneyPrewarm().then((controller) => {

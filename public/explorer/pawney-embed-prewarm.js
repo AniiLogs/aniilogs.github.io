@@ -165,8 +165,10 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,
     }
     if(!state.frame){
       try{await start()}
-      catch{await directFallback();return false}
+      catch{if(eligible())await directFallback();return false}
     }
+    // A route/auth change can happen while the one-use ticket is pending.
+    if(!eligible())return false;
     if(!state.frame){await directFallback();return false}
     open=true;state.openedAt=performance.now();
     onscreen();

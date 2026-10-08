@@ -23,8 +23,9 @@ function functionSource(name){
 
 function fixture(){
   const switches={dev:true,token:'local-test-token'};
-  const controller={state:{status:'idle'},starts:0,stops:0,
+  const controller={state:{status:'idle'},starts:0,stops:0,hides:0,
     start(){this.starts++;this.state.status='loading';return Promise.resolve(true)},
+    hide(){this.hides++},
     stop(){this.stops++;this.state.status='idle'}};
   const context={
     PAWNEY_PREWARM_DESKTOP:{matches:true},
@@ -37,10 +38,12 @@ function fixture(){
       {id:'pawney-form',form_id:1002603},
       {id:'other-form',form_id:1002604},
     ],
-    loadPawneyPrewarm:()=>Promise.resolve(controller),
+    imports:0,
+    loadPawneyPrewarm:()=>{context.imports++;return Promise.resolve(controller)},
   };
   vm.createContext(context);
-  vm.runInContext(functionSource('pawneyPrewarmEligible')+'\n'+
+  vm.runInContext(functionSource('pawneyPrewarmRetainEligible')+'\n'+
+    functionSource('pawneyPrewarmEligible')+'\n'+
     functionSource('pawneyPreviewSelectionActive')+'\n'+
     functionSource('syncPawneyPrewarm'),context);
   return {context,controller,switches};
@@ -66,18 +69,47 @@ test('Pawney prewarm starts on authenticated desktop Dev Mode Aniilog entry and 
   assert.equal(context.pawneyPrewarmEligible(),false);
 });
 
-test('Dev Mode, logout, page and desktop changes dispose the existing scene',async()=>{
+test('route changes retain loading or ready scene without starting a new one',async()=>{
+  const {context,controller}=fixture();
+  context.state.sidebarView='map';
+  assert.equal(context.pawneyPrewarmRetainEligible(),true);
+  assert.equal(context.pawneyPrewarmEligible(),false);
+  context.syncPawneyPrewarm();
+  await setImmediate();
+  assert.equal(context.imports,0,'another route must not prewarm Pawney');
+  assert.equal(controller.starts,0);
+
+  context.state.sidebarView='aniilog';
+  context.syncPawneyPrewarm();
+  await setImmediate();
+  assert.equal(controller.starts,1);
+  for(const status of ['loading','ready','shown']){
+    controller.state.status=status;
+    context.state.sidebarView='map';
+    const before=controller.hides;
+    context.syncPawneyPrewarm();
+    assert.equal(controller.hides,before+1,`${status} scene must be hidden/paused`);
+    assert.equal(controller.stops,0,`${status} scene must not be destroyed`);
+    context.state.sidebarView='aniilog';
+    context.syncPawneyPrewarm();
+    await setImmediate();
+    assert.equal(controller.starts,1,'returning to Aniilog reuses the scene');
+  }
+});
+
+test('Dev Mode, logout and desktop changes dispose a scene even on another route',async()=>{
   const {context,controller,switches}=fixture();
   const cases=[
     ()=>{switches.dev=false},
     ()=>{context.state.cloudSyncAuthenticated=false},
     ()=>{switches.token=''},
-    ()=>{context.state.sidebarView='map'},
     ()=>{context.PAWNEY_PREWARM_DESKTOP.matches=false},
   ];
   for(const change of cases){
     controller.state.status='loading';
+    context.state.sidebarView='map';
     change();
+    assert.equal(context.pawneyPrewarmRetainEligible(),false);
     assert.equal(context.pawneyPrewarmEligible(),false);
     const before=controller.stops;
     context.syncPawneyPrewarm();
@@ -99,6 +131,7 @@ test('UI transition hooks and direct one-use fallback remain wired',()=>{
   assert.match(explorer,/openDeveloperModelPreview\(previewButton, selected\.form_id\)/u);
   assert.match(explorer,/window\.addEventListener\("pagehide", \(\) => pawneyPrewarmController\?\.stop\(\)\)/u);
   assert.match(explorer,/window\.addEventListener\("pageshow", syncPawneyPrewarm\)/u);
+  assert.match(explorer,/eligible: pawneyPrewarmEligible/u);
   assert.match(explorer,/submitDeveloperPreviewHandoff\(await response\.json\(\)\)/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
@@ -219,5 +252,25 @@ test('failed embed uses a fresh one-use direct POST handoff',async()=>{
   assert.equal(await controller.show(),false);
   assert.equal(requests,1,'revoked eligibility must not mint another ticket');
   assert.equal(submitted,null);
+  controller.destroy();
+});
+
+test('leaving Aniilog while ticket is pending cancels reveal and direct fallback',async()=>{
+  const qa='https://aniilogs-renderer-qa-3634150.pages.dev';
+  const ticket='a'.repeat(32)+'.'+'b'.repeat(43);
+  let releaseTicket,eligible=true,requests=0,directSubmits=0;
+  const doc={defaultView:{addEventListener(){},removeEventListener(){}}};
+  const controller=createPawneyEmbedPrewarm({
+    doc,eligible:()=>eligible,
+    apiFetch:()=>{requests++;return new Promise(resolve=>{releaseTicket=resolve})},
+    submitDirect:()=>{directSubmits++},
+  });
+  const showing=controller.show();
+  eligible=false;
+  releaseTicket({ok:true,json:async()=>({ticket,launchUrl:qa+'/qa/current3634150/redeem'})});
+  assert.equal(await showing,false);
+  assert.equal(requests,1);
+  assert.equal(directSubmits,0);
+  assert.equal(controller.state.frame,null);
   controller.destroy();
 });
