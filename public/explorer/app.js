@@ -1723,7 +1723,7 @@ function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
 
 function loadPawneyPrewarm() {
   if (!pawneyPrewarmImport) {
-    pawneyPrewarmImport = import("./pawney-embed-prewarm.js?v=0.17.13-early-optin").then(({ createPawneyEmbedPrewarm }) => {
+    pawneyPrewarmImport = import("./pawney-embed-prewarm.js?v=0.17.13-embed-reload").then(({ createPawneyEmbedPrewarm }) => {
       pawneyPrewarmController = createPawneyEmbedPrewarm({
         apiFetch,
         eligible: pawneyPrewarmStartEligible,

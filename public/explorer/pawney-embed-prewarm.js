@@ -19,6 +19,7 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,visibleEligible=elig
   const state={status:'idle',frame:null,panel:null,startedAt:null,
     readyAt:null,openedAt:null,sceneCount:0,channel:null};
   let backdrop=null,pending=null,timeout=null,open=false,disposed=false;
+  let generation=0;
   const update=status=>{state.status=status;onStatus(state)};
   const channel=()=>{
     const raw=new Uint8Array(24);crypto.getRandomValues(raw);
@@ -98,9 +99,10 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,visibleEligible=elig
     if(disposed||!eligible())return false;
     if(state.frame)return true;
     if(pending)return pending;
-    pending=(async()=>{
+    const run=generation;
+    const started=(async()=>{
       const oneUse=await ticket();
-      if(disposed||!eligible())return false;
+      if(disposed||run!==generation||!eligible())return false;
       const host=doc.createElement('section');
       host.setAttribute('aria-label','Private Pawney live viewer');
       host.setAttribute('aria-hidden','true');
@@ -117,10 +119,16 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,visibleEligible=elig
         alignItems:'center',justifyContent:'space-between',padding:'0 12px'});
       const label=doc.createElement('span');
       label.textContent='Pawney 3D preview · Work in progress';
+      const reloadButton=doc.createElement('button');
+      reloadButton.type='button';reloadButton.textContent='Reload viewer';
+      reloadButton.addEventListener('click',()=>{
+        void reload().catch(error=>doc.defaultView.alert?.(
+          error?.message||'Viewer could not reload.'));
+      });
       const close=doc.createElement('button');
       close.type='button';close.textContent='Close viewer';
       close.addEventListener('click',()=>hide());
-      toolbar.append(label,close);
+      toolbar.append(label,reloadButton,close);
       const frame=doc.createElement('iframe');
       frame.title='Private Pawney live 3D viewer';
       frame.name=channel();
@@ -147,7 +155,12 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,visibleEligible=elig
       form.submit();form.remove();
       timeout=setTimeout(()=>{if(state.status==='loading')fail()},45000);
       return true;
-    })().catch(error=>{fail();throw error}).finally(()=>{pending=null});
+    })();
+    const tracked=started.catch(error=>{
+      if(run!==generation)return false;
+      fail();throw error;
+    }).finally(()=>{if(pending===tracked)pending=null});
+    pending=tracked;
     return pending;
   }
   async function directFallback(){
@@ -184,13 +197,21 @@ export function createPawneyEmbedPrewarm({apiFetch,eligible,visibleEligible=elig
     if(state.status==='shown')update('ready');
   }
   function stop(){
+    generation++;
+    pending=null;
     open=false;post('pawney-qa-dispose');removeFrame();
     update('idle');
+  }
+  async function reload(){
+    if(disposed||!visibleEligible())return false;
+    const wasOpen=open;
+    stop();
+    return wasOpen?show():start();
   }
   function destroy(){
     stop();disposed=true;
     doc.defaultView.removeEventListener('message',onMessage);
   }
-  return {state,start,show,hide,stop,destroy,directFallback};
+  return {state,start,show,hide,stop,reload,destroy,directFallback};
 }
 

@@ -216,10 +216,10 @@ test('background iframe stays invisible and inert, then reveals the same frame',
   const ticket='a'.repeat(32)+'.'+'b'.repeat(43);
   const posts=[];
   const element=tag=>({
-    tag,style:{},children:[],attributes:new Map(),removed:false,
+    tag,style:{},children:[],attributes:new Map(),listeners:new Map(),removed:false,
     setAttribute(name,value){this.attributes.set(name,value)},
     getAttribute(name){return this.attributes.get(name)},
-    addEventListener(){},
+    addEventListener(type,handler){this.listeners.set(type,handler)},
     append(...children){this.children.push(...children)},
     remove(){this.removed=true},
     submit(){this.submitted=true},
@@ -257,6 +257,80 @@ test('background iframe stays invisible and inert, then reveals the same frame',
   controller.destroy();
   assert.equal(panel.removed,true);
   assert.equal(frame.removed,true);
+});
+
+test('Reload viewer replaces the retained frame with a fresh one-use POST',async()=>{
+  const qa='https://aniilogs-renderer-qa-3634150.pages.dev';
+  const tickets=[];
+  const elements=[];
+  const element=tag=>{
+    const node={tag,style:{},children:[],attributes:new Map(),
+      listeners:new Map(),removed:false,
+      setAttribute(name,value){this.attributes.set(name,value)},
+      addEventListener(type,handler){this.listeners.set(type,handler)},
+      append(...children){this.children.push(...children)},
+      remove(){this.removed=true},
+      submit(){this.submitted=true},
+      ...(tag==='iframe'?{contentWindow:{postMessage(){}}}:{}),
+    };
+    elements.push(node);return node;
+  };
+  const doc={body:element('body'),createElement:element,defaultView:{
+    addEventListener(){},removeEventListener(){},
+  }};
+  const controller=createPawneyEmbedPrewarm({doc,eligible:()=>true,
+    apiFetch:async()=>{
+      const ticket='a'.repeat(32)+'.'+String(tickets.length+1).repeat(43);
+      tickets.push(ticket);
+      return {ok:true,json:async()=>({ticket,
+        launchUrl:qa+'/qa/current3634150/redeem'})};
+    },
+  });
+  await controller.show();
+  const original=controller.state.frame;
+  const reloadButton=controller.state.panel.children[0].children[1];
+  assert.equal(reloadButton.textContent,'Reload viewer');
+  reloadButton.listeners.get('click')();
+  await setImmediate();
+  assert.equal(tickets.length,2);
+  assert.equal(original.removed,true);
+  assert.notEqual(controller.state.frame,original);
+  assert.equal(controller.state.panel.style.opacity,'1');
+  const forms=elements.filter(node=>node.tag==='form');
+  assert.equal(forms.length,2);
+  assert.deepEqual(forms.map(node=>node.children[0].value),tickets);
+  assert.ok(forms.every(node=>node.method==='POST'&&
+    node.action===qa+'/qa/current3634150/redeem-embed'));
+  controller.destroy();
+});
+
+test('stop during ticket fetch cannot resurrect an old iframe',async()=>{
+  const qa='https://aniilogs-renderer-qa-3634150.pages.dev';
+  const ticket='a'.repeat(32)+'.'+'b'.repeat(43);
+  const resolvers=[];
+  const element=tag=>({tag,style:{},children:[],
+    setAttribute(){},addEventListener(){},append(...children){this.children.push(...children)},
+    remove(){},submit(){},
+    ...(tag==='iframe'?{contentWindow:{postMessage(){}}}:{})});
+  const doc={body:element('body'),createElement:element,defaultView:{
+    addEventListener(){},removeEventListener(){},
+  }};
+  const controller=createPawneyEmbedPrewarm({doc,eligible:()=>true,
+    apiFetch:()=>new Promise(resolve=>resolvers.push(resolve)),
+  });
+  const first=controller.start();
+  controller.stop();
+  const second=controller.start();
+  assert.equal(resolvers.length,2,'restart must mint a new ticket');
+  resolvers[0]({ok:true,json:async()=>({ticket,
+    launchUrl:qa+'/qa/current3634150/redeem'})});
+  assert.equal(await first,false);
+  assert.equal(controller.state.frame,null);
+  resolvers[1]({ok:true,json:async()=>({ticket,
+    launchUrl:qa+'/qa/current3634150/redeem'})});
+  assert.equal(await second,true);
+  assert.ok(controller.state.frame);
+  controller.destroy();
 });
 
 test('failed embed uses a fresh one-use direct POST handoff',async()=>{
