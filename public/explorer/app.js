@@ -1661,41 +1661,6 @@ async function apiFetch(path, options = {}) {
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
-const PAWNEY_PREWARM_DESKTOP = window.matchMedia("(min-width: 1024px) and (hover: hover) and (pointer: fine)");
-const PAWNEY_EARLY_PREWARM_STORAGE_KEY = "aniilogs:pawney-early-prewarm-owner";
-let pawneyPrewarmController = null;
-let pawneyPrewarmImport = null;
-
-function pawneyPrewarmRetainEligible() {
-  return PAWNEY_PREWARM_DESKTOP.matches && state.cloudSyncAuthenticated
-    && developerModeEnabled() && Boolean(authSessionToken());
-}
-
-function pawneyPrewarmEligible() {
-  return pawneyPrewarmRetainEligible() && state.sidebarView === "aniilog";
-}
-
-function pawneyEarlyPrewarmEnabled() {
-  if (!state.developerAdminAvailable || !state.developerAccountsOwnerId) return false;
-  try {
-    return window.localStorage.getItem(PAWNEY_EARLY_PREWARM_STORAGE_KEY)
-      === state.developerAccountsOwnerId;
-  } catch {
-    return false;
-  }
-}
-
-function pawneyPrewarmStartEligible() {
-  return pawneyPrewarmEligible() || (pawneyPrewarmRetainEligible()
-    && state.sidebarView === "map" && pawneyEarlyPrewarmEnabled());
-}
-
-function pawneyPreviewSelectionActive() {
-  const selected = catalogEntriesForView("aniilog")
-    .find((entry) => entry.id === state.catalogSelection.aniilog);
-  return String(selected?.form_id ?? "") === "1002603";
-}
-
 function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
   const destination = new URL(String(launchUrl || ""));
   if (!/^[A-Za-z0-9_-]{32,128}\.[A-Za-z0-9_-]{43}$/u.test(String(ticket || ""))
@@ -1720,48 +1685,6 @@ function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
   form.submit();
   form.remove();
 }
-
-function loadPawneyPrewarm() {
-  if (!pawneyPrewarmImport) {
-    pawneyPrewarmImport = import("./pawney-embed-prewarm.js?v=0.17.13-embed-reload").then(({ createPawneyEmbedPrewarm }) => {
-      pawneyPrewarmController = createPawneyEmbedPrewarm({
-        apiFetch,
-        eligible: pawneyPrewarmStartEligible,
-        visibleEligible: pawneyPrewarmEligible,
-        submitDirect: ({ ticket, url }) => submitDeveloperPreviewHandoff({ ticket, launchUrl: url }),
-      });
-      return pawneyPrewarmController;
-    });
-  }
-  return pawneyPrewarmImport;
-}
-
-function syncPawneyPrewarm() {
-  if (!pawneyPrewarmRetainEligible()) {
-    pawneyPrewarmController?.stop();
-    return;
-  }
-  if (!pawneyPrewarmEligible()) {
-    // Keep an existing GPU scene across routes without displaying it.
-    // Early Map preparation is owner/admin opt-in for this browser only.
-    pawneyPrewarmController?.hide();
-    if (!pawneyPrewarmStartEligible()) return;
-  }
-  void loadPawneyPrewarm().then((controller) => {
-    if (pawneyPrewarmStartEligible() && controller.state.status === "idle") return controller.start();
-    return null;
-  }).catch(() => {
-    // The original direct one-use handoff remains available on click.
-  });
-}
-
-if (typeof PAWNEY_PREWARM_DESKTOP.addEventListener === "function") {
-  PAWNEY_PREWARM_DESKTOP.addEventListener("change", syncPawneyPrewarm);
-} else {
-  PAWNEY_PREWARM_DESKTOP.addListener?.(syncPawneyPrewarm);
-}
-window.addEventListener("pagehide", () => pawneyPrewarmController?.stop());
-window.addEventListener("pageshow", syncPawneyPrewarm);
 
 async function openDeveloperModelPreview(button, formId = "") {
   if (!developerModeEnabled() || !state.cloudSyncAuthenticated) return;
@@ -1834,7 +1757,6 @@ function applyDeveloperVisibility() {
   const enabled = developerModeEnabled();
   if (els.mapMeta) els.mapMeta.hidden = !enabled;
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
-  syncPawneyPrewarm();
 }
 
 async function logoutCloudAccount() {
@@ -2706,40 +2628,6 @@ function renderDeveloperSettings(container) {
   container.append(visibilityCard);
 
   if (!state.developerAdminAvailable) return;
-  const fastViewerCard = document.createElement("section");
-  fastViewerCard.className = "settings-card settings-display-card";
-  const fastViewerCopy = document.createElement("div");
-  fastViewerCopy.className = "settings-account";
-  const fastViewerTitle = document.createElement("strong");
-  fastViewerTitle.textContent = "Fast desktop viewer";
-  const fastViewerDetail = document.createElement("small");
-  fastViewerDetail.textContent = "Prepare Pawney in the background on Map so it opens almost instantly after loading. Uses about 34 MB of downloads and 1 GB of PC memory while ready. This setting is only for this browser.";
-  fastViewerCopy.append(fastViewerTitle, fastViewerDetail);
-  const fastViewerToggle = document.createElement("label");
-  fastViewerToggle.className = "settings-toggle";
-  const fastViewerInput = document.createElement("input");
-  fastViewerInput.type = "checkbox";
-  fastViewerInput.checked = pawneyEarlyPrewarmEnabled();
-  fastViewerInput.addEventListener("change", () => {
-    try {
-      if (fastViewerInput.checked) {
-        window.localStorage.setItem(PAWNEY_EARLY_PREWARM_STORAGE_KEY, state.developerAccountsOwnerId);
-      } else {
-        window.localStorage.removeItem(PAWNEY_EARLY_PREWARM_STORAGE_KEY);
-        if (state.sidebarView !== "aniilog") pawneyPrewarmController?.stop();
-      }
-    } catch {
-      fastViewerInput.checked = pawneyEarlyPrewarmEnabled();
-    }
-    syncPawneyPrewarm();
-  });
-  const fastViewerToggleCopy = document.createElement("span");
-  const fastViewerToggleTitle = document.createElement("strong");
-  fastViewerToggleTitle.textContent = "Preload on desktop Map";
-  fastViewerToggleCopy.append(fastViewerToggleTitle);
-  fastViewerToggle.append(fastViewerInput, fastViewerToggleCopy);
-  fastViewerCard.append(fastViewerCopy, fastViewerToggle);
-  container.append(fastViewerCard);
   const accessCard = document.createElement("section");
   accessCard.className = "settings-card settings-display-card";
   const accessCopy = document.createElement("div");
@@ -7569,7 +7457,6 @@ function renderCatalogSidebar(view, title, allEntries, entries, selectedId, stat
 
 function renderCatalogPreview(options = {}) {
   if (!isCatalogView()) return;
-  syncPawneyPrewarm();
   const view = state.sidebarView;
   const title = view === "aniilog" ? "Aniilog" : "Item-log";
   const sidebarTitle = view === "aniilog" ? "Filters" : "Items";
@@ -7667,7 +7554,6 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
-  syncPawneyPrewarm();
   let approvedGenders = null;
   if (view === "aniilog") {
     const approvedVariants = Array.isArray(selected.showcase_variants)
@@ -8493,7 +8379,6 @@ function setSidebarView(view) {
   const previousView = state.sidebarView;
   const nextView = ENABLED_WORKSPACE_VIEWS.has(view) ? view : "map";
   state.sidebarView = nextView;
-  syncPawneyPrewarm();
   if (nextView !== "aniilog" && state.aniilogShowcaseMode) setAniilogShowcaseMode(false);
   if (nextView === "aniilog") void ensureAniilogData();
   updateWorkspaceTabs();

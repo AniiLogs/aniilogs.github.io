@@ -22,147 +22,13 @@ function functionSource(name){
   throw Error(`Unterminated ${name}`);
 }
 
-function fixture(){
-  const switches={dev:true,token:'local-test-token'};
-  const saved=new Map();
-  const controller={state:{status:'idle'},starts:0,stops:0,hides:0,
-    start(){this.starts++;this.state.status='loading';return Promise.resolve(true)},
-    hide(){this.hides++},
-    stop(){this.stops++;this.state.status='idle'}};
-  const context={
-    PAWNEY_PREWARM_DESKTOP:{matches:true},
-    pawneyPrewarmController:controller,
-    state:{cloudSyncAuthenticated:true,sidebarView:'aniilog',
-      developerAdminAvailable:true,developerAccountsOwnerId:'owner-1',
-      catalogSelection:{aniilog:'pawney-form'}},
-    PAWNEY_EARLY_PREWARM_STORAGE_KEY:'aniilogs:pawney-early-prewarm-owner',
-    window:{localStorage:{getItem:key=>saved.get(key)??null,
-      setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key)}},
-    developerModeEnabled:()=>switches.dev,
-    authSessionToken:()=>switches.token,
-    catalogEntriesForView:()=>[
-      {id:'pawney-form',form_id:1002603},
-      {id:'other-form',form_id:1002604},
-    ],
-    imports:0,
-    loadPawneyPrewarm:()=>{context.imports++;return Promise.resolve(controller)},
-  };
-  vm.createContext(context);
-  vm.runInContext(functionSource('pawneyPrewarmRetainEligible')+'\n'+
-    functionSource('pawneyPrewarmEligible')+'\n'+
-    functionSource('pawneyEarlyPrewarmEnabled')+'\n'+
-    functionSource('pawneyPrewarmStartEligible')+'\n'+
-    functionSource('pawneyPreviewSelectionActive')+'\n'+
-    functionSource('syncPawneyPrewarm'),context);
-  return {context,controller,switches,saved};
-}
-
-test('Pawney prewarm starts on authenticated desktop Dev Mode Aniilog entry and survives selection changes',async()=>{
-  const {context,controller,switches}=fixture();
-  context.state.catalogSelection.aniilog='other-form';
-  assert.equal(context.pawneyPrewarmEligible(),true);
-  assert.equal(context.pawneyPreviewSelectionActive(),false);
-  context.syncPawneyPrewarm();
-  await setImmediate();
-  assert.equal(controller.starts,1);
-  context.state.catalogSelection.aniilog='pawney-form';
-  assert.equal(context.pawneyPreviewSelectionActive(),true);
-  context.syncPawneyPrewarm();
-  await setImmediate();
-  assert.equal(controller.starts,1,'re-render must not create a second GPU scene');
-  context.state.catalogSelection.aniilog='other-form';
-  context.syncPawneyPrewarm();
-  assert.equal(controller.stops,0,'Aniilog selection changes retain the prepared scene');
-  switches.token='';
-  assert.equal(context.pawneyPrewarmEligible(),false);
-});
-
-test('route changes retain loading or ready scene without starting a new one',async()=>{
-  const {context,controller}=fixture();
-  context.state.sidebarView='map';
-  assert.equal(context.pawneyPrewarmRetainEligible(),true);
-  assert.equal(context.pawneyPrewarmEligible(),false);
-  context.syncPawneyPrewarm();
-  await setImmediate();
-  assert.equal(context.imports,0,'another route must not prewarm Pawney');
-  assert.equal(controller.starts,0);
-
-  context.state.sidebarView='aniilog';
-  context.syncPawneyPrewarm();
-  await setImmediate();
-  assert.equal(controller.starts,1);
-  for(const status of ['loading','ready','shown']){
-    controller.state.status=status;
-    context.state.sidebarView='map';
-    const before=controller.hides;
-    context.syncPawneyPrewarm();
-    assert.equal(controller.hides,before+1,`${status} scene must be hidden/paused`);
-    assert.equal(controller.stops,0,`${status} scene must not be destroyed`);
-    context.state.sidebarView='aniilog';
-    context.syncPawneyPrewarm();
-    await setImmediate();
-    assert.equal(controller.starts,1,'returning to Aniilog reuses the scene');
-  }
-});
-
-test('owner/admin per-browser opt-in prepares on Map but never displays there',async()=>{
-  const {context,controller,saved}=fixture();
-  context.state.sidebarView='map';
-  assert.equal(context.pawneyPrewarmStartEligible(),false);
-  saved.set(context.PAWNEY_EARLY_PREWARM_STORAGE_KEY,'owner-1');
-  assert.equal(context.pawneyPrewarmStartEligible(),true);
-  context.syncPawneyPrewarm();
-  await setImmediate();
-  assert.equal(controller.starts,1);
-  assert.equal(controller.hides,1);
-  assert.equal(context.pawneyPrewarmEligible(),false,'Map cannot reveal the viewer');
-  context.state.developerAccountsOwnerId='other-owner';
-  assert.equal(context.pawneyPrewarmStartEligible(),false,'opt-in cannot cross accounts');
-  context.state.developerAccountsOwnerId='owner-1';
-  context.state.developerAdminAvailable=false;
-  assert.equal(context.pawneyPrewarmStartEligible(),false,'developer account cannot opt in');
-});
-
-test('Dev Mode, logout and desktop changes dispose a scene even on another route',async()=>{
-  const {context,controller,switches}=fixture();
-  const cases=[
-    ()=>{switches.dev=false},
-    ()=>{context.state.cloudSyncAuthenticated=false},
-    ()=>{switches.token=''},
-    ()=>{context.PAWNEY_PREWARM_DESKTOP.matches=false},
-  ];
-  for(const change of cases){
-    controller.state.status='loading';
-    context.state.sidebarView='map';
-    change();
-    assert.equal(context.pawneyPrewarmRetainEligible(),false);
-    assert.equal(context.pawneyPrewarmEligible(),false);
-    const before=controller.stops;
-    context.syncPawneyPrewarm();
-    assert.equal(controller.stops,before+1);
-    switches.dev=true;
-    switches.token='local-test-token';
-    context.state.cloudSyncAuthenticated=true;
-    context.state.catalogSelection.aniilog='pawney-form';
-    context.state.sidebarView='aniilog';
-    context.PAWNEY_PREWARM_DESKTOP.matches=true;
-  }
-  await setImmediate();
-});
-
-test('UI transition hooks and direct one-use fallback remain wired',()=>{
-  assert.match(explorer,/function applyDeveloperVisibility\(\)[\s\S]*?syncPawneyPrewarm\(\);/u);
-  assert.match(explorer,/function setSidebarView\(view\)[\s\S]*?state\.sidebarView = nextView;\s*syncPawneyPrewarm\(\);/u);
-  assert.match(explorer,/state\.catalogSelection\[view\] = selected\.id;\s*syncPawneyPrewarm\(\);/u);
+test('public Aniilog opens only the current ticket viewer without background Pawney prewarm',()=>{
   assert.match(explorer,/openDeveloperModelPreview\(previewButton, selected\.form_id\)/u);
-  assert.match(explorer,/window\.addEventListener\("pagehide", \(\) => pawneyPrewarmController\?\.stop\(\)\)/u);
-  assert.match(explorer,/window\.addEventListener\("pageshow", syncPawneyPrewarm\)/u);
-  assert.match(explorer,/eligible: pawneyPrewarmStartEligible/u);
-  assert.match(explorer,/visibleEligible: pawneyPrewarmEligible/u);
+  assert.match(explorer,/openDeveloperModelPreview\(previewButton\)/u);
+  assert.doesNotMatch(explorer,/pawney-embed-prewarm|pawneyPrewarm|PawneyPrewarm|PAWNEY_PREWARM|Fast desktop viewer|Preload on desktop Map/u);
   assert.match(explorer,/const handoff = await response\.json\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff\)/u);
-  assert.match(explorerHtml,/\.\/app\.js\?v=0\.17\.14-current-viewer/u);
-  assert.doesNotMatch(functionSource('openDeveloperModelPreview'),
-    /loadPawneyPrewarm|controller\.show\(/u);
+  assert.match(explorerHtml,/\.\/app\.js\?v=0\.17\.15-no-prewarm/u);
+  assert.doesNotMatch(functionSource('openDeveloperModelPreview'),/controller\.show\(/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
   assert.match(client,/if\(event\.origin!==qaOrigin\|\|event\.source!==state\.frame\?\.contentWindow/u);
@@ -210,18 +76,6 @@ test('Dev Mode revocation during ticket fetch cancels the handoff',()=>
 
 test('logout during ticket JSON cancels the handoff',()=>
   runTicketRace({revokeAt:'json'}));
-
-test('legacy MediaQueryList listeners keep the public app bootable',()=>{
-  const start=explorer.indexOf('if (typeof PAWNEY_PREWARM_DESKTOP.addEventListener');
-  const end=explorer.indexOf('window.addEventListener("pagehide"',start);
-  assert.ok(start>0&&end>start);
-  let registered=false;
-  const context={PAWNEY_PREWARM_DESKTOP:{addListener:fn=>{registered=typeof fn==='function'}},
-    syncPawneyPrewarm:()=>{}};
-  vm.createContext(context);
-  vm.runInContext(explorer.slice(start,end),context);
-  assert.equal(registered,true);
-});
 
 test('background iframe stays invisible and inert, then reveals the same frame',async()=>{
   const qa='https://aniilogs-renderer-qa-3634150.pages.dev';
