@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import {createPawneyEmbedPrewarm} from '../public/explorer/pawney-embed-prewarm.js';
 
 const explorer=readFileSync(fileURLToPath(new URL('../public/explorer/app.js',import.meta.url)),'utf8');
+const explorerHtml=readFileSync(fileURLToPath(new URL('../public/explorer/index.html',import.meta.url)),'utf8');
 const client=readFileSync(fileURLToPath(new URL('../public/explorer/pawney-embed-prewarm.js',import.meta.url)),'utf8');
 
 function functionSource(name){
@@ -158,46 +159,57 @@ test('UI transition hooks and direct one-use fallback remain wired',()=>{
   assert.match(explorer,/window\.addEventListener\("pageshow", syncPawneyPrewarm\)/u);
   assert.match(explorer,/eligible: pawneyPrewarmStartEligible/u);
   assert.match(explorer,/visibleEligible: pawneyPrewarmEligible/u);
-  assert.match(explorer,/submitDeveloperPreviewHandoff\(await response\.json\(\)\)/u);
+  assert.match(explorer,/const handoff = await response\.json\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff\)/u);
+  assert.match(explorerHtml,/\.\/app\.js\?v=0\.17\.14-current-viewer/u);
+  assert.doesNotMatch(functionSource('openDeveloperModelPreview'),
+    /loadPawneyPrewarm|controller\.show\(/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
   assert.match(client,/if\(event\.origin!==qaOrigin\|\|event\.source!==state\.frame\?\.contentWindow/u);
 });
 
-async function runEligibilityRace(revokeDevMode){
-  const switches={dev:true,pawney:true};
-  let resolveImport,apiCalls=0,directSubmits=0,shows=0;
+async function runTicketRace({revokeAt=null}={}){
+  const switches={dev:true,token:'local-test-token'};
+  let releaseResponse,releaseJson,apiCalls=0,directSubmits=0,imports=0;
   const context={
     state:{cloudSyncAuthenticated:true},
     developerModeEnabled:()=>switches.dev,
-    pawneyPrewarmEligible:()=>true,
-    pawneyPreviewSelectionActive:()=>switches.pawney,
-    loadPawneyPrewarm:()=>new Promise(resolve=>{resolveImport=resolve}),
-    apiFetch:async()=>{apiCalls++;return {ok:true,
-      json:async()=>({ticket:'test',launchUrl:'https://example.test/redeem'})}},
-    submitDeveloperPreviewHandoff:()=>{directSubmits++},
+    authSessionToken:()=>switches.token,
+    loadPawneyPrewarm:()=>{imports++;throw Error('old prewarm must not open')},
+    apiFetch:()=>{apiCalls++;return new Promise(resolve=>{releaseResponse=resolve})},
+    submitDeveloperPreviewHandoff:value=>{directSubmits++;assert.equal(value.ticket,'test')},
     window:{alert:message=>{throw Error(message)}},
   };
   vm.createContext(context);
   vm.runInContext('async '+functionSource('openDeveloperModelPreview'),context);
   const button={disabled:false,textContent:'Work-in-progress viewer'};
   const opening=context.openDeveloperModelPreview(button,1002603);
-  assert.equal(typeof resolveImport,'function');
-  switches.pawney=false;
-  if(revokeDevMode)switches.dev=false;
-  resolveImport({show:async()=>{shows++}});
+  assert.equal(typeof releaseResponse,'function');
+  assert.equal(apiCalls,1);
+  assert.equal(imports,0,'Pawney must use the same ticket path as all forms');
+  if(revokeAt==='response')switches.dev=false;
+  releaseResponse({ok:true,json:()=>new Promise(resolve=>{releaseJson=resolve})});
+  await setImmediate();
+  assert.equal(typeof releaseJson,'function');
+  if(revokeAt==='json'){
+    context.state.cloudSyncAuthenticated=false;
+    switches.token='';
+  }
+  releaseJson({ticket:'test',launchUrl:'https://example.test/redeem'});
   await opening;
-  assert.equal(shows,0,'stale Pawney scene must never open');
-  assert.equal(apiCalls,revokeDevMode?0:1);
-  assert.equal(directSubmits,revokeDevMode?0:1);
+  assert.equal(directSubmits,revokeAt===null?1:0);
   assert.equal(button.disabled,false);
+  assert.equal(button.textContent,'Work-in-progress viewer');
 }
 
-test('selection changing during import falls back to direct handoff',()=>
-  runEligibilityRace(false));
+test('Pawney Dev Mode preview uses the current ticket handoff',()=>
+  runTicketRace());
 
-test('Dev Mode revocation during import cancels the handoff',()=>
-  runEligibilityRace(true));
+test('Dev Mode revocation during ticket fetch cancels the handoff',()=>
+  runTicketRace({revokeAt:'response'}));
+
+test('logout during ticket JSON cancels the handoff',()=>
+  runTicketRace({revokeAt:'json'}));
 
 test('legacy MediaQueryList listeners keep the public app bootable',()=>{
   const start=explorer.indexOf('if (typeof PAWNEY_PREWARM_DESKTOP.addEventListener');

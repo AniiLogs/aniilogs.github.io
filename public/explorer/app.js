@@ -1769,21 +1769,11 @@ async function openDeveloperModelPreview(button, formId = "") {
   const originalLabel = button.textContent;
   button.textContent = "Opening preview…";
   try {
-    if (String(formId) === "1002603" && pawneyPrewarmEligible()
-        && pawneyPreviewSelectionActive()) {
-      let controller = null;
-      try { controller = await loadPawneyPrewarm(); } catch { /* Direct handoff below. */ }
-      if (controller) {
-        if (pawneyPrewarmEligible() && pawneyPreviewSelectionActive()) {
-          await controller.show();
-          return;
-        }
-        if (!developerModeEnabled() || !state.cloudSyncAuthenticated) return;
-      }
-    }
     const response = await apiFetch("/dev-preview/ticket", { method: "POST" });
     if (!response.ok) throw new Error("Developer preview is unavailable right now.");
-    submitDeveloperPreviewHandoff(await response.json());
+    const handoff = await response.json();
+    if (!developerModeEnabled() || !state.cloudSyncAuthenticated || !authSessionToken()) return;
+    submitDeveloperPreviewHandoff(handoff);
   } catch (error) {
     window.alert(error?.message || "Developer preview could not be opened.");
   } finally {
