@@ -11,22 +11,21 @@ const explorerHtml=readFileSync(fileURLToPath(new URL('../public/explorer/index.
 const client=readFileSync(fileURLToPath(new URL('../public/explorer/pawney-embed-prewarm.js',import.meta.url)),'utf8');
 
 function functionSource(name){
-  const start=explorer.indexOf(`function ${name}(`);
-  assert.ok(start>=0,`${name} is present`);
-  const body=explorer.indexOf('{',start);
-  let depth=0;
-  for(let i=body;i<explorer.length;i++){
-    if(explorer[i]==='{')depth++;
-    if(explorer[i]==='}'&&!--depth)return explorer.slice(start,i+1);
-  }
-  throw Error(`Unterminated ${name}`);
+  // Bound top-level declarations rather than counting parameter/object braces.
+  // This also preserves the real async keyword on the preview function.
+  const declaration=new RegExp(`^(?:async )?function ${name}\\(`,'mu').exec(explorer);
+  assert.ok(declaration,`${name} is present`);
+  const tail=explorer.slice(declaration.index+declaration[0].length);
+  const next=/^(?:async )?function [A-Za-z0-9_]+\(/mu.exec(tail);
+  assert.ok(next,`${name} has a bounded following declaration`);
+  return explorer.slice(declaration.index,declaration.index+declaration[0].length+next.index).trimEnd();
 }
 
 test('public Aniilog opens only the current ticket viewer without background Pawney prewarm',()=>{
-  assert.match(explorer,/openDeveloperModelPreview\(previewButton, selected\.form_id\)/u);
+  assert.match(explorer,/openDeveloperModelPreview\(previewButton, \{\s*formId: String\(selected\.form_id \|\| ""\), formKey: selected\.form_key,\s*appearanceId: selected\.showcase_media\?\.id,\s*requestedAppearance: state\.aniilogAppearanceSelection\[String\(selected\.form_id \|\| ""\)\],\s*gender: state\.aniilogGenderSelection \|\| "male",\s*\}\)/u);
   assert.match(explorer,/openDeveloperModelPreview\(previewButton\)/u);
   assert.doesNotMatch(explorer,/pawney-embed-prewarm|pawneyPrewarm|PawneyPrewarm|PAWNEY_PREWARM|Fast desktop viewer|Preload on desktop Map/u);
-  assert.match(explorer,/const handoff = await response\.json\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff\)/u);
+  assert.match(explorer,/const handoff = await response\.json\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff, selectedFields\)/u);
   assert.match(explorerHtml,/\.\/app\.js\?v=0\.17\.15-no-prewarm/u);
   assert.doesNotMatch(functionSource('openDeveloperModelPreview'),/controller\.show\(/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
@@ -34,7 +33,9 @@ test('public Aniilog opens only the current ticket viewer without background Paw
   assert.match(client,/if\(event\.origin!==qaOrigin\|\|event\.source!==state\.frame\?\.contentWindow/u);
 });
 
-async function runTicketRace({revokeAt=null}={}){
+async function runTicketRace({revokeAt=null,selectionContext={formId:'1002603',formKey:'rainbow',
+  appearanceId:'sparkling-03',requestedAppearance:'sparkling-01'},
+  expectedFields={choice:'1002603:style-01',mode:'lit',gender:'male'},changePendingSelection=false}={}){
   const switches={dev:true,token:'local-test-token'};
   let releaseResponse,releaseJson,apiCalls=0,directSubmits=0,imports=0;
   const context={
@@ -43,16 +44,20 @@ async function runTicketRace({revokeAt=null}={}){
     authSessionToken:()=>switches.token,
     loadPawneyPrewarm:()=>{imports++;throw Error('old prewarm must not open')},
     apiFetch:()=>{apiCalls++;return new Promise(resolve=>{releaseResponse=resolve})},
-    submitDeveloperPreviewHandoff:value=>{directSubmits++;assert.equal(value.ticket,'test')},
+    submitDeveloperPreviewHandoff:(value,fields)=>{
+      directSubmits++;assert.equal(value.ticket,'test');
+      assert.deepEqual({...fields},expectedFields);
+    },
     window:{alert:message=>{throw Error(message)}},
   };
   vm.createContext(context);
-  vm.runInContext('async '+functionSource('openDeveloperModelPreview'),context);
+  vm.runInContext(functionSource('developerSelectionFieldsV11040')+'\n'+functionSource('openDeveloperModelPreview'),context);
   const button={disabled:false,textContent:'Work-in-progress viewer'};
-  const opening=context.openDeveloperModelPreview(button,1002603);
+  const opening=context.openDeveloperModelPreview(button,selectionContext);
   assert.equal(typeof releaseResponse,'function');
   assert.equal(apiCalls,1);
   assert.equal(imports,0,'Pawney must use the same ticket path as all forms');
+  if(changePendingSelection)selectionContext.requestedAppearance='sparkling-10';
   if(revokeAt==='response')switches.dev=false;
   releaseResponse({ok:true,json:()=>new Promise(resolve=>{releaseJson=resolve})});
   await setImmediate();
@@ -76,6 +81,72 @@ test('Dev Mode revocation during ticket fetch cancels the handoff',()=>
 
 test('logout during ticket JSON cancels the handoff',()=>
   runTicketRace({revokeAt:'json'}));
+
+test('selected requested appearance is snapshotted before the ticket request',()=>
+  runTicketRace({changePendingSelection:true}));
+
+test('Settings still requests a ticket without a selected-model payload',()=>
+  runTicketRace({selectionContext:null,expectedFields:{}}));
+
+function directHandoffFixture(){
+  const ticket='a'.repeat(32)+'.'+'b'.repeat(43);
+  const submissions=[],alerts=[],calls=[];
+  const doc={body:{append(){}},createElement:tag=>({tag,children:[],
+    append(child){this.children.push(child)},remove(){},
+    submit(){submissions.push({method:this.method,action:this.action,
+      fields:Object.fromEntries(this.children.map(child=>[child.name,child.value]))})},
+  })};
+  const context={URL,document:doc,window:{alert:message=>alerts.push(message)},
+    state:{cloudSyncAuthenticated:true},developerModeEnabled:()=>true,
+    authSessionToken:()=> 'local-test-token',
+    apiFetch:async(path,options)=>{calls.push({path,options});return {ok:true,json:async()=>({ticket,
+      launchUrl:'https://aniilogs-renderer-qa-3634150.pages.dev/qa/current3634150/redeem'})}},
+  };
+  vm.createContext(context);
+  for(const name of ['developerSelectionFieldsV11040','submitDeveloperPreviewHandoff','openDeveloperModelPreview'])
+    vm.runInContext(functionSource(name),context);
+  const button={disabled:false,textContent:'Work-in-progress viewer'};
+  return {context,button,ticket,submissions,alerts,calls};
+}
+
+test('selected form/style/gender are POST fields; ticket and selection never enter the launch URL',async()=>{
+  const fixture=directHandoffFixture();
+  await fixture.context.openDeveloperModelPreview(fixture.button,{formId:'1234567',formKey:'rainbow',
+    appearanceId:'common',requestedAppearance:'sparkling-05',gender:'male'});
+  assert.deepEqual(fixture.submissions,[{method:'POST',
+    action:'https://aniilogs-renderer-qa-3634150.pages.dev/qa/current3634150/redeem',
+    fields:{ticket:fixture.ticket,choice:'1234567:style-05',mode:'lit',gender:'male'}}]);
+  assert.equal(new URL(fixture.submissions[0].action).search,'');
+  assert.equal(new URL(fixture.submissions[0].action).hash,'');
+  assert.equal(fixture.calls.length,1);
+  assert.equal(fixture.calls[0].path,'/dev-preview/ticket');
+  assert.equal(fixture.calls[0].options.method,'POST');
+  assert.equal(fixture.calls[0].options.body,undefined,'source selection does not alter ticket authorization');
+});
+
+test('missing public media defaults catalog handoff to Common/male; Settings posts only its ticket',async()=>{
+  const fixture=directHandoffFixture();
+  for(const appearanceId of [null,undefined]){
+    await fixture.context.openDeveloperModelPreview(fixture.button,{formId:'1234567',appearanceId});
+    assert.deepEqual(fixture.submissions.at(-1).fields,
+      {ticket:fixture.ticket,choice:'1234567:common',mode:'lit',gender:'male'});
+  }
+  await fixture.context.openDeveloperModelPreview(fixture.button);
+  assert.deepEqual(fixture.submissions.at(-1).fields,{ticket:fixture.ticket});
+  await fixture.context.openDeveloperModelPreview(fixture.button,{formId:'1234567',appearanceId:'common',gender:'female'});
+  assert.equal(fixture.submissions.at(-1).fields.gender,'female');
+});
+
+test('unsupported explicit style cannot silently become approved Common or request a ticket',async()=>{
+  const fixture=directHandoffFixture();
+  for(const requestedAppearance of ['sparkling-13','unknown-style']){
+    await fixture.context.openDeveloperModelPreview(fixture.button,{formId:'1234567',formKey:'rainbow',
+      appearanceId:'common',requestedAppearance});
+  }
+  assert.equal(fixture.calls.length,0);assert.equal(fixture.submissions.length,0);
+  assert.equal(fixture.alerts.length,2);assert.ok(fixture.alerts.every(message=>message.includes('unsupported')));
+  assert.equal(fixture.button.disabled,false);assert.equal(fixture.button.textContent,'Work-in-progress viewer');
+});
 
 test('background iframe stays invisible and inert, then reveals the same frame',async()=>{
   const qa='https://aniilogs-renderer-qa-3634150.pages.dev';

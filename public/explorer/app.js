@@ -1661,7 +1661,28 @@ async function apiFetch(path, options = {}) {
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
-function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
+function developerSelectionFieldsV11040(context = null) {
+  if (context === null) return Object.freeze({});
+  const fail = () => { throw Error('Selected Aniimo appearance is unsupported by the developer preview.'); };
+  if (!context || typeof context !== 'object' || Array.isArray(context)) fail();
+  const {formId, formKey} = context;
+  // Requested WIP appearance is independent of public approved-video coverage.
+  // Missing media defaults to Common only when no explicit request exists.
+  const hasExplicitAppearance = context.requestedAppearance !== undefined &&
+    context.requestedAppearance !== null && context.requestedAppearance !== '';
+  const appearanceId = hasExplicitAppearance ? context.requestedAppearance : context.appearanceId ?? 'common';
+  const gender = context.gender === undefined || context.gender === '' ? 'male' : context.gender;
+  if (typeof formId !== 'string' || !/^[0-9]{7,9}$/u.test(formId) ||
+      !['male', 'female'].includes(gender)) fail();
+  let appearance;
+  if (appearanceId === 'common') appearance = 'common';
+  else if (formKey === 'rainbow' && /^sparkling-(?:0[1-9]|1[0-2])$/u.test(appearanceId ?? ''))
+    appearance = 'style-' + appearanceId.slice(-2);
+  else fail();
+  return Object.freeze({choice: formId + ':' + appearance, mode: 'lit', gender});
+}
+
+function submitDeveloperPreviewHandoff({ ticket, launchUrl }, selectedFields = {}) {
   const destination = new URL(String(launchUrl || ""));
   if (!/^[A-Za-z0-9_-]{32,128}\.[A-Za-z0-9_-]{43}$/u.test(String(ticket || ""))
     || destination.protocol !== "https:"
@@ -1681,22 +1702,31 @@ function submitDeveloperPreviewHandoff({ ticket, launchUrl }) {
   input.name = "ticket";
   input.value = ticket;
   form.append(input);
+  for (const name of ['choice', 'mode', 'gender']) {
+    if (!Object.hasOwn(selectedFields, name)) continue;
+    const field = document.createElement('input');
+    field.type = 'hidden';
+    field.name = name;
+    field.value = selectedFields[name];
+    form.append(field);
+  }
   document.body.append(form);
   form.submit();
   form.remove();
 }
 
-async function openDeveloperModelPreview(button, formId = "") {
+async function openDeveloperModelPreview(button, selectionContext = null) {
   if (!developerModeEnabled() || !state.cloudSyncAuthenticated) return;
   button.disabled = true;
   const originalLabel = button.textContent;
   button.textContent = "Opening preview…";
   try {
+    const selectedFields = developerSelectionFieldsV11040(selectionContext);
     const response = await apiFetch("/dev-preview/ticket", { method: "POST" });
     if (!response.ok) throw new Error("Developer preview is unavailable right now.");
     const handoff = await response.json();
     if (!developerModeEnabled() || !state.cloudSyncAuthenticated || !authSessionToken()) return;
-    submitDeveloperPreviewHandoff(handoff);
+    submitDeveloperPreviewHandoff(handoff, selectedFields);
   } catch (error) {
     window.alert(error?.message || "Developer preview could not be opened.");
   } finally {
@@ -7588,7 +7618,12 @@ function renderCatalogPreview(options = {}) {
       previewButton.type = "button";
       previewButton.className = "catalog-showcase-button developer-preview-button";
       previewButton.textContent = "Work-in-progress viewer";
-      previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton, selected.form_id));
+      previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton, {
+        formId: String(selected.form_id || ""), formKey: selected.form_key,
+        appearanceId: selected.showcase_media?.id,
+        requestedAppearance: state.aniilogAppearanceSelection[String(selected.form_id || "")],
+        gender: state.aniilogGenderSelection || "male",
+      }));
       headingActions.append(previewButton);
     }
     els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
