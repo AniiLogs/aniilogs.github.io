@@ -255,6 +255,12 @@ const SHARE_API_URL = API_URL;
 const CLOUD_SYNC_ENABLED = Boolean(API_URL);
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
 const INITIAL_URL_PARAMS = new URLSearchParams(window.location.search);
+let mainViewerResumeRequestV73604 = parseMainViewerResumeV73604(window.location.href);
+if (mainViewerResumeRequestV73604.hadRequest) {
+  INITIAL_URL_PARAMS.delete('resumeViewer'); INITIAL_URL_PARAMS.delete('gender');
+  try { window.history.replaceState(window.history.state, '', mainViewerResumeRequestV73604.cleanUrl); }
+  catch { mainViewerResumeRequestV73604 = Object.freeze({...mainViewerResumeRequestV73604, context:null}); }
+}
 const REQUESTED_SETTINGS_OPEN = INITIAL_URL_PARAMS.get("settings") === "1";
 const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog", "team"]);
 if (SITE_CONFIG.aniilogAvailable) ENABLED_WORKSPACE_VIEWS.add("aniilog");
@@ -1661,10 +1667,55 @@ async function apiFetch(path, options = {}) {
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
+function rawViewerSelectionFieldsV73604(context){
+ const fail=()=>{throw Error('Selected Aniimo appearance is unsupported by the developer preview.');};
+ if(!context||typeof context!=='object'||Array.isArray(context)||Object.keys(context).length!==2||
+   !Object.hasOwn(context,'choice')||!Object.hasOwn(context,'gender')||typeof context.choice!=='string'||
+   !/^[0-9]{7,9}:(?:common|style-(?:0[0-9]|1[0-2]))$/u.test(context.choice)||!['male','female'].includes(context.gender))fail();
+ // The existing redeem endpoint still checks the original 577-key/female catalog.
+ return Object.freeze({choice:context.choice,mode:'lit',gender:context.gender});
+}
+function parseMainViewerResumeV73604(href){
+ const url=new URL(href),params=url.searchParams,hadRequest=params.has('resumeViewer');
+ if(!hadRequest)return Object.freeze({hadRequest:false,context:null,cleanUrl:url.href});
+ const choices=params.getAll('resumeViewer'),genders=params.getAll('gender');let context=null;
+ if(choices.length===1&&genders.length===1&&choices[0].length<=32&&genders[0].length<=6){
+  try{const fields=rawViewerSelectionFieldsV73604({choice:choices[0],gender:genders[0]});context=Object.freeze({choice:fields.choice,gender:fields.gender});}catch{}
+ }
+ params.delete('resumeViewer');params.delete('gender');
+ return Object.freeze({hadRequest:true,context,cleanUrl:url.href});
+}
+function createMainViewerResumeV73604({parsed,doc,authorized,openPreview}={}){
+ let attempted=false,node=null,button=null;
+ const status=message=>{
+  if(!parsed.hadRequest)return;
+  if(!node){node=doc.createElement('section');node.id='developer-viewer-resume-status-v73604';node.setAttribute('role','status');doc.body.prepend(node);}
+  node.textContent=message;
+ };
+ return Object.freeze({
+  noteSignedOut(){if(parsed.hadRequest)status('Sign in using the account menu to reopen the requested private viewer.');},
+  attachToSignInReturn(url){if(parsed.context&&!attempted){url.searchParams.set('resumeViewer',parsed.context.choice);url.searchParams.set('gender',parsed.context.gender);}return url;},
+  async afterFreshAccount(){
+   if(!parsed.hadRequest||attempted)return false;
+   if(!parsed.context){status('The requested private viewer selection was invalid. Open the viewer from Developer Mode.');return false;}
+   if(!authorized()){status('Enable Developer Mode with an authorized account to reopen the requested private viewer.');return false;}
+   attempted=true;status('Reopening the requested private viewer through your authorized account…');
+   button=doc.createElement('button');button.type='button';button.textContent='Reopen requested viewer';
+   button.addEventListener('click',()=>{if(authorized())void openPreview(button,parsed.context);});node.append(button);
+   await openPreview(button,parsed.context);return true;
+  },
+ });
+}
+const mainViewerResumeV73604 = createMainViewerResumeV73604({
+  parsed:mainViewerResumeRequestV73604, doc:document,
+  authorized:()=>developerModeEnabled() && state.cloudSyncAuthenticated && Boolean(authSessionToken()),
+  openPreview:(button,context)=>openDeveloperModelPreview(button,context),
+});
 function developerSelectionFieldsV11040(context = null) {
   if (context === null) return Object.freeze({});
   const fail = () => { throw Error('Selected Aniimo appearance is unsupported by the developer preview.'); };
   if (!context || typeof context !== 'object' || Array.isArray(context)) fail();
+  if (Object.hasOwn(context, 'choice')) return rawViewerSelectionFieldsV73604(context);
   const {formId, formKey} = context;
   // Requested WIP appearance is independent of public approved-video coverage.
   // Missing media defaults to Common only when no explicit request exists.
@@ -1738,6 +1789,7 @@ async function openDeveloperModelPreview(button, selectionContext = null) {
 function signInReturnUrl() {
   const returnUrl = new URL(window.location.href);
   returnUrl.hash = "";
+  if (mainViewerResumeRequestV73604.hadRequest) mainViewerResumeV73604.attachToSignInReturn(returnUrl);
   return returnUrl.toString();
 }
 
@@ -1912,6 +1964,7 @@ async function hydrateCloudProgress() {
     const account = await accountResponse.json();
     if (!account.authenticated) {
       clearAuthSession();
+      mainViewerResumeV73604.noteSignedOut();
       return;
     }
     state.cloudSyncAuthenticated = true;
@@ -1929,6 +1982,7 @@ async function hydrateCloudProgress() {
     state.developerAdminAvailable = Boolean(accountIdentity.developerAdminAvailable);
     configureTopbarAccount(accountIdentity);
     applyDeveloperVisibility();
+    if (mainViewerResumeRequestV73604.hadRequest) await mainViewerResumeV73604.afterFreshAccount();
     if (els.cloudSyncLink) {
       els.cloudSyncLink.textContent = "Cloud sync active";
       els.cloudSyncLink.removeAttribute("href");
