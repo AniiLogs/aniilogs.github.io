@@ -1639,6 +1639,7 @@ function authSessionToken() {
 }
 
 function clearAuthSession() {
+  developerAccountWrites.invalidate();
   try {
     window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
   } catch {
@@ -1666,6 +1667,89 @@ async function apiFetch(path, options = {}) {
   if (token) headers.set("authorization", `Bearer ${token}`);
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
+
+// Serialize same-account progress writes with a fresh, same-value Dev Mode ACK.
+// This is client sequencing only; the API and private gateway remain authorities.
+function createDeveloperModeAccountWrites({ getContext, requestMode, writeProgress }) {
+  let tail = Promise.resolve(), ownerVersion = 0, modeVersion = 0;
+  const capture = () => ({ ...getContext(), ownerVersion, modeVersion });
+  const sameOwner = context => {
+    const now = getContext();
+    return context.authenticated === true && now.authenticated === true && context.ownerId
+      && context.token && context.ownerVersion === ownerVersion
+      && context.ownerId === now.ownerId && context.token === now.token;
+  };
+  const current = (context, enabled) => sameOwner(context) && context.modeVersion === modeVersion
+    && getContext().selectedMode === enabled && (!enabled || getContext().available === true);
+  const enqueue = task => {
+    const job = tail.catch(() => {}).then(task);
+    tail = job.catch(() => {});
+    return job;
+  };
+  async function withMode(enabled, afterAck = async value => value) {
+    if (typeof enabled !== "boolean") throw Error("An explicit Developer mode selection is required.");
+    const context = capture();
+    const check = () => {
+      if (!current(context, enabled)) {
+        const error = Error("Developer account or mode changed. Reopen the preview from your current account.");
+        error.superseded = true;
+        throw error;
+      }
+    };
+    return enqueue(async () => {
+      try {
+        check();
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const response = await requestMode(enabled);
+          check();
+          if (response.status === 409 && attempt < 2) continue;
+          if (!response.ok) throw Error("Server Developer mode could not be acknowledged. Please sign in again or retry.");
+          const result = await response.json();
+          check();
+          if (result.ok !== true || result.purpose !== "aniilogs-dev-source-model-uid"
+            || result.devModeEnabled !== enabled || !Number.isSafeInteger(result.serverDevModeRevision)
+            || result.serverDevModeRevision < 1) throw Error("Server Developer mode acknowledgement was invalid.");
+          // Hold the account-write lease through ticket creation and handoff.
+          return await afterAck(result, check);
+        }
+      } catch (error) {
+        check(); // A late response must not affect a different account/selection.
+        throw error;
+      }
+    });
+  }
+  return Object.freeze({
+    withMode,
+    setMode: enabled => withMode(enabled),
+    modeChanged() { modeVersion++; },
+    invalidate() { ownerVersion++; modeVersion++; },
+    uploadProgress() {
+      const context = capture();
+      return enqueue(async () => {
+        if (!sameOwner(context)) return;
+        // Capture the LATEST snapshot only after older writes and ACKs settle.
+        return writeProgress(() => sameOwner(context));
+      });
+    },
+  });
+}
+
+const developerAccountWrites = createDeveloperModeAccountWrites({
+  getContext: () => ({ ownerId: state.developerAccountsOwnerId, token: authSessionToken(),
+    authenticated: state.cloudSyncAuthenticated, available: state.developerModeAvailable,
+    selectedMode: Boolean(state.preferences.developerMode) }),
+  requestMode: enabled => apiFetch("/dev-preview/source-model-uid/mode", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }),
+  }),
+  writeProgress: async current => {
+    if (state.cloudSyncHydrating || !current()) return;
+    const response = await apiFetch("/progress", { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ progress: cloudProgressPayload() }) });
+    if (!current()) return;
+    if (response.status === 401) clearAuthSession();
+    else if (!response.ok) throw Error(`Cloud progress returned ${response.status}`);
+  },
+});
 
 function rawViewerSelectionFieldsV73604(context){
  const fail=()=>{throw Error('Selected Aniimo appearance is unsupported by the developer preview.');};
@@ -1773,13 +1857,18 @@ async function openDeveloperModelPreview(button, selectionContext = null) {
   button.textContent = "Opening preview…";
   try {
     const selectedFields = developerSelectionFieldsV11040(selectionContext);
-    const response = await apiFetch("/dev-preview/ticket", { method: "POST" });
-    if (!response.ok) throw new Error("Developer preview is unavailable right now.");
-    const handoff = await response.json();
-    if (!developerModeEnabled() || !state.cloudSyncAuthenticated || !authSessionToken()) return;
-    submitDeveloperPreviewHandoff(handoff, selectedFields);
+    await developerAccountWrites.withMode(true, async (_ack, current) => {
+      current();
+      const response = await apiFetch("/dev-preview/ticket", { method: "POST" });
+      current();
+      if (!response.ok) throw new Error("Developer preview is unavailable right now.");
+      const handoff = await response.json();
+      current();
+      if (!developerModeEnabled() || !state.cloudSyncAuthenticated || !authSessionToken()) return;
+      submitDeveloperPreviewHandoff(handoff, selectedFields);
+    });
   } catch (error) {
-    window.alert(error?.message || "Developer preview could not be opened.");
+    if (!error?.superseded) window.alert(error?.message || "Developer preview could not be opened.");
   } finally {
     button.disabled = false;
     button.textContent = originalLabel;
@@ -1907,13 +1996,7 @@ async function consumeAuthHandoff() {
 async function uploadCloudProgress() {
   if (!CLOUD_SYNC_ENABLED || !state.cloudSyncAuthenticated || state.cloudSyncHydrating) return;
   try {
-    const response = await apiFetch("/progress", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ progress: cloudProgressPayload() }),
-    });
-    if (response.status === 401) clearAuthSession();
-    else if (!response.ok) throw new Error(`Cloud progress returned ${response.status}`);
+    await developerAccountWrites.uploadProgress();
   } catch (error) {
     console.error("Could not sync AniiLogs progress", error);
   }
@@ -1970,6 +2053,7 @@ async function hydrateCloudProgress() {
     state.cloudSyncAuthenticated = true;
     const accountIdentity = account.account || account;
     if (state.developerAccountsOwnerId !== String(accountIdentity.discordId || "")) {
+      developerAccountWrites.invalidate();
       state.developerAccounts = [];
       state.developerAccountsLoaded = false;
       state.developerAccountsLoading = false;
@@ -2683,12 +2767,23 @@ function renderDeveloperSettings(container) {
   const input = document.createElement("input");
   input.type = "checkbox";
   input.checked = Boolean(state.preferences.developerMode);
+  let modeStatusRequest = 0;
   input.addEventListener("change", () => {
     state.preferences.developerMode = input.checked;
+    developerAccountWrites.modeChanged();
     persistLocalTracking();
     applyDeveloperVisibility();
     previewButton.hidden = !developerModeEnabled();
     if (state.sidebarView === "itemlog" || state.sidebarView === "aniilog") renderCatalogPreview();
+    const selected = input.checked, token = authSessionToken(), request = ++modeStatusRequest;
+    modeStatus.textContent = "Acknowledging server Developer mode…";
+    void developerAccountWrites.setMode(selected).then(() => {
+      if (request === modeStatusRequest && token === authSessionToken() && selected === state.preferences.developerMode)
+        modeStatus.textContent = selected ? "Server Developer mode is on." : "Server Developer mode is off.";
+    }, () => {
+      if (request === modeStatusRequest && token === authSessionToken() && selected === state.preferences.developerMode)
+        modeStatus.textContent = "Server Developer mode was not acknowledged. Retry the selection or opening the preview.";
+    });
   });
   const toggleCopy = document.createElement("span");
   const toggleTitle = document.createElement("strong");
@@ -2698,6 +2793,10 @@ function renderDeveloperSettings(container) {
   toggleCopy.append(toggleTitle, toggleDetail);
   toggle.append(input, toggleCopy);
   visibilityCard.append(visibilityCopy, toggle);
+  const modeStatus = document.createElement("p");
+  modeStatus.className = "database-meta";
+  modeStatus.setAttribute("role", "status");
+  visibilityCard.append(modeStatus);
   const audit = document.createElement("p");
   audit.className = "database-meta developer-audit-summary";
   audit.textContent = els.mapMeta.textContent;

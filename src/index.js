@@ -859,6 +859,9 @@ async function putProgress(request, env) {
   }
   const progress = progressPayload(body.progress);
   if (!progress) return json({ error: "Progress payload has an invalid shape." }, 400);
+  // Only the explicit owner mode endpoint may change this server-owned flag.
+  // Preserve it atomically below, even when an old tab saves stale preferences.
+  delete progress.preferences.developerMode;
   const encoded = JSON.stringify(progress);
   if (encoder.encode(encoded).byteLength > MAX_PROGRESS_BYTES) {
     return json({ error: "Progress payload is too large." }, 413);
@@ -869,7 +872,13 @@ async function putProgress(request, env) {
      VALUES (?, 1, ?, ?, ?)
      ON CONFLICT(discord_id) DO UPDATE SET
        revision = progress_snapshots.revision + 1,
-       data_json = excluded.data_json,
+       data_json = CASE
+         WHEN json_valid(progress_snapshots.data_json) THEN CASE
+           WHEN json_type(progress_snapshots.data_json, '$.preferences.developerMode') IN ('true', 'false')
+           THEN json_set(excluded.data_json, '$.preferences.developerMode',
+             json(CASE WHEN json_extract(progress_snapshots.data_json, '$.preferences.developerMode') = 1 THEN 'true' ELSE 'false' END))
+           ELSE excluded.data_json END
+         ELSE excluded.data_json END,
        updated_at = excluded.updated_at`,
   ).bind(account.discordId, encoded, now, now).run();
   const row = await env.DB.prepare(

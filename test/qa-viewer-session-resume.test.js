@@ -9,6 +9,7 @@ function region(start,end){const a=source.indexOf(start),z=source.indexOf(end,a+
 const helpers=region('function rawViewerSelectionFieldsV73604(','\nconst mainViewerResumeV73604 =');
 const {raw,parse,create}=new Function(helpers+';return {raw:rawViewerSelectionFieldsV73604,parse:parseMainViewerResumeV73604,create:createMainViewerResumeV73604};')();
 const fields=new Function('rawViewerSelectionFieldsV73604',region('function developerSelectionFieldsV11040(','\nfunction submitDeveloperPreviewHandoff(')+';return developerSelectionFieldsV11040;')(raw);
+const createWrites=new Function(region('function createDeveloperModeAccountWrites(', '\nconst developerAccountWrites =')+';return createDeveloperModeAccountWrites;')();
 const selection={choice:'1002603:style-00',gender:'female'};
 const resumeUrl='https://aniilogs.github.io/explorer/?view=aniilog&resumeViewer=1002603%3Astyle-00&gender=female';
 function documentFixture(){const nodes=[],forms=[];return{nodes,forms,body:{prepend:n=>nodes.push(n),append:n=>nodes.push(n)},createElement:tag=>({tag,children:[],setAttribute(k,v){this[k]=v;},append(n){this.children.push(n);},addEventListener(){},remove(){},submit(){forms.push({method:this.method,action:this.action,fields:Object.fromEntries(this.children.map(n=>[n.name,n.value]))});}})};}
@@ -55,9 +56,12 @@ test('resume runs once only after the actual fresh-account hook and existing Dev
 test('actual original ticket endpoint and POST form keep credentials out of URLs and selection out of ticket authorization',async()=>{
   const doc=documentFixture(),calls=[],ticket='a'.repeat(32)+'.'+'b'.repeat(43),launchUrl='https://aniilogs-renderer-qa-3634150.pages.dev/qa/current3634150/redeem';
   const body=region('function submitDeveloperPreviewHandoff(','\nfunction signInReturnUrl(');
-  const open=new Function('document','developerModeEnabled','state','developerSelectionFieldsV11040','apiFetch','authSessionToken','window',body+';return openDeveloperModelPreview;')(doc,()=>true,{cloudSyncAuthenticated:true},fields,async(path,options)=>{calls.push({path,options});return{ok:true,json:async()=>({ticket,launchUrl})};},()=> 'synthetic-in-memory-test-token',{alert:message=>assert.fail(message)});
+  const token='synthetic-in-memory-test-token';
+  const apiFetch=async(path,options)=>{calls.push({path,options});return{ok:true,json:async()=>path.endsWith('/mode')?{ok:true,purpose:'aniilogs-dev-source-model-uid',devModeEnabled:true,serverDevModeRevision:1}:{ticket,launchUrl}};};
+  const writes=createWrites({getContext:()=>({ownerId:'unit-owner',token,authenticated:true,available:true,selectedMode:true}),requestMode:enabled=>apiFetch('/dev-preview/source-model-uid/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled})}),writeProgress:async()=>{}});
+  const open=new Function('document','developerModeEnabled','state','developerSelectionFieldsV11040','apiFetch','authSessionToken','window','developerAccountWrites',body+';return openDeveloperModelPreview;')(doc,()=>true,{cloudSyncAuthenticated:true},fields,apiFetch,()=>token,{alert:message=>assert.fail(message)},writes);
   await open({disabled:false,textContent:'Preview'},selection);
-  assert.deepEqual(calls,[{path:'/dev-preview/ticket',options:{method:'POST'}}]);
+  assert.deepEqual(calls,[{path:'/dev-preview/source-model-uid/mode',options:{method:'POST',headers:{'content-type':'application/json'},body:'{"enabled":true}'}},{path:'/dev-preview/ticket',options:{method:'POST'}}]);
   assert.deepEqual(doc.forms,[{method:'POST',action:launchUrl,fields:{ticket,...selection,mode:'lit'}}]);
   assert.equal(new URL(doc.forms[0].action).search,'');assert.equal(new URL(doc.forms[0].action).hash,'');
   assert.match(region('async function apiFetch(','\nfunction developerSelectionFieldsV11040('),/credentials: "omit"/u);

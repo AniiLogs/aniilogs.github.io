@@ -9,6 +9,12 @@ import {createPawneyEmbedPrewarm} from '../public/explorer/pawney-embed-prewarm.
 const explorer=readFileSync(fileURLToPath(new URL('../public/explorer/app.js',import.meta.url)),'utf8');
 const explorerHtml=readFileSync(fileURLToPath(new URL('../public/explorer/index.html',import.meta.url)),'utf8');
 const client=readFileSync(fileURLToPath(new URL('../public/explorer/pawney-embed-prewarm.js',import.meta.url)),'utf8');
+const writesSource=explorer.slice(explorer.indexOf('function createDeveloperModeAccountWrites('),explorer.indexOf('const developerAccountWrites ='));
+function installWrites(context){
+  context.modeContext=()=>({ownerId:'unit-owner',token:context.authSessionToken(),authenticated:context.state.cloudSyncAuthenticated,available:true,selectedMode:context.developerModeEnabled()});
+  vm.runInContext(writesSource+`;globalThis.developerAccountWrites=createDeveloperModeAccountWrites({getContext:modeContext,requestMode:enabled=>apiFetch('/dev-preview/source-model-uid/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled})}),writeProgress:async()=>{}});`,context);
+}
+const modeAck=()=>({ok:true,status:200,json:async()=>({ok:true,purpose:'aniilogs-dev-source-model-uid',devModeEnabled:true,serverDevModeRevision:1})});
 
 function functionSource(name){
   // Bound top-level declarations rather than counting parameter/object braces.
@@ -25,8 +31,8 @@ test('public Aniilog opens only the current ticket viewer without background Paw
   assert.match(explorer,/openDeveloperModelPreview\(previewButton, \{\s*formId: String\(selected\.form_id \|\| ""\), formKey: selected\.form_key,\s*appearanceId: selected\.showcase_media\?\.id,\s*requestedAppearance: state\.aniilogAppearanceSelection\[String\(selected\.form_id \|\| ""\)\],\s*gender: state\.aniilogGenderSelection \|\| "male",\s*\}\)/u);
   assert.match(explorer,/openDeveloperModelPreview\(previewButton\)/u);
   assert.doesNotMatch(explorer,/pawney-embed-prewarm|pawneyPrewarm|PawneyPrewarm|PAWNEY_PREWARM|Fast desktop viewer|Preload on desktop Map/u);
-  assert.match(explorer,/const handoff = await response\.json\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff, selectedFields\)/u);
-  assert.match(explorerHtml,/\.\/app\.js\?v=0\.17\.17-dev-viewer-session-renewal/u);
+  assert.match(explorer,/const handoff = await response\.json\(\);\s*current\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff, selectedFields\)/u);
+  assert.match(explorerHtml,/\.\/app\.js\?v=0\.17\.18-dev-mode-server-ack/u);
   assert.doesNotMatch(functionSource('openDeveloperModelPreview'),/controller\.show\(/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
@@ -43,7 +49,7 @@ async function runTicketRace({revokeAt=null,selectionContext={formId:'1002603',f
     developerModeEnabled:()=>switches.dev,
     authSessionToken:()=>switches.token,
     loadPawneyPrewarm:()=>{imports++;throw Error('old prewarm must not open')},
-    apiFetch:()=>{apiCalls++;return new Promise(resolve=>{releaseResponse=resolve})},
+    apiFetch:path=>{apiCalls++;return path.endsWith('/mode')?modeAck():new Promise(resolve=>{releaseResponse=resolve})},
     submitDeveloperPreviewHandoff:(value,fields)=>{
       directSubmits++;assert.equal(value.ticket,'test');
       assert.deepEqual({...fields},expectedFields);
@@ -51,22 +57,24 @@ async function runTicketRace({revokeAt=null,selectionContext={formId:'1002603',f
     window:{alert:message=>{throw Error(message)}},
   };
   vm.createContext(context);
+  installWrites(context);
   vm.runInContext(functionSource('developerSelectionFieldsV11040')+'\n'+functionSource('openDeveloperModelPreview'),context);
   const button={disabled:false,textContent:'Work-in-progress viewer'};
   const opening=context.openDeveloperModelPreview(button,selectionContext);
+  await setImmediate();
   assert.equal(typeof releaseResponse,'function');
-  assert.equal(apiCalls,1);
+  assert.equal(apiCalls,2);
   assert.equal(imports,0,'Pawney must use the same ticket path as all forms');
   if(changePendingSelection)selectionContext.requestedAppearance='sparkling-10';
   if(revokeAt==='response')switches.dev=false;
   releaseResponse({ok:true,json:()=>new Promise(resolve=>{releaseJson=resolve})});
   await setImmediate();
-  assert.equal(typeof releaseJson,'function');
+  assert.equal(typeof releaseJson,revokeAt==='response'?'undefined':'function');
   if(revokeAt==='json'){
     context.state.cloudSyncAuthenticated=false;
     switches.token='';
   }
-  releaseJson({ticket:'test',launchUrl:'https://example.test/redeem'});
+  if(releaseJson)releaseJson({ticket:'test',launchUrl:'https://example.test/redeem'});
   await opening;
   assert.equal(directSubmits,revokeAt===null?1:0);
   assert.equal(button.disabled,false);
@@ -99,10 +107,11 @@ function directHandoffFixture(){
   const context={URL,document:doc,window:{alert:message=>alerts.push(message)},
     state:{cloudSyncAuthenticated:true},developerModeEnabled:()=>true,
     authSessionToken:()=> 'local-test-token',
-    apiFetch:async(path,options)=>{calls.push({path,options});return {ok:true,json:async()=>({ticket,
+    apiFetch:async(path,options)=>{calls.push({path,options});return path.endsWith('/mode')?modeAck():{ok:true,json:async()=>({ticket,
       launchUrl:'https://aniilogs-renderer-qa-3634150.pages.dev/qa/current3634150/redeem'})}},
   };
   vm.createContext(context);
+  installWrites(context);
   for(const name of ['developerSelectionFieldsV11040','submitDeveloperPreviewHandoff','openDeveloperModelPreview'])
     vm.runInContext(functionSource(name),context);
   const button={disabled:false,textContent:'Work-in-progress viewer'};
@@ -118,10 +127,12 @@ test('selected form/style/gender are POST fields; ticket and selection never ent
     fields:{ticket:fixture.ticket,choice:'1234567:style-05',mode:'lit',gender:'male'}}]);
   assert.equal(new URL(fixture.submissions[0].action).search,'');
   assert.equal(new URL(fixture.submissions[0].action).hash,'');
-  assert.equal(fixture.calls.length,1);
-  assert.equal(fixture.calls[0].path,'/dev-preview/ticket');
-  assert.equal(fixture.calls[0].options.method,'POST');
-  assert.equal(fixture.calls[0].options.body,undefined,'source selection does not alter ticket authorization');
+  assert.equal(fixture.calls.length,2);
+  assert.equal(fixture.calls[0].path,'/dev-preview/source-model-uid/mode');
+  assert.equal(fixture.calls[0].options.body,'{"enabled":true}');
+  assert.equal(fixture.calls[1].path,'/dev-preview/ticket');
+  assert.equal(fixture.calls[1].options.method,'POST');
+  assert.equal(fixture.calls[1].options.body,undefined,'source selection does not alter ticket authorization');
 });
 
 test('missing public media defaults catalog handoff to Common/male; Settings posts only its ticket',async()=>{
