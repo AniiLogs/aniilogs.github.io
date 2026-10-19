@@ -86,6 +86,30 @@ if (!/authentication required/iu.test(String(progress.payload.error || ""))) {
 }
 checks.push("anonymous_identity", "owner_progress_auth_required");
 
+// These purpose-specific routes must survive every API release. Probe only
+// method rejection and missing service authorization: no secret, account ID,
+// session or real account/progress write is supplied by this smoke check.
+const uidPurpose = "aniilogs-dev-source-model-uid";
+for (const route of ["authorize", "mode"]) {
+  const result = await jsonResponse(`${api}/dev-preview/source-model-uid/${route}`, {
+    method: "GET", credentials: "omit", cache: "no-store", headers: { origin: publicOrigin },
+  }, 405);
+  if (result.payload.authorized !== false || result.payload.purpose !== uidPurpose) {
+    throw new Error(`UID ${route} route did not return its fail-closed purpose response.`);
+  }
+  checks.push(`source_model_uid_${route}_route_presence`);
+}
+const uidUnauthorized = await jsonResponse(`${api}/dev-preview/source-model-uid/authorize`, {
+  method: "POST", credentials: "omit", cache: "no-store",
+  headers: { origin: publicOrigin, "content-type": "application/json" },
+  body: JSON.stringify({}),
+}, 403);
+if (uidUnauthorized.payload.authorized !== false || uidUnauthorized.payload.purpose !== uidPurpose
+  || !/service authorization required/iu.test(String(uidUnauthorized.payload.error || ""))) {
+  throw new Error("UID authorization did not reject the missing service credential.");
+}
+checks.push("source_model_uid_service_auth_required");
+
 const accountDeletion = await jsonResponse(`${api}/account`, {
   method: "DELETE",
   headers: { origin: publicOrigin, "content-type": "application/json" },

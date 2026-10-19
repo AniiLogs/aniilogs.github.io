@@ -1002,6 +1002,7 @@ async function deleteOwnAccount(request, env) {
 async function api(request, env) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders() });
+  if (url.pathname === '/api/dev-preview/source-model-uid/mode' || url.pathname === '/api/dev-preview/source-model-uid/authorize') return sourceUidApiV56306(request, env);
   if (url.pathname === "/api/dev-preview/ticket" && request.method === "POST") {
     return issueDeveloperPreviewTicket(request, env);
   }
@@ -1067,3 +1068,119 @@ export default {
     });
   },
 };
+// UID authorization only; no inventory, asset catalog or renderer code.
+const sourceUidApiV56306=(()=>{
+// Generic UID-purpose authorization; existing preview/auth routes unchanged.
+// Uses the ORIGINAL account/role/progress/body/origin implementations supplied
+// by the API integration. No new table, public asset path, token or auth cache.
+const sourceModelUidPurposeV56300 = 'aniilogs-dev-source-model-uid';
+const sourceModelUidModePathV56300 = '/api/dev-preview/source-model-uid/mode';
+const sourceModelUidAuthorizePathV56300 = '/api/dev-preview/source-model-uid/authorize';
+const idPattern = /^\d{15,22}$/u;
+const sameSecret = (a,b) => {
+  if (a.length !== b.length) return false;
+  let difference=0;
+  for (let i=0;i<a.length;i++) difference|=a.charCodeAt(i)^b.charCodeAt(i);
+  return difference===0;
+};
+function createSourceModelUidAuthApiV56300({
+  currentAccount, developerAccountAllowed, progressPayload, readJsonBody,
+  browserWriteAllowed, json,
+}={}) {
+  for (const fn of [currentAccount,developerAccountAllowed,progressPayload,
+    readJsonBody,browserWriteAllowed,json]) {
+    if (typeof fn!=='function') throw Error('Original API owner dependency required');
+  }
+  const denied=(status,message)=>json({authorized:false,
+    purpose:sourceModelUidPurposeV56300,error:message},status);
+  async function storedProgress(env,discordId) {
+    return env.DB.prepare('SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?')
+      .bind(discordId).first();
+  }
+  function decodeProgress(row) {
+    if (!row) return null;
+    const value=progressPayload(JSON.parse(row.dataJson));
+    if (!value) throw Error('Invalid original progress row');
+    return value;
+  }
+  async function authorizeIdentity(discordId,env) {
+    if (!idPattern.test(discordId)) return denied(403,'Developer authorization required.');
+    if (!env?.DB) return denied(503,'Source model authorization unavailable.');
+    // No decision cache: query the live existing role authority on EVERY read.
+    let developer=developerAccountAllowed(discordId,env);
+    if (!developer) developer=Boolean(await env.DB.prepare(
+      'SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1')
+      .bind(discordId).first());
+    if (!developer) return denied(403,'Developer authorization required.');
+    const row=await storedProgress(env,discordId),progress=decodeProgress(row);
+    // Missing, false, strings, numbers and unacknowledged local UI state deny.
+    if (progress?.preferences?.developerMode!==true)
+      return denied(403,'Developer mode must be enabled.');
+    return json({authorized:true,purpose:sourceModelUidPurposeV56300,
+      discordId,developerRole:true,devModeEnabled:true,
+      serverDevModeRevision:Number(row.revision)});
+  }
+  async function authorize(request,env) {
+    const secret=typeof env?.QA_BRIDGE_SECRET==='string'?env.QA_BRIDGE_SECRET:'';
+    const header=request.headers.get('authorization')||'';
+    if (secret.length<32) return denied(503,'Source model authorization unavailable.');
+    if (!header.startsWith('Bearer ')||!sameSecret(header.slice(7),secret))
+      return denied(403,'Service authorization required.');
+    const body=await readJsonBody(request,256);
+    if (!body||Object.keys(body).length!==1||typeof body.discordId!=='string')
+      return denied(400,'Exact authenticated subject required.');
+    return authorizeIdentity(body.discordId,env);
+  }
+  async function syncMode(request,env) {
+    if (!browserWriteAllowed(request,env)) return denied(403,'Cross-origin request denied.');
+    const account=await currentAccount(request,env);
+    if (!account) return denied(401,'Authentication required.');
+    const body=await readJsonBody(request,128);
+    if (!body||Object.keys(body).length!==1||typeof body.enabled!=='boolean')
+      return denied(400,'Exact developer mode boolean required.');
+    // Revocation/off remains available to any authenticated owner. It cannot
+    // grant access after a developer role is removed.
+    if (body.enabled&&!account.developerModeAvailable)
+      return denied(403,'Developer authorization required.');
+    const discordId=account.discordId;
+    if (!idPattern.test(discordId)) return denied(403,'Authenticated owner required.');
+    const row=await storedProgress(env,discordId);
+    const previous=decodeProgress(row)||{schemaVersion:1,tracking:[],completed:[],preferences:{}};
+    const next={...previous,preferences:{...previous.preferences,developerMode:body.enabled}};
+    const encoded=JSON.stringify(next),now=Math.floor(Date.now()/1000);
+    if(new TextEncoder().encode(encoded).byteLength>512*1024)
+      return denied(413,'Original progress size limit exceeded.');
+    let changed;
+    if (row) {
+      if (!Number.isSafeInteger(Number(row.revision))) return denied(503,'Stored progress is invalid.');
+      changed=await env.DB.prepare('UPDATE progress_snapshots SET revision = revision + 1, data_json = ?, updated_at = ? WHERE discord_id = ? AND revision = ?')
+        .bind(encoded,now,discordId,Number(row.revision)).run();
+    } else {
+      changed=await env.DB.prepare('INSERT OR IGNORE INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at) VALUES (?, 1, ?, ?, ?)')
+        .bind(discordId,encoded,now,now).run();
+    }
+    if (Number(changed?.meta?.changes)!==1) return denied(409,'Progress changed; retry developer mode sync.');
+    const confirmed=await storedProgress(env,discordId),progress=decodeProgress(confirmed);
+    if (progress?.preferences?.developerMode!==body.enabled)
+      return denied(409,'Developer mode acknowledgement changed.');
+    return json({ok:true,purpose:sourceModelUidPurposeV56300,
+      devModeEnabled:body.enabled,serverDevModeRevision:Number(confirmed.revision)});
+  }
+  return async function sourceModelUidAuthApiV56300(request,env) {
+    const path=new URL(request.url).pathname;
+    if (![sourceModelUidModePathV56300,sourceModelUidAuthorizePathV56300].includes(path))
+      return denied(404,'Not found.');
+    if (request.method!=='POST') return denied(405,'Method not allowed.');
+    if (!request.headers.get('content-type')?.startsWith('application/json'))
+      return denied(415,'Unsupported media type.');
+    try {
+      return path===sourceModelUidModePathV56300?await syncMode(request,env):await authorize(request,env);
+    } catch (error) {
+      return denied(error instanceof RangeError?413:error instanceof TypeError?400:503,
+        'Source model authorization unavailable.');
+    }
+  };
+}
+
+return createSourceModelUidAuthApiV56300({currentAccount,developerAccountAllowed,progressPayload,readJsonBody,browserWriteAllowed,json});
+})();
