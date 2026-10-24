@@ -5,6 +5,10 @@
   // team_builder_data.json release file (skills, traits and buffs traced from the game tables).
   // The explorer mounts it with show({ sidebar, panel, loadAniilog, contentUrl, dataUrl }).
   const STORAGE_KEY = "aniilogs:team-builder:v1";
+  const VIEW_STORAGE_KEY = "aniilogs:team-builder:view:v1";
+  const MAX_TYPE_SELECTION = 2;
+  const STRONG = 1.6;
+  const WEAK = 0.625;
   const LOADOUT_FILE_FORMAT = "aniilogs-team-loadout";
   const LOADOUT_FILE_VERSION = 1;
   const MAX_LOCAL_LOADOUTS = 50;
@@ -42,6 +46,35 @@
   let status = "";
   let store = loadStore();
   let model = activeLoadout().model;
+  // Which Team Builder page is open and the elements picked in Type matchups (per viewer).
+  let viewState = loadViewState();
+
+  function loadViewState() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(VIEW_STORAGE_KEY) || "null");
+      return {
+        page: saved?.page === "types" ? "types" : "team",
+        types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
+      };
+    } catch {
+      return { page: "team", types: [] };
+    }
+  }
+
+  function saveViewState() {
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(viewState));
+    } catch {
+      // Remembering the open page is only a convenience.
+    }
+  }
+
+  function openTypes(types) {
+    viewState = { page: "types", types: types.map(String).slice(0, MAX_TYPE_SELECTION) };
+    saveViewState();
+    render();
+    host.panel.scrollTo?.({ top: 0 });
+  }
 
   function defaultMember() {
     return { formId: "", activeSkills: ["", ""], switchSkill: "", ultimateSkill: "" };
@@ -985,9 +1018,14 @@
     copy.append(
       el("p", "team-eyebrow", slotRole(index)),
       el("h2", "", entry?.name || form.name),
-      el("p", "team-member-meta", [entry?.form_label, entry?.role, ...(entry?.elements || []).map((element) => element?.name || element)]
-        .filter((part) => typeof part === "string" && part).join(" · ")),
+      el("p", "team-member-meta", [entry?.form_label, entry?.role].filter((part) => typeof part === "string" && part).join(" · ")),
     );
+    if (form.elements?.length) {
+      const chips = el("div", "team-type-chips");
+      form.elements.forEach((id) => chips.append(elementChip(id)));
+      chips.append(button("Type matchups →", "team-type-link", () => openTypes(form.elements)));
+      copy.append(chips);
+    }
     identity.append(copy);
     wrapper.append(identity);
     const columns = el("div", "team-builder-columns");
@@ -998,16 +1036,245 @@
     return wrapper;
   }
 
+  // --- Type matchups -------------------------------------------------------------------------
+
+  function element(id) {
+    return data?.elements?.[String(id)] || null;
+  }
+
+  function elementIds() {
+    return Object.keys(data?.elements || {});
+  }
+
+  function elementChip(id) {
+    const info = element(id);
+    const chip = el("span", "team-type-chip", info?.name || String(id));
+    if (info?.color) chip.style.setProperty("--type-color", info.color);
+    return chip;
+  }
+
+  function chipRow(ids, emptyText = "None") {
+    const row = el("div", "team-type-chips");
+    if (!ids.length) row.append(el("span", "team-type-none", emptyText));
+    ids.forEach((id) => row.append(elementChip(id)));
+    return row;
+  }
+
+  // real_element_against rows are the attacking element, columns the defending one.
+  function attackersAt(defender, multiplier) {
+    return elementIds().filter((attacker) => element(attacker).against[String(defender)] === multiplier);
+  }
+
+  function defendersAt(attacker, multiplier) {
+    return elementIds().filter((defender) => element(attacker)?.against[defender] === multiplier);
+  }
+
+  function formsWithTypes(types) {
+    const wanted = types.map(Number);
+    return Object.entries(data?.forms || {})
+      .filter(([, form]) => wanted.every((id) => form.elements?.includes(id)))
+      .map(([formId, form]) => ({ formId, form, entry: entryForForm(formId) }))
+      .sort((left, right) => (left.form.elements.length - right.form.elements.length)
+        || String(left.entry?.name || left.form.name).localeCompare(String(right.entry?.name || right.form.name)));
+  }
+
+  function addToTeam(formId) {
+    const empty = model.members.findIndex((member) => !member.formId);
+    const slot = empty >= 0 ? empty : model.activeSlot;
+    model.members[slot] = { ...defaultMember(), formId };
+    model.activeSlot = slot;
+    persist();
+    status = `Added to ${slotRole(slot).toLocaleLowerCase()}.`;
+    viewState.page = "team";
+    saveViewState();
+    render();
+  }
+
+  function renderTypePicker() {
+    const section = el("section", "team-config-section");
+    const heading = el("div", "team-section-heading");
+    heading.append(el("div", "", "Elements"), el("small", "", "Pick one or two"));
+    section.append(heading);
+    const grid = el("div", "team-type-grid");
+    elementIds().forEach((id) => {
+      const selected = viewState.types.includes(id);
+      const control = button(element(id).name, "team-type-button", () => openTypes(selected
+        ? viewState.types.filter((type) => type !== id)
+        : [...viewState.types, id].slice(-MAX_TYPE_SELECTION)));
+      control.style.setProperty("--type-color", element(id).color || "var(--accent)");
+      control.setAttribute("aria-pressed", String(selected));
+      grid.append(control);
+    });
+    section.append(grid);
+    const team = model.members.map((member) => ({ member, form: formFor(member) })).filter((row) => row.form);
+    if (team.length) {
+      const quick = el("div", "team-type-quick");
+      quick.append(el("span", "team-field-label", "Your team"));
+      team.forEach(({ member, form }) => {
+        const entry = entryForForm(member.formId);
+        const pick = button("", "team-type-member", () => openTypes(form.elements));
+        if (entry?.icon) pick.append(icon(entry.icon, "team-type-member-icon"));
+        pick.append(el("span", "", entry?.name || form.name));
+        quick.append(pick);
+      });
+      section.append(quick);
+    }
+    if (viewState.types.length) section.append(button("Clear", "team-loadout-action team-type-clear", () => openTypes([])));
+    return section;
+  }
+
+  function matchupBlock(title, rows) {
+    const block = el("div", "team-type-block");
+    block.append(el("div", "team-subsection-heading", title));
+    rows.forEach(([label, ids, tone]) => {
+      const row = el("div", `team-type-row team-type-row--${tone}`);
+      row.append(el("span", "team-type-multiplier", label), chipRow(ids));
+      block.append(row);
+    });
+    return block;
+  }
+
+  function renderMatchups(types) {
+    const section = el("section", "team-config-section");
+    const heading = el("div", "team-section-heading");
+    heading.append(el("div", "", "Matchups"), chipRow(types));
+    section.append(heading);
+    types.forEach((type) => section.append(matchupBlock(`${element(type).name} defending`, [
+      [`Takes ${STRONG}×`, attackersAt(type, STRONG), "weak"],
+      [`Takes ${WEAK}×`, attackersAt(type, WEAK), "resist"],
+    ])));
+    if (types.length > 1) {
+      // Facts per element only: the game tables do not say how two defending elements combine.
+      const onAll = (multiplier) => elementIds().filter((attacker) => types.every((type) => element(attacker).against[type] === multiplier));
+      const mixed = elementIds().filter((attacker) => {
+        const values = types.map((type) => element(attacker).against[type]);
+        return values.includes(STRONG) && values.includes(WEAK);
+      });
+      section.append(matchupBlock("Across both elements", [
+        [`${STRONG}× on both`, onAll(STRONG), "weak"],
+        [`${WEAK}× on both`, onAll(WEAK), "resist"],
+        [`${STRONG}× on one, ${WEAK}× on the other`, mixed, "mixed"],
+      ]));
+      section.append(el("p", "team-data-note", "The game's tables give one multiplier per element pair. How two defending elements combine is decided in battle and isn't in the data, so each element is listed on its own."));
+    }
+    types.forEach((type) => section.append(matchupBlock(`${element(type).name} attacking`, [
+      [`Deals ${STRONG}×`, defendersAt(type, STRONG), "strong"],
+      [`Deals ${WEAK}×`, defendersAt(type, WEAK), "resist"],
+    ])));
+    return section;
+  }
+
+  function renderTypeAniimo(types) {
+    const section = el("section", "team-config-section");
+    const rows = formsWithTypes(types);
+    const heading = el("div", "team-section-heading");
+    heading.append(el("div", "", types.length > 1 ? "Aniimo with both elements" : "Aniimo with this element"), el("small", "", String(rows.length)));
+    section.append(heading);
+    if (!rows.length) {
+      section.append(el("p", "team-empty-copy", "No published Aniimo has this combination."));
+      return section;
+    }
+    const groups = types.length === 1
+      ? [["Only this element", rows.filter((row) => row.form.elements.length === 1)], ["With a second element", rows.filter((row) => row.form.elements.length > 1)]]
+      : [["", rows]];
+    groups.forEach(([label, list]) => {
+      if (!list.length) return;
+      if (label) section.append(el("div", "team-subsection-heading", label));
+      const grid = el("div", "team-type-aniimo");
+      list.forEach(({ formId, form, entry }) => {
+        const card = el("article", "team-type-card");
+        if (entry?.icon) card.append(icon(entry.icon, "team-overview-icon"));
+        const copy = el("div", "team-overview-copy");
+        copy.append(
+          el("strong", "", entry?.name || form.name),
+          el("small", "", [entry?.form_label, entry?.role].filter(Boolean).join(" · ")),
+          chipRow(form.elements),
+        );
+        const inTeam = model.members.some((member) => member.formId === formId);
+        const add = button(inTeam ? "In team" : "Add to team", "team-loadout-action", () => addToTeam(formId));
+        add.disabled = inTeam;
+        card.append(copy, add);
+        grid.append(card);
+      });
+      section.append(grid);
+    });
+    return section;
+  }
+
+  // Per element: which of the team's elements hit it for 1.6x, and which members have an element it hits for 1.6x.
+  function renderTeamCoverage() {
+    const section = el("section", "team-config-section");
+    const heading = el("div", "team-section-heading");
+    heading.append(el("div", "", "Team coverage"), el("small", "", "From your team's elements"));
+    section.append(heading);
+    const team = model.members.map((member) => ({ member, form: formFor(member) })).filter((row) => row.form);
+    if (!team.length) {
+      section.append(el("p", "team-empty-copy", "Add Aniimo to your team to see which elements it covers."));
+      return section;
+    }
+    const teamTypes = [...new Set(team.flatMap((row) => row.form.elements.map(String)))];
+    const table = el("div", "team-coverage");
+    ["Element", `Your ${STRONG}× hits`, `Members it hits ${STRONG}×`].forEach((label) => table.append(el("span", "team-coverage-head", label)));
+    elementIds().forEach((id) => {
+      const hits = teamTypes.filter((attacker) => element(attacker)?.against[id] === STRONG);
+      const exposed = team.filter((row) => row.form.elements.some((type) => element(id).against[String(type)] === STRONG));
+      const names = exposed.map((row) => entryForForm(row.member.formId)?.name || row.form.name).join(", ") || "—";
+      table.append(elementChip(id), chipRow(hits, "No strong hit"), el("span", exposed.length >= 2 ? "team-coverage-risk" : "", names));
+    });
+    section.append(table);
+    return section;
+  }
+
+  function renderTypesPage() {
+    const wrapper = el("div", "team-member-configuration");
+    const types = viewState.types.filter((type) => element(type));
+    const columns = el("div", "team-builder-columns");
+    const main = el("div", "team-builder-main-column");
+    main.append(renderTypePicker());
+    if (types.length) main.append(renderMatchups(types), renderTypeAniimo(types));
+    else main.append(el("section", "team-builder-empty", "Pick an element above, or tap a team member, to see its matchups and every Aniimo with that typing."));
+    const side = el("div", "team-builder-main-column");
+    side.append(renderTeamCoverage());
+    if (data?.build) side.append(el("p", "team-data-note", `Multipliers from game build ${data.build}.`));
+    columns.append(main, side);
+    wrapper.append(columns);
+    return wrapper;
+  }
+
+  function renderPageSwitch() {
+    const group = el("div", "team-mode-switch");
+    group.setAttribute("role", "tablist");
+    [["team", "Team"], ["types", "Type matchups"]].forEach(([id, label]) => {
+      const control = button(label, "team-mode-button", () => {
+        viewState.page = id;
+        saveViewState();
+        render();
+      });
+      control.setAttribute("role", "tab");
+      control.setAttribute("aria-selected", String(viewState.page === id));
+      group.append(control);
+    });
+    return group;
+  }
+
   function renderPanel() {
     const panel = host.panel;
     panel.textContent = "";
     const header = el("header", "team-builder-header");
     const copy = el("div");
-    copy.append(el("h1", "", "Team Builder"), el("p", "", model.mode === "coop"
-      ? "Configure one controlled Aniimo and the Core skills your three allies bring."
-      : "Pick four Aniimo and their skills, see how each skill works, and model the effects they share."));
-    header.append(copy, renderModeSwitch());
-    panel.append(header, renderOverview(), renderMember(model.members[model.activeSlot], model.activeSlot));
+    const typesPage = viewState.page === "types";
+    copy.append(el("h1", "", typesPage ? "Type matchups" : "Team Builder"), el("p", "", typesPage
+      ? "See what an element or pair of elements is weak to and strong against, and which Aniimo have that typing."
+      : model.mode === "coop"
+        ? "Configure one controlled Aniimo and the Core skills your three allies bring."
+        : "Pick four Aniimo and their skills, see how each skill works, and model the effects they share."));
+    const controls = el("div", "team-header-controls");
+    controls.append(renderPageSwitch());
+    if (!typesPage) controls.append(renderModeSwitch());
+    header.append(copy, controls);
+    panel.append(header);
+    if (typesPage) panel.append(renderTypesPage());
+    else panel.append(renderOverview(), renderMember(model.members[model.activeSlot], model.activeSlot));
   }
 
   function renderLoading() {

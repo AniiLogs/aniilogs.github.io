@@ -299,6 +299,13 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /const MAX_ACTIVE_SKILLS = 2;/u);
   assert.match(teamBuilder, /How this skill works/u);
   assert.match(teamBuilder, /function synergyEffects\(\)/u);
+  // Type matchups use the game's own multipliers and never invent a combined dual-element value.
+  assert.match(teamBuilder, /const STRONG = 1\.6;/u);
+  assert.match(teamBuilder, /const WEAK = 0\.625;/u);
+  assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
+  assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
+  assert.doesNotMatch(teamBuilder, /2×|½×/u);
+  assert.match(explorerHtml, /styles\.css\?v=0\.17\.13-team-builder/u);
   assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);
 });
 
