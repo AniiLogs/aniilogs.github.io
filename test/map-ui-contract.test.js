@@ -305,7 +305,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0\.17\.13-team-builder/u);
+  assert.match(explorerHtml, /styles\.css\?v=0\.17\.14-aniilog-3746914/u);
   assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);
 });
 
@@ -486,7 +486,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20261024-build3535596-itemlog-names-r72"/u);
+  assert.match(explorerConfig, /contentRevision = "20261024-build3535596-aniilog-3746914-r73"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
