@@ -5,7 +5,7 @@
   const contentBaseUrl = isLocalPreview
     ? "http://127.0.0.1:8788/releases/3535596"
     : "https://aniilogs-api.pages.dev/api/content/releases/3535596";
-  const contentRevision = "20261023-build3535596-npc-duel-challenges-r65";
+  const contentRevision = "20261023-build3535596-tracking-pin-cleanup-r66";
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
