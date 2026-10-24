@@ -5244,6 +5244,8 @@ html[data-theme="pawney"] .catalog-record {
 
 .catalog-itemlog-record .catalog-facts {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  width: 100%;
+  min-width: 0;
   max-width: 1100px;
 }
 

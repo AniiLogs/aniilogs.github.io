@@ -1263,7 +1263,9 @@ function applyPendingItemlogLocate(finalAttempt = false) {
   return applyItemlogLocate(state.pendingItemlogLocate, finalAttempt);
 }
 
-function locateItemlogEntry(entry) {
+function locateItemlogEntry(entry, chosenTarget = null) {
+  // A chosen target narrows the pending locate to that one marker.
+  if (chosenTarget) entry = { ...entry, map_targets: [chosenTarget] };
   const targets = Array.isArray(entry?.map_targets) ? entry.map_targets : [];
   if (!targets.length) return;
   state.pendingItemlogLocate = entry;
@@ -6680,6 +6682,73 @@ function renderItemLogProgressionUses(progressionUses) {
   return section;
 }
 
+function renderItemLogMapTargets(entry) {
+  const targets = Array.isArray(entry.map_targets) ? entry.map_targets.filter((target) => target?.map_id) : [];
+  if (!targets.length) return null;
+  const section = createCatalogSection("Where to find it");
+  const list = document.createElement("div");
+  list.className = "catalog-obtain-list";
+  targets.forEach((target) => {
+    const row = document.createElement("div");
+    row.className = "catalog-obtain-row";
+    const label = document.createElement("strong");
+    label.textContent = target.label || entry.name;
+    const detail = document.createElement("p");
+    const count = Number(target.location_count) || 0;
+    detail.textContent = [
+      target.map_label || target.map_id,
+      count ? `${formatNumber(count)} location${count === 1 ? "" : "s"}` : "",
+    ].filter(Boolean).join(" · ");
+    const locate = document.createElement("button");
+    locate.type = "button";
+    locate.className = "catalog-locate-button";
+    locate.textContent = "Locate on Map";
+    locate.addEventListener("click", () => locateItemlogEntry(entry, target));
+    row.append(label, detail, locate);
+    list.append(row);
+  });
+  section.append(list);
+  return section;
+}
+
+function renderItemLogVariants(entry) {
+  const key = String(entry.name || "").trim().toLocaleLowerCase("en");
+  const siblings = allCatalogEntriesForView("itemlog").filter((candidate) => (
+    candidate.id !== entry.id && String(candidate.name || "").trim().toLocaleLowerCase("en") === key
+  ));
+  if (!siblings.length) return null;
+  const section = createCatalogSection("Same-name variants");
+  const facts = (Array.isArray(entry.variant_facts) ? entry.variant_facts : [])
+    .map((fact) => `${fact.label}: ${fact.value}`);
+  if (facts.length) {
+    const note = document.createElement("p");
+    note.className = "catalog-description";
+    note.textContent = `This one · ${facts.join(" · ")}`;
+    section.append(note);
+  }
+  const list = document.createElement("div");
+  list.className = "catalog-obtain-list";
+  siblings.forEach((sibling) => {
+    const row = document.createElement("div");
+    row.className = "catalog-obtain-row";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "catalog-item-reference is-linked";
+    open.textContent = sibling.variant_label || `#${sibling.item_id}`;
+    open.title = `Open ${sibling.name} #${sibling.item_id} in the Item-log`;
+    open.addEventListener("click", () => openItemlogReference(sibling.item_id));
+    row.append(open);
+    (Array.isArray(sibling.variant_facts) ? sibling.variant_facts : []).forEach((fact) => {
+      const detail = document.createElement("p");
+      detail.textContent = `${fact.label}: ${fact.value}`;
+      row.append(detail);
+    });
+    list.append(row);
+  });
+  section.append(list);
+  return section;
+}
+
 function renderItemLogClientReferences(entry) {
   const sources = Array.isArray(entry.source_references) ? entry.source_references : [];
   const unlocks = Array.isArray(entry.unlock_references) ? entry.unlock_references : [];
@@ -7331,7 +7400,10 @@ function renderItemLogCatalogRecord(entry) {
   eyebrow.className = "catalog-eyebrow";
   eyebrow.textContent = entry.catalog_category || entry.type || "Item";
   const name = document.createElement("h2");
-  name.textContent = entry.name;
+  // Same-name variants carry the facets that tell them apart, e.g. "Alpha Egg - Nimbus Fields".
+  name.textContent = entry.variant_facts && entry.variant_label
+    ? `${entry.name} - ${entry.variant_label}`
+    : entry.name;
   const subtitle = document.createElement("p");
   subtitle.className = "catalog-subtitle";
   subtitle.textContent = entry.inventory || "";
@@ -7387,6 +7459,10 @@ function renderItemLogCatalogRecord(entry) {
     details.append(facts);
     record.append(details);
   }
+  const mapTargets = renderItemLogMapTargets(entry);
+  if (mapTargets) record.append(mapTargets);
+  const variants = renderItemLogVariants(entry);
+  if (variants) record.append(variants);
 
   const gizmoProgression = renderHoloBattleGizmoProgression(entry.holo_battle_gizmo);
   if (gizmoProgression) record.append(gizmoProgression);
