@@ -11285,6 +11285,14 @@ function refreshSelectionDetails() {
   updateSelectionCatalogShortcuts(spawn, item);
 }
 
+// Release data can attach extra label/value rows to a marker (for example challenge tiers and unlocks).
+function spawnDetailRows(spawn) {
+  if (!Array.isArray(spawn?.detail_rows)) return [];
+  return spawn.detail_rows
+    .filter((row) => typeof row?.label === "string" && typeof row?.value === "string")
+    .map((row) => [row.label, row.value]);
+}
+
 function renderSelectionDetail(detail, spawn, item) {
   detail.className = "selection";
   detail.replaceChildren();
@@ -11398,6 +11406,7 @@ function renderSelectionDetail(detail, spawn, item) {
   const regionValue = regionDetailValue(spawn);
   const rows = [
     ["Type", typeLabel],
+    ...spawnDetailRows(spawn),
     luminMetadata ? ["Lumin source", luminMetadata.source] : null,
     spawn.marker_type === "field_boss_lumin_reward" ? ["Reward", `${spawn.reward_amount || 1} Lumin Amber (first clear)`] : null,
     spawn.document_group ? ["Series", spawn.document_group] : null,
