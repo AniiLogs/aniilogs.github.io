@@ -773,6 +773,10 @@ button[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
+.team-member-identity--simple {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
 .team-member-icon {
   width: 70px;
   height: 70px;
@@ -1001,7 +1005,7 @@ button[aria-pressed="true"] {
 }
 
 .team-skill-cards {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .team-skill-summary,
@@ -1017,6 +1021,10 @@ button[aria-pressed="true"] {
   display: flex;
   min-width: 0;
   gap: 9px;
+}
+
+.team-skill-summary > .team-skill-copy {
+  flex: 1 1 auto;
 }
 
 .team-skill-icon {
@@ -1143,6 +1151,93 @@ button[aria-pressed="true"] {
 .team-pill.is-locked {
   border-style: dashed;
   opacity: 0.58;
+}
+
+.team-pill--scope {
+  border-color: var(--line);
+  background: rgba(var(--background-rgb), 0.36);
+  color: var(--muted);
+}
+
+.team-pill--synergy {
+  border-color: rgba(var(--accent-2-rgb), 0.56);
+  background: rgba(var(--accent-2-rgb), 0.12);
+  color: color-mix(in srgb, var(--accent-2) 40%, var(--text));
+}
+
+.team-skill-how > summary,
+.team-skill-description > summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.team-skill-description p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+ul.team-skill-operations {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+ul.team-skill-operations .team-skill-operation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  font-weight: 650;
+}
+
+.team-skill-operation strong {
+  color: var(--text);
+}
+
+.team-skill-operation small {
+  margin-left: auto;
+  font-weight: 800;
+}
+
+.team-buff-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team-buff {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--background-rgb), 0.28);
+  padding: 6px 8px;
+}
+
+.team-buff-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.team-buff-title strong {
+  margin-right: auto;
+  font-size: 12px;
+}
+
+.team-buff-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .team-carried-level-field {

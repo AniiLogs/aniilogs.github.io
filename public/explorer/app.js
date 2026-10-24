@@ -21,6 +21,7 @@ const ITEMLOG_DATA_URL =
   contentUrl("./data/itemlog_data.json");
 const ANIILOG_DATA_URL = contentUrl("./data/aniilog_data.json");
 const ANIILOG_MEDIA_URL = contentUrl("./data/aniilog_media.json");
+const TEAM_BUILDER_DATA_URL = SITE_CONFIG.teamBuilderDataUrl || contentUrl("./data/team_builder_data.json");
 // The UI order and rare flags are extracted from the current client and kept
 // in the private R2 release alongside the media. The static table below keeps
 // the viewer usable during a transient manifest failure; when available, this
@@ -8803,7 +8804,7 @@ function updateWorkspaceTabs() {
   if (catalogView) {
     renderCatalogPreview();
   } else if (state.sidebarView === "team") {
-    renderTeamUnderConstruction();
+    renderTeamBuilder();
     removeMobileCatalogStickyIdentity();
   } else {
     removeMobileCatalogStickyIdentity();
@@ -8980,20 +8981,14 @@ function renderMapBase() {
   scheduleMapTileDetail();
 }
 
-function renderTeamUnderConstruction() {
-  els.teamSidebarContent.innerHTML = `
-    <section class="team-construction-sidebar">
-      <span class="team-construction-kicker">Coming later</span>
-      <h2>Team Builder</h2>
-      <p>The page shell is ready. Build-specific team data and automation remain withheld until their own audit is complete.</p>
-    </section>`;
-  els.teamPanel.innerHTML = `
-    <div class="team-construction">
-      <span class="team-construction-mark" aria-hidden="true">✦</span>
-      <p class="team-construction-kicker">Under construction</p>
-      <h1>Team Builder is on the way</h1>
-      <p>This area will open after its data model and current-build inputs are reviewed independently.</p>
-    </div>`;
+function renderTeamBuilder() {
+  window.AniilogsTeamBuilder?.show({
+    sidebar: els.teamSidebarContent,
+    panel: els.teamPanel,
+    loadAniilog: ensureAniilogData,
+    contentUrl,
+    dataUrl: TEAM_BUILDER_DATA_URL,
+  });
 }
 
 function openWorkspaceFromNavigation(event, view) {

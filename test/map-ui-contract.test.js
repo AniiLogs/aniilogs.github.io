@@ -6,6 +6,7 @@ import test from "node:test";
 const explorer = await readFile(new URL("../public/explorer/app.js", import.meta.url), "utf8");
 const explorerHtml = await readFile(new URL("../public/explorer/index.html", import.meta.url), "utf8");
 const explorerStyles = await readFile(new URL("../public/explorer/styles.css", import.meta.url), "utf8");
+const teamBuilder = await readFile(new URL("../public/explorer/team-builder.js", import.meta.url), "utf8");
 const landingApp = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
 const landingHtml = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
 const landingStyles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
@@ -288,11 +289,17 @@ test("logs are top-level sections while the Map sidebar contains only map tools"
   assert.match(explorer, /state\.sidebarView === "team"\) els\.topNavTeam/u);
 });
 
-test("Team Builder is a fluid top-level under-construction workspace", () => {
+test("Team Builder mounts the skill and synergy builder from reviewed release data", () => {
   assert.match(explorer, /ENABLED_WORKSPACE_VIEWS = new Set\(\["map", "tracking", "checklist", "itemlog", "team"\]\)/u);
-  assert.match(explorer, /function renderTeamUnderConstruction\(\)/u);
-  assert.match(explorer, /Under construction/u);
+  assert.match(explorer, /TEAM_BUILDER_DATA_URL = SITE_CONFIG\.teamBuilderDataUrl \|\| contentUrl\("\.\/data\/team_builder_data\.json"\)/u);
+  assert.match(explorer, /window\.AniilogsTeamBuilder\?\.show\(\{/u);
+  assert.match(explorerHtml, /<script defer src="\.\/team-builder\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/app\.js/u);
   assert.match(explorerHtml, /id="topNavTeam"[^>]*>Team Builder<\/a>/u);
+  assert.match(teamBuilder, /const TEAM_SIZE = 4;/u);
+  assert.match(teamBuilder, /const MAX_ACTIVE_SKILLS = 2;/u);
+  assert.match(teamBuilder, /How this skill works/u);
+  assert.match(teamBuilder, /function synergyEffects\(\)/u);
+  assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);
 });
 
 test("the desktop sidebar handle stays narrow and unobtrusive", () => {
