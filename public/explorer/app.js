@@ -6868,12 +6868,27 @@ function renderItemLogClientReferences(entry) {
     row.className = "catalog-requirement-row";
     const label = document.createElement("strong");
     const referenceKind = source.source_table === "item_shop_data" ? "shop" : "source";
-    label.textContent = `${source.label || "Source"} · ${referenceKind} #${source.source_id}`;
+    label.textContent = source.label || "Source";
+    label.title = `${referenceKind} #${source.source_id}`;
     row.append(label);
+    // What the in-game link opens (screen, guide page, shop, place), when it adds to the label.
+    if (source.target && source.target !== source.label) {
+      const target = document.createElement("p");
+      target.textContent = source.target;
+      row.append(target);
+    }
     if (source.hint) {
       const hint = document.createElement("p");
       appendGameRichText(hint, source.hint);
       row.append(hint);
+    }
+    if (source.map_target?.map_id) {
+      const locate = document.createElement("button");
+      locate.type = "button";
+      locate.className = "catalog-locate-button";
+      locate.textContent = "Locate on Map";
+      locate.addEventListener("click", () => locateItemlogEntry({ map_targets: [source.map_target] }));
+      row.append(locate);
     }
     list.append(row);
   }
