@@ -1028,7 +1028,8 @@ function aniimoSpeciesSortName(item) {
 }
 
 function aniimoFormSortRank(item) {
-  if (item.form_label === "Basic") return 0;
+  // The form key stays "basic" when the game renames the label (e.g. "Basic" -> "Basic Form").
+  if (!item.special_type && aniilogFormKey(item.form_key) === "basic") return 0;
   if (item.special_type) return 2;
   return 1;
 }
