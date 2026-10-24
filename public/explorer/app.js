@@ -6426,18 +6426,25 @@ function renderItemLogObtainMethods(methods) {
   const section = createCatalogSection("How to obtain");
   const list = document.createElement("div");
   list.className = "catalog-obtain-list";
+  // Methods of one kind (e.g. several chests) share a single row under that kind's label.
+  const rowsByLabel = new Map();
   usableMethods.forEach((method) => {
-    const row = document.createElement("div");
-    row.className = "catalog-obtain-row";
-    const label = document.createElement("strong");
-    label.textContent = method?.label || "Source method";
-    row.append(label);
+    const labelText = method?.label || "Source method";
+    let row = rowsByLabel.get(labelText);
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "catalog-obtain-row";
+      const label = document.createElement("strong");
+      label.textContent = labelText;
+      row.append(label);
+      rowsByLabel.set(labelText, row);
+      list.append(row);
+    }
     if (method?.detail) {
       const detail = document.createElement("p");
       detail.textContent = method.detail;
       row.append(detail);
     }
-    list.append(row);
   });
   section.append(list);
   return section;
