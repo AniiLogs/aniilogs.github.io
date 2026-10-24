@@ -1343,7 +1343,9 @@ function applyPendingPointLocate() {
   pin.title = point.label || "Location";
   els.mapSectionShortcutLayer.append(pin);
   focusSpawn({ normalized: point.normalized });
-  clearSelectionDetails(`${point.label || "Location"} · X ${point.x}, Y ${point.y}`);
+  [els.selectionDetail, els.mobileSelectionDetail].forEach((detail) => renderPointSelectionDetail(detail, point));
+  updateSelectionCatalogShortcuts(null, null);
+  setDesktopSelectionVisible(true);
   state.pendingPointLocate = null;
   return true;
 }
@@ -11497,6 +11499,98 @@ function spawnDetailRows(spawn) {
     .map((row) => [row.label, row.value]);
 }
 
+// Compact title-row coordinates shown when the selection panel is minimized.
+function selectionMinimizedCoordinates(coordinates) {
+  const minimizedCoordinates = document.createElement("div");
+  minimizedCoordinates.className = "selection-minimized-coordinates";
+  coordinates.forEach(([label, value, copyable]) => {
+    const coordinate = document.createElement(copyable ? "button" : "div");
+    coordinate.className = "selection-minimized-coordinate";
+    if (copyable) {
+      coordinate.type = "button";
+      coordinate.classList.add("copyable-detail");
+      coordinate.setAttribute("aria-label", `Copy ${label} coordinate ${value}`);
+      coordinate.title = `Copy ${label}`;
+    } else {
+      coordinate.classList.add("is-static");
+    }
+    const coordinateLabel = document.createElement("span");
+    coordinateLabel.className = "selection-minimized-coordinate-label";
+    coordinateLabel.textContent = label;
+    const coordinateValue = document.createElement("strong");
+    coordinateValue.className = "selection-minimized-coordinate-value";
+    coordinateValue.textContent = value;
+    if (copyable) {
+      coordinate.addEventListener("click", () => copyDetailValue(coordinateValue, value));
+    }
+    coordinate.append(coordinateLabel, coordinateValue);
+    minimizedCoordinates.append(coordinate);
+  });
+  return minimizedCoordinates;
+}
+
+// Rows are [label, value, copyValue]; a copy value makes the value click-to-copy (X and Y separately).
+function appendDetailGridRows(grid, rows) {
+  rows.forEach(([label, value, copyValue]) => {
+    const left = document.createElement("span");
+    left.textContent = label;
+    const right = document.createElement("span");
+    right.className = "detail-value";
+    right.textContent = value || "";
+    if (copyValue) {
+      right.classList.add("copyable-detail");
+      right.tabIndex = 0;
+      right.setAttribute("role", "button");
+      right.setAttribute("aria-label", `Copy ${label} coordinate ${copyValue}`);
+      right.title = `Copy ${label}`;
+      right.addEventListener("click", () => copyDetailValue(right, copyValue));
+      right.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        copyDetailValue(right, copyValue);
+      });
+    }
+    grid.append(left, right);
+  });
+}
+
+// A located spot without a marker of its own still gets a selection with copyable X and Y.
+function renderPointSelectionDetail(detail, point) {
+  detail.className = "selection";
+  detail.replaceChildren();
+  const title = document.createElement("div");
+  title.className = "selection-title";
+  const titleText = document.createElement("div");
+  titleText.className = "selection-title-copy";
+  const name = document.createElement("strong");
+  name.className = "selection-name";
+  name.textContent = point.label || "Location";
+  titleText.append(name);
+  const subtitleText = [point.place || point.marker?.label, point.region].filter(Boolean).join(" - ");
+  if (subtitleText) {
+    const subtitle = document.createElement("small");
+    subtitle.className = "selection-subtitle";
+    subtitle.textContent = subtitleText;
+    titleText.append(subtitle);
+  }
+  const x = formatCoordinate(point.x);
+  const y = formatCoordinate(point.y);
+  title.append(
+    makeIcon("selection-portrait", ""),
+    titleText,
+    selectionMinimizedCoordinates([["X", x, true], ["Y", y, true]]),
+  );
+
+  const grid = document.createElement("div");
+  grid.className = "detail-grid";
+  appendDetailGridRows(grid, [
+    ["X", x, x],
+    ["Y", y, y],
+    point.map_label ? ["Map", point.map_label] : null,
+  ].filter((row) => row && row[1]));
+  detail.append(title, grid);
+}
+
 function renderSelectionDetail(detail, spawn, item) {
   detail.className = "selection";
   detail.replaceChildren();
@@ -11562,36 +11656,11 @@ function renderSelectionDetail(detail, spawn, item) {
   }
   titleText.append(strong, small);
 
-  const minimizedCoordinates = document.createElement("div");
-  minimizedCoordinates.className = "selection-minimized-coordinates";
-  const compactCoordinates = [
+  const minimizedCoordinates = selectionMinimizedCoordinates([
     ["X", formatCoordinate(spawn.x), true],
     ["Y", formatCoordinate(spawn.y), true],
     ["Height", formatNumber(spawn.height_y, 2), false],
-  ];
-  compactCoordinates.forEach(([label, value, copyable]) => {
-    const coordinate = document.createElement(copyable ? "button" : "div");
-    coordinate.className = "selection-minimized-coordinate";
-    if (copyable) {
-      coordinate.type = "button";
-      coordinate.classList.add("copyable-detail");
-      coordinate.setAttribute("aria-label", `Copy ${label} coordinate ${value}`);
-      coordinate.title = `Copy ${label}`;
-    } else {
-      coordinate.classList.add("is-static");
-    }
-    const coordinateLabel = document.createElement("span");
-    coordinateLabel.className = "selection-minimized-coordinate-label";
-    coordinateLabel.textContent = label;
-    const coordinateValue = document.createElement("strong");
-    coordinateValue.className = "selection-minimized-coordinate-value";
-    coordinateValue.textContent = value;
-    if (copyable) {
-      coordinate.addEventListener("click", () => copyDetailValue(coordinateValue, value));
-    }
-    coordinate.append(coordinateLabel, coordinateValue);
-    minimizedCoordinates.append(coordinate);
-  });
+  ]);
   title.append(icon, titleText, minimizedCoordinates);
 
   const luminMetadata = luminMapMetadata(spawn);
@@ -11623,27 +11692,7 @@ function renderSelectionDetail(detail, spawn, item) {
     areaValue ? ["Area", areaValue] : null,
     regionValue ? ["Region", regionValue] : null,
   ].filter((row) => row && row[1]);
-  rows.forEach(([label, value, copyValue]) => {
-    const left = document.createElement("span");
-    left.textContent = label;
-    const right = document.createElement("span");
-    right.className = "detail-value";
-    right.textContent = value || "";
-    if (copyValue) {
-      right.classList.add("copyable-detail");
-      right.tabIndex = 0;
-      right.setAttribute("role", "button");
-      right.setAttribute("aria-label", `Copy ${label} coordinate ${copyValue}`);
-      right.title = `Copy ${label}`;
-      right.addEventListener("click", () => copyDetailValue(right, copyValue));
-      right.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        copyDetailValue(right, copyValue);
-      });
-    }
-    grid.append(left, right);
-  });
+  appendDetailGridRows(grid, rows);
 
   detail.append(title, description, grid);
   if (state.sidebarView !== "map") {
