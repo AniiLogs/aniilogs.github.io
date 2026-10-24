@@ -4258,7 +4258,7 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
     const sort = aniilogSortOption();
     const statValue = aniilogSortValue(entry, sort);
     meta.textContent = [
-      `${entry.aniilog_number || "Special"} - ${entry.form_label || "Basic"}`,
+      `${entry.aniilog_number || "Special"} - ${entry.form_label || "Basic Form"}`,
       statValue === null ? "" : `${sort.label.replace(" (high to low)", "")} ${formatNumber(statValue, 0)}`,
     ].filter(Boolean).join(" - ");
   } else {
@@ -4935,7 +4935,7 @@ function catalogElementMeta(element) {
 
 function catalogElementLabel(element) {
   const name = typeof element === "string" ? element : element?.name;
-  return catalogElementMeta(element).label || name || "Unknown";
+  return state.aniilogData?.element_labels?.[name] || catalogElementMeta(element).label || name || "Unknown";
 }
 
 function catalogRoleMeta(role) {
@@ -5297,6 +5297,21 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
         appendGameRichText(description, displayed.description);
         copy.append(description);
       }
+      // Stat-scaled values show as a range; the game's formula tooltip explains it.
+      const scaling = showUpgrade && ability.upgrade ? ability.upgrade.scaling : ability.scaling;
+      if (Array.isArray(scaling) && scaling.length) {
+        const note = document.createElement("div");
+        note.className = "catalog-ability-scaling";
+        const label = document.createElement("strong");
+        label.textContent = "Scales with stats";
+        note.append(label);
+        scaling.forEach((line) => {
+          const text = document.createElement("span");
+          text.textContent = line;
+          note.append(text);
+        });
+        copy.append(note);
+      }
       if (ability.upgrade) {
         const difference = document.createElement("div");
         difference.className = "catalog-skill-variant-note";
@@ -5519,7 +5534,7 @@ function createEvolutionNode(node, label, isCurrent = false) {
   const name = document.createElement("strong");
   name.textContent = node.name;
   const form = document.createElement("small");
-  form.textContent = node.form_label || "Basic";
+  form.textContent = node.form_label || "Basic Form";
   copy.append(name, form);
   button.append(icon, copy);
   button.addEventListener("click", () => openAniilogRecord(node.id));
@@ -6388,7 +6403,7 @@ function renderAniilogCatalogRecord(entry) {
   stickyIndicator.setAttribute("aria-hidden", "true");
   const number = document.createElement("p");
   number.className = "catalog-eyebrow";
-  number.textContent = `${entry.aniilog_number || "Special"} - ${entry.form_label || "Basic"}`;
+  number.textContent = `${entry.aniilog_number || "Special"} - ${entry.form_label || "Basic Form"}`;
   const name = document.createElement("h2");
   name.textContent = entry.name;
   const tags = document.createElement("div");
