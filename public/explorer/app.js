@@ -1330,6 +1330,34 @@ function applyPendingBossLocate(finalAttempt = false) {
   return applyBossLocate(state.pendingBossLocate, finalAttempt);
 }
 
+// A spot with no marker of its own (e.g. a research objective's tracking point) is shown by
+// centring the map on its normalized position.
+function applyPendingPointLocate() {
+  const point = state.pendingPointLocate;
+  if (!point || point.map_id !== state.activeMapId || !point.normalized) return false;
+  els.mapSectionShortcutLayer.querySelector(".map-located-point")?.remove();
+  const pin = document.createElement("span");
+  pin.className = "map-located-point";
+  pin.dataset.normalizedX = String(point.normalized.x);
+  pin.dataset.normalizedY = String(point.normalized.y);
+  pin.title = point.label || "Location";
+  els.mapSectionShortcutLayer.append(pin);
+  focusSpawn({ normalized: point.normalized });
+  clearSelectionDetails(`${point.label || "Location"} · X ${point.x}, Y ${point.y}`);
+  state.pendingPointLocate = null;
+  return true;
+}
+
+function locateMapPoint(point) {
+  if (!point?.map_id || !point.normalized) return;
+  state.pendingPointLocate = point;
+  setSidebarView("map");
+  if (point.map_id !== state.activeMapId) {
+    switchMap(point.map_id);
+  }
+  if (datasetForMap(point.map_id)) applyPendingPointLocate();
+}
+
 function locateBossVariant(boss) {
   if (!boss?.map_id || !boss?.item_id) return;
   state.pendingBossLocate = boss;
@@ -5298,6 +5326,8 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
           reward.textContent = `Reward: ${displayed.reward}`;
           objective.append(reward);
         }
+        const guide = renderResearchGuide(displayed);
+        if (guide) objective.append(guide);
         copy.append(objective);
       }
       const behavior = renderCatalogAbilityBehavior(displayed);
@@ -5386,6 +5416,65 @@ function renderCatalogLocations(entry) {
   });
   section.append(list);
   return section;
+}
+
+// Where to go, what is nearby, photo distance and other Aniimo involved in a research objective.
+function renderResearchGuide(research) {
+  const guide = research?.guide;
+  if (!guide || typeof guide !== "object") return null;
+  const block = document.createElement("div");
+  block.className = "catalog-research-guide";
+  const where = guide.where;
+  if (where?.map_id) {
+    const row = document.createElement("p");
+    row.textContent = [
+      where.place || where.marker?.label || "",
+      where.region,
+      `${where.map_label || where.map_id} X ${where.x}, Y ${where.y}`,
+    ].filter(Boolean).join(" · ");
+    const locate = document.createElement("button");
+    locate.type = "button";
+    locate.className = "catalog-locate-button";
+    locate.textContent = "Locate on Map";
+    locate.addEventListener("click", () => (where.marker
+      ? locateItemlogEntry({ map_targets: [where.marker] })
+      : locateMapPoint({ ...where, label: research.name })));
+    block.append(row, locate);
+    if (where.hint && where.hint !== research.objective) {
+      const hint = document.createElement("small");
+      hint.textContent = `In game: ${where.hint}`;
+      block.append(hint);
+    }
+    if (where.nearby) {
+      const nearby = document.createElement("small");
+      nearby.textContent = `Near ${where.nearby.label} (${formatNumber(where.nearby.distance_m, 0)} m)`;
+      block.append(nearby);
+    }
+  }
+  if (guide.photo?.max_distance_m) {
+    const photo = document.createElement("small");
+    photo.textContent = `Photo task · take the photo within ${formatNumber(guide.photo.max_distance_m, 0)} m`;
+    block.append(photo);
+  }
+  const involves = Array.isArray(guide.involves) ? guide.involves.filter((aniimo) => aniimo?.id) : [];
+  if (involves.length) {
+    const list = document.createElement("div");
+    list.className = "catalog-item-reference-grid";
+    const label = document.createElement("small");
+    label.textContent = "Involves";
+    list.append(label);
+    involves.forEach((aniimo) => {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "catalog-item-reference is-linked";
+      open.textContent = aniimo.name;
+      open.title = `Open ${aniimo.name} in the Aniilog`;
+      open.addEventListener("click", () => openAniilogRecord(aniimo.id));
+      list.append(open);
+    });
+    block.append(list);
+  }
+  return block.childElementCount ? block : null;
 }
 
 function openAniilogRecord(entryId) {
@@ -8669,7 +8758,7 @@ function setSidebarView(view) {
   stabilizeViewport();
   if (isFullPanelView(previousView)) {
     window.requestAnimationFrame(() => {
-      if (!isCatalogView()) fitMap();
+      if (!isCatalogView()) refitMapView();
     });
   }
 }
@@ -8739,8 +8828,22 @@ function scheduleMapViewportFit() {
     if (!state.data) return;
     const rect = els.mapViewport.getBoundingClientRect();
     if (!mapViewportSizeChanged(rect)) return;
-    fitMap();
+    refitMapView();
   });
+}
+
+// Fit the whole map, unless a locate has just focused a spot: then keep that spot centred.
+function refitMapView() {
+  const focus = state.lastFocus;
+  if (!focus || performance.now() - focus.at > 1500) {
+    fitMap();
+    return;
+  }
+  const rect = els.mapViewport.getBoundingClientRect();
+  state.viewportWidth = rect.width;
+  state.viewportHeight = rect.height;
+  focusSpawn(focus.spawn);
+  state.lastFocus = focus;
 }
 
 function preventControlFocus(event) {
@@ -9438,7 +9541,7 @@ function syncDomPinPositions() {
 function syncMapSectionPositions() {
   const map = currentMap();
   if (!map) return;
-  els.mapSectionShortcutLayer.querySelectorAll(".map-section-label").forEach((label) => {
+  els.mapSectionShortcutLayer.querySelectorAll(".map-section-label, .map-located-point").forEach((label) => {
     const normalizedX = Number(label.dataset.normalizedX);
     const normalizedY = Number(label.dataset.normalizedY);
     if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) return;
@@ -11555,6 +11658,8 @@ function renderSelectionDetail(detail, spawn, item) {
 }
 
 function focusSpawn(spawn) {
+  // Remembered so a view switch that would re-fit the whole map re-centres here instead.
+  state.lastFocus = { spawn, at: performance.now() };
   const rect = els.mapViewport.getBoundingClientRect();
   const locateScale = clamp(mapFitScale(rect) * 3.5, MIN_SCALE, 0.55);
   const map = currentMap();
@@ -11662,6 +11767,7 @@ function useMapDataset(mapId, dataset) {
   applyPendingAniilogLocate(true);
   applyPendingItemlogLocate(true);
   applyPendingBossLocate(true);
+  applyPendingPointLocate();
 }
 
 async function loadMapData(mapId, token) {
@@ -11902,6 +12008,7 @@ function switchMap(mapId, preserveSharedPins = false) {
     applyPendingAniilogLocate(true);
     applyPendingItemlogLocate(true);
     applyPendingBossLocate(true);
+    applyPendingPointLocate();
   }
   if (!dataset) scheduleMapDataLoad(mapId, loadToken);
 }

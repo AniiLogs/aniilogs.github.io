@@ -6652,6 +6652,36 @@ select option:hover {
   color: var(--text-soft);
 }
 
+.map-located-point {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.45), 0 0 16px rgba(var(--accent-rgb), 0.9);
+  pointer-events: none;
+}
+
+.catalog-research-guide {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--background-rgb), 0.42);
+}
+
+.catalog-research-guide p,
+.catalog-research-guide small {
+  margin: 0;
+}
+
+.catalog-research-guide .catalog-item-reference-grid {
+  align-items: center;
+}
+
 .catalog-skill-analysis {
   margin-top: 9px;
   border: 1px solid color-mix(in srgb, var(--line) 76%, var(--accent));
