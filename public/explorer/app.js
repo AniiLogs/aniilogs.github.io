@@ -6683,6 +6683,9 @@ function renderItemLogProgressionUses(progressionUses) {
 function renderItemLogClientReferences(entry) {
   const sources = Array.isArray(entry.source_references) ? entry.source_references : [];
   const unlocks = Array.isArray(entry.unlock_references) ? entry.unlock_references : [];
+  const showDeveloperRow = developerModeEnabled() && entry.client_visibility?.status === "developer-only";
+  // "How to obtain" already answers the question when the client has no direct reference.
+  if (!sources.length && !unlocks.length && !showDeveloperRow && itemlogObtainMethods(entry).length) return null;
   const section = createCatalogSection("Client references");
   const note = document.createElement("p");
   note.className = "catalog-description";
@@ -6692,7 +6695,7 @@ function renderItemLogClientReferences(entry) {
   section.append(note);
   const list = document.createElement("div");
   list.className = "catalog-requirements-list";
-  if (developerModeEnabled() && entry.client_visibility?.status === "developer-only") {
+  if (showDeveloperRow) {
     const row = document.createElement("div");
     row.className = "catalog-requirement-row";
     const label = document.createElement("strong");

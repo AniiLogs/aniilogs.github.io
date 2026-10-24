@@ -5251,6 +5251,7 @@ html[data-theme="pawney"] .catalog-record {
 .catalog-requirement-row,
 .catalog-carried-effect {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 4px;
   border-left: 2px solid rgba(var(--accent-rgb), 0.55);
