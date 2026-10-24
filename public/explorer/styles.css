@@ -6664,6 +6664,23 @@ select option:hover {
   pointer-events: none;
 }
 
+.catalog-source-proof {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.catalog-source-proof summary {
+  cursor: pointer;
+}
+
+.catalog-source-proof code {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
 .catalog-research-guide {
   display: grid;
   gap: 6px;

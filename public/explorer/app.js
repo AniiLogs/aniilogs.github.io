@@ -6541,8 +6541,40 @@ function renderItemLogObtainMethods(methods) {
       detail.textContent = method.detail;
       row.append(detail);
     }
+    appendSourceProof(row, method?.chain);
   });
   section.append(list);
+  return section;
+}
+
+// Each source row's game-table chain, gathered into one collapsed "Game-file proof" per row box.
+function appendSourceProof(row, chain) {
+  const chains = Array.isArray(chain) ? chain.filter(Boolean) : [];
+  if (!chains.length) return;
+  let proof = row.querySelector(":scope > .catalog-source-proof");
+  if (!proof) {
+    proof = document.createElement("details");
+    proof.className = "catalog-source-proof";
+    const summary = document.createElement("summary");
+    summary.textContent = "Game-file proof";
+    proof.append(summary);
+    row.append(proof);
+  }
+  chains.forEach((link) => {
+    const line = document.createElement("code");
+    line.textContent = link;
+    proof.append(line);
+  });
+  row.append(proof);
+}
+
+function renderItemLogAvailability(availability) {
+  if (!availability?.note || availability.status === "sourced") return null;
+  const section = createCatalogSection("Availability");
+  const note = document.createElement("p");
+  note.className = "catalog-description";
+  note.textContent = availability.note;
+  section.append(note);
   return section;
 }
 
@@ -6799,6 +6831,7 @@ function renderItemLogMapTargets(entry) {
     locate.textContent = "Locate on Map";
     locate.addEventListener("click", () => locateItemlogEntry(entry, target));
     row.append(label, detail, locate);
+    appendSourceProof(row, target.chain);
     list.append(row);
   });
   section.append(list);
@@ -6895,6 +6928,7 @@ function renderItemLogClientReferences(entry) {
       locate.addEventListener("click", () => locateItemlogEntry({ map_targets: [source.map_target] }));
       row.append(locate);
     }
+    appendSourceProof(row, source.chain);
     list.append(row);
   }
   for (const unlock of unlocks) {
@@ -7153,6 +7187,7 @@ function renderRvExpeditionSources(entry) {
       ? `x${formatNumber(source.quantity_min)}–${formatNumber(source.quantity_max)}`
       : "Possible reward";
     row.append(park, trip, kind, quantity);
+    if (Array.isArray(source.chain) && source.chain.length) row.title = `Game-file proof: ${source.chain.join("; ")}`;
     list.append(row);
   });
   section.append(list);
@@ -7568,6 +7603,8 @@ function renderItemLogCatalogRecord(entry) {
     details.append(facts);
     record.append(details);
   }
+  const availability = renderItemLogAvailability(entry.availability);
+  if (availability) record.append(availability);
   const mapTargets = renderItemLogMapTargets(entry);
   if (mapTargets) record.append(mapTargets);
   const variants = renderItemLogVariants(entry);
