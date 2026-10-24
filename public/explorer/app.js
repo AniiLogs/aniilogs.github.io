@@ -6529,6 +6529,9 @@ function renderItemLogObtainMethods(methods) {
       row.className = "catalog-obtain-row";
       const label = document.createElement("strong");
       label.textContent = labelText;
+      // The game-table join behind this kind of source, for auditing.
+      const chain = state.itemlogData?.obtain_source_chains?.[labelText];
+      if (chain) label.title = `Source tables: ${chain}`;
       row.append(label);
       rowsByLabel.set(labelText, row);
       list.append(row);
