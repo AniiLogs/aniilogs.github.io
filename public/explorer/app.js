@@ -546,6 +546,7 @@ const state = {
   checklistCategory: "aniimo",
   luminChecklistTab: "ambers",
   checklistSearch: "",
+  checklistMissingSparkling: false,
   itemlogData: null,
   itemlogLoadError: "",
   itemlogLoadPromise: null,
@@ -8620,6 +8621,54 @@ function renderLuminGuide() {
   return section;
 }
 
+function checklistSparklingStateId(entry) {
+  return (entry?.completion_states || [])
+    .find((completionState) => String(completionState?.id || "").endsWith(":sparkling"))?.id || "";
+}
+
+// Sparkling progress per form, with the regional research bonus that each form's first Sparkling earns.
+function renderChecklistSparklingSummary(entries) {
+  const forms = entries.filter((entry) => entry?.kind === "aniimo_form" && checklistSparklingStateId(entry));
+  if (!forms.length) return null;
+  const hasSparkling = (entry) => state.completed.has(checklistSparklingStateId(entry));
+  const section = document.createElement("section");
+  section.className = "checklist-sparkling-summary";
+  const heading = document.createElement("div");
+  heading.className = "checklist-section-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Sparkling forms";
+  const count = document.createElement("span");
+  count.textContent = `${forms.filter(hasSparkling).length} / ${forms.length}`;
+  heading.append(title, count);
+  section.append(heading);
+
+  const bonus = state.checklistData?.sparkling_collection_bonus;
+  const regionForms = bonus ? forms.filter((entry) => entry?.research_country?.id === bonus.research_country_id) : [];
+  if (bonus && regionForms.length) {
+    const caught = regionForms.filter(hasSparkling).length;
+    const points = Number(bonus.points_per_form) || 0;
+    const note = document.createElement("p");
+    note.textContent = `${bonus.research_country_name || "Regional"} research: +${formatNumber(caught * points)} points from ${caught} / ${regionForms.length} forms. `
+      + `The first Sparkling of each form gives +${points}, so every form of the same Aniimo counts separately.`;
+    section.append(note);
+  }
+
+  const filter = document.createElement("label");
+  filter.className = "checklist-toggle checklist-sparkling-filter";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = Boolean(state.checklistMissingSparkling);
+  input.addEventListener("change", () => {
+    state.checklistMissingSparkling = input.checked;
+    renderChecklist();
+  });
+  const label = document.createElement("span");
+  label.textContent = "Only forms missing a Sparkling";
+  filter.append(input, label);
+  section.append(filter);
+  return section;
+}
+
 function renderChecklistSpecialSection() {
   const visibleEntries = checklistSpecialEntries().filter(checklistEntryMatches);
   if (!visibleEntries.length) return null;
@@ -8730,7 +8779,12 @@ function renderChecklist() {
   const entries = checklistEntriesForActiveTab();
   const progress = checklistProgress(entries);
   els.checklistCount.textContent = `${progress.completed} / ${progress.total}`;
-  const visibleEntries = entries.filter(checklistEntryMatches);
+  const missingSparklingOnly = state.checklistCategory === "aniimo" && state.checklistMissingSparkling;
+  const visibleEntries = entries.filter(checklistEntryMatches).filter((entry) => {
+    if (!missingSparklingOnly) return true;
+    const sparklingId = checklistSparklingStateId(entry);
+    return Boolean(sparklingId) && !state.completed.has(sparklingId);
+  });
   const fragment = document.createDocumentFragment();
   let renderedSections = 0;
   if (state.checklistCategory === "ambers") {
@@ -8746,6 +8800,8 @@ function renderChecklist() {
       fragment.append(specialSection);
       renderedSections += 1;
     }
+    const sparklingSummary = renderChecklistSparklingSummary(entries);
+    if (sparklingSummary) fragment.append(sparklingSummary);
   }
   if (visibleEntries.length) {
     const section = document.createElement("section");
@@ -8760,7 +8816,9 @@ function renderChecklist() {
   if (!renderedSections) {
     const empty = document.createElement("div");
     empty.className = "checklist-empty";
-    empty.textContent = state.checklistSearch ? "No matching checklist entries" : "No checklist entries available";
+    empty.textContent = missingSparklingOnly
+      ? "Every form here has a Sparkling checked"
+      : state.checklistSearch ? "No matching checklist entries" : "No checklist entries available";
     fragment.append(empty);
   }
   els.checklistList.append(fragment);
