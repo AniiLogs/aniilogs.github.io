@@ -653,6 +653,7 @@ test("release relay preserves reviewed data, image, video, and model outputs", a
   const publicPaths = [
     "data/aniilog_data.json",
     "data/rarity-manifest.remote.json",
+    "data/team_builder_data.json",
     "data/i18n/en.json",
     "data/maps/country-of-time.json",
     "assets/icons/aniimo.png",

@@ -21,6 +21,7 @@ const PUBLIC_RELEASE_DATA = new Set([
   "map_site_data.json",
   "petmanual-artwork-manifest.remote.json",
   "rarity-manifest.remote.json",
+  "team_builder_data.json",
 ]);
 const PRIVATE_RELEASE_SEGMENTS = new Set([
   "qa", "private", "private-extract", "source", "src", "renderer", "shader", "shaders",
