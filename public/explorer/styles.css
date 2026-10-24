@@ -2547,6 +2547,103 @@ ul.team-skill-operations .team-skill-operation {
   padding-right: 2px;
 }
 
+.checklist-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: clamp(16px, 2vw, 30px);
+}
+
+.checklist-panel[hidden] {
+  display: none;
+}
+
+.checklist-panel-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid rgba(80, 96, 103, 0.72);
+  padding-bottom: 14px;
+}
+
+.checklist-panel-header h1 {
+  margin: 0;
+  font-size: clamp(24px, 2.4vw, 34px);
+}
+
+.checklist-panel-kicker {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.checklist-panel-progress {
+  display: grid;
+  min-width: min(260px, 40vw);
+  justify-items: end;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.checklist-progress-bar {
+  display: block;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(80, 96, 103, 0.5);
+}
+
+.checklist-progress-bar span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 160ms ease;
+}
+
+.checklist-panel .checklist-list {
+  flex: 0 0 auto;
+  gap: 16px;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.checklist-panel .checklist-section-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+  gap: 8px;
+}
+
+.checklist-panel .checklist-sparkling-summary p,
+.checklist-panel .checklist-special-section p,
+.checklist-panel .checklist-section-heading span {
+  font-size: 13px;
+}
+
+.checklist-panel .checklist-section-heading strong {
+  font-size: 15px;
+}
+
+.checklist-sync-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .checklist-empty {
   color: var(--muted);
   font-size: 13px;
@@ -9982,6 +10079,7 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     padding: 20px 12px;
   }
 
+  .map-panel.catalog-active .checklist-panel,
   .map-panel.catalog-active .team-panel {
     position: static;
     width: 100%;
@@ -10119,6 +10217,21 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     max-height: min(46dvh, 380px);
     flex: 0 0 auto;
     overscroll-behavior: contain;
+  }
+
+  .checklist-panel .checklist-list {
+    max-height: none;
+  }
+
+  .checklist-panel-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .checklist-panel-progress {
+    min-width: 0;
+    justify-items: start;
   }
 
   .checklist-row {

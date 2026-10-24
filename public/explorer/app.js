@@ -672,6 +672,7 @@ const els = {
   topNavMap: document.querySelector("#topNavMap"),
   topNavAniilog: document.querySelector("#topNavAniilog"),
   topNavItemlog: document.querySelector("#topNavItemlog"),
+  topNavChecklist: document.querySelector("#topNavChecklist"),
   topNavTeam: document.querySelector("#topNavTeam"),
   topNavProfiles: document.querySelector("#topNavProfiles"),
   topbarContext: document.querySelector("#topbarContext"),
@@ -689,7 +690,6 @@ const els = {
   workspaceTabs: document.querySelector("#workspaceTabs"),
   mapWorkspaceTab: document.querySelector("#mapWorkspaceTab"),
   trackingWorkspaceTab: document.querySelector("#trackingWorkspaceTab"),
-  checklistWorkspaceTab: document.querySelector("#checklistWorkspaceTab"),
   aniilogWorkspaceTab: document.querySelector("#aniilogWorkspaceTab"),
   itemlogWorkspaceTab: document.querySelector("#itemlogWorkspaceTab"),
   teamWorkspaceTab: document.querySelector("#teamWorkspaceTab"),
@@ -716,6 +716,11 @@ const els = {
   luminChecklistTabs: document.querySelector("#luminChecklistTabs"),
   checklistSearchInput: document.querySelector("#checklistSearchInput"),
   checklistList: document.querySelector("#checklistList"),
+  checklistPanel: document.querySelector("#checklistPanel"),
+  checklistPanelTitle: document.querySelector("#checklistPanelTitle"),
+  checklistPanelCount: document.querySelector("#checklistPanelCount"),
+  checklistProgressFill: document.querySelector("#checklistProgressFill"),
+  checklistSyncNote: document.querySelector("#checklistSyncNote"),
   settingsContent: document.querySelector("#settingsContent"),
   mapTabs: document.querySelector("#mapTabs"),
   searchInput: document.querySelector("#searchInput"),
@@ -3590,7 +3595,7 @@ function isCatalogView(view = state.sidebarView) {
 }
 
 function isFullPanelView(view = state.sidebarView) {
-  return isCatalogView(view) || view === "team";
+  return isCatalogView(view) || view === "team" || view === "checklist";
 }
 
 const ANIILOG_CLASS_ORDER = Object.freeze(["DPS", "REGEN", "BREAK", "HEALER", "SUPPORT"]);
@@ -9054,6 +9059,7 @@ async function locateChecklistLuminEntry(entry) {
   const mapId = String(entry?.map_id || "").trim();
   if (!completionId || !mapId || !state.data?.mapsById.has(mapId)) return;
 
+  if (state.sidebarView === "checklist") showWorkspaceView("map");
   if (state.activeMapId !== mapId) switchMap(mapId);
 
   try {
@@ -9342,8 +9348,13 @@ function renderChecklist() {
   els.luminChecklistTabs.hidden = true;
   els.checklistList.textContent = "";
 
+  els.checklistSyncNote.textContent = state.cloudSyncAuthenticated
+    ? "Saved in this browser and synced to your account."
+    : "Saved in this browser. Sign in to keep it on your account.";
   if (!state.checklistData) {
     els.checklistCount.textContent = state.checklistLoadError ? "Unavailable" : "Loading";
+    els.checklistPanelCount.textContent = els.checklistCount.textContent;
+    els.checklistProgressFill.style.width = "0%";
     const message = document.createElement("div");
     message.className = "checklist-empty";
     message.textContent = state.checklistLoadError || "Loading checklist data...";
@@ -9389,6 +9400,14 @@ function renderChecklist() {
   const entries = checklistEntriesForActiveTab();
   const progress = checklistProgress(entries);
   els.checklistCount.textContent = `${progress.completed} / ${progress.total}`;
+  const activeCategory = categories.find((category) => category?.id === state.checklistCategory);
+  const activeLuminTab = state.checklistCategory === "ambers"
+    ? LUMIN_CHECKLIST_TABS.find((tab) => tab.id === state.luminChecklistTab)
+    : null;
+  els.checklistPanelTitle.textContent = [activeCategory?.label || state.checklistCategory, activeLuminTab?.label]
+    .filter(Boolean).join(" · ");
+  els.checklistPanelCount.textContent = els.checklistCount.textContent;
+  els.checklistProgressFill.style.width = `${progress.total ? (progress.completed / progress.total) * 100 : 0}%`;
   const missingSparklingOnly = state.checklistCategory === "aniimo" && state.checklistMissingSparkling;
   const visibleEntries = entries.filter(checklistEntryMatches).filter((entry) => {
     if (!missingSparklingOnly) return true;
@@ -9438,15 +9457,15 @@ function updateWorkspaceTabs() {
   const workspaces = {
     map: { tab: els.mapWorkspaceTab, panel: els.mapWorkspace },
     tracking: { tab: els.trackingWorkspaceTab, panel: els.trackingWorkspace },
-    checklist: { tab: els.checklistWorkspaceTab, panel: els.checklistWorkspace },
+    checklist: { panel: els.checklistWorkspace },
     aniilog: { tab: els.aniilogWorkspaceTab },
     itemlog: { tab: els.itemlogWorkspaceTab },
     team: { tab: els.teamWorkspaceTab, panel: els.teamWorkspace },
   };
   Object.entries(workspaces).forEach(([view, workspace]) => {
     const selected = state.sidebarView === view;
-    workspace.tab.setAttribute("aria-selected", String(selected));
-    workspace.tab.tabIndex = selected ? 0 : -1;
+    workspace.tab?.setAttribute("aria-selected", String(selected));
+    if (workspace.tab) workspace.tab.tabIndex = selected ? 0 : -1;
     if (workspace.panel) workspace.panel.hidden = !selected;
   });
 
@@ -9463,14 +9482,17 @@ function updateWorkspaceTabs() {
   els.mapSurface.hidden = fullPanelView;
   els.catalogPanel.hidden = !catalogView;
   els.teamPanel.hidden = state.sidebarView !== "team";
+  els.checklistPanel.hidden = state.sidebarView !== "checklist";
   els.mapPanel.classList.toggle("catalog-active", fullPanelView);
   document.body.classList.toggle("catalog-view-active", fullPanelView);
   els.topNavMap?.removeAttribute("aria-current");
   els.topNavAniilog?.removeAttribute("aria-current");
   els.topNavItemlog?.removeAttribute("aria-current");
+  els.topNavChecklist?.removeAttribute("aria-current");
   els.topNavTeam?.removeAttribute("aria-current");
   if (state.sidebarView === "aniilog") els.topNavAniilog?.setAttribute("aria-current", "page");
   else if (state.sidebarView === "itemlog") els.topNavItemlog?.setAttribute("aria-current", "page");
+  else if (state.sidebarView === "checklist") els.topNavChecklist?.setAttribute("aria-current", "page");
   else if (state.sidebarView === "team") els.topNavTeam?.setAttribute("aria-current", "page");
   else els.topNavMap?.setAttribute("aria-current", "page");
   els.topNavProfiles?.removeAttribute("aria-current");
@@ -9478,7 +9500,7 @@ function updateWorkspaceTabs() {
     els.topbarContext.textContent = {
       map: "Map",
       tracking: "Map · Tracking",
-      checklist: "Map · Checklist",
+      checklist: "Checklist",
       aniilog: "Aniilog",
       itemlog: "Item-log",
       team: "Team",
@@ -9674,15 +9696,19 @@ function renderTeamBuilder() {
   });
 }
 
-function openWorkspaceFromNavigation(event, view) {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  if (!ENABLED_WORKSPACE_VIEWS.has(view)) return;
-  event.preventDefault();
+function showWorkspaceView(view) {
   setSidebarView(view);
   const url = new URL(window.location.href);
   if (view === "map") url.searchParams.delete("view");
   else url.searchParams.set("view", view);
   window.history.pushState({ workspaceView: view }, "", url);
+}
+
+function openWorkspaceFromNavigation(event, view) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!ENABLED_WORKSPACE_VIEWS.has(view)) return;
+  event.preventDefault();
+  showWorkspaceView(view);
 }
 
 function renderMapSections() {
@@ -12850,13 +12876,13 @@ function bindEvents() {
   });
   els.mapWorkspaceTab.addEventListener("click", () => setSidebarView("map"));
   els.trackingWorkspaceTab.addEventListener("click", () => setSidebarView("tracking"));
-  els.checklistWorkspaceTab.addEventListener("click", () => setSidebarView("checklist"));
   els.aniilogWorkspaceTab.addEventListener("click", () => setSidebarView("aniilog"));
   els.itemlogWorkspaceTab.addEventListener("click", () => setSidebarView("itemlog"));
   els.teamWorkspaceTab.addEventListener("click", () => setSidebarView("team"));
   els.topNavMap?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "map"));
   els.topNavAniilog?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "aniilog"));
   els.topNavItemlog?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "itemlog"));
+  els.topNavChecklist?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "checklist"));
   window.addEventListener("popstate", () => {
     const view = new URLSearchParams(window.location.search).get("view") || "map";
     setSidebarView(ENABLED_WORKSPACE_VIEWS.has(view) ? view : "map");
@@ -13137,7 +13163,7 @@ async function init() {
     els.filterCount.textContent = "Unavailable";
     els.itemList.innerHTML = '<div class="content-unavailable-sidebar">Map markers and filters will return with the reviewed snapshot.</div>';
     [els.searchInput, els.selectAllButton, els.selectNoneButton, els.showCollectedInput, els.sharePinsButton,
-      els.mapWorkspaceTab, els.trackingWorkspaceTab, els.checklistWorkspaceTab].forEach((control) => {
+      els.mapWorkspaceTab, els.trackingWorkspaceTab].forEach((control) => {
       control.disabled = true;
     });
     els.topNavItemlog.removeAttribute("href");

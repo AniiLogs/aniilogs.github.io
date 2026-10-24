@@ -31,6 +31,7 @@
         <a id="topNavMap" href="/explorer/">Map</a>
         <a id="topNavAniilog" class="nav-disabled" aria-disabled="true" title="Withheld until current-build numbering is verified">Aniilog</a>
         <a id="topNavItemlog" href="/explorer/?view=itemlog">Item-log</a>
+        <a id="topNavChecklist" href="/explorer/?view=checklist">Checklist</a>
         <a id="topNavTeam" href="/explorer/?view=team">Team Builder</a>
         <a id="topNavLeaderboards" href="/leaderboard/">Leaderboards</a>
         <a id="topNavCompanion" href="/companion/">Companion App</a>
@@ -102,7 +103,6 @@
         <div id="workspaceTabs" class="workspace-tabs" role="tablist" aria-label="Sidebar views">
           <button id="mapWorkspaceTab" class="workspace-tab" data-workspace-view="map" type="button" role="tab" aria-controls="mapWorkspace" aria-selected="true">Map</button>
           <button id="trackingWorkspaceTab" class="workspace-tab" data-workspace-view="tracking" type="button" role="tab" aria-controls="trackingWorkspace" aria-selected="false">Tracking</button>
-          <button id="checklistWorkspaceTab" class="workspace-tab" data-workspace-view="checklist" type="button" role="tab" aria-controls="checklistWorkspace" aria-selected="false" title="Current build local preview">Checklist</button>
           <button id="aniilogWorkspaceTab" class="workspace-tab" data-workspace-view="aniilog" type="button" role="tab" aria-controls="catalogWorkspace" aria-selected="false" title="Withheld until current-build numbering is verified" disabled hidden>Aniilog · audit</button>
           <button id="itemlogWorkspaceTab" class="workspace-tab" data-workspace-view="itemlog" type="button" role="tab" aria-controls="catalogWorkspace" aria-selected="false" hidden>Item-log</button>
           <button id="teamWorkspaceTab" class="workspace-tab" data-workspace-view="team" type="button" role="tab" aria-controls="teamWorkspace" aria-selected="false" hidden>Team</button>
@@ -157,7 +157,7 @@
           <div id="trackingList" class="tracking-list"></div>
         </section>
 
-        <section id="checklistWorkspace" class="checklist-workspace" role="tabpanel" aria-labelledby="checklistWorkspaceTab" hidden>
+        <section id="checklistWorkspace" class="checklist-workspace" role="region" aria-labelledby="topNavChecklist" hidden>
           <div class="panel-heading">
             <h2>Checklist</h2>
             <span id="checklistCount" class="filter-count" aria-live="polite">Loading</span>
@@ -166,7 +166,7 @@
           <div id="luminChecklistTabs" class="lumin-checklist-tabs" role="tablist" aria-label="Lumin checklist sources" hidden></div>
           <label class="search-label" for="checklistSearchInput">Search</label>
           <input id="checklistSearchInput" class="search" type="search" autocomplete="off" placeholder="Aniimo, form, or location">
-          <div id="checklistList" class="checklist-list" aria-live="polite"></div>
+          <p id="checklistSyncNote" class="checklist-sync-note">Saved in this browser. Sign in to keep it on your account.</p>
         </section>
 
         <section id="catalogWorkspace" class="catalog-workspace" role="tabpanel" aria-labelledby="aniilogWorkspaceTab" hidden>
@@ -250,6 +250,19 @@
         </div>
         <section id="catalogPanel" class="catalog-panel" role="region" aria-live="polite" hidden></section>
         <section id="teamPanel" class="team-panel" role="region" aria-live="polite" hidden></section>
+        <section id="checklistPanel" class="checklist-panel" role="region" aria-labelledby="checklistPanelTitle" hidden>
+          <header class="checklist-panel-header">
+            <div>
+              <p class="checklist-panel-kicker">Checklist</p>
+              <h1 id="checklistPanelTitle">Aniimo</h1>
+            </div>
+            <div class="checklist-panel-progress">
+              <span id="checklistPanelCount" aria-live="polite"></span>
+              <span class="checklist-progress-bar" aria-hidden="true"><span id="checklistProgressFill"></span></span>
+            </div>
+          </header>
+          <div id="checklistList" class="checklist-list" aria-live="polite"></div>
+        </section>
       </section>
     </main>
 

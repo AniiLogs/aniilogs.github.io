@@ -289,6 +289,21 @@ test("logs are top-level sections while the Map sidebar contains only map tools"
   assert.match(explorer, /state\.sidebarView === "team"\) els\.topNavTeam/u);
 });
 
+test("the checklist is its own top-level section with unchanged completion ids", () => {
+  assert.match(landingHtml, /href="\/explorer\/\?view=checklist"[^>]*>Checklist</u);
+  assert.match(explorerHtml, /id="topNavChecklist" href="\/explorer\/\?view=checklist"[^>]*>Checklist</u);
+  assert.doesNotMatch(explorerHtml, /id="checklistWorkspaceTab"/u);
+  assert.match(explorerHtml, /<section id="checklistPanel"[\s\S]*?<div id="checklistList"/u);
+  assert.match(explorer, /view === "team" \|\| view === "checklist"/u);
+  assert.match(explorer, /els\.checklistPanel\.hidden = state\.sidebarView !== "checklist"/u);
+  assert.match(explorer, /state\.sidebarView === "checklist"\) els\.topNavChecklist/u);
+  assert.match(explorer, /els\.topNavChecklist\?\.addEventListener\("click", \(event\) => openWorkspaceFromNavigation\(event, "checklist"\)\)/u);
+  // Locate leaves the checklist page for the map; progress keys stay the same so saved progress carries over.
+  assert.match(explorer, /if \(state\.sidebarView === "checklist"\) showWorkspaceView\("map"\);/u);
+  assert.match(explorer, /return `amber:\$\{sourceType\}:\$\{mapId\}:\$\{sceneId\}:\$\{coordinateKey\}:collected`;/u);
+  assert.match(explorerStyles, /\.checklist-panel \.checklist-section-rows \{[^}]*grid-template-columns: repeat\(auto-fill/u);
+});
+
 test("Team Builder mounts the skill and synergy builder from reviewed release data", () => {
   assert.match(explorer, /ENABLED_WORKSPACE_VIEWS = new Set\(\["map", "tracking", "checklist", "itemlog", "team"\]\)/u);
   assert.match(explorer, /TEAM_BUILDER_DATA_URL = SITE_CONFIG\.teamBuilderDataUrl \|\| contentUrl\("\.\/data\/team_builder_data\.json"\)/u);
