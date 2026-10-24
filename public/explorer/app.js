@@ -3466,6 +3466,24 @@ function itemlogCategoryCount(category, entries = allCatalogEntriesForView("item
   return entries.filter((entry) => itemlogEntryMatchesCategory(entry, category)).length;
 }
 
+// Rarity tiers from lowest to highest; an item without a tier sorts below Common, and the top tier
+// (Prismatic, also called Mythic) sorts above Legendary.
+const ITEMLOG_QUALITY_RANK = new Map([
+  ["common", 1], ["uncommon", 2], ["rare", 3], ["epic", 4], ["legendary", 5],
+  ["prismatic", 6], ["mythic", 6], ["mythical", 6],
+]);
+
+function itemlogQualityRank(quality) {
+  return ITEMLOG_QUALITY_RANK.get(String(quality || "").trim().toLowerCase()) || 0;
+}
+
+function compareItemlogVariants(left, right) {
+  return compareText(left?.name, right?.name)
+    || itemlogQualityRank(left?.quality) - itemlogQualityRank(right?.quality)
+    || compareText(left?.variant_label, right?.variant_label)
+    || compareText(left?.id, right?.id);
+}
+
 function itemlogMethodSourceId(label) {
   return `${ITEMLOG_SOURCE_METHOD_PREFIX}${String(label || "").trim()}`;
 }
@@ -3503,10 +3521,11 @@ function itemlogMethodSourceOptions(entries = allCatalogEntriesForView("itemlog"
     const quality = String(entry?.quality || "").trim();
     if (quality) qualityCounts.set(quality, (qualityCounts.get(quality) || 0) + 1);
   });
-  [...qualityCounts].sort(([left], [right]) => compareText(left, right)).forEach(([quality, count]) => {
-    options.push({ id: `quality:${quality}`, label: quality, count });
-  });
-  return [...options, ...methods.values()].sort((left, right) => compareText(left.label, right.label));
+  // Rarity filters follow the tier order (lowest to highest) after the alphabetical source filters.
+  const qualityOptions = [...qualityCounts]
+    .sort(([left], [right]) => itemlogQualityRank(left) - itemlogQualityRank(right))
+    .map(([quality, count]) => ({ id: `quality:${quality}`, label: quality, count }));
+  return [...[...options, ...methods.values()].sort((left, right) => compareText(left.label, right.label)), ...qualityOptions];
 }
 
 function itemlogEntryMatchesFilter(entry, selectedSource, park = "all", tier = "all") {
@@ -3585,12 +3604,7 @@ function catalogEntriesForView(view = state.sidebarView) {
   }
   if (view === "aniilog") return sortAniilogEntries(entries);
   if (view === "itemlog") {
-    return [...entries].sort((left, right) => (
-      compareText(left?.name, right?.name)
-      || compareText(left?.variant_label, right?.variant_label)
-      || compareText(left?.quality, right?.quality)
-      || compareText(left?.id, right?.id)
-    ));
+    return [...entries].sort(compareItemlogVariants);
   }
   return entries;
 }
@@ -6842,7 +6856,7 @@ function renderItemLogVariants(entry) {
   const key = String(entry.name || "").trim().toLocaleLowerCase("en");
   const siblings = allCatalogEntriesForView("itemlog").filter((candidate) => (
     candidate.id !== entry.id && String(candidate.name || "").trim().toLocaleLowerCase("en") === key
-  ));
+  )).sort(compareItemlogVariants);
   if (!siblings.length) return null;
   const section = createCatalogSection("Same-name variants");
   const facts = (Array.isArray(entry.variant_facts) ? entry.variant_facts : [])
