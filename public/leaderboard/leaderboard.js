@@ -17,11 +17,11 @@
     ],
     // Skeleton: the meter doesn't read Egg Heist results yet; entries can only come in through the API for now.
     eggheist: [
-      { kind: "eggheist_match", label: "Matches", sorts: ["score", "placement"], fields: ["party"] },
+      { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars"], fields: ["cycle"] },
     ],
   });
   const SORT_LABELS = Object.freeze({
-    score: "Score", placement: "Best placement", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
+    standing: "Rank", score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
@@ -47,11 +47,13 @@
       { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
       { label: "Week", value: (e) => e.cycle || "—" },
     ],
-    eggheist_match: [
-      { label: "Score", sort: "score", value: (e) => number(e.score) },
-      { label: "Placement", sort: "placement", value: (e) => (e.placement ? `#${e.placement}` : "—") },
-      { label: "Party", value: (e) => number(e.partySize) },
-      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
+    eggheist_season: [
+      { label: "Rank", sort: "standing", value: (e) => e.seasonRank?.name || (e.seasonRank?.tier ? `Tier ${e.seasonRank.tier}` : "—") },
+      { label: "Rank points", sort: "score", value: (e) => number(e.score) },
+      // Stars only exist at the top rank (Egg Emperor)
+      { label: "Emperor stars", sort: "stars", value: (e) => (e.seasonRank?.tier === 7 || e.stars ? number(e.stars) : "—") },
+      { label: "Season", value: (e) => e.cycle || "—" },
+      { label: "Updated", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
       { label: "Clear time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
@@ -176,6 +178,7 @@
   }
   function renderControls() {
     $("[data-mode-note]").hidden = state.mode !== "eggheist";
+    $("[data-cycle-label]").textContent = state.mode === "eggheist" ? "Season" : "Week";
     document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
       tab.setAttribute("aria-selected", String(tab.dataset.modeTab === state.mode));
     });
@@ -196,7 +199,9 @@
     const facets = await response.json();
     state.facets = facets;
     const f = els.filters.elements;
-    fillSelect(f.cycle, facets.cycles.map((row) => ({ value: row.value, label: `Cycle ${row.value}` })), "All weeks");
+    const seasonMode = state.mode === "eggheist";
+    fillSelect(f.cycle, facets.cycles.map((row) => ({ value: row.value, label: seasonMode ? `Season ${row.value}` : `Cycle ${row.value}` })),
+      seasonMode ? "All seasons" : "All weeks");
     fillSelect(f.boss, facets.bosses.map((row) => ({ value: row.id, label: row.name || row.id })), "All bosses");
     fillSelect(f.level, facets.levels.map((row) => ({ value: row.value, label: `Lv ${row.value}` })), "Any");
     fillSelect(f.party, facets.partySizes.map((row) => ({ value: row.value, label: row.value === 1 ? "Solo" : `${row.value} players` })), "Any size");
@@ -230,7 +235,7 @@
   }
   function currentOrder() {
     if (state.order) return state.order;
-    return state.sort === "clear_time_s" || state.sort === "placement" ? "asc" : "desc";
+    return state.sort === "clear_time_s" ? "asc" : "desc";
   }
   function detailRow(entry, span) {
     const parts = [];

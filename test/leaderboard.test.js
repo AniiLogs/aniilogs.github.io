@@ -279,22 +279,32 @@ test("characters link to one account, show on the board, and protect submissions
   assert.equal((await call(env, "/api/leaderboard/characters/302000105986", { token: dev2Token, method: "DELETE" })).status, 200);
 });
 
-test("Egg Heist matches rank by score or by best placement", async () => {
+test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {
   const { env } = await setup();
   const devToken = await desktopToken(env, SESSIONS.dev);
   const dev2Token = await desktopToken(env, SESSIONS.dev2);
-  const match = (id, score, placement) => ({ kind: "eggheist_match", clientRunId: id, score, placement, partySize: 2 });
-  for (const [token, body] of [[devToken, match("e1", 1200, 3)], [devToken, match("e2", 900, 1)], [dev2Token, match("e3", 1500, 2)]]) {
-    assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", body })).status, 201);
-  }
-  assert.match(leaderboardSubmission(match("bad", 10, 0)).error, /placement/u);
+  const standing = (id, season, tier, subtier, name, points, stars = null) => ({
+    kind: "eggheist_season", clientRunId: id, cycle: season, rank: { tier, subtier, name }, score: points, stars,
+  });
+  const submit = async (token, body) => (await call(env, "/api/leaderboard/submissions", { token, method: "POST", body })).status;
+  assert.equal(await submit(devToken, standing("eh-S1", "S1", 3, 2, "Pro Egg Snatcher III", 1277)), 201);
+  assert.equal(await submit(devToken, standing("eh-S1", "S1", 7, 1, "Egg Emperor", 2900, 475)), 200);   // same season: updated
+  assert.equal(await submit(dev2Token, standing("eh-S1", "S1", 7, 1, "Egg Emperor", 3100, 300)), 201);
+  assert.equal(await submit(dev2Token, standing("eh-S0", "S0", 4, 1, "Elite Egg Seeker IV", 2400)), 201);
+  assert.match(leaderboardSubmission(standing("bad", "S1", 8, 1, "Nope", 1)).error, /rankTier/u);
+
   const get = async (query) => (await call(env, `/api/leaderboard/entries?${query}`, { session: SESSIONS.dev })).json();
-  const byScore = await get("kind=eggheist_match");
-  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score]), [["dev2 name", 1500], ["dev name", 1200]]);
-  const byPlacement = await get("kind=eggheist_match&sort=placement");
-  assert.equal(byPlacement.order, "asc");
-  assert.deepEqual(byPlacement.entries.map((entry) => [entry.player, entry.placement]), [["dev name", 1], ["dev2 name", 2]]);
+  const s1 = await get("kind=eggheist_season&cycle=S1");
+  assert.equal(s1.sort, "standing");
+  // Both Emperors; more stars first even though the other has more rank points.
+  assert.deepEqual(s1.entries.map((entry) => [entry.player, entry.seasonRank.name, entry.stars]),
+    [["dev name", "Egg Emperor", 475], ["dev2 name", "Egg Emperor", 300]]);
+  const all = await get("kind=eggheist_season");
+  // One standing per player per season; Emperors above a lower tier with more points.
+  assert.deepEqual(all.entries.map((entry) => [entry.player, entry.cycle, entry.seasonRank.tier]),
+    [["dev name", "S1", 7], ["dev2 name", "S1", 7], ["dev2 name", "S0", 4]]);
+  const byPoints = await get("kind=eggheist_season&sort=score");
+  assert.deepEqual(byPoints.entries.map((entry) => entry.score), [3100, 2900, 2400]);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist", { session: SESSIONS.dev })).json();
-  assert.equal(facets.mode, "eggheist");
-  assert.deepEqual(facets.kinds, [{ value: "eggheist_match", count: 3 }]);
+  assert.deepEqual(facets.cycles.map((row) => row.value), ["S1", "S0"]);
 });

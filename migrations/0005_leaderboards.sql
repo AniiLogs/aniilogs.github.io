@@ -21,12 +21,13 @@ CREATE INDEX IF NOT EXISTS leaderboard_tokens_discord_idx ON leaderboard_tokens(
 --   interlink_week  weekly best total across the cycle's bosses (Challenge Stats)
 --   interlink_best  best score on one boss (battle prep screen)
 --   sim_run         one Holo-Battle Sim run: final clear time, floors, rogue buffs taken
---   eggheist_match  one Egg Heist match: score and finishing placement (skeleton until the meter reads it)
+--   eggheist_season a player's Egg Heist season standing: rank tier/sub-tier, rank points (score) and, at Egg
+--                   Emperor, stars (skeleton until the meter reads the Rank Info screen)
 CREATE TABLE IF NOT EXISTS leaderboard_submissions (
   submission_id TEXT PRIMARY KEY,
   discord_id TEXT NOT NULL,
   mode TEXT NOT NULL CHECK (mode IN ('interlink', 'sim', 'eggheist')),
-  kind TEXT NOT NULL CHECK (kind IN ('interlink_run', 'interlink_week', 'interlink_best', 'sim_run', 'eggheist_match')),
+  kind TEXT NOT NULL CHECK (kind IN ('interlink_run', 'interlink_week', 'interlink_best', 'sim_run', 'eggheist_season')),
   client_run_id TEXT NOT NULL,
   game_uid TEXT,
   cycle TEXT,
@@ -34,7 +35,9 @@ CREATE TABLE IF NOT EXISTS leaderboard_submissions (
   boss_name TEXT,
   boss_level INTEGER,
   score INTEGER,
-  placement INTEGER,
+  rank_tier INTEGER,
+  rank_subtier INTEGER,
+  rank_name TEXT,
   stars INTEGER,
   clear_time_s REAL,
   cleared INTEGER,
