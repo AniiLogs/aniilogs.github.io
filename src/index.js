@@ -1008,6 +1008,7 @@ async function deleteOwnAccount(request, env) {
     env.DB.prepare("DELETE FROM auth_handoffs WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM leaderboard_tokens WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM leaderboard_submissions WHERE discord_id = ?").bind(discordId),
+    env.DB.prepare("DELETE FROM game_characters WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM map_shares WHERE creator_discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM progress_snapshots WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM profiles WHERE discord_id = ?").bind(discordId),
@@ -1300,6 +1301,14 @@ async function submitLeaderboardRecord(request, env) {
   }
   const { record, error } = leaderboardSubmission(parsed.body);
   if (error) return json({ error }, 400);
+  if (record.gameUid) {
+    const owner = await env.DB.prepare(
+      "SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1",
+    ).bind(record.gameUid).first();
+    if (owner && owner.discordId !== account.discordId) {
+      return json({ error: "This character is linked to another account." }, 409);
+    }
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
@@ -1344,6 +1353,89 @@ async function submitLeaderboardRecord(request, env) {
   }, existing ? 200 : 201);
 }
 
+// ---------------------------------------------------------------- linked game characters
+async function listCharacters(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  const { results } = await env.DB.prepare(
+    `SELECT game_uid AS gameUid, character_name AS name, source, linked_at AS linkedAt, last_seen_at AS lastSeenAt
+     FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
+  ).bind(account.discordId).all();
+  return json({ characters: results || [] });
+}
+
+// Claims a character for the signed-in account. The desktop meter calls this with the UID it reads from the game's
+// own log ("meter"); the website can add one by hand ("manual"). A UID linked to another account is refused.
+async function linkCharacter(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 1024);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
+  const name = boundedText(body.name, 40);
+  if (!gameUid) return json({ error: "A numeric game UID is required." }, 400);
+  if (name === undefined) return json({ error: "Character name is invalid." }, 400);
+  const source = account.viaToken && body.source !== "manual" ? "meter" : "manual";
+  const now = Math.floor(Date.now() / 1000);
+  const existing = await env.DB.prepare(
+    "SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1",
+  ).bind(gameUid).first();
+  if (existing && existing.discordId !== account.discordId) {
+    return json({ error: "This character is already linked to another account. Ask a developer if it is yours." }, 409);
+  }
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE game_characters SET character_name = COALESCE(?, character_name), last_seen_at = ?,
+         source = CASE WHEN ? = 'meter' THEN 'meter' ELSE source END
+       WHERE game_uid = ?`,
+    ).bind(name, now, source, gameUid).run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(gameUid, account.discordId, name, source, now, now).run();
+  }
+  return json({ ok: true, gameUid, name, source, linked: !existing }, existing ? 200 : 201);
+}
+
+async function unlinkCharacter(request, env, gameUid) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const result = await env.DB.prepare(
+    "DELETE FROM game_characters WHERE game_uid = ? AND (discord_id = ? OR ? = 1)",
+  ).bind(gameUid, account.discordId, account.developerModeAvailable ? 1 : 0).run();
+  if (Number(result.meta?.changes || 0) < 1) return json({ error: "Character not found." }, 404);
+  return json({ ok: true });
+}
+
+// Developers settle disputes: move a UID to the account that really owns it.
+async function reassignCharacter(request, env, gameUid) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account?.developerModeAvailable) return json({ error: "Developer access required." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 512);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const discordId = String(body.discordId || "");
+  if (!/^\d{15,22}$/u.test(discordId)) return json({ error: "A valid Discord user ID is required." }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at)
+     VALUES (?, ?, NULL, 'manual', ?, ?)
+     ON CONFLICT(game_uid) DO UPDATE SET discord_id = excluded.discord_id, linked_at = excluded.linked_at`,
+  ).bind(gameUid, discordId, now, now).run();
+  return json({ ok: true, gameUid, discordId });
+}
+
 // Builds the WHERE clause shared by entries and facets from query parameters (all values are bound).
 function leaderboardFilters(params, { includeHidden = false } = {}) {
   const where = [];
@@ -1385,9 +1477,10 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
   }
   const player = String(params.get("player") || "").trim().slice(0, 40);
   if (player) {
-    where.push("(COALESCE(p.display_name, u.discord_global_name, u.discord_username) LIKE ? ESCAPE '\\' OR s.players_json LIKE ? ESCAPE '\\')");
+    where.push(`(COALESCE(p.display_name, u.discord_global_name, u.discord_username) LIKE ? ESCAPE '\\'
+      OR gc.character_name LIKE ? ESCAPE '\\' OR s.players_json LIKE ? ESCAPE '\\')`);
     const like = `%${player.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
-    binds.push(like, like);
+    binds.push(like, like, like);
   }
   const buff = String(params.get("buff") || "").trim().slice(0, 80);
   if (buff) {
@@ -1431,10 +1524,12 @@ async function leaderboardEntries(request, env) {
   const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.discord_id, s.boss_id" : "s.discord_id";
   const base = `
     SELECT s.*, COALESCE(p.display_name, u.discord_global_name, u.discord_username) AS playerName,
+      gc.character_name AS characterName,
       ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY s.${sortKey} ${order}, s.created_at ASC) AS playerRank
     FROM leaderboard_submissions s
     JOIN users u ON u.discord_id = s.discord_id
     LEFT JOIN profiles p ON p.discord_id = s.discord_id
+    LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id
     WHERE ${where.join(" AND ")}`;
   const filtered = bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base;
   const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...binds).first();
@@ -1453,6 +1548,7 @@ async function leaderboardEntries(request, env) {
       rank: offset + index + 1,
       submissionId: row.submission_id,
       player: row.playerName,
+      character: row.characterName || null,
       own: Boolean(account && row.discord_id === account.discordId),
       kind: row.kind,
       mode: row.mode,
@@ -1624,6 +1720,12 @@ async function api(request, env) {
   if (submissionMatch && !submissionMatch[2] && request.method === "PATCH") return moderateSubmission(request, env, submissionMatch[1]);
   if (submissionMatch && !submissionMatch[2] && request.method === "DELETE") return deleteSubmission(request, env, submissionMatch[1]);
   if (submissionMatch && submissionMatch[2] && request.method === "GET") return submissionEvidence(request, env, submissionMatch[1]);
+  if (url.pathname === "/api/leaderboard/characters" && request.method === "GET") return listCharacters(request, env);
+  if (url.pathname === "/api/leaderboard/characters" && request.method === "POST") return linkCharacter(request, env);
+  const characterMatch = url.pathname.match(/^\/api\/leaderboard\/characters\/(\d{1,24})$/u);
+  if (characterMatch && request.method === "DELETE") return unlinkCharacter(request, env, characterMatch[1]);
+  const characterAdminMatch = url.pathname.match(/^\/api\/admin\/characters\/(\d{1,24})$/u);
+  if (characterAdminMatch && request.method === "PUT") return reassignCharacter(request, env, characterAdminMatch[1]);
   if (url.pathname === "/api/v1/shares" && request.method === "POST") return createMapShare(request, env);
   const shareMatch = url.pathname.match(/^\/api\/v1\/shares\/([^/]+)$/u);
   if (shareMatch && request.method === "GET") return getMapShare(shareMatch[1], env);

@@ -90,3 +90,6 @@
 .lb-token-new code { border: 1px dashed var(--accent-2); border-radius: 10px; color: var(--accent-2); font-size: 0.8rem; overflow-wrap: anywhere; padding: 0.4rem 0.6rem; }
 .lb-token-list { display: grid; gap: 0.4rem; margin: 0; padding: 0; list-style: none; font-size: 0.85rem; }
 .lb-token-list li { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); padding: 0.35rem 0; }
+.lb-character { margin-left: 0.45rem; color: var(--muted); font-size: 0.78rem; }
+.lb-character::before { content: "· "; }
+.lb-tools-subheading { margin-top: 1.4rem !important; }

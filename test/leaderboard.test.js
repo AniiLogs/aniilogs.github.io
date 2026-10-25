@@ -247,3 +247,34 @@ test("developers can hide entries; evidence is private to the submitter and deve
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token: userToken, method: "DELETE" })).status, 200);
   assert.equal(EVIDENCE.objects.size, 0);
 });
+
+test("characters link to one account, show on the board, and protect submissions", async () => {
+  const { env } = await setup();
+  const devToken = await desktopToken(env, SESSIONS.dev);
+  const dev2Token = await desktopToken(env, SESSIONS.dev2);
+  const link = (token, body) => call(env, "/api/leaderboard/characters", { token, method: "POST", body });
+
+  const claimed = await link(devToken, { gameUid: "302000105986", name: "MinMax" });
+  assert.equal(claimed.status, 201);
+  assert.equal((await claimed.json()).source, "meter");
+  assert.equal((await link(devToken, { gameUid: "302000105986", name: "MinMax2" })).status, 200);
+  assert.equal((await link(dev2Token, { gameUid: "302000105986", name: "Thief" })).status, 409);
+  assert.equal((await link(devToken, { gameUid: "abc" })).status, 400);
+
+  const mine = await (await call(env, "/api/leaderboard/characters", { session: SESSIONS.dev })).json();
+  assert.deepEqual(mine.characters.map((row) => [row.gameUid, row.name]), [["302000105986", "MinMax2"]]);
+
+  // Someone else can't post scores as this character.
+  const stolen = await call(env, "/api/leaderboard/submissions", { token: dev2Token, method: "POST", body: run("x", { gameUid: "302000105986" }) });
+  assert.equal(stolen.status, 409);
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: devToken, method: "POST", body: run("y", { gameUid: "302000105986" }) })).status, 201);
+  const board = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&player=MinMax2", { session: SESSIONS.dev })).json();
+  assert.equal(board.entries[0].character, "MinMax2");
+
+  // A developer settles a dispute by moving the UID; the old owner can no longer use it.
+  const moved = await call(env, "/api/admin/characters/302000105986", { session: SESSIONS.dev2, method: "PUT", body: { discordId: IDS.dev2 } });
+  assert.equal(moved.status, 200);
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: devToken, method: "POST", body: run("z", { gameUid: "302000105986" }) })).status, 409);
+  assert.equal((await call(env, "/api/admin/characters/302000105986", { session: SESSIONS.user, method: "PUT", body: { discordId: IDS.user } })).status, 403);
+  assert.equal((await call(env, "/api/leaderboard/characters/302000105986", { token: dev2Token, method: "DELETE" })).status, 200);
+});

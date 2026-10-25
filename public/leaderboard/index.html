@@ -121,6 +121,16 @@
           <button type="button" class="secondary-button" data-token-copy>Copy</button>
         </div>
         <ul class="lb-token-list" data-token-list></ul>
+
+        <h2 class="lb-tools-subheading">Linked characters</h2>
+        <p>Your in-game characters, so your records show under your character name. The meter links the character it sees automatically; a UID can belong to only one account.</p>
+        <ul class="lb-token-list" data-character-list></ul>
+        <div class="lb-token-create">
+          <input type="text" inputmode="numeric" maxlength="24" placeholder="Game UID" data-character-uid>
+          <input type="text" maxlength="40" placeholder="Character name (optional)" data-character-name>
+          <button type="button" class="secondary-button" data-character-link>Link by hand</button>
+        </div>
+        <p class="lb-facts" data-character-status role="status" aria-live="polite"></p>
       </section>
     </main>
 

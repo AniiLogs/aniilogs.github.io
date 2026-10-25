@@ -272,7 +272,8 @@
             else state.expanded.add(entry.submissionId);
             renderRows(entries);
           },
-        }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null),
+        }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null,
+        entry.character ? el("span", { class: "lb-character", text: entry.character }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
       ];
       rows.push(el("tr", { class: [entry.own ? "is-own" : "", entry.status === "hidden" ? "is-hidden" : ""].join(" ").trim() || null }, cells));
@@ -382,6 +383,41 @@
     } catch {
       els.tokenCopy.textContent = "Select and copy it manually";
     }
+  });
+
+  // ---------------------------------------------------------------- linked characters
+  async function loadCharacters() {
+    const response = await apiFetch("/leaderboard/characters");
+    if (!response.ok) return;
+    const { characters } = await response.json();
+    const list = $("[data-character-list]");
+    list.replaceChildren(...characters.map((character) => el("li", {},
+      el("span", { text: `${character.name || "Unnamed"} · UID ${character.gameUid} · ${character.source === "meter" ? "detected by the meter" : "added by hand"}` }),
+      el("button", {
+        type: "button", class: "quiet-button", text: "Unlink",
+        onclick: async () => {
+          if (!window.confirm(`Unlink ${character.name || character.gameUid} from your account?`)) return;
+          await apiFetch(`/leaderboard/characters/${character.gameUid}`, { method: "DELETE" });
+          void loadCharacters();
+        },
+      }))));
+    if (!characters.length) list.replaceChildren(el("li", { class: "lb-empty", text: "No characters linked yet. The meter links yours automatically once submissions are on." }));
+  }
+  $("[data-character-link]").addEventListener("click", async () => {
+    const uid = $("[data-character-uid]").value.trim();
+    const name = $("[data-character-name]").value.trim();
+    const status = $("[data-character-status]");
+    if (!/^\d{1,24}$/u.test(uid)) {
+      status.textContent = "Enter the numeric UID shown at the bottom right of the game screen.";
+      return;
+    }
+    const response = await apiFetch("/leaderboard/characters", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ gameUid: uid, name: name || null, source: "manual" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    status.textContent = response.ok ? "Linked." : (result.error || "Could not link this character.");
+    if (response.ok) void loadCharacters();
   });
 
   // ---------------------------------------------------------------- events
@@ -498,7 +534,10 @@
     await loadFacets();
     renderControls();
     void loadEntries();
-    if (status.canSubmit) void loadTokens();
+    if (status.canSubmit) {
+      void loadTokens();
+      void loadCharacters();
+    }
   }
 
   void start();
