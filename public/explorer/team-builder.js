@@ -545,6 +545,51 @@
     return !detail || (!detail.name && !detail.attributes?.length);
   }
 
+  // Which skills or traits apply each buff, to name unnamed states a condition checks for.
+  let appliersIndex = null;
+  function appliers(id) {
+    if (!appliersIndex) {
+      appliersIndex = new Map();
+      const add = (buffId, name) => {
+        const names = appliersIndex.get(String(buffId)) || new Set();
+        names.add(name);
+        appliersIndex.set(String(buffId), names);
+      };
+      Object.values(data?.forms || {}).forEach((form) => {
+        form.skills.forEach((skill) => [skill, skill.upgrade].filter(Boolean)
+          .forEach((variant) => variant.mechanics?.buffs.forEach((link) => add(link.id, skill.name))));
+        form.traits.forEach((trait) => trait.buffs.forEach((id) => add(id, trait.name)));
+      });
+    }
+    return [...(appliersIndex.get(String(id)) || [])];
+  }
+
+  const CONDITION_HOLDERS = Object.freeze({ self: "this Aniimo", target: "the target", player: "the player", enemy: "the enemy" });
+
+  // "Only while this Aniimo has Shrouded in Mist" — the buff checks on the path to an effect. A check
+  // for an unnamed buff that no skill or trait in the game files applies is shown as a special state.
+  function conditionText(requires) {
+    if (!requires?.length) return "";
+    const unknown = (item) => !buff(item.buff)?.name && !appliers(item.buff).length;
+    const known = requires.filter((item) => !unknown(item));
+    const special = requires.filter(unknown);
+    const parts = known.map((item) => {
+      const detail = buff(item.buff);
+      const from = appliers(item.buff);
+      const name = detail?.name || `the state from ${from.slice(0, 2).join(" / ")}`;
+      return `${CONDITION_HOLDERS[item.on] || item.on} ${item.holds ? "has" : "doesn't have"} ${name}`;
+    });
+    const sentences = [];
+    if (parts.length) sentences.push(`Only while ${parts.join(" and ")}.`);
+    if (special.some((item) => item.holds)) {
+      const ids = special.filter((item) => item.holds).map((item) => item.buff).join(", ");
+      sentences.push(`Only in a special state (unnamed buff ${ids}, which no skill in the game files applies).`);
+    } else if (special.length) {
+      sentences.push("Normal case (without that special state).");
+    }
+    return sentences.join(" ");
+  }
+
   function renderBuffLine(link, fallbackName = "Unnamed effect") {
     const detail = buff(link.id);
     const item = el("li", "team-buff");
@@ -556,6 +601,7 @@
     if (Number(detail?.max_layer) > 1) title.append(pill(`Up to ${detail.max_layer} stacks`));
     if (detail?.carries_over_on_switch) title.append(pill("Carries over on switch", "synergy"));
     item.append(title);
+    if (link.requires?.length) item.append(el("p", "team-condition", conditionText(link.requires)));
     if (detail?.description) item.append(el("p", "team-buff-description", detail.description));
     const attributes = (detail?.attributes || []).filter((attribute) => attribute.values?.length || attribute.formula);
     if (attributes.length) {
@@ -592,6 +638,7 @@
           el("span", "", ` → ${WHO_LABELS[operation.on] || operation.on}`),
           el("small", "", [value, operation.count > 1 ? `${operation.count} hits/ticks` : ""].filter(Boolean).join(" · ")),
         );
+        if (operation.requires?.length) row.append(el("span", "team-condition", conditionText(operation.requires)));
         operations.append(row);
       });
       section.append(operations);
@@ -636,15 +683,70 @@
       skill.scaling?.forEach((note) => description.append(el("p", "team-skill-caveat", note)));
       copy.append(description);
     }
-    if (skill.upgrade) {
-      const upgrade = el("details", "team-skill-description");
-      upgrade.append(el("summary", "", `Upgraded: ${skill.upgrade.name}`));
-      if (skill.upgrade.description) upgrade.append(el("p", "", skill.upgrade.description));
-      upgrade.append(renderMechanics(skill.upgrade));
-      copy.append(upgrade);
-    }
+    if (skill.upgrade) copy.append(renderUpgrade(skill, skill.upgrade));
     card.append(copy);
     return card;
+  }
+
+  const requiresKey = (requires) => (requires || []).map((item) => `${item.holds ? "+" : "-"}${item.buff}@${item.on}`).sort().join(",");
+
+  // The upgraded Core skill, shown as only what differs from the normal version.
+  function renderUpgrade(base, upgrade) {
+    const section = el("details", "team-skill-description team-upgrade");
+    section.append(el("summary", "", upgrade.name === base.name ? "Upgraded version" : `Upgraded: ${upgrade.name}`));
+    const changes = el("ul", "team-upgrade-changes");
+    const change = (label, from, to) => {
+      const row = el("li");
+      row.append(el("strong", "", label), el("span", "team-upgrade-from", String(from)), el("span", "", " → "), el("span", "team-upgrade-to", String(to)));
+      changes.append(row);
+    };
+    [["Might", "might"], ["EP cost", "ep_cost"], ["Cooldown", "cooldown", "s"]].forEach(([label, key, unit = ""]) => {
+      if (base[key] !== upgrade[key]) change(label, `${formatNumber(base[key] ?? 0)}${unit}`, `${formatNumber(upgrade[key] ?? 0)}${unit}`);
+    });
+    const tagsBefore = (base.tags || []).join(", ");
+    const tagsAfter = (upgrade.tags || []).join(", ");
+    if (tagsBefore !== tagsAfter) change("Tags", tagsBefore || "none", tagsAfter || "none");
+
+    // Effects: compare operations and buffs by what they are, who they land on and when.
+    const opKey = (operation) => `${operation.key}|${operation.on}|${requiresKey(operation.requires)}`;
+    const opValue = (operation) => [formatValues(operation.key, operation.values), ...(operation.formulas || [])].filter(Boolean).join(" · ") || "runtime value";
+    const baseOps = new Map((base.mechanics?.operations || []).map((operation) => [opKey(operation), operation]));
+    const upgradeOps = new Map((upgrade.mechanics?.operations || []).map((operation) => [opKey(operation), operation]));
+    upgradeOps.forEach((operation, key) => {
+      const before = baseOps.get(key);
+      const where = `${operation.label} → ${WHO_LABELS[operation.on] || operation.on}`;
+      if (!before) change(where, "not in the normal version", opValue(operation));
+      else if (opValue(before) !== opValue(operation) || before.count !== operation.count) {
+        change(where, `${opValue(before)} (${before.count}×)`, `${opValue(operation)} (${operation.count}×)`);
+      }
+    });
+    baseOps.forEach((operation, key) => {
+      if (!upgradeOps.has(key)) change(`${operation.label} → ${WHO_LABELS[operation.on] || operation.on}`, opValue(operation), "removed");
+    });
+    const linkKey = (link) => `${link.id}|${link.on}|${requiresKey(link.requires)}`;
+    const linkValue = (link) => [link.duration ? `${formatNumber(link.duration)}s` : "", link.stacks ? `${link.stacks} stacks` : ""].filter(Boolean).join(", ") || "applied";
+    const linkName = (link) => `${buff(link.id)?.name || "Unnamed effect"} on ${WHO_LABELS[link.on] || link.on}`;
+    const visible = (links) => (links || []).filter((link) => !isInternal(link.id));
+    const baseLinks = new Map(visible(base.mechanics?.buffs).map((link) => [linkKey(link), link]));
+    const upgradeLinks = new Map(visible(upgrade.mechanics?.buffs).map((link) => [linkKey(link), link]));
+    upgradeLinks.forEach((link, key) => {
+      const before = baseLinks.get(key);
+      if (!before) change(linkName(link), "not in the normal version", linkValue(link));
+      else if (linkValue(before) !== linkValue(link)) change(linkName(link), linkValue(before), linkValue(link));
+    });
+    baseLinks.forEach((link, key) => {
+      if (!upgradeLinks.has(key)) change(linkName(link), linkValue(link), "removed");
+    });
+
+    if (changes.childElementCount) section.append(changes);
+    const textChanged = Boolean(upgrade.description) && upgrade.description !== base.description;
+    if (textChanged) {
+      section.append(el("p", "team-upgrade-label", "Upgraded game description"), el("p", "", upgrade.description));
+    }
+    section.append(el("p", "team-skill-variant-note", changes.childElementCount || textChanged
+      ? "Everything not listed here is the same as the normal version."
+      : "No differences from the normal version were found in the game data."));
+    return section;
   }
 
   // --- Team synergy ---------------------------------------------------------------------------
@@ -748,6 +850,7 @@
       if (Number(duration) > 0) facts.push(`${formatNumber(duration)}s`);
       if (effect.detail.carries_over_on_switch) facts.push("Carries over on switch");
       copy.append(el("span", "team-synergy-scope", facts.join(" · ")));
+      if (effect.link.requires?.length) copy.append(el("span", "team-condition", conditionText(effect.link.requires)));
       if (effect.detail.description) copy.append(el("span", "team-synergy-description", effect.detail.description));
       const values = effect.detail.attributes.filter((attribute) => attribute.values?.length)
         .map((attribute) => `${attribute.label} ${formatValues(attribute.key, attribute.values)}${attribute.per_stack ? " per stack" : ""}`);
@@ -755,6 +858,7 @@
     } else {
       const value = [formatValues(effect.operation.key, effect.operation.values), ...(effect.operation.formulas || [])].filter(Boolean).join(" · ");
       copy.append(el("span", "team-synergy-scope", `On ${WHO_LABELS[effect.operation.on] || effect.operation.on}`));
+      if (effect.operation.requires?.length) copy.append(el("span", "team-condition", conditionText(effect.operation.requires)));
       if (value) copy.append(el("span", "team-synergy-note", value));
     }
     label.append(input, copy);

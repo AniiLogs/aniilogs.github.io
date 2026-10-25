@@ -305,7 +305,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0\.17\.16-team-modes/u);
+  assert.match(explorerHtml, /styles\.css\?v=0\.17\.17-team-conditions/u);
   // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);
   // Ultimates come with the Aniimo rather than being picked.
   assert.match(teamBuilder, /id: "interlink", label: "Interlink"/u);
@@ -317,6 +317,10 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /function renderTeamPage\(\)/u);
   // The Core skill is the switch-skill and is always available, so it is never picked.
   assert.match(teamBuilder, /function coreSkill\(form\)/u);
+  // Effects show the buff conditions they need; the upgraded Core skill shows only what changed.
+  assert.match(teamBuilder, /function conditionText\(requires\)/u);
+  assert.match(teamBuilder, /function renderUpgrade\(base, upgrade\)/u);
+  assert.match(teamBuilder, /Everything not listed here is the same as the normal version\./u);
   assert.doesNotMatch(teamBuilder, /switchSkill|Switch-skill \(Core\)/u);
   assert.doesNotMatch(teamBuilder, /index === focus|Selected Aniimo's own buffs/u);
   assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);

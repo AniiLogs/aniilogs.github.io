@@ -1250,6 +1250,52 @@ ul.team-skill-operations .team-skill-operation {
   grid-auto-flow: column;
 }
 
+.team-condition {
+  display: block;
+  width: 100%;
+  margin: 0;
+  border-left: 2px solid var(--accent-2);
+  padding-left: 6px;
+  color: color-mix(in srgb, var(--accent-2) 45%, var(--text));
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.team-upgrade-changes {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+
+.team-upgrade-changes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.team-upgrade-changes strong {
+  margin-right: 4px;
+}
+
+.team-upgrade-from {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.team-upgrade-to {
+  color: color-mix(in srgb, var(--accent) 45%, var(--text));
+  font-weight: 850;
+}
+
+.team-upgrade-label {
+  font-weight: 800;
+}
+
 .team-slot--reserve {
   border-style: dashed;
 }
