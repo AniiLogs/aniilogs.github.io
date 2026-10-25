@@ -278,3 +278,23 @@ test("characters link to one account, show on the board, and protect submissions
   assert.equal((await call(env, "/api/admin/characters/302000105986", { session: SESSIONS.user, method: "PUT", body: { discordId: IDS.user } })).status, 403);
   assert.equal((await call(env, "/api/leaderboard/characters/302000105986", { token: dev2Token, method: "DELETE" })).status, 200);
 });
+
+test("Egg Heist matches rank by score or by best placement", async () => {
+  const { env } = await setup();
+  const devToken = await desktopToken(env, SESSIONS.dev);
+  const dev2Token = await desktopToken(env, SESSIONS.dev2);
+  const match = (id, score, placement) => ({ kind: "eggheist_match", clientRunId: id, score, placement, partySize: 2 });
+  for (const [token, body] of [[devToken, match("e1", 1200, 3)], [devToken, match("e2", 900, 1)], [dev2Token, match("e3", 1500, 2)]]) {
+    assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", body })).status, 201);
+  }
+  assert.match(leaderboardSubmission(match("bad", 10, 0)).error, /placement/u);
+  const get = async (query) => (await call(env, `/api/leaderboard/entries?${query}`, { session: SESSIONS.dev })).json();
+  const byScore = await get("kind=eggheist_match");
+  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score]), [["dev2 name", 1500], ["dev name", 1200]]);
+  const byPlacement = await get("kind=eggheist_match&sort=placement");
+  assert.equal(byPlacement.order, "asc");
+  assert.deepEqual(byPlacement.entries.map((entry) => [entry.player, entry.placement]), [["dev name", 1], ["dev2 name", 2]]);
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist", { session: SESSIONS.dev })).json();
+  assert.equal(facets.mode, "eggheist");
+  assert.deepEqual(facets.kinds, [{ value: "eggheist_match", count: 3 }]);
+});

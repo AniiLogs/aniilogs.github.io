@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="AniiLogs leaderboards for Holo-Battle Interlink and Holo-Battle Sim.">
+    <meta name="description" content="AniiLogs leaderboards for Holo-Battle Interlink, Holo-Battle Sim and Egg Heist.">
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Leaderboards</title>
     <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
@@ -63,6 +63,7 @@
         <div class="lb-tabs" role="tablist" aria-label="Game mode">
           <button type="button" role="tab" data-mode-tab="interlink" aria-selected="true">Holo-Battle Interlink</button>
           <button type="button" role="tab" data-mode-tab="sim" aria-selected="false">Holo-Battle Sim</button>
+          <button type="button" role="tab" data-mode-tab="eggheist" aria-selected="false">Egg Heist</button>
         </div>
 
         <form class="lb-filters" data-filters>
@@ -95,6 +96,7 @@
           <label class="lb-check" data-mod-only hidden><input type="checkbox" name="hidden" value="1"> Show hidden</label>
         </form>
 
+        <p class="lb-facts" data-mode-note hidden>Egg Heist is a skeleton: the desktop meter doesn't record its results yet.</p>
         <p class="lb-summary" data-summary role="status" aria-live="polite"></p>
         <div class="lb-table-wrap">
           <table class="lb-table">

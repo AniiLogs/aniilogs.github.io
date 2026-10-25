@@ -1031,10 +1031,13 @@ const LEADERBOARD_KINDS = Object.freeze({
   interlink_week: "interlink",
   interlink_best: "interlink",
   sim_run: "sim",
+  eggheist_match: "eggheist",
 });
+const LEADERBOARD_MODES = Object.freeze(["interlink", "sim", "eggheist"]);
 // Sortable columns and their natural direction (lower clear time is better).
 const LEADERBOARD_SORTS = Object.freeze({
   score: "DESC",
+  placement: "ASC",
   stars: "DESC",
   clear_time_s: "ASC",
   team_dps: "DESC",
@@ -1050,6 +1053,7 @@ const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_week: "score",
   interlink_best: "score",
   sim_run: "clear_time_s",
+  eggheist_match: "score",
 });
 
 export function leaderboardPublic(env) {
@@ -1203,6 +1207,7 @@ export function leaderboardSubmission(value) {
     bossName: boundedText(boss.name, 80),
     bossLevel: boundedInteger(boss.level, 1, 200),
     score: boundedInteger(value.score, 0, 1e9),
+    placement: boundedInteger(value.placement, 1, 100),
     stars: boundedInteger(value.stars, 0, 10000),
     clearTimeS: boundedNumber(value.clearTimeS, 0, 7 * 24 * 3600),
     cleared: value.cleared === undefined || value.cleared === null ? null : (value.cleared ? 1 : 0),
@@ -1326,12 +1331,13 @@ async function submitLeaderboardRecord(request, env) {
   await env.DB.prepare(
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
-      score, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
+      score, placement, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
       players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
+      placement = excluded.placement,
       stars = excluded.stars, clear_time_s = excluded.clear_time_s, cleared = excluded.cleared,
       floors = excluded.floors, team_dps = excluded.team_dps, meter_dps = excluded.meter_dps,
       meter_damage = excluded.meter_damage, party_size = excluded.party_size,
@@ -1340,7 +1346,7 @@ async function submitLeaderboardRecord(request, env) {
       played_at = excluded.played_at, updated_at = excluded.updated_at`,
   ).bind(
     submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
-    record.bossId, record.bossName, record.bossLevel, record.score, record.stars, record.clearTimeS,
+    record.bossId, record.bossName, record.bossLevel, record.score, record.placement, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
     record.playedAt, now, now,
@@ -1445,7 +1451,7 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
     where.push("s.kind = ?");
     binds.push(kind);
   } else {
-    const mode = params.get("mode") === "sim" ? "sim" : "interlink";
+    const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "interlink";
     where.push("s.mode = ?");
     binds.push(mode);
   }
@@ -1555,6 +1561,7 @@ async function leaderboardEntries(request, env) {
       cycle: row.cycle,
       boss: { id: row.boss_id, name: row.boss_name, level: row.boss_level },
       score: row.score,
+      placement: row.placement,
       stars: row.stars,
       clearTimeS: row.clear_time_s,
       cleared: row.cleared == null ? null : Boolean(row.cleared),
@@ -1579,7 +1586,7 @@ async function leaderboardFacets(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
   const params = new URL(request.url).searchParams;
-  const mode = params.get("mode") === "sim" ? "sim" : "interlink";
+  const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "interlink";
   const all = async (sql) => (await env.DB.prepare(sql).bind(mode).all()).results || [];
   const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible'";
   const [cycles, bosses, levels, parties, kinds, buffRows] = await Promise.all([

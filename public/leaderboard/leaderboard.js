@@ -15,9 +15,13 @@
     sim: [
       { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
     ],
+    // Skeleton: the meter doesn't read Egg Heist results yet; entries can only come in through the API for now.
+    eggheist: [
+      { kind: "eggheist_match", label: "Matches", sorts: ["score", "placement"], fields: ["party"] },
+    ],
   });
   const SORT_LABELS = Object.freeze({
-    score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
+    score: "Score", placement: "Best placement", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
@@ -42,6 +46,12 @@
       { label: "Best score", sort: "score", value: (e) => number(e.score) },
       { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
       { label: "Week", value: (e) => e.cycle || "—" },
+    ],
+    eggheist_match: [
+      { label: "Score", sort: "score", value: (e) => number(e.score) },
+      { label: "Placement", sort: "placement", value: (e) => (e.placement ? `#${e.placement}` : "—") },
+      { label: "Party", value: (e) => number(e.partySize) },
+      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
       { label: "Clear time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
@@ -117,7 +127,7 @@
   // ---------------------------------------------------------------- URL state
   function readUrl() {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("mode") === "sim") state.mode = "sim";
+    if (Object.hasOwn(BOARDS, params.get("mode") || "")) state.mode = params.get("mode");
     const kind = params.get("kind");
     if (BOARDS[state.mode].some((item) => item.kind === kind)) state.kind = kind;
     else state.kind = BOARDS[state.mode][0].kind;
@@ -165,6 +175,7 @@
     delete select.dataset.pending;
   }
   function renderControls() {
+    $("[data-mode-note]").hidden = state.mode !== "eggheist";
     document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
       tab.setAttribute("aria-selected", String(tab.dataset.modeTab === state.mode));
     });
@@ -219,7 +230,7 @@
   }
   function currentOrder() {
     if (state.order) return state.order;
-    return state.sort === "clear_time_s" ? "asc" : "desc";
+    return state.sort === "clear_time_s" || state.sort === "placement" ? "asc" : "desc";
   }
   function detailRow(entry, span) {
     const parts = [];
