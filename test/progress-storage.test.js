@@ -94,3 +94,13 @@ test("cloud-only hydration does not leak stale local progress into a new browser
   assert.deepEqual(merged.completed, ["remote-check"]);
   assert.deepEqual(merged.preferences, { theme: "meadow" });
 });
+
+test("completion flags merge by newest change instead of a plain union", () => {
+  const merged = storageApi.mergeSnapshots(
+    { tracking: [], completed: ["app-set", "kept"], completedChanges: { "app-set": [1, 200], "cleared-here": [1, 50] }, preferences: {} },
+    { tracking: [], completed: ["kept", "cleared-here", "local-only"], completedChanges: { "cleared-here": [0, 100] }, preferences: {} },
+    { mergeLocal: true },
+  );
+  assert.deepEqual(new Set(merged.completed), new Set(["app-set", "kept", "local-only"]));
+  assert.deepEqual(merged.completedChanges, { "app-set": [1, 200], "cleared-here": [0, 100] });
+});

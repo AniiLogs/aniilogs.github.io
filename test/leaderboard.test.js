@@ -308,3 +308,33 @@ test("Egg Heist season standings rank by tier, then Emperor stars, then rank poi
   const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist", { session: SESSIONS.dev })).json();
   assert.deepEqual(facets.cycles.map((row) => row.value), ["S1", "S0"]);
 });
+
+test("completion flags merge by newest change, so stale copies cannot undo the desktop app", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const save = (progress) => call(env, "/api/progress", { session: SESSIONS.user, method: "PUT", body: { progress } });
+  const read = async () => (await (await call(env, "/api/progress", { session: SESSIONS.user })).json()).progress;
+  assert.equal((await save({ tracking: [], completed: ["old", "pin:a"], preferences: {} })).status, 200);
+
+  const token = await desktopToken(env, SESSIONS.user);
+  const patch = await call(env, "/api/progress/completed", { token, method: "PATCH", body: { set: ["aniimo:1:sparkling"], clear: ["old"] } });
+  assert.equal(patch.status, 200);
+  assert.deepEqual(await (await call(env, "/api/progress/completed", { token })).json().then((value) => value.completed.sort()),
+    ["aniimo:1:sparkling", "pin:a"]);
+
+  // A browser tab that loaded before the app's change saves its stale copy: the app's set and clear survive.
+  assert.equal((await save({ tracking: [{ id: "timer" }], completed: ["old", "pin:a"], preferences: { theme: "x" } })).status, 200);
+  let progress = await read();
+  assert.deepEqual(progress.completed.sort(), ["aniimo:1:sparkling", "pin:a"]);
+  assert.deepEqual(progress.tracking, [{ id: "timer" }]);
+  assert.equal(progress.completedChanges.old[0], 0);
+
+  // A newer clear from the website wins over the app's earlier set.
+  const later = Date.now() + 1000;
+  await save({ tracking: [], completed: ["pin:a"], completedChanges: { "aniimo:1:sparkling": [0, later] }, preferences: {} });
+  progress = await read();
+  assert.deepEqual(progress.completed, ["pin:a"]);
+
+  const bad = await call(env, "/api/progress/completed", { token, method: "PATCH", body: { set: [42] } });
+  assert.equal(bad.status, 400);
+  assert.equal((await call(env, "/api/progress/completed", { method: "PATCH", body: { set: ["x"] } })).status, 401);
+});

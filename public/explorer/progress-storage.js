@@ -8,9 +8,11 @@
     return storage;
   }
 
+  const FAMILIES = ["tracking", "completed", "preferences"];
+
   function requireKeys(keys) {
     for (const family of ["current", "legacy"]) {
-      for (const name of ["tracking", "completed", "preferences"]) {
+      for (const name of FAMILIES) {
         if (!String(keys?.[family]?.[name] || "")) {
           throw new TypeError(`Missing ${family}.${name} storage key.`);
         }
@@ -26,22 +28,19 @@
   function readLocalSnapshot(storage, keys) {
     const target = requireStorage(storage);
     const names = requireKeys(keys);
-    const current = Object.fromEntries(
-      Object.entries(names.current).map(([name, key]) => [name, target.getItem(key)]),
-    );
-    const legacy = Object.fromEntries(
-      Object.entries(names.legacy).map(([name, key]) => [name, target.getItem(key)]),
-    );
-    const raw = Object.fromEntries(
-      Object.keys(names.current).map((name) => [name, current[name] ?? legacy[name]]),
-    );
-    const migratedFamilies = Object.keys(names.current).filter(
+    const current = Object.fromEntries(FAMILIES.map((name) => [name, target.getItem(names.current[name])]));
+    const legacy = Object.fromEntries(FAMILIES.map((name) => [name, target.getItem(names.legacy[name])]));
+    const raw = Object.fromEntries(FAMILIES.map((name) => [name, current[name] ?? legacy[name]]));
+    const migratedFamilies = FAMILIES.filter(
       (name) => current[name] === null && legacy[name] !== null,
     );
     return {
       tracking: parseValue(raw.tracking, []),
       completed: parseValue(raw.completed, []),
       preferences: parseValue(raw.preferences, {}),
+      completedChanges: names.current.completedChanges
+        ? parseValue(target.getItem(names.current.completedChanges), {})
+        : {},
       present: Object.values(raw).some((value) => value !== null && value !== ""),
       shouldMigrate: migratedFamilies.length > 0,
       migratedFamilies,
@@ -54,6 +53,44 @@
     target.setItem(names.current.tracking, JSON.stringify(snapshot?.tracking || []));
     target.setItem(names.current.completed, JSON.stringify(snapshot?.completed || []));
     target.setItem(names.current.preferences, JSON.stringify(snapshot?.preferences || {}));
+    if (names.current.completedChanges) {
+      target.setItem(names.current.completedChanges, JSON.stringify(snapshot?.completedChanges || {}));
+    }
+  }
+
+  function completionChanges(value) {
+    const changes = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) return changes;
+    for (const [id, change] of Object.entries(value)) {
+      if (id && Array.isArray(change) && (change[0] === 0 || change[0] === 1) && Number.isSafeInteger(change[1])) {
+        changes[id] = [change[0], change[1]];
+      }
+    }
+    return changes;
+  }
+
+  // Completion flags carry a change log ({ id: [1 = set | 0 = cleared, unix ms] }), so the newest change wins
+  // across this browser, other devices and the desktop app. A completed id without a logged change counts as set
+  // at time 0; an id missing from one side is not a clear. The API merges the same way.
+  function mergeCompletion(...snapshots) {
+    const latest = new Map();
+    for (const snapshot of snapshots) {
+      if (!snapshot) continue;
+      const changes = completionChanges(snapshot.completedChanges);
+      for (const entry of Array.isArray(snapshot.completed) ? snapshot.completed : []) {
+        const id = String(entry || "").trim();
+        if (id && !changes[id] && !latest.has(id)) latest.set(id, [1, 0]);
+      }
+      for (const [id, change] of Object.entries(changes)) {
+        const prior = latest.get(id);
+        if (!prior || change[1] > prior[1] || (change[1] === prior[1] && change[0] === 1)) latest.set(id, change);
+      }
+    }
+    return {
+      completed: [...latest].filter(([, change]) => change[0] === 1).map(([id]) => id),
+      completedChanges: Object.fromEntries([...latest].filter(([, change]) => change[1] > 0)
+        .sort((a, b) => b[1][1] - a[1][1]).slice(0, 15000)),
+    };
   }
 
   function mergeSnapshots(remote, local, { mergeLocal = false, normalizeTrackingEntry = (entry) => entry } = {}) {
@@ -69,17 +106,7 @@
       }
     }
 
-    const completed = new Set(
-      Array.isArray(remote?.completed)
-        ? remote.completed.map((entry) => String(entry || "").trim()).filter(Boolean)
-        : [],
-    );
-    if (mergeLocal) {
-      for (const entry of Array.isArray(local?.completed) ? local.completed : []) {
-        const id = String(entry || "").trim();
-        if (id) completed.add(id);
-      }
-    }
+    const completion = mergeCompletion(remote, mergeLocal ? local : null);
 
     const remotePreferences = remote?.preferences && typeof remote.preferences === "object"
       ? remote.preferences
@@ -89,7 +116,8 @@
       : {};
     return {
       tracking: [...combinedTracking.values()],
-      completed: [...completed],
+      completed: completion.completed,
+      completedChanges: completion.completedChanges,
       preferences: mergeLocal
         ? { ...remotePreferences, ...localPreferences }
         : { ...remotePreferences },
@@ -100,5 +128,7 @@
     readLocalSnapshot,
     writeLocalSnapshot,
     mergeSnapshots,
+    mergeCompletion,
+    completionChanges,
   });
 })();

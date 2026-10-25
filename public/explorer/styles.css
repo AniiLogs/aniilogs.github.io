@@ -10740,3 +10740,12 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 .desktop-settings-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .desktop-settings-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); padding: 4px 0; }
 .settings-card .desktop-settings-list button { width: auto; flex: 0 0 auto; }
+
+.show-collected-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  font-size: 12px;
+  cursor: pointer;
+}

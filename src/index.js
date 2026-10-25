@@ -831,7 +831,96 @@ export function progressPayload(value) {
   if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return null;
   if (completed.some((entry) => typeof entry !== "string" || entry.length > 240)) return null;
   if (tracking.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) return null;
-  return { schemaVersion: 1, tracking, completed, preferences };
+  const payload = { schemaVersion: 1, tracking, completed, preferences };
+  if (value.completedChanges !== undefined) {
+    const changes = completionChanges(value.completedChanges);
+    if (!changes) return null;
+    if (Object.keys(changes).length) payload.completedChanges = changes;
+  }
+  return payload;
+}
+
+const MAX_COMPLETION_CHANGES = 15000;
+
+// The change log behind completion flags: { id: [1 = set | 0 = cleared, unix ms] }. It lets the website, other
+// devices and the desktop app each change flags without a stale copy undoing a newer change.
+export function completionChanges(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > MAX_COMPLETION_CHANGES) return null;
+  const changes = {};
+  for (const [id, change] of entries) {
+    if (!id || id.length > 240 || !Array.isArray(change) || change.length !== 2) return null;
+    if ((change[0] !== 0 && change[0] !== 1) || !Number.isSafeInteger(change[1]) || change[1] < 0) return null;
+    changes[id] = [change[0], change[1]];
+  }
+  return changes;
+}
+
+// Newest change wins per flag. A flag listed as completed without a logged change counts as set at time 0, so any
+// logged clear overrides it, and a flag missing from one side is not a clear.
+export function mergeCompletion(...snapshots) {
+  const latest = new Map();
+  for (const snapshot of snapshots) {
+    if (!snapshot) continue;
+    const changes = snapshot.completedChanges || {};
+    for (const id of snapshot.completed || []) {
+      if (!changes[id] && !latest.has(id)) latest.set(id, [1, 0]);
+    }
+    for (const [id, change] of Object.entries(changes)) {
+      const prior = latest.get(id);
+      if (!prior || change[1] > prior[1] || (change[1] === prior[1] && change[0] === 1)) latest.set(id, change);
+    }
+  }
+  const completed = [...latest].filter(([, change]) => change[0] === 1).map(([id]) => id);
+  const logged = [...latest].filter(([, change]) => change[1] > 0)
+    .sort((a, b) => b[1][1] - a[1][1]).slice(0, MAX_COMPLETION_CHANGES);
+  return { completed, completedChanges: Object.fromEntries(logged) };
+}
+
+function withCompletion(progress, completion) {
+  const next = { ...progress, completed: completion.completed };
+  delete next.completedChanges;
+  if (Object.keys(completion.completedChanges).length) next.completedChanges = completion.completedChanges;
+  return next;
+}
+
+async function storedProgressRow(env, discordId) {
+  return env.DB.prepare(
+    "SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
+  ).bind(discordId).first();
+}
+
+// Read-modify-write of one account's snapshot, retried when another write lands in between.
+async function updateProgress(env, discordId, change) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const row = await storedProgressRow(env, discordId);
+    let previous = null;
+    if (row) {
+      try {
+        previous = progressPayload(JSON.parse(row.dataJson));
+      } catch {
+        previous = null;
+      }
+    }
+    const next = change(previous);
+    const encoded = JSON.stringify(next);
+    if (encoder.encode(encoded).byteLength > MAX_PROGRESS_BYTES) return { error: "Progress payload is too large.", status: 413 };
+    const now = Math.floor(Date.now() / 1000);
+    const result = row
+      ? await env.DB.prepare(
+        "UPDATE progress_snapshots SET revision = revision + 1, data_json = ?, updated_at = ? WHERE discord_id = ? AND revision = ?",
+      ).bind(encoded, now, discordId, Number(row.revision)).run()
+      : await env.DB.prepare(
+        `INSERT INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at)
+         VALUES (?, 1, ?, ?, ?) ON CONFLICT(discord_id) DO NOTHING`,
+      ).bind(discordId, encoded, now, now).run();
+    if (Number(result?.meta?.changes) === 1) {
+      const saved = await storedProgressRow(env, discordId);
+      return { progress: next, revision: Number(saved.revision), updatedAt: Number(saved.updatedAt) };
+    }
+  }
+  return { error: "Progress changed during the save. Try again.", status: 409 };
 }
 
 async function getProgress(request, env) {
@@ -860,32 +949,62 @@ async function putProgress(request, env) {
   }
   const progress = progressPayload(body.progress);
   if (!progress) return json({ error: "Progress payload has an invalid shape." }, 400);
-  // Only the explicit owner mode endpoint may change this server-owned flag.
-  // Preserve it atomically below, even when an old tab saves stale preferences.
+  // Only the explicit owner mode endpoint may change this server-owned flag; an old tab's stale value is ignored.
   delete progress.preferences.developerMode;
-  const encoded = JSON.stringify(progress);
-  if (encoder.encode(encoded).byteLength > MAX_PROGRESS_BYTES) {
-    return json({ error: "Progress payload is too large." }, 413);
+  const saved = await updateProgress(env, account.discordId, (previous) => {
+    const next = withCompletion(progress, mergeCompletion(previous, progress));
+    const developerMode = previous?.preferences?.developerMode;
+    if (typeof developerMode === "boolean") next.preferences = { ...next.preferences, developerMode };
+    return next;
+  });
+  if (saved.error) return json({ error: saved.error }, saved.status);
+  return json({ ok: true, revision: saved.revision, updatedAt: saved.updatedAt });
+}
+
+// Completion flags for the desktop app (desktop token) or the website (session): read them, or set and clear some.
+async function getCompletion(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  const row = await storedProgressRow(env, account.discordId);
+  let progress = null;
+  try {
+    progress = row ? progressPayload(JSON.parse(row.dataJson)) : null;
+  } catch {
+    progress = null;
   }
-  const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    `INSERT INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at)
-     VALUES (?, 1, ?, ?, ?)
-     ON CONFLICT(discord_id) DO UPDATE SET
-       revision = progress_snapshots.revision + 1,
-       data_json = CASE
-         WHEN json_valid(progress_snapshots.data_json) THEN CASE
-           WHEN json_type(progress_snapshots.data_json, '$.preferences.developerMode') IN ('true', 'false')
-           THEN json_set(excluded.data_json, '$.preferences.developerMode',
-             json(CASE WHEN json_extract(progress_snapshots.data_json, '$.preferences.developerMode') = 1 THEN 'true' ELSE 'false' END))
-           ELSE excluded.data_json END
-         ELSE excluded.data_json END,
-       updated_at = excluded.updated_at`,
-  ).bind(account.discordId, encoded, now, now).run();
-  const row = await env.DB.prepare(
-    "SELECT revision, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
-  ).bind(account.discordId).first();
-  return json({ ok: true, revision: Number(row.revision), updatedAt: Number(row.updatedAt) });
+  return json({ revision: Number(row?.revision || 0), completed: progress?.completed || [] });
+}
+
+function completionIds(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 5000) return null;
+  const ids = value.map((id) => (typeof id === "string" ? id.trim() : ""));
+  return ids.every((id) => id && id.length <= 240) ? ids : null;
+}
+
+async function patchCompletion(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 256 * 1024);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const set = completionIds(body?.set);
+  const clear = completionIds(body?.clear);
+  if (!set || !clear || !(set.length + clear.length)) {
+    return json({ error: "Send set and/or clear as lists of completion ids." }, 400);
+  }
+  const now = Date.now();
+  const changes = Object.fromEntries([...clear.map((id) => [id, [0, now]]), ...set.map((id) => [id, [1, now]])]);
+  const saved = await updateProgress(env, account.discordId, (previous) => withCompletion(
+    previous || { schemaVersion: 1, tracking: [], completed: [], preferences: {} },
+    mergeCompletion(previous, { completed: [], completedChanges: changes }),
+  ));
+  if (saved.error) return json({ error: saved.error }, saved.status);
+  return json({ ok: true, revision: saved.revision, set: set.length, cleared: clear.length });
 }
 
 function shareId() {
@@ -1711,6 +1830,8 @@ async function api(request, env) {
   }
   if (url.pathname === "/api/progress" && request.method === "GET") return getProgress(request, env);
   if (url.pathname === "/api/progress" && request.method === "PUT") return putProgress(request, env);
+  if (url.pathname === "/api/progress/completed" && request.method === "GET") return getCompletion(request, env);
+  if (url.pathname === "/api/progress/completed" && request.method === "PATCH") return patchCompletion(request, env);
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);

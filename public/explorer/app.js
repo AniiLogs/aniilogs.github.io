@@ -219,6 +219,7 @@ const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-grou
 const TRACKING_TICK_MS = 1000;
 const LOCAL_TRACKING_STORAGE_KEY = "aniilogs:explorer:tracking:v1";
 const LOCAL_COMPLETION_STORAGE_KEY = "aniilogs:explorer:completed:v1";
+const LOCAL_COMPLETION_CHANGES_STORAGE_KEY = "aniilogs:explorer:completed-changes:v1";
 const LOCAL_PREFERENCES_STORAGE_KEY = "aniilogs:explorer:preferences:v1";
 const LEGACY_LOCAL_TRACKING_STORAGE_KEY = "minmax-map:tracking:v1";
 const LEGACY_LOCAL_COMPLETION_STORAGE_KEY = "minmax-map:completed:v1";
@@ -228,6 +229,7 @@ const PROGRESS_STORAGE_KEYS = Object.freeze({
     tracking: LOCAL_TRACKING_STORAGE_KEY,
     completed: LOCAL_COMPLETION_STORAGE_KEY,
     preferences: LOCAL_PREFERENCES_STORAGE_KEY,
+    completedChanges: LOCAL_COMPLETION_CHANGES_STORAGE_KEY,
   }),
   legacy: Object.freeze({
     tracking: LEGACY_LOCAL_TRACKING_STORAGE_KEY,
@@ -450,6 +452,7 @@ const THEME_PRESETS = Object.freeze({
 const DEFAULT_CUSTOM_THEME = Object.freeze({ ...THEME_PRESETS.emberpup.colors });
 const DEFAULT_PREFERENCES = Object.freeze({
   showMagicAttack: false,
+  showCollected: false,
   developerMode: false,
   language: "en",
   theme: "default",
@@ -543,6 +546,8 @@ const state = {
   changelogLoadToken: 0,
   tracking: new Map(),
   completed: new Set(),
+  completedChanges: {},
+  cloudRefreshedAt: 0,
   checklistData: null,
   checklistLoadError: "",
   checklistCategory: "aniimo",
@@ -722,6 +727,7 @@ const els = {
   undergroundPlanToggleLabel: document.querySelector("#undergroundPlanToggleLabel"),
   selectAllButton: document.querySelector("#selectAllButton"),
   selectNoneButton: document.querySelector("#selectNoneButton"),
+  showCollectedInput: document.querySelector("#showCollectedInput"),
   sharePinsButton: document.querySelector("#sharePinsButton"),
   sharePinsStatus: document.querySelector("#sharePinsStatus"),
   sharePinsNotice: document.querySelector("#sharePinsNotice"),
@@ -1592,9 +1598,11 @@ function loadLocalTracking() {
     state.completed = new Set(Array.isArray(completedEntries)
       ? completedEntries.map((entry) => String(entry || "").trim()).filter(Boolean)
       : []);
+    state.completedChanges = window.AniiLogsProgressStorage.completionChanges(snapshot.completedChanges);
     state.preferences = {
       ...defaultPreferences(),
       showMagicAttack: Boolean(preferences?.showMagicAttack),
+      showCollected: Boolean(preferences?.showCollected),
       developerMode: Boolean(preferences?.developerMode),
       language: window.AniipediaI18n.normalizeLocale(preferences?.language),
       theme: normalizeThemeId(preferences?.theme),
@@ -1610,6 +1618,7 @@ function loadLocalTracking() {
   } catch (error) {
     state.tracking = new Map();
     state.completed = new Set();
+    state.completedChanges = {};
     state.preferences = defaultPreferences();
     updateLocalStorageError(error);
   }
@@ -1623,6 +1632,7 @@ function persistLocalTracking({ sync = true } = {}) {
       {
         tracking: [...state.tracking.values()],
         completed: [...state.completed],
+        completedChanges: state.completedChanges,
         preferences: state.preferences,
       },
     );
@@ -1664,8 +1674,18 @@ function cloudProgressPayload() {
     schemaVersion: 1,
     tracking: [...state.tracking.values()],
     completed: [...state.completed],
+    completedChanges: state.completedChanges,
     preferences: state.preferences,
   };
+}
+
+// Sets or clears one completion flag and logs when, so the newest change wins when devices and the desktop app merge.
+function setCompletion(id, completed) {
+  const completionId = String(id || "").trim();
+  if (!completionId) return;
+  if (completed) state.completed.add(completionId);
+  else state.completed.delete(completionId);
+  state.completedChanges[completionId] = [completed ? 1 : 0, Date.now()];
 }
 
 function authSessionToken() {
@@ -2054,16 +2074,19 @@ function applyCloudProgress(progress, mergeLocal) {
     {
       tracking: [...state.tracking.values()],
       completed: [...state.completed],
+      completedChanges: state.completedChanges,
       preferences: state.preferences,
     },
     { mergeLocal, normalizeTrackingEntry },
   );
+  state.completedChanges = merged.completedChanges;
   const preferredPreferences = merged.preferences;
   state.tracking = new Map(merged.tracking.map((entry) => [entry.id, entry]));
   state.completed = new Set(merged.completed);
   state.preferences = {
     ...defaultPreferences(),
     showMagicAttack: Boolean(preferredPreferences.showMagicAttack),
+    showCollected: Boolean(preferredPreferences.showCollected),
     developerMode: Boolean(preferredPreferences.developerMode),
     language: window.AniipediaI18n.normalizeLocale(preferredPreferences.language),
     theme: normalizeThemeId(preferredPreferences.theme),
@@ -2125,11 +2148,32 @@ async function hydrateCloudProgress() {
   if (state.cloudSyncAuthenticated) scheduleCloudProgressUpload();
 }
 
+async function refreshCloudProgress() {
+  if (!CLOUD_SYNC_ENABLED || !state.cloudSyncAuthenticated || state.cloudSyncHydrating) return;
+  if (Date.now() - state.cloudRefreshedAt < 15000) return;
+  state.cloudRefreshedAt = Date.now();
+  try {
+    const response = await apiFetch("/progress");
+    if (!response.ok) return;
+    const remote = await response.json();
+    if (!remote.progress) return;
+    const before = [...state.completed].sort().join("\n");
+    applyCloudProgress(remote.progress, true);
+    persistLocalTracking({ sync: false });
+    if ([...state.completed].sort().join("\n") === before) return;
+    refreshLuminCompletionViews();
+    if (state.data) refreshVisibility();
+  } catch (error) {
+    console.error("Could not refresh AniiLogs cloud progress", error);
+  }
+}
+
 function clearLocalTracking() {
   try {
     window.localStorage.removeItem(LOCAL_TRACKING_STORAGE_KEY);
     window.localStorage.removeItem(LOCAL_COMPLETION_STORAGE_KEY);
     window.localStorage.removeItem(LOCAL_PREFERENCES_STORAGE_KEY);
+    window.localStorage.removeItem(LOCAL_COMPLETION_CHANGES_STORAGE_KEY);
     window.localStorage.removeItem(LEGACY_LOCAL_TRACKING_STORAGE_KEY);
     window.localStorage.removeItem(LEGACY_LOCAL_COMPLETION_STORAGE_KEY);
     window.localStorage.removeItem(LEGACY_LOCAL_PREFERENCES_STORAGE_KEY);
@@ -2191,12 +2235,16 @@ async function removeTracking(id) {
 
 function resetLocalData() {
   if (state.pendingReset) return;
-  if (!window.confirm("Reset all browser-saved timers and checklist progress on this device?")) return;
+  const confirmText = state.cloudSyncAuthenticated
+    ? "Reset timers and checklist progress saved in this browser? Progress saved to your account stays and syncs back."
+    : "Reset all browser-saved timers and checklist progress on this device?";
+  if (!window.confirm(confirmText)) return;
   state.pendingReset = true;
   renderSettings();
   try {
     state.tracking = new Map();
     state.completed = new Set();
+    state.completedChanges = {};
     state.preferences = defaultPreferences();
     applyThemePreference();
     state.settingsThemeDraft = themeDraftFromPreferences();
@@ -8571,6 +8619,39 @@ function luminCompletionIdForChecklistEntry(entry) {
   return String(completionState?.id || "").trim();
 }
 
+// One-time pins (Lumens, chests, pickups, teleports...) can be marked collected; Aniimo spawns and anything with a
+// respawn timer cannot. The desktop app sets the same ids from the in-game map.
+function spawnCompletionId(spawn) {
+  const luminId = luminCompletionIdForSpawn(spawn);
+  if (luminId || !spawn) return luminId;
+  if (spawn.marker_type === "aniimo_spawn") return "";
+  if (respawnSecondsForSpawn(spawn, state.data?.itemsById?.get(spawn.item_id))) return "";
+  const mapId = String(spawn.map_id || "").trim();
+  const itemId = String(spawn.item_id || "").trim();
+  const coordinateKey = String(spawn.coordinate_key || "").trim();
+  return mapId && itemId && coordinateKey ? `pin:${mapId}:${itemId}:${coordinateKey}:collected` : "";
+}
+
+function spawnCollected(spawn) {
+  const id = spawnCompletionId(spawn);
+  return Boolean(id) && state.completed.has(id);
+}
+
+function toggleSpawnCollected(entry) {
+  const id = spawnCompletionId(entry.spawn);
+  if (!id) return false;
+  clearLocatedSpawn();
+  state.hoveredCanvasIndex = null;
+  hideCanvasTooltip();
+  const collected = !state.completed.has(id);
+  setCompletion(id, collected);
+  persistLocalTracking();
+  if (collected && !state.preferences.showCollected && state.selectedSpawnIndex === entry.index) dismissSelection();
+  refreshLuminCompletionViews();
+  refreshVisibility();
+  return true;
+}
+
 function createPinCompletionBadge() {
   const badge = document.createElement("span");
   badge.className = "pin-completion-badge";
@@ -8580,7 +8661,7 @@ function createPinCompletionBadge() {
 }
 
 function syncPinCompletionBadge(pin, spawn) {
-  const completionId = luminCompletionIdForSpawn(spawn);
+  const completionId = spawnCompletionId(spawn);
   if (!completionId) return;
   const completed = state.completed.has(completionId);
   pin.classList.toggle("pin-completed", completed);
@@ -8600,7 +8681,7 @@ function syncLuminCompletionPins() {
   els.pinLayer.querySelectorAll(".pin[data-spawn-index]").forEach((pin) => {
     const index = Number(pin.dataset.spawnIndex);
     const spawn = state.data?.spawns[index];
-    if (isLuminCompletionSpawn(spawn)) syncPinCompletionBadge(pin, spawn);
+    if (spawnCompletionId(spawn)) syncPinCompletionBadge(pin, spawn);
   });
 }
 
@@ -8674,16 +8755,12 @@ function updateChecklistCompletion(entry, completionState, checked) {
       if (candidate?.id === entry.id || candidate?.choice_group !== entry.choice_group) return;
       (candidate.completion_states || []).forEach((candidateState) => {
         const candidateId = String(candidateState?.id || "").trim();
-        if (candidateId) state.completed.delete(candidateId);
+        if (candidateId && state.completed.has(candidateId)) setCompletion(candidateId, false);
       });
     });
   }
 
-  if (checked) {
-    state.completed.add(completionId);
-  } else {
-    state.completed.delete(completionId);
-  }
+  setCompletion(completionId, checked);
   persistLocalTracking();
   if (isLuminChecklistEntry(entry)) {
     refreshLuminCompletionViews();
@@ -10578,6 +10655,7 @@ function visibleSpawnEntries() {
     itemSpawns.forEach((entry) => {
       if (
         !state.disabledSpawnIds.has(spawnSelectionId(entry.spawn))
+        && (state.preferences.showCollected || !spawnCollected(entry.spawn))
         && (!state.search || itemMatchesSearch || entry.spawn.search_text.includes(state.search))
       ) {
         entries.push(entry);
@@ -11436,7 +11514,7 @@ function pinClassName(spawn) {
     spawn.marker_type === "underground_entrance" ? "pin-underground" : "",
     spawn.marker_type === "physical_reward_source" ? "pin-physical-reward-source" : "",
     spawn.is_underground ? "pin-underground-marker" : "",
-    state.completed.has(luminCompletionIdForSpawn(spawn)) ? "pin-completed" : "",
+    spawnCollected(spawn) ? "pin-completed" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -11490,7 +11568,7 @@ function createMarkerPin(entry) {
   if (hoverIcon) pinBody.append(hoverIcon);
   if (specialBadge) pinBody.append(specialBadge);
   if (undergroundBadge) pinBody.append(undergroundBadge);
-  if (state.completed.has(luminCompletionIdForSpawn(spawn))) {
+  if (spawnCollected(spawn)) {
     pinBody.append(createPinCompletionBadge());
   }
   pin.append(pinBody, label);
@@ -11701,7 +11779,7 @@ function renderCanvasPins() {
     if (specialBadge) {
       context.drawImage(specialBadge, x + size / 2 - 15, y - size / 2 - 3, 18, 18);
     }
-    if (state.completed.has(luminCompletionIdForSpawn(spawn))) {
+    if (spawnCollected(spawn)) {
       const badgeRadius = Math.max(5, Math.min(6.5, size * 0.2));
       const badgeX = x + size * 0.34;
       const badgeY = y + size * 0.34;
@@ -12486,7 +12564,15 @@ function bindEvents() {
     }
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) updateTrackingCountdowns();
+    if (document.hidden) return;
+    updateTrackingCountdowns();
+    void refreshCloudProgress();
+  });
+  els.showCollectedInput.checked = Boolean(state.preferences.showCollected);
+  els.showCollectedInput.addEventListener("change", () => {
+    state.preferences.showCollected = els.showCollectedInput.checked;
+    persistLocalTracking();
+    refreshVisibility();
   });
   els.searchInput.addEventListener("input", () => {
     clearLocatedSpawn();
@@ -12552,7 +12638,7 @@ function bindEvents() {
     if (!entry?.spawn) return;
     event.preventDefault();
     event.stopPropagation();
-    deselectIndividualSpawn(entry);
+    if (!toggleSpawnCollected(entry)) deselectIndividualSpawn(entry);
   });
   els.mapViewport.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -12710,7 +12796,7 @@ async function init() {
     els.mapTabs.replaceChildren(field);
     els.filterCount.textContent = "Unavailable";
     els.itemList.innerHTML = '<div class="content-unavailable-sidebar">Map markers and filters will return with the reviewed snapshot.</div>';
-    [els.searchInput, els.selectAllButton, els.selectNoneButton, els.sharePinsButton,
+    [els.searchInput, els.selectAllButton, els.selectNoneButton, els.showCollectedInput, els.sharePinsButton,
       els.mapWorkspaceTab, els.trackingWorkspaceTab, els.checklistWorkspaceTab].forEach((control) => {
       control.disabled = true;
     });
