@@ -313,6 +313,9 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /const MEMBER_SLOTS = 5;/u);
   assert.match(teamBuilder, /if \(value === "coop"\) return "interlink";/u);
   assert.doesNotMatch(teamBuilder, /ultimateSkill|Choose an Ultimate/u);
+  // Synergy covers the whole battle roster, not just the selected slot.
+  assert.match(teamBuilder, /function renderTeamPage\(\)/u);
+  assert.doesNotMatch(teamBuilder, /index === focus|Selected Aniimo's own buffs/u);
   assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);
 });
 

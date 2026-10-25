@@ -646,12 +646,10 @@
 
   // --- Team synergy ---------------------------------------------------------------------------
 
-  // Every buff and ally-side operation the four fighting Aniimo's skills and traits put out, with
-  // whether it can reach the selected Aniimo (the one being built around). A Holo-Sim reserve is not
-  // in the fight until it is swapped in.
+  // Every buff and ally-side operation the whole battle roster's skills and traits put out, sorted by
+  // who it reaches. A Holo-Sim reserve is not in the fight until it is swapped in.
   function synergyEffects() {
     const effects = [];
-    const focus = model.activeSlot;
     battleMembers().forEach(({ member, index, form }) => {
       const source = formLabel(entryForForm(member.formId), form);
       const consider = (origin, kind, links, operations = []) => {
@@ -660,7 +658,7 @@
           if (!detail || isInternal(link.id)) return;
           let reach = "";
           if (["ally", "active Aniimo", "player"].includes(link.on)) reach = link.on === "player" ? "player" : "team";
-          else if (link.on === "self") reach = detail.carries_over_on_switch ? "switch" : index === focus ? "self" : "";
+          else if (link.on === "self") reach = detail.carries_over_on_switch ? "switch" : "self";
           else if (link.on === "enemy" && detail.attributes.length) reach = "enemy";
           if (!reach) return;
           effects.push({ key: `${index}:${kind}:${origin.id}:${link.id}:${link.on}`, slot: index, source, origin: origin.name, kind, link, detail, reach });
@@ -678,12 +676,13 @@
     return effects;
   }
 
+  // Shared groups reach more than the Aniimo that made them; "self" stays on its own Aniimo.
   const REACH_GROUPS = Object.freeze([
-    { id: "team", label: "Team buffs and heals" },
-    { id: "switch", label: "Carries over when you switch" },
-    { id: "enemy", label: "Enemy debuffs" },
-    { id: "self", label: "Selected Aniimo's own buffs" },
-    { id: "player", label: "Player buffs" },
+    { id: "team", label: "Team buffs and heals", shared: true },
+    { id: "switch", label: "Carries over when you switch", shared: true },
+    { id: "enemy", label: "Enemy debuffs (help whoever hits that enemy)", shared: true },
+    { id: "self", label: "Each Aniimo's own buffs", shared: false },
+    { id: "player", label: "Player buffs", shared: false },
   ]);
 
   function renderScenario() {
@@ -693,16 +692,22 @@
     const heading = el("div", "team-section-heading");
     heading.append(el("div", "", "Team synergy"), el("small", "", `${enabled.length} of ${effects.length} on`));
     section.append(heading);
-    const focus = formFor(model.members[model.activeSlot]);
-    const focusName = focus ? formLabel(entryForForm(model.members[model.activeSlot].formId), focus) : "";
-    section.append(el("p", "team-section-copy", !focus
-      ? "Choose team members and skills to see the effects they share."
-      : model.activeSlot === RESERVE_SLOT
-        ? `${focusName} is in reserve. These are the effects the four fighting Aniimo would put on it once it's swapped in (the one it replaces would leave).`
-        : `Effects your team can put on ${focusName}. Switch on the ones active in the fight you want to model.`));
-    if (!effects.length) {
-      if (focus) section.append(el("p", "team-empty-copy", "No shared effects from the current picks."));
+    const roster = battleMembers();
+    section.append(el("p", "team-section-copy", roster.length
+      ? `Every effect your ${model.mode === "holosim" ? "four Aniimo in battle" : "team"} puts out from its picked skills, Ultimates and traits. Switch on the ones active in the fight you want to model.`
+      : "Add Aniimo to your team to see the effects they share."));
+    if (roster.length) {
+      const counts = el("div", "team-type-quick");
+      roster.forEach(({ member, index, form }) => {
+        const count = effects.filter((effect) => effect.slot === index).length;
+        counts.append(el("span", "team-pill team-pill--scope", `${entryForForm(member.formId)?.name || form.name}: ${count}`));
+      });
+      section.append(counts);
     }
+    if (model.mode === "holosim" && formFor(model.members[RESERVE_SLOT])) {
+      section.append(el("p", "team-data-note", "The reserve's effects aren't counted until you swap it into the team."));
+    }
+    if (roster.length && !effects.length) section.append(el("p", "team-empty-copy", "No shared effects from the current picks."));
     REACH_GROUPS.forEach((group) => {
       const rows = effects.filter((effect) => effect.reach === group.id);
       if (!rows.length) return;
@@ -735,7 +740,7 @@
     );
     copy.append(title);
     if (effect.detail) {
-      const facts = [`On ${WHO_LABELS[effect.link.on] || effect.link.on}`];
+      const facts = [effect.link.on === "self" ? `On ${effect.source}` : `On ${WHO_LABELS[effect.link.on] || effect.link.on}`];
       const duration = effect.link.duration ?? effect.detail.duration;
       if (Number(duration) > 0) facts.push(`${formatNumber(duration)}s`);
       if (effect.detail.carries_over_on_switch) facts.push("Carries over on switch");
@@ -753,10 +758,11 @@
     return label;
   }
 
-  // Sum of the switched-on buffs' configured values, per game attribute (first level, one stack).
-  function renderEnabledTotals(enabled) {
+  // Sum of switched-on configured values per game attribute (first level, one stack). Shared effects
+  // are added together; each Aniimo's own buffs are added per Aniimo, since they only reach it.
+  function sumAttributes(effects) {
     const totals = new Map();
-    enabled.forEach((effect) => {
+    effects.forEach((effect) => {
       (effect.detail?.attributes || []).forEach((attribute) => {
         const value = Number(attribute.values?.[0]);
         if (!Number.isFinite(value)) return;
@@ -766,18 +772,35 @@
         totals.set(attribute.key, current);
       });
     });
-    const section = el("div", "team-damage-preview");
-    section.append(el("p", "team-eyebrow", "Switched-on modifiers"));
-    if (!totals.size) {
-      section.append(el("p", "", "The switched-on effects have no configured stat values (heals and timed effects are listed above)."));
-      return section;
-    }
+    return totals;
+  }
+
+  function totalsList(totals) {
     const list = el("dl", "team-skill-coefficients");
     totals.forEach((total) => list.append(
       el("dt", "", total.label),
       el("dd", "", `${formatValues(total.key, [total.value])}${total.perStack ? " (one stack each)" : ""}`),
     ));
-    section.append(list, el("p", "", "Added up per stat as configured; whether they stack in combat is up to the game."));
+    return list;
+  }
+
+  function renderEnabledTotals(enabled) {
+    const section = el("div", "team-damage-preview");
+    section.append(el("p", "team-eyebrow", "Switched-on modifiers"));
+    const shared = REACH_GROUPS.filter((group) => group.shared).map((group) => group.id);
+    const sharedTotals = sumAttributes(enabled.filter((effect) => shared.includes(effect.reach)));
+    const groups = [];
+    if (sharedTotals.size) groups.push(["Shared by the team", sharedTotals]);
+    battleMembers().forEach(({ member, index, form }) => {
+      const own = sumAttributes(enabled.filter((effect) => effect.reach === "self" && effect.slot === index));
+      if (own.size) groups.push([`${entryForForm(member.formId)?.name || form.name} only`, own]);
+    });
+    if (!groups.length) {
+      section.append(el("p", "", "The switched-on effects have no configured stat values (heals and timed effects are listed above)."));
+      return section;
+    }
+    groups.forEach(([label, totals]) => section.append(el("div", "team-subsection-heading", label), totalsList(totals)));
+    section.append(el("p", "", "Added up per stat as configured; whether they stack in combat is up to the game."));
     return section;
   }
 
@@ -1097,12 +1120,18 @@
       const swap = renderSwapBar(index);
       if (swap) wrapper.append(swap);
     }
+    wrapper.append(renderSkillLoadout(member, form, index), renderTraits(form));
+    return wrapper;
+  }
+
+  // The selected Aniimo's setup beside the whole roster's synergy, which stays visible whichever
+  // slot is selected.
+  function renderTeamPage() {
     const columns = el("div", "team-builder-columns");
     const main = el("div", "team-builder-main-column");
-    main.append(renderSkillLoadout(member, form, index), renderTraits(form));
+    main.append(renderMember(model.members[model.activeSlot], model.activeSlot));
     columns.append(main, renderScenario());
-    wrapper.append(columns);
-    return wrapper;
+    return columns;
   }
 
   // --- Type matchups -------------------------------------------------------------------------
@@ -1343,7 +1372,7 @@
     header.append(copy, controls);
     panel.append(header);
     if (typesPage) panel.append(renderTypesPage());
-    else panel.append(renderOverview(), renderMember(model.members[model.activeSlot], model.activeSlot));
+    else panel.append(renderOverview(), renderTeamPage());
   }
 
   function renderLoading() {
