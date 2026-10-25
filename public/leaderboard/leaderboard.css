@@ -1,0 +1,92 @@
+/* Leaderboards page. Colors come from the shared theme variables set by theme-shell.js. */
+.lb-main { display: grid; gap: 1.4rem; padding: 2rem 0 3rem; }
+.lb-heading h1 { margin: 0.5rem 0 0.6rem; font-size: clamp(2.2rem, 4.5vw, 3.4rem); }
+.lb-intro { max-width: 640px; margin: 0; color: var(--ink-soft); line-height: 1.6; }
+
+.lb-gate, .lb-board, .lb-tools {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--text);
+  padding: 1.3rem 1.4rem;
+}
+.lb-gate strong { display: block; font-size: 1.1rem; }
+.lb-gate p { margin: 0.5rem 0 0; color: var(--muted); }
+.lb-gate a { color: var(--accent); font-weight: 700; }
+.lb-account { color: var(--ink); font-size: 0.85rem; font-weight: 700; }
+
+.lb-preview-badge {
+  display: inline-block;
+  margin-bottom: 1rem;
+  border: 1px dashed var(--accent-2);
+  border-radius: 999px;
+  color: var(--accent-2);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 0.25rem 0.75rem;
+  text-transform: uppercase;
+}
+
+.lb-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+.lb-tabs button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+  padding: 0.5rem 1rem;
+}
+.lb-tabs button[aria-selected="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-primary); }
+
+.lb-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem 1rem; margin-bottom: 1rem; }
+.lb-filters label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
+.lb-filters label[hidden] { display: none; }
+.lb-filters select, .lb-filters input[type="search"], .lb-token-create input {
+  min-width: 9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.6rem;
+}
+.lb-filter-wide input[type="search"] { min-width: 14rem; }
+.lb-filters .lb-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
+
+.lb-summary { min-height: 1.2rem; margin: 0 0 0.6rem; color: var(--muted); font-size: 0.82rem; }
+.lb-table-wrap { overflow-x: auto; }
+.lb-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.lb-table th, .lb-table td { border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); padding: 0.55rem 0.6rem; text-align: left; white-space: nowrap; }
+.lb-table th { color: var(--muted); font-size: 0.74rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.lb-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.lb-table tr.is-own td { background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
+.lb-table tr.is-hidden td { opacity: 0.55; }
+.lb-rank { width: 3rem; color: var(--accent-2); font-weight: 900; }
+.lb-sort, .lb-expand { border: 0; background: none; color: inherit; cursor: pointer; font: inherit; padding: 0; text-transform: inherit; letter-spacing: inherit; }
+.lb-sort.is-active { color: var(--accent); }
+.lb-expand { color: var(--text); font-weight: 750; text-decoration: underline dotted; text-underline-offset: 3px; }
+.lb-you { margin-left: 0.45rem; border-radius: 999px; background: var(--accent-2); color: var(--on-highlight); font-size: 0.66rem; font-weight: 900; padding: 0.05rem 0.45rem; text-transform: uppercase; }
+.lb-empty { color: var(--muted); text-align: center; }
+
+.lb-detail td { white-space: normal; background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
+.lb-players { width: auto; border-collapse: collapse; margin-bottom: 0.8rem; font-size: 0.8rem; }
+.lb-players th, .lb-players td { border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); padding: 0.3rem 0.8rem 0.3rem 0; text-align: left; }
+.lb-buffs ol { columns: 2 14rem; margin: 0.4rem 0 0.8rem; padding-left: 1.2rem; }
+.lb-facts { margin: 0 0 0.6rem; color: var(--muted); font-size: 0.8rem; }
+.lb-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.lb-actions button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.9rem; }
+.lb-evidence { display: block; max-width: min(100%, 900px); border: 1px solid var(--line); border-radius: 12px; }
+
+.lb-pager { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1rem; color: var(--muted); font-size: 0.85rem; }
+.lb-pager button:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+.lb-tools h2 { margin: 0 0 0.4rem; font-size: 1.1rem; }
+.lb-tools p { margin: 0 0 0.9rem; color: var(--muted); font-size: 0.88rem; }
+.lb-token-create, .lb-token-new { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.8rem; }
+.lb-token-new code { border: 1px dashed var(--accent-2); border-radius: 10px; color: var(--accent-2); font-size: 0.8rem; overflow-wrap: anywhere; padding: 0.4rem 0.6rem; }
+.lb-token-list { display: grid; gap: 0.4rem; margin: 0; padding: 0; list-style: none; font-size: 0.85rem; }
+.lb-token-list li { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); padding: 0.35rem 0; }

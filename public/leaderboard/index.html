@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AniiLogs leaderboards for Holo-Battle Interlink and Holo-Battle Sim.">
+    <meta name="theme-color" content="#f5eecb">
+    <title>AniiLogs — Leaderboards</title>
+    <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
+    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.1.0">
+    <script src="/explorer/app-config.js?v=0.6.3" defer></script>
+    <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.1.0" defer></script>
+  </head>
+  <body>
+    <div class="sky-speckles" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="AniiLogs home">
+        <span class="brand-mark" aria-hidden="true"><span class="brand-spark">✦</span><span class="brand-letter">A</span></span>
+        <span class="brand-name">Anii<span>Logs</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/explorer/">Map</a>
+        <a href="/explorer/?view=aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog">Item-log</a>
+        <a href="/explorer/?view=team">Team Builder</a>
+        <a href="/leaderboard/" aria-current="page">Leaderboards</a>
+        <a href="/#profiles">Profiles</a>
+      </nav>
+      <div class="account-actions">
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login aria-label="Sign in with Discord">
+          <svg class="discord-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <span class="lb-account" data-account hidden></span>
+      </div>
+    </header>
+
+    <main class="lb-main">
+      <section class="lb-heading">
+        <p class="eyebrow"><span aria-hidden="true">✦</span> Holo-Battle records</p>
+        <h1>Leader<span>boards</span></h1>
+        <p class="lb-intro">Team records read from the game's own result screens by the AniiLogs desktop meter.</p>
+      </section>
+
+      <section class="lb-gate" data-gate>
+        <strong data-gate-title>Checking access…</strong>
+        <p data-gate-detail></p>
+      </section>
+
+      <section class="lb-board" data-board hidden>
+        <div class="lb-preview-badge" data-preview-badge hidden>Developer preview · not public yet</div>
+
+        <div class="lb-tabs" role="tablist" aria-label="Game mode">
+          <button type="button" role="tab" data-mode-tab="interlink" aria-selected="true">Holo-Battle Interlink</button>
+          <button type="button" role="tab" data-mode-tab="sim" aria-selected="false">Holo-Battle Sim</button>
+        </div>
+
+        <form class="lb-filters" data-filters>
+          <label>Board
+            <select name="kind" data-filter-kind></select>
+          </label>
+          <label>Rank by
+            <select name="sort" data-filter-sort></select>
+          </label>
+          <label data-field="cycle">Week
+            <select name="cycle"><option value="">All weeks</option></select>
+          </label>
+          <label data-field="boss">Boss
+            <select name="boss"><option value="">All bosses</option></select>
+          </label>
+          <label data-field="level">Level
+            <select name="level"><option value="">Any</option></select>
+          </label>
+          <label data-field="party">Party
+            <select name="party"><option value="">Any size</option></select>
+          </label>
+          <label data-field="buff">Rogue buff
+            <select name="buff"><option value="">Any buff</option></select>
+          </label>
+          <label class="lb-filter-wide">Player
+            <input type="search" name="player" maxlength="40" placeholder="Name or teammate">
+          </label>
+          <label class="lb-check" data-field="cleared"><input type="checkbox" name="cleared" value="1"> Kills only</label>
+          <label class="lb-check"><input type="checkbox" name="best" value="0"> Every run (not just each player's best)</label>
+          <label class="lb-check" data-mod-only hidden><input type="checkbox" name="hidden" value="1"> Show hidden</label>
+        </form>
+
+        <p class="lb-summary" data-summary role="status" aria-live="polite"></p>
+        <div class="lb-table-wrap">
+          <table class="lb-table">
+            <thead data-head></thead>
+            <tbody data-rows></tbody>
+          </table>
+        </div>
+        <div class="lb-pager">
+          <button type="button" class="secondary-button" data-prev>← Previous</button>
+          <span data-page></span>
+          <button type="button" class="secondary-button" data-next>Next →</button>
+        </div>
+      </section>
+
+      <section class="lb-tools" data-tools hidden>
+        <h2>Desktop meter</h2>
+        <p>The meter submits your records with a desktop token. Create one, paste it into the meter, and keep it private — it is shown only once.</p>
+        <div class="lb-token-create">
+          <input type="text" maxlength="60" placeholder="Label (e.g. Gaming PC)" data-token-label>
+          <button type="button" class="primary-button" data-token-create>Create desktop token</button>
+        </div>
+        <div class="lb-token-new" data-token-new hidden>
+          <code data-token-value></code>
+          <button type="button" class="secondary-button" data-token-copy>Copy</button>
+        </div>
+        <ul class="lb-token-list" data-token-list></ul>
+      </section>
+    </main>
+
+    <footer>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
+    </footer>
+  </body>
+</html>

@@ -642,6 +642,7 @@ const els = {
   topbarAccountLabel: document.querySelector("#topbarAccountLabel"),
   topbarProfileLink: document.querySelector("#topbarProfileLink"),
   topbarDeveloperButton: document.querySelector("#topbarDeveloperButton"),
+  topNavLeaderboards: document.querySelector("#topNavLeaderboards"),
   topbarSignInLink: document.querySelector("#topbarSignInLink"),
   topbarLogoutButton: document.querySelector("#topbarLogoutButton"),
   sidebar: document.querySelector("#sidebar"),
@@ -1963,6 +1964,8 @@ function applyDeveloperVisibility() {
   const enabled = developerModeEnabled();
   if (els.mapMeta) els.mapMeta.hidden = !enabled;
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
+  // Leaderboards are a developer preview until they open to everyone.
+  if (els.topNavLeaderboards) els.topNavLeaderboards.hidden = !enabled;
 }
 
 async function logoutCloudAccount() {

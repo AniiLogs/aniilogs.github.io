@@ -148,6 +148,10 @@ async function authenticatedTestDatabase() {
                 const changed = accounts.delete(values[0]);
                 return { meta: { changes: changed ? 1 : 0 } };
               }
+              if (sql === "DELETE FROM leaderboard_tokens WHERE discord_id = ?"
+                || sql === "DELETE FROM leaderboard_submissions WHERE discord_id = ?") {
+                return { meta: { changes: 0 } };
+              }
               throw new Error(`Unexpected run: ${sql}`);
             },
           };

@@ -998,8 +998,16 @@ async function deleteOwnAccount(request, env) {
   }
 
   const discordId = account.discordId;
+  if (env.EVIDENCE) {
+    const { results } = await env.DB.prepare(
+      "SELECT evidence_key AS evidenceKey FROM leaderboard_submissions WHERE discord_id = ? AND evidence_key IS NOT NULL",
+    ).bind(discordId).all();
+    for (const row of results || []) await env.EVIDENCE.delete(row.evidenceKey);
+  }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM auth_handoffs WHERE discord_id = ?").bind(discordId),
+    env.DB.prepare("DELETE FROM leaderboard_tokens WHERE discord_id = ?").bind(discordId),
+    env.DB.prepare("DELETE FROM leaderboard_submissions WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM map_shares WHERE creator_discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM progress_snapshots WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM profiles WHERE discord_id = ?").bind(discordId),
@@ -1007,6 +1015,554 @@ async function deleteOwnAccount(request, env) {
     env.DB.prepare("DELETE FROM users WHERE discord_id = ?").bind(discordId),
   ]);
   return json({ ok: true }, 200, { "set-cookie": clearCookie(SESSION_COOKIE) });
+}
+
+// ---------------------------------------------------------------- leaderboards
+// Holo-Battle Interlink and Holo-Battle Sim records submitted by the desktop meter, which reads the game's own
+// result screens. Gated: until LEADERBOARD_PUBLIC is "true", only developer accounts can submit or read.
+
+const LEADERBOARD_TOKEN_PREFIX = "alb_";
+const MAX_SUBMISSION_BYTES = 64 * 1024;
+const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
+const LEADERBOARD_KINDS = Object.freeze({
+  interlink_run: "interlink",
+  interlink_week: "interlink",
+  interlink_best: "interlink",
+  sim_run: "sim",
+});
+// Sortable columns and their natural direction (lower clear time is better).
+const LEADERBOARD_SORTS = Object.freeze({
+  score: "DESC",
+  stars: "DESC",
+  clear_time_s: "ASC",
+  team_dps: "DESC",
+  meter_dps: "DESC",
+  meter_damage: "DESC",
+  floors: "DESC",
+  party_size: "ASC",
+  boss_level: "DESC",
+  played_at: "DESC",
+});
+const LEADERBOARD_DEFAULT_SORT = Object.freeze({
+  interlink_run: "score",
+  interlink_week: "score",
+  interlink_best: "score",
+  sim_run: "clear_time_s",
+});
+
+export function leaderboardPublic(env) {
+  return String(env?.LEADERBOARD_PUBLIC || "").toLowerCase() === "true";
+}
+
+async function accountIsDeveloper(discordId, env) {
+  if (developerAccountAllowed(discordId, env)) return true;
+  try {
+    return Boolean(await env.DB.prepare(
+      "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
+    ).bind(String(discordId)).first());
+  } catch (error) {
+    console.error("Could not read developer role", error);
+    return false;
+  }
+}
+
+function bearerToken(request) {
+  return (request.headers.get("authorization") || "").match(/^Bearer ([A-Za-z0-9_-]{32,256})$/u)?.[1] || "";
+}
+
+// The desktop app authenticates with a leaderboard token; the website with its normal session.
+async function leaderboardAccount(request, env) {
+  if (!env.DB) return null;
+  const raw = bearerToken(request);
+  if (raw.startsWith(LEADERBOARD_TOKEN_PREFIX)) {
+    const tokenHash = await sha256(raw);
+    const row = await env.DB.prepare(
+      `SELECT leaderboard_tokens.discord_id AS discordId
+       FROM leaderboard_tokens
+       JOIN users ON users.discord_id = leaderboard_tokens.discord_id
+       WHERE leaderboard_tokens.token_hash = ? AND leaderboard_tokens.revoked_at IS NULL
+       LIMIT 1`,
+    ).bind(tokenHash).first();
+    if (!row) return null;
+    await env.DB.prepare("UPDATE leaderboard_tokens SET last_used_at = ? WHERE token_hash = ?")
+      .bind(Math.floor(Date.now() / 1000), tokenHash).run();
+    const discordId = String(row.discordId);
+    return { discordId, viaToken: true, developerModeAvailable: await accountIsDeveloper(discordId, env) };
+  }
+  const account = await currentAccount(request, env);
+  return account ? { ...account, viaToken: false } : null;
+}
+
+function leaderboardAllowed(account, env) {
+  return leaderboardPublic(env) || Boolean(account?.developerModeAvailable);
+}
+
+function gatedResponse(account) {
+  return account
+    ? json({ error: "Leaderboards are in developer preview." }, 403)
+    : json({ error: "Authentication required." }, 401);
+}
+
+async function leaderboardStatus(request, env) {
+  const account = await leaderboardAccount(request, env);
+  return json({
+    public: leaderboardPublic(env),
+    authenticated: Boolean(account),
+    canRead: leaderboardAllowed(account, env),
+    canSubmit: Boolean(account) && leaderboardAllowed(account, env),
+    canModerate: Boolean(account?.developerModeAvailable),
+    evidenceStorage: Boolean(env.EVIDENCE),
+  });
+}
+
+async function createLeaderboardToken(request, env) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
+  let body;
+  try {
+    body = await readJsonBody(request, 1024);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const label = String(body.label || "Desktop meter").trim().slice(0, 60) || "Desktop meter";
+  const raw = `${LEADERBOARD_TOKEN_PREFIX}${randomToken(36)}`;
+  const tokenHash = await sha256(raw);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO leaderboard_tokens (token_hash, discord_id, label, created_at) VALUES (?, ?, ?, ?)",
+  ).bind(tokenHash, account.discordId, label, now).run();
+  return json({ token: raw, tokenId: tokenHash.slice(0, 12), label, createdAt: now }, 201);
+}
+
+async function listLeaderboardTokens(request, env) {
+  const account = await currentAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  const { results } = await env.DB.prepare(
+    `SELECT token_hash AS tokenHash, label, created_at AS createdAt, last_used_at AS lastUsedAt
+     FROM leaderboard_tokens WHERE discord_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`,
+  ).bind(account.discordId).all();
+  return json({
+    tokens: (results || []).map((row) => ({
+      tokenId: String(row.tokenHash).slice(0, 12),
+      label: row.label,
+      createdAt: Number(row.createdAt),
+      lastUsedAt: row.lastUsedAt == null ? null : Number(row.lastUsedAt),
+    })),
+  });
+}
+
+async function revokeLeaderboardToken(request, env, tokenId) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!/^[A-Za-z0-9_-]{12}$/u.test(tokenId)) return json({ error: "Token not found." }, 404);
+  const result = await env.DB.prepare(
+    `UPDATE leaderboard_tokens SET revoked_at = ?
+     WHERE discord_id = ? AND substr(token_hash, 1, 12) = ? AND revoked_at IS NULL`,
+  ).bind(Math.floor(Date.now() / 1000), account.discordId, tokenId).run();
+  if (Number(result.meta?.changes || 0) < 1) return json({ error: "Token not found." }, 404);
+  return json({ ok: true });
+}
+
+function boundedInteger(value, min, max) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max ? number : undefined;
+}
+
+function boundedNumber(value, min, max) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : undefined;
+}
+
+function boundedText(value, maxLength, pattern = null) {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value).trim();
+  if (!text || text.length > maxLength || (pattern && !pattern.test(text))) return undefined;
+  return text;
+}
+
+// Validates and normalizes one desktop submission. Returns { record } or { error }.
+export function leaderboardSubmission(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "Submission must be an object." };
+  const kind = String(value.kind || "");
+  const mode = LEADERBOARD_KINDS[kind];
+  if (!mode) return { error: "Unknown submission kind." };
+  const boss = value.boss && typeof value.boss === "object" ? value.boss : {};
+  const record = {
+    kind,
+    mode,
+    clientRunId: boundedText(value.clientRunId, 120, /^[A-Za-z0-9_.:-]+$/u),
+    gameUid: boundedText(value.gameUid, 24, /^\d+$/u),
+    cycle: boundedText(value.cycle, 24, /^[A-Za-z0-9_.-]+$/u),
+    bossId: boundedText(boss.id, 24, /^[A-Za-z0-9_-]+$/u),
+    bossName: boundedText(boss.name, 80),
+    bossLevel: boundedInteger(boss.level, 1, 200),
+    score: boundedInteger(value.score, 0, 1e9),
+    stars: boundedInteger(value.stars, 0, 10000),
+    clearTimeS: boundedNumber(value.clearTimeS, 0, 7 * 24 * 3600),
+    cleared: value.cleared === undefined || value.cleared === null ? null : (value.cleared ? 1 : 0),
+    floors: boundedInteger(value.floors, 0, 100),
+    teamDps: boundedInteger(value.teamDps, 0, 1e12),
+    meterDps: boundedInteger(value.meterDps, 0, 1e12),
+    meterDamage: boundedInteger(value.meterDamage, 0, 1e15),
+    partySize: boundedInteger(value.partySize, 1, 4),
+    clientVersion: boundedText(value.clientVersion, 40),
+    playedAt: boundedInteger(value.playedAt, 1.5e9, 4e9),
+  };
+  const bad = Object.entries(record).find(([, field]) => field === undefined);
+  if (bad) return { error: `Field ${bad[0]} is invalid.` };
+  if (!record.clientRunId) return { error: "clientRunId is required." };
+
+  const players = value.players ?? [];
+  if (!Array.isArray(players) || players.length > 4) return { error: "players must be a list of up to 4." };
+  const cleanPlayers = [];
+  for (const player of players) {
+    if (!player || typeof player !== "object" || Array.isArray(player)) return { error: "Each player must be an object." };
+    const clean = {
+      name: boundedText(player.name, 40),
+      stat: boundedText(player.stat, 60),
+      value: boundedInteger(player.value, 0, 1e15),
+      avgDps: boundedInteger(player.avgDps, 0, 1e12),
+      breakValue: boundedInteger(player.breakValue, 0, 1e15),
+      damageTaken: boundedInteger(player.damageTaken, 0, 1e15),
+      heal: boundedInteger(player.heal, 0, 1e15),
+      ai: player.ai === undefined ? null : Boolean(player.ai),
+    };
+    if (Object.values(clean).some((field) => field === undefined)) return { error: "A player field is invalid." };
+    cleanPlayers.push(clean);
+  }
+
+  const buffs = value.buffs ?? [];
+  if (!Array.isArray(buffs) || buffs.length > 64) return { error: "buffs must be a list of up to 64." };
+  const cleanBuffs = [];
+  for (const buff of buffs) {
+    if (!buff || typeof buff !== "object" || Array.isArray(buff)) return { error: "Each buff must be an object." };
+    const clean = {
+      name: boundedText(buff.name, 80),
+      id: boundedText(buff.id, 24, /^[A-Za-z0-9_-]+$/u),
+      floor: boundedInteger(buff.floor, 0, 100),
+      level: boundedInteger(buff.level, 0, 100),
+    };
+    if (Object.values(clean).some((field) => field === undefined) || !clean.name) return { error: "A buff field is invalid." };
+    cleanBuffs.push(clean);
+  }
+
+  let extraJson = null;
+  if (value.extra !== undefined && value.extra !== null) {
+    if (typeof value.extra !== "object" || Array.isArray(value.extra)) return { error: "extra must be an object." };
+    extraJson = JSON.stringify(value.extra);
+    if (encoder.encode(extraJson).byteLength > 8192) return { error: "extra is too large." };
+  }
+  record.playersJson = cleanPlayers.length ? JSON.stringify(cleanPlayers) : null;
+  record.buffsJson = cleanBuffs.length ? JSON.stringify(cleanBuffs) : null;
+  record.extraJson = extraJson;
+  if (record.partySize === null && cleanPlayers.length) record.partySize = cleanPlayers.length;
+  return { record };
+}
+
+async function readSubmissionRequest(request) {
+  const type = request.headers.get("content-type") || "";
+  if (!type.toLowerCase().startsWith("multipart/form-data")) {
+    return { body: await readJsonBody(request, MAX_SUBMISSION_BYTES), evidence: null };
+  }
+  const declared = Number(request.headers.get("content-length") || 0);
+  if (declared > MAX_SUBMISSION_BYTES + MAX_EVIDENCE_BYTES + 4096) throw new RangeError("Request body is too large.");
+  const form = await request.formData();
+  const text = String(form.get("submission") || "");
+  if (encoder.encode(text).byteLength > MAX_SUBMISSION_BYTES) throw new RangeError("Submission is too large.");
+  let body;
+  try {
+    body = JSON.parse(text || "{}");
+  } catch {
+    throw new TypeError("Submission must be valid JSON.");
+  }
+  const file = form.get("evidence");
+  if (!file || typeof file === "string") return { body, evidence: null };
+  if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Evidence must be a JPEG, PNG or WebP image.");
+  if (file.size > MAX_EVIDENCE_BYTES) throw new RangeError("Evidence image is too large.");
+  return { body, evidence: file };
+}
+
+async function submitLeaderboardRecord(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
+  // Session-cookie writes must come from the site; bearer tokens can't be sent by another site automatically.
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let parsed;
+  try {
+    parsed = await readSubmissionRequest(request);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const { record, error } = leaderboardSubmission(parsed.body);
+  if (error) return json({ error }, 400);
+
+  const now = Math.floor(Date.now() / 1000);
+  const existing = await env.DB.prepare(
+    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey FROM leaderboard_submissions
+     WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
+  ).bind(account.discordId, record.kind, record.clientRunId).first();
+  const submissionId = existing?.submissionId || randomToken(12);
+  let evidenceKey = existing?.evidenceKey || null;
+  if (parsed.evidence && env.EVIDENCE) {
+    evidenceKey = `evidence/${account.discordId}/${submissionId}.${EVIDENCE_TYPES[parsed.evidence.type]}`;
+    await env.EVIDENCE.put(evidenceKey, parsed.evidence.stream(), {
+      httpMetadata: { contentType: parsed.evidence.type },
+    });
+  }
+  await env.DB.prepare(
+    `INSERT INTO leaderboard_submissions (
+      submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
+      score, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
+      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
+      game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
+      boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
+      stars = excluded.stars, clear_time_s = excluded.clear_time_s, cleared = excluded.cleared,
+      floors = excluded.floors, team_dps = excluded.team_dps, meter_dps = excluded.meter_dps,
+      meter_damage = excluded.meter_damage, party_size = excluded.party_size,
+      players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
+      evidence_key = excluded.evidence_key, client_version = excluded.client_version,
+      played_at = excluded.played_at, updated_at = excluded.updated_at`,
+  ).bind(
+    submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
+    record.bossId, record.bossName, record.bossLevel, record.score, record.stars, record.clearTimeS,
+    record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
+    record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
+    record.playedAt, now, now,
+  ).run();
+  return json({
+    ok: true,
+    submissionId,
+    updated: Boolean(existing),
+    evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
+  }, existing ? 200 : 201);
+}
+
+// Builds the WHERE clause shared by entries and facets from query parameters (all values are bound).
+function leaderboardFilters(params, { includeHidden = false } = {}) {
+  const where = [];
+  const binds = [];
+  const kind = String(params.get("kind") || "");
+  if (LEADERBOARD_KINDS[kind]) {
+    where.push("s.kind = ?");
+    binds.push(kind);
+  } else {
+    const mode = params.get("mode") === "sim" ? "sim" : "interlink";
+    where.push("s.mode = ?");
+    binds.push(mode);
+  }
+  if (!includeHidden) where.push("s.status = 'visible'");
+  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"]];
+  for (const [name, column] of exact) {
+    const value = String(params.get(name) || "").trim();
+    if (value && value.length <= 40) {
+      where.push(`${column} = ?`);
+      binds.push(value);
+    }
+  }
+  const integers = [["level", "s.boss_level"], ["party", "s.party_size"]];
+  for (const [name, column] of integers) {
+    const value = Number(params.get(name));
+    if (params.get(name) && Number.isInteger(value)) {
+      where.push(`${column} = ?`);
+      binds.push(value);
+    }
+  }
+  if (params.get("cleared") === "1") where.push("s.cleared = 1");
+  const ranges = [["minScore", "s.score >= ?"], ["maxTime", "s.clear_time_s <= ?"], ["minFloors", "s.floors >= ?"]];
+  for (const [name, clause] of ranges) {
+    const value = Number(params.get(name));
+    if (params.get(name) && Number.isFinite(value)) {
+      where.push(clause);
+      binds.push(value);
+    }
+  }
+  const player = String(params.get("player") || "").trim().slice(0, 40);
+  if (player) {
+    where.push("(COALESCE(p.display_name, u.discord_global_name, u.discord_username) LIKE ? ESCAPE '\\' OR s.players_json LIKE ? ESCAPE '\\')");
+    const like = `%${player.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
+    binds.push(like, like);
+  }
+  const buff = String(params.get("buff") || "").trim().slice(0, 80);
+  if (buff) {
+    where.push("s.buffs_json LIKE ? ESCAPE '\\'");
+    binds.push(`%"name":"${JSON.stringify(buff).slice(1, -1).replace(/[\\%_]/gu, (character) => `\\${character}`)}"%`);
+  }
+  return { where, binds, kind };
+}
+
+function parseJsonColumn(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+async function leaderboardEntries(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!leaderboardAllowed(account, env)) return gatedResponse(account);
+  const params = new URL(request.url).searchParams;
+  const moderator = Boolean(account?.developerModeAvailable);
+  const { where, binds, kind } = leaderboardFilters(params, { includeHidden: moderator && params.get("hidden") === "1" });
+  if (params.get("mine") === "1" && account) {
+    where.push("s.discord_id = ?");
+    binds.push(account.discordId);
+  }
+  const sortKey = Object.hasOwn(LEADERBOARD_SORTS, params.get("sort") || "")
+    ? params.get("sort")
+    : LEADERBOARD_DEFAULT_SORT[kind] || "score";
+  const natural = LEADERBOARD_SORTS[sortKey];
+  const order = params.get("order") === "asc" ? "ASC" : params.get("order") === "desc" ? "DESC" : natural;
+  // Clear-time boards only rank finished runs; values the board sorts on must be present.
+  where.push(`s.${sortKey} IS NOT NULL`);
+  if (sortKey === "clear_time_s") where.push("COALESCE(s.cleared, 1) = 1");
+  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
+  const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
+  // One row per player (their best on each boss) unless every submission is requested.
+  const bestPerPlayer = params.get("best") !== "0";
+  const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.discord_id, s.boss_id" : "s.discord_id";
+  const base = `
+    SELECT s.*, COALESCE(p.display_name, u.discord_global_name, u.discord_username) AS playerName,
+      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY s.${sortKey} ${order}, s.created_at ASC) AS playerRank
+    FROM leaderboard_submissions s
+    JOIN users u ON u.discord_id = s.discord_id
+    LEFT JOIN profiles p ON p.discord_id = s.discord_id
+    WHERE ${where.join(" AND ")}`;
+  const filtered = bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base;
+  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...binds).first();
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM (${filtered}) ORDER BY ${sortKey} ${order}, created_at ASC LIMIT ? OFFSET ?`,
+  ).bind(...binds, limit, offset).all();
+  return json({
+    kind,
+    sort: sortKey,
+    order: order.toLowerCase(),
+    bestPerPlayer,
+    total: Number(countRow?.total || 0),
+    offset,
+    limit,
+    entries: (results || []).map((row, index) => ({
+      rank: offset + index + 1,
+      submissionId: row.submission_id,
+      player: row.playerName,
+      own: Boolean(account && row.discord_id === account.discordId),
+      kind: row.kind,
+      mode: row.mode,
+      cycle: row.cycle,
+      boss: { id: row.boss_id, name: row.boss_name, level: row.boss_level },
+      score: row.score,
+      stars: row.stars,
+      clearTimeS: row.clear_time_s,
+      cleared: row.cleared == null ? null : Boolean(row.cleared),
+      floors: row.floors,
+      teamDps: row.team_dps,
+      meterDps: row.meter_dps,
+      meterDamage: row.meter_damage,
+      partySize: row.party_size,
+      players: parseJsonColumn(row.players_json),
+      buffs: parseJsonColumn(row.buffs_json),
+      extra: parseJsonColumn(row.extra_json),
+      hasEvidence: Boolean(row.evidence_key),
+      status: row.status,
+      playedAt: row.played_at,
+      submittedAt: row.created_at,
+    })),
+  });
+}
+
+// Distinct values present in the data, for the page's filter menus.
+async function leaderboardFacets(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!leaderboardAllowed(account, env)) return gatedResponse(account);
+  const params = new URL(request.url).searchParams;
+  const mode = params.get("mode") === "sim" ? "sim" : "interlink";
+  const all = async (sql) => (await env.DB.prepare(sql).bind(mode).all()).results || [];
+  const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible'";
+  const [cycles, bosses, levels, parties, kinds, buffRows] = await Promise.all([
+    all(`SELECT cycle AS value, COUNT(*) AS count ${visible} AND cycle IS NOT NULL GROUP BY cycle ORDER BY cycle DESC`),
+    all(`SELECT boss_id AS id, MAX(boss_name) AS name, COUNT(*) AS count ${visible} AND boss_id IS NOT NULL GROUP BY boss_id ORDER BY name`),
+    all(`SELECT boss_level AS value, COUNT(*) AS count ${visible} AND boss_level IS NOT NULL GROUP BY boss_level ORDER BY boss_level DESC`),
+    all(`SELECT party_size AS value, COUNT(*) AS count ${visible} AND party_size IS NOT NULL GROUP BY party_size ORDER BY party_size`),
+    all(`SELECT kind AS value, COUNT(*) AS count ${visible} GROUP BY kind`),
+    mode === "sim" ? all(`SELECT buffs_json AS buffs ${visible} AND buffs_json IS NOT NULL LIMIT 2000`) : Promise.resolve([]),
+  ]);
+  const buffCounts = new Map();
+  for (const row of buffRows) {
+    for (const buff of parseJsonColumn(row.buffs) || []) {
+      if (buff?.name) buffCounts.set(buff.name, (buffCounts.get(buff.name) || 0) + 1);
+    }
+  }
+  return json({
+    mode,
+    cycles,
+    bosses,
+    levels,
+    partySizes: parties,
+    kinds,
+    buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    sorts: Object.keys(LEADERBOARD_SORTS),
+  });
+}
+
+async function moderateSubmission(request, env, submissionId) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account?.developerModeAvailable) return json({ error: "Developer access required." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 512);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  if (body.status !== "visible" && body.status !== "hidden") return json({ error: "status must be visible or hidden." }, 400);
+  const result = await env.DB.prepare(
+    "UPDATE leaderboard_submissions SET status = ?, updated_at = ? WHERE submission_id = ?",
+  ).bind(body.status, Math.floor(Date.now() / 1000), submissionId).run();
+  if (Number(result.meta?.changes || 0) < 1) return json({ error: "Submission not found." }, 404);
+  return json({ ok: true, submissionId, status: body.status });
+}
+
+async function deleteSubmission(request, env, submissionId) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const row = await env.DB.prepare(
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!row) return json({ error: "Submission not found." }, 404);
+  if (row.discordId !== account.discordId && !account.developerModeAvailable) {
+    return json({ error: "You can only delete your own submissions." }, 403);
+  }
+  await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
+  if (row.evidenceKey && env.EVIDENCE) await env.EVIDENCE.delete(row.evidenceKey);
+  return json({ ok: true });
+}
+
+// Screenshot evidence: visible to the submitter and to developers only.
+async function submissionEvidence(request, env, submissionId) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  const row = await env.DB.prepare(
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!row?.evidenceKey || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
+  if (row.discordId !== account.discordId && !account.developerModeAvailable) {
+    return json({ error: "Evidence is visible to its submitter and developers only." }, 403);
+  }
+  const object = await env.EVIDENCE.get(row.evidenceKey);
+  if (!object) return json({ error: "Evidence not found." }, 404);
+  const headers = securityHeaders(new Headers());
+  object.writeHttpMetadata?.(headers);
+  headers.set("cache-control", "private, no-store");
+  return new Response(object.body, { status: 200, headers });
 }
 
 async function api(request, env) {
@@ -1056,6 +1612,18 @@ async function api(request, env) {
   if (developerRoleMatch && request.method === "DELETE") {
     return updateDeveloperRole(request, env, developerRoleMatch[1], false);
   }
+  if (url.pathname === "/api/leaderboard/status" && request.method === "GET") return leaderboardStatus(request, env);
+  if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return leaderboardEntries(request, env);
+  if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
+  if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
+  if (url.pathname === "/api/leaderboard/tokens" && request.method === "GET") return listLeaderboardTokens(request, env);
+  if (url.pathname === "/api/leaderboard/tokens" && request.method === "POST") return createLeaderboardToken(request, env);
+  const leaderboardTokenMatch = url.pathname.match(/^\/api\/leaderboard\/tokens\/([^/]+)$/u);
+  if (leaderboardTokenMatch && request.method === "DELETE") return revokeLeaderboardToken(request, env, leaderboardTokenMatch[1]);
+  const submissionMatch = url.pathname.match(/^\/api\/leaderboard\/submissions\/([A-Za-z0-9_-]{8,40})(\/evidence)?$/u);
+  if (submissionMatch && !submissionMatch[2] && request.method === "PATCH") return moderateSubmission(request, env, submissionMatch[1]);
+  if (submissionMatch && !submissionMatch[2] && request.method === "DELETE") return deleteSubmission(request, env, submissionMatch[1]);
+  if (submissionMatch && submissionMatch[2] && request.method === "GET") return submissionEvidence(request, env, submissionMatch[1]);
   if (url.pathname === "/api/v1/shares" && request.method === "POST") return createMapShare(request, env);
   const shareMatch = url.pathname.match(/^\/api\/v1\/shares\/([^/]+)$/u);
   if (shareMatch && request.method === "GET") return getMapShare(shareMatch[1], env);

@@ -1,0 +1,249 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import test from "node:test";
+
+import worker, { leaderboardSubmission } from "../src/index.js";
+
+const ORIGIN = "https://aniilogs.github.io";
+const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
+const SESSIONS = { dev: "d".repeat(48), dev2: "e".repeat(48), user: "u".repeat(48) };
+
+async function tokenHash(token) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
+  return Buffer.from(digest).toString("base64url");
+}
+
+// A D1-shaped wrapper over a real in-memory SQLite database with every migration applied,
+// so the leaderboard SQL (window functions, upserts, filters) runs for real.
+async function database() {
+  const sqlite = new DatabaseSync(":memory:");
+  const dir = resolve(import.meta.dirname, "..", "migrations");
+  for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
+    sqlite.exec(readFileSync(resolve(dir, file), "utf8"));
+  }
+  const statement = (sql, values = []) => ({
+    async first() {
+      return sqlite.prepare(sql).get(...values) ?? null;
+    },
+    async all() {
+      return { results: sqlite.prepare(sql).all(...values) };
+    },
+    async run() {
+      const result = sqlite.prepare(sql).run(...values);
+      return { meta: { changes: Number(result.changes) } };
+    },
+  });
+  const DB = {
+    prepare(sql) {
+      return { ...statement(sql), bind: (...values) => statement(sql, values) };
+    },
+    async batch(statements) {
+      return Promise.all(statements.map((item) => item.run()));
+    },
+  };
+  const now = Math.floor(Date.now() / 1000);
+  for (const [key, discordId] of Object.entries(IDS)) {
+    sqlite.prepare("INSERT INTO users VALUES (?, ?, ?, NULL, ?, ?)").run(discordId, key, `${key} name`, now, now);
+    sqlite.prepare("INSERT INTO profiles VALUES (?, ?, NULL, 0, ?, ?)").run(discordId, `${key} name`, now, now);
+    sqlite.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?)").run(await tokenHash(SESSIONS[key]), discordId, now, now + 3600);
+  }
+  return { DB, sqlite };
+}
+
+function evidenceStore() {
+  const objects = new Map();
+  return {
+    objects,
+    async put(key, body, options) {
+      objects.set(key, { bytes: new Uint8Array(await new Response(body).arrayBuffer()), type: options?.httpMetadata?.contentType });
+    },
+    async get(key) {
+      const object = objects.get(key);
+      return object ? { body: object.bytes, writeHttpMetadata: (headers) => headers.set("content-type", object.type) } : null;
+    },
+    async delete(key) {
+      objects.delete(key);
+    },
+  };
+}
+
+async function setup(extraEnv = {}) {
+  const { DB, sqlite } = await database();
+  const env = { DB, PUBLIC_SITE_ORIGIN: ORIGIN, DEVELOPER_DISCORD_IDS: `${IDS.dev},${IDS.dev2}`, ...extraEnv };
+  return { env, sqlite };
+}
+
+// Website call (session + site origin) or desktop call (leaderboard token, no origin).
+function call(env, path, { session, token, method = "GET", body, form } = {}) {
+  const headers = new Headers();
+  if (session) {
+    headers.set("authorization", `Bearer ${session}`);
+    headers.set("origin", ORIGIN);
+  }
+  if (token) headers.set("authorization", `Bearer ${token}`);
+  let payload;
+  if (form) payload = form;
+  else if (body !== undefined) {
+    headers.set("content-type", "application/json");
+    payload = JSON.stringify(body);
+  }
+  return worker.fetch(new Request(`https://api.aniilogs.example${path}`, { method, headers, body: payload }), env);
+}
+
+async function desktopToken(env, session = SESSIONS.dev) {
+  const response = await call(env, "/api/leaderboard/tokens", { session, method: "POST", body: { label: "PC" } });
+  assert.equal(response.status, 201);
+  const { token } = await response.json();
+  assert.match(token, /^alb_[A-Za-z0-9_-]{40,}$/u);
+  return token;
+}
+
+function run(id, overrides = {}) {
+  return {
+    kind: "interlink_run",
+    clientRunId: id,
+    cycle: "3005",
+    boss: { id: "80000107", name: "Omega Infergon", level: 60 },
+    score: 20000,
+    stars: 20,
+    clearTimeS: 180,
+    cleared: false,
+    teamDps: 40000,
+    meterDps: 40100,
+    players: [
+      { name: "MinMax", stat: "Total Damage Dealt", value: 2457849, avgDps: 25913 },
+      { name: "Leonard", avgDps: 3469, ai: true },
+    ],
+    playedAt: 1792700000,
+    ...overrides,
+  };
+}
+
+test("submission validation normalizes good records and rejects bad ones", () => {
+  const { record } = leaderboardSubmission(run("a"));
+  assert.equal(record.mode, "interlink");
+  assert.equal(record.partySize, 2);
+  assert.equal(JSON.parse(record.playersJson)[1].ai, true);
+  assert.match(leaderboardSubmission({ ...run("a"), kind: "pvp" }).error, /kind/u);
+  assert.match(leaderboardSubmission({ ...run("a"), clientRunId: "../x" }).error, /clientRunId/u);
+  assert.match(leaderboardSubmission({ ...run("a"), score: -1 }).error, /score/u);
+  assert.match(leaderboardSubmission({ ...run("a"), players: [{}, {}, {}, {}, {}] }).error, /players/u);
+  assert.match(leaderboardSubmission({ ...run("a"), extra: { blob: "x".repeat(9000) } }).error, /extra/u);
+});
+
+test("leaderboards are gated to developers until made public", async () => {
+  const { env } = await setup();
+  assert.equal((await call(env, "/api/leaderboard/entries")).status, 401);
+  assert.equal((await call(env, "/api/leaderboard/entries", { session: SESSIONS.user })).status, 403);
+  const status = await (await call(env, "/api/leaderboard/status", { session: SESSIONS.user })).json();
+  assert.equal(status.canRead, false);
+  assert.equal(status.public, false);
+  assert.equal((await call(env, "/api/leaderboard/tokens", { session: SESSIONS.user, method: "POST", body: {} })).status, 403);
+  assert.equal((await call(env, "/api/leaderboard/entries", { session: SESSIONS.dev })).status, 200);
+
+  const open = await setup({ LEADERBOARD_PUBLIC: "true" });
+  assert.equal((await call(open.env, "/api/leaderboard/entries")).status, 200);
+  const token = await desktopToken(open.env, SESSIONS.user);
+  assert.equal((await call(open.env, "/api/leaderboard/submissions", { token, method: "POST", body: run("u1") })).status, 201);
+});
+
+test("desktop tokens submit without an origin, upsert by run id, and stop working once revoked", async () => {
+  const { env } = await setup();
+  const token = await desktopToken(env);
+  const first = await call(env, "/api/leaderboard/submissions", { token, method: "POST", body: run("fight-1") });
+  assert.equal(first.status, 201);
+  const again = await call(env, "/api/leaderboard/submissions", { token, method: "POST", body: run("fight-1", { score: 22652 }) });
+  assert.equal(again.status, 200);
+  assert.equal((await again.json()).updated, true);
+  const entries = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0", { session: SESSIONS.dev })).json();
+  assert.equal(entries.total, 1);
+  assert.equal(entries.entries[0].score, 22652);
+
+  const listed = await (await call(env, "/api/leaderboard/tokens", { session: SESSIONS.dev })).json();
+  assert.equal(listed.tokens.length, 1);
+  assert.notEqual(listed.tokens[0].lastUsedAt, null);
+  assert.equal((await call(env, `/api/leaderboard/tokens/${listed.tokens[0].tokenId}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", body: run("fight-2") })).status, 401);
+
+  const bad = await call(env, "/api/leaderboard/submissions", { session: SESSIONS.dev, method: "POST", body: { kind: "nope" } });
+  assert.equal(bad.status, 400);
+});
+
+test("entries rank best per player, sort by any board, and filter by the data", async () => {
+  const { env } = await setup();
+  const devToken = await desktopToken(env, SESSIONS.dev);
+  const dev2Token = await desktopToken(env, SESSIONS.dev2);
+  const submit = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  await submit(devToken, run("a1", { score: 20000, teamDps: 30000 }));
+  await submit(devToken, run("a2", { score: 22652, teamDps: 41000, cleared: true, clearTimeS: 150 }));
+  await submit(dev2Token, run("b1", { score: 21000, teamDps: 50000, cleared: true, clearTimeS: 120, players: [{ name: "Solo" }] }));
+  await submit(dev2Token, run("b2", { score: 30000, boss: { id: "80000100", name: "Omega Tucking", level: 60 } }));
+
+  const get = async (query) => (await call(env, `/api/leaderboard/entries?${query}`, { session: SESSIONS.dev })).json();
+  const byScore = await get("kind=interlink_run&boss=80000107");
+  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score, entry.rank]), [["dev name", 22652, 1], ["dev2 name", 21000, 2]]);
+  assert.equal(byScore.entries[0].own, true);
+  assert.equal((await get("kind=interlink_run&boss=80000107&best=0")).total, 3);
+
+  const byDps = await get("kind=interlink_run&boss=80000107&sort=team_dps");
+  assert.equal(byDps.entries[0].teamDps, 50000);
+  const fastest = await get("kind=interlink_run&sort=clear_time_s");
+  assert.deepEqual(fastest.entries.map((entry) => entry.clearTimeS), [120, 150]);
+  assert.equal(fastest.order, "asc");
+
+  assert.equal((await get("kind=interlink_run&party=1")).total, 1);
+  assert.equal((await get("kind=interlink_run&player=MinMax")).total, 2);
+  assert.equal((await get("kind=interlink_run&player=%25")).total, 0);
+  assert.equal((await get("kind=interlink_run&sort=score; DROP TABLE users")).sort, "score");
+
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=interlink", { session: SESSIONS.dev })).json();
+  assert.deepEqual(facets.bosses.map((boss) => boss.name), ["Omega Infergon", "Omega Tucking"]);
+  assert.deepEqual(facets.cycles.map((cycle) => cycle.value), ["3005"]);
+});
+
+test("sim runs rank by clear time and filter by rogue buffs", async () => {
+  const { env } = await setup();
+  const token = await desktopToken(env);
+  const sim = (id, time, buffs) => ({
+    kind: "sim_run", clientRunId: id, clearTimeS: time, cleared: true, floors: 16,
+    buffs: buffs.map((name, floor) => ({ name, floor: floor + 1 })),
+  });
+  for (const body of [sim("s1", 2400, ["Trick Bomb", "Multi-Cast"]), sim("s2", 1800, ["Multi-Cast"])]) {
+    assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", body })).status, 201);
+  }
+  const all = await (await call(env, "/api/leaderboard/entries?kind=sim_run&best=0", { session: SESSIONS.dev })).json();
+  assert.deepEqual(all.entries.map((entry) => entry.clearTimeS), [1800, 2400]);
+  const withBomb = await (await call(env, "/api/leaderboard/entries?kind=sim_run&best=0&buff=Trick%20Bomb", { session: SESSIONS.dev })).json();
+  assert.equal(withBomb.total, 1);
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=sim", { session: SESSIONS.dev })).json();
+  assert.deepEqual(facets.buffs, [{ name: "Multi-Cast", count: 2 }, { name: "Trick Bomb", count: 1 }]);
+});
+
+test("developers can hide entries; evidence is private to the submitter and developers", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const userToken = await desktopToken(env, SESSIONS.user);
+  const form = new FormData();
+  form.set("submission", JSON.stringify(run("with-shot")));
+  form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" }), "result.jpg");
+  const submitted = await call(env, "/api/leaderboard/submissions", { token: userToken, method: "POST", form });
+  assert.equal(submitted.status, 201);
+  const { submissionId, evidenceStored } = await submitted.json();
+  assert.equal(evidenceStored, true);
+  assert.equal(EVIDENCE.objects.size, 1);
+
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.user })).status, 200);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.dev })).status, 200);
+  const outsider = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  assert.equal((await call(outsider.env, `/api/leaderboard/submissions/${submissionId}/evidence`)).status, 401);
+
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.user, method: "PATCH", body: { status: "hidden" } })).status, 403);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "PATCH", body: { status: "hidden" } })).status, 200);
+  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run", { session: SESSIONS.user })).json()).total, 0);
+  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&hidden=1", { session: SESSIONS.dev })).json()).total, 1);
+
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token: userToken, method: "DELETE" })).status, 200);
+  assert.equal(EVIDENCE.objects.size, 0);
+});

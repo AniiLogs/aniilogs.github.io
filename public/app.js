@@ -5,6 +5,7 @@ const accountMenu = document.querySelector("[data-account-menu]");
 const logoutButton = document.querySelector("[data-logout]");
 const deleteAccountButton = document.querySelector("[data-delete-account]");
 const settingsShortcut = document.querySelector("[data-settings-shortcut]");
+const leaderboardNav = document.querySelector("[data-leaderboard-nav]");
 const status = document.querySelector("[data-auth-status]");
 const profileEditor = document.querySelector("[data-profile-editor]");
 const profileDisplayName = document.querySelector("[data-profile-display-name]");
@@ -107,6 +108,14 @@ function showSignedIn(account) {
   deleteAccountButton.hidden = false;
   settingsShortcut.hidden = true;
   status.textContent = `Signed in as ${name}. Your profile is private by default.`;
+  // Leaderboards are a developer preview until they open to everyone.
+  let developerMode = false;
+  try {
+    developerMode = Boolean(JSON.parse(window.localStorage.getItem("aniilogs:explorer:preferences:v1") || "{}").developerMode);
+  } catch {
+    developerMode = false;
+  }
+  if (leaderboardNav) leaderboardNav.hidden = !(account.developerModeAvailable && developerMode);
   void loadPrivateProfile(name);
 }
 
