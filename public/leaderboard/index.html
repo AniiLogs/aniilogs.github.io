@@ -65,11 +65,9 @@
           <button type="button" role="tab" data-mode-tab="sim" aria-selected="false">Holo-Battle Sim</button>
           <button type="button" role="tab" data-mode-tab="eggheist" aria-selected="false">Egg Heist</button>
         </div>
+        <div class="lb-tabs lb-board-tabs" role="tablist" aria-label="Board" data-board-tabs></div>
 
         <form class="lb-filters" data-filters>
-          <label>Board
-            <select name="kind" data-filter-kind></select>
-          </label>
           <label>Rank by
             <select name="sort" data-filter-sort></select>
           </label>
@@ -111,29 +109,6 @@
         </div>
       </section>
 
-      <section class="lb-tools" data-tools hidden>
-        <h2>Desktop meter</h2>
-        <p>The meter submits your records with a desktop token. Create one, paste it into the meter, and keep it private — it is shown only once.</p>
-        <div class="lb-token-create">
-          <input type="text" maxlength="60" placeholder="Label (e.g. Gaming PC)" data-token-label>
-          <button type="button" class="primary-button" data-token-create>Create desktop token</button>
-        </div>
-        <div class="lb-token-new" data-token-new hidden>
-          <code data-token-value></code>
-          <button type="button" class="secondary-button" data-token-copy>Copy</button>
-        </div>
-        <ul class="lb-token-list" data-token-list></ul>
-
-        <h2 class="lb-tools-subheading">Linked characters</h2>
-        <p>Your in-game characters, so your records show under your character name. The meter links the character it sees automatically; a UID can belong to only one account.</p>
-        <ul class="lb-token-list" data-character-list></ul>
-        <div class="lb-token-create">
-          <input type="text" inputmode="numeric" maxlength="24" placeholder="Game UID" data-character-uid>
-          <input type="text" maxlength="40" placeholder="Character name (optional)" data-character-name>
-          <button type="button" class="secondary-button" data-character-link>Link by hand</button>
-        </div>
-        <p class="lb-facts" data-character-status role="status" aria-live="polite"></p>
-      </section>
     </main>
 
     <footer>

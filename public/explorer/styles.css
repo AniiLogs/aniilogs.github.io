@@ -10731,3 +10731,12 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     padding-left: 10px !important;
   }
 }
+
+/* Settings > Desktop app: tokens and linked characters for the aLogs desktop app */
+.desktop-settings-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.desktop-settings-row input { flex: 1 1 10rem; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); font: inherit; padding: 6px 8px; }
+.settings-card .desktop-settings-row button { width: auto; flex: 0 0 auto; }
+.desktop-settings-token code { flex: 1 1 100%; border: 1px dashed var(--accent-2); border-radius: 8px; color: var(--accent-2); font-size: 12px; overflow-wrap: anywhere; padding: 6px 8px; }
+.desktop-settings-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.desktop-settings-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); padding: 4px 0; }
+.settings-card .desktop-settings-list button { width: auto; flex: 0 0 auto; }

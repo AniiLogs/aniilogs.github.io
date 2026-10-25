@@ -3,7 +3,7 @@
 .lb-heading h1 { margin: 0.5rem 0 0.6rem; font-size: clamp(2.2rem, 4.5vw, 3.4rem); }
 .lb-intro { max-width: 640px; margin: 0; color: var(--ink-soft); line-height: 1.6; }
 
-.lb-gate, .lb-board, .lb-tools {
+.lb-gate, .lb-board {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
@@ -44,7 +44,7 @@
 .lb-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem 1rem; margin-bottom: 1rem; }
 .lb-filters label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
 .lb-filters label[hidden] { display: none; }
-.lb-filters select, .lb-filters input[type="search"], .lb-token-create input {
+.lb-filters select, .lb-filters input[type="search"] {
   min-width: 9rem;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -84,12 +84,11 @@
 .lb-pager { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1rem; color: var(--muted); font-size: 0.85rem; }
 .lb-pager button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
-.lb-tools h2 { margin: 0 0 0.4rem; font-size: 1.1rem; }
-.lb-tools p { margin: 0 0 0.9rem; color: var(--muted); font-size: 0.88rem; }
-.lb-token-create, .lb-token-new { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.8rem; }
-.lb-token-new code { border: 1px dashed var(--accent-2); border-radius: 10px; color: var(--accent-2); font-size: 0.8rem; overflow-wrap: anywhere; padding: 0.4rem 0.6rem; }
-.lb-token-list { display: grid; gap: 0.4rem; margin: 0; padding: 0; list-style: none; font-size: 0.85rem; }
-.lb-token-list li { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); padding: 0.35rem 0; }
 .lb-character { margin-left: 0.45rem; color: var(--muted); font-size: 0.78rem; }
 .lb-character::before { content: "· "; }
-.lb-tools-subheading { margin-top: 1.4rem !important; }
+
+/* boards inside a mode (Boss runs / Weekly total / ...) - a lighter second row of tabs */
+.lb-board-tabs { margin-top: -0.4rem; }
+.lb-board-tabs[hidden] { display: none; }
+.lb-board-tabs button { padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+.lb-board-tabs button[aria-selected="true"] { border-color: var(--accent); background: transparent; color: var(--accent); }

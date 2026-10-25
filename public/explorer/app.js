@@ -262,7 +262,9 @@ if (mainViewerResumeRequestV73604.hadRequest) {
   try { window.history.replaceState(window.history.state, '', mainViewerResumeRequestV73604.cleanUrl); }
   catch { mainViewerResumeRequestV73604 = Object.freeze({...mainViewerResumeRequestV73604, context:null}); }
 }
-const REQUESTED_SETTINGS_OPEN = INITIAL_URL_PARAMS.get("settings") === "1";
+// ?settings=1 opens Settings; ?settings=desktop opens it on the Desktop app tab (linked from the aLogs app)
+const REQUESTED_SETTINGS_TAB = INITIAL_URL_PARAMS.get("settings") || "";
+const REQUESTED_SETTINGS_OPEN = REQUESTED_SETTINGS_TAB === "1" || REQUESTED_SETTINGS_TAB === "desktop";
 const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog", "team"]);
 if (SITE_CONFIG.aniilogAvailable) ENABLED_WORKSPACE_VIEWS.add("aniilog");
 const HIDDEN_MAP_IDS = new Set(["egg-heist", "egg-heist-team"]);
@@ -2622,6 +2624,7 @@ function renderSettingsTabs() {
   const options = [
     { id: "general", label: "General Settings" },
   ];
+  if (authSessionToken()) options.push({ id: "desktop", label: "Desktop app" });
   if (state.developerModeAvailable) options.push({ id: "developer", label: "Developer" });
   options.forEach((option, index) => {
     const button = document.createElement("button");
@@ -2893,9 +2896,192 @@ function renderDeveloperSettings(container) {
   if (!state.developerAccountsLoaded && !state.developerAccountsLoading) void loadDeveloperAccounts();
 }
 
+// Desktop app tab: the tokens the aLogs desktop app uses to send records to the leaderboards, and the in-game
+// characters linked to this account. Shown to signed-in users.
+function settingsCard(title, detail) {
+  const card = document.createElement("section");
+  card.className = "settings-card desktop-settings-card";
+  const heading = document.createElement("div");
+  heading.className = "settings-account";
+  const strong = document.createElement("strong");
+  strong.textContent = title;
+  const small = document.createElement("small");
+  small.textContent = detail;
+  heading.append(strong, small);
+  card.append(heading);
+  return card;
+}
+
+function settingsDate(unix) {
+  return unix ? new Date(unix * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "never";
+}
+
+function renderDesktopSettings(container) {
+  const tokensCard = settingsCard(
+    "Desktop app tokens",
+    "The aLogs desktop app uses a token to send your records to the leaderboards. Create one, paste it into the app (Leaderboards & account), and keep it private - it is shown only once.",
+  );
+  const createRow = document.createElement("div");
+  createRow.className = "desktop-settings-row";
+  const label = document.createElement("input");
+  label.type = "text";
+  label.maxLength = 60;
+  label.placeholder = "Label (e.g. Gaming PC)";
+  const create = document.createElement("button");
+  create.type = "button";
+  create.textContent = "Create token";
+  createRow.append(label, create);
+  const fresh = document.createElement("div");
+  fresh.className = "desktop-settings-row desktop-settings-token";
+  fresh.hidden = true;
+  const freshValue = document.createElement("code");
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy";
+  fresh.append(freshValue, copy);
+  const tokenList = document.createElement("ul");
+  tokenList.className = "desktop-settings-list";
+  const tokenStatus = document.createElement("p");
+  tokenStatus.setAttribute("role", "status");
+  tokensCard.append(createRow, fresh, tokenStatus, tokenList);
+
+  const charactersCard = settingsCard(
+    "Linked characters",
+    "Your in-game characters, so your records show under your character name. The desktop app links the character it sees automatically; a UID can belong to only one account.",
+  );
+  const characterList = document.createElement("ul");
+  characterList.className = "desktop-settings-list";
+  const linkRow = document.createElement("div");
+  linkRow.className = "desktop-settings-row";
+  const uid = document.createElement("input");
+  uid.type = "text";
+  uid.inputMode = "numeric";
+  uid.maxLength = 24;
+  uid.placeholder = "Game UID";
+  const name = document.createElement("input");
+  name.type = "text";
+  name.maxLength = 40;
+  name.placeholder = "Character name (optional)";
+  const link = document.createElement("button");
+  link.type = "button";
+  link.textContent = "Link by hand";
+  linkRow.append(uid, name, link);
+  const characterStatus = document.createElement("p");
+  characterStatus.setAttribute("role", "status");
+  charactersCard.append(characterList, linkRow, characterStatus);
+  container.append(tokensCard, charactersCard);
+
+  function listItem(text, actionLabel, action) {
+    const item = document.createElement("li");
+    const span = document.createElement("span");
+    span.textContent = text;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = actionLabel;
+    button.addEventListener("click", action);
+    item.append(span, button);
+    return item;
+  }
+
+  async function loadTokens() {
+    try {
+      const response = await apiFetch("/leaderboard/tokens");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { tokens } = await response.json();
+      tokenList.replaceChildren(...tokens.map((token) => listItem(
+        `${token.label} - created ${settingsDate(token.createdAt)}, last used ${settingsDate(token.lastUsedAt)}`,
+        "Revoke",
+        async () => {
+          if (!window.confirm(`Revoke "${token.label}"? The desktop app using it will stop sending records.`)) return;
+          await apiFetch(`/leaderboard/tokens/${token.tokenId}`, { method: "DELETE" });
+          void loadTokens();
+        },
+      )));
+      if (!fresh.hidden) return;
+      tokenStatus.textContent = tokens.length ? "" : "No tokens yet.";
+    } catch {
+      tokenStatus.textContent = "Tokens could not be loaded.";
+    }
+  }
+
+  async function loadCharacters() {
+    try {
+      const response = await apiFetch("/leaderboard/characters");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { characters } = await response.json();
+      characterList.replaceChildren(...characters.map((character) => listItem(
+        `${character.name || "Unnamed"} - UID ${character.gameUid} (${character.source === "meter" ? "detected by the app" : "added by hand"})`,
+        "Unlink",
+        async () => {
+          if (!window.confirm(`Unlink ${character.name || character.gameUid} from your account?`)) return;
+          await apiFetch(`/leaderboard/characters/${character.gameUid}`, { method: "DELETE" });
+          void loadCharacters();
+        },
+      )));
+      characterStatus.textContent = characters.length ? "" : "No characters linked yet.";
+    } catch {
+      characterStatus.textContent = "Characters could not be loaded.";
+    }
+  }
+
+  create.addEventListener("click", async () => {
+    create.disabled = true;
+    try {
+      const response = await apiFetch("/leaderboard/tokens", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ label: label.value.trim() || "Desktop app" }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { token } = await response.json();
+      freshValue.textContent = token;
+      fresh.hidden = false;
+      label.value = "";
+      tokenStatus.textContent = "Copy this token now - it will not be shown again.";
+      void loadTokens();
+    } catch {
+      tokenStatus.textContent = "Could not create a token. Try again.";
+    } finally {
+      create.disabled = false;
+    }
+  });
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(freshValue.textContent);
+      copy.textContent = "Copied";
+    } catch {
+      copy.textContent = "Select and copy it";
+    }
+  });
+  link.addEventListener("click", async () => {
+    if (!/^\d{1,24}$/u.test(uid.value.trim())) {
+      characterStatus.textContent = "Enter the numeric UID shown at the bottom right of the game screen.";
+      return;
+    }
+    const response = await apiFetch("/leaderboard/characters", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ gameUid: uid.value.trim(), name: name.value.trim() || null, source: "manual" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    characterStatus.textContent = response.ok ? "Linked." : (result.error || "Could not link this character.");
+    if (response.ok) {
+      uid.value = "";
+      name.value = "";
+      void loadCharacters();
+    }
+  });
+  void loadTokens();
+  void loadCharacters();
+}
+
 function renderSettings() {
   els.settingsContent.textContent = "";
-  const availableTabs = new Set(["general", ...(state.developerModeAvailable ? ["developer"] : [])]);
+  const availableTabs = new Set([
+    "general",
+    ...(authSessionToken() ? ["desktop"] : []),
+    ...(state.developerModeAvailable ? ["developer"] : []),
+  ]);
   if (!availableTabs.has(state.settingsActiveTab)) state.settingsActiveTab = "general";
   const tabs = renderSettingsTabs();
   const settingsPanel = document.createElement("div");
@@ -2906,6 +3092,10 @@ function renderSettings() {
   els.settingsContent.append(tabs, settingsPanel);
   if (state.settingsActiveTab === "developer") {
     renderDeveloperSettings(settingsPanel);
+    return;
+  }
+  if (state.settingsActiveTab === "desktop") {
+    renderDesktopSettings(settingsPanel);
     return;
   }
 
@@ -12584,6 +12774,7 @@ async function init() {
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete("settings");
     window.history.replaceState(null, "", cleanUrl);
+    if (REQUESTED_SETTINGS_TAB === "desktop") state.settingsActiveTab = "desktop";
     openSettings();
   }
   if ("requestIdleCallback" in window) {

@@ -68,11 +68,9 @@
   const els = {
     gate: $("[data-gate]"), gateTitle: $("[data-gate-title]"), gateDetail: $("[data-gate-detail]"),
     board: $("[data-board]"), badge: $("[data-preview-badge]"), filters: $("[data-filters]"),
-    kind: $("[data-filter-kind]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
+    boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
-    tools: $("[data-tools]"), tokenLabel: $("[data-token-label]"), tokenCreate: $("[data-token-create]"),
-    tokenNew: $("[data-token-new]"), tokenValue: $("[data-token-value]"), tokenCopy: $("[data-token-copy]"),
-    tokenList: $("[data-token-list]"), login: $("[data-login]"), account: $("[data-account]"),
+    login: $("[data-login]"), account: $("[data-account]"),
   };
   const state = {
     mode: "interlink", kind: "interlink_run", sort: "", order: "", offset: 0,
@@ -182,8 +180,20 @@
     document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
       tab.setAttribute("aria-selected", String(tab.dataset.modeTab === state.mode));
     });
-    els.kind.replaceChildren(...BOARDS[state.mode].map((item) => el("option", { value: item.kind, text: item.label })));
-    els.kind.value = state.kind;
+    els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
+      type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), text: item.label,
+      onclick: () => {
+        if (state.kind === item.kind) return;
+        state.kind = item.kind;
+        state.sort = "";
+        state.order = "";
+        state.offset = 0;
+        state.expanded.clear();
+        renderControls();
+        void loadEntries();
+      },
+    })));
+    els.boardTabs.hidden = BOARDS[state.mode].length < 2;
     const sorts = board().sorts;
     if (!sorts.includes(state.sort)) state.sort = sorts[0];
     els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: SORT_LABELS[key] })));
@@ -356,86 +366,6 @@
     void loadEntries();
   }
 
-  // ---------------------------------------------------------------- desktop tokens
-  async function loadTokens() {
-    const response = await apiFetch("/leaderboard/tokens");
-    if (!response.ok) return;
-    const { tokens } = await response.json();
-    els.tokenList.replaceChildren(...tokens.map((token) => el("li", {},
-      el("span", { text: `${token.label} · created ${date(token.createdAt)} · ${token.lastUsedAt ? `last used ${date(token.lastUsedAt)}` : "never used"}` }),
-      el("button", {
-        type: "button", class: "quiet-button", text: "Revoke",
-        onclick: async () => {
-          if (!window.confirm(`Revoke "${token.label}"? The meter using it will stop submitting.`)) return;
-          await apiFetch(`/leaderboard/tokens/${token.tokenId}`, { method: "DELETE" });
-          void loadTokens();
-        },
-      }))));
-    if (!tokens.length) els.tokenList.replaceChildren(el("li", { class: "lb-empty", text: "No desktop tokens yet." }));
-  }
-  els.tokenCreate.addEventListener("click", async () => {
-    els.tokenCreate.disabled = true;
-    try {
-      const response = await apiFetch("/leaderboard/tokens", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label: els.tokenLabel.value.trim() || "Desktop meter" }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const { token } = await response.json();
-      els.tokenValue.textContent = token;
-      els.tokenNew.hidden = false;
-      els.tokenLabel.value = "";
-      void loadTokens();
-    } catch {
-      window.alert("Could not create a desktop token.");
-    } finally {
-      els.tokenCreate.disabled = false;
-    }
-  });
-  els.tokenCopy.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(els.tokenValue.textContent);
-      els.tokenCopy.textContent = "Copied";
-    } catch {
-      els.tokenCopy.textContent = "Select and copy it manually";
-    }
-  });
-
-  // ---------------------------------------------------------------- linked characters
-  async function loadCharacters() {
-    const response = await apiFetch("/leaderboard/characters");
-    if (!response.ok) return;
-    const { characters } = await response.json();
-    const list = $("[data-character-list]");
-    list.replaceChildren(...characters.map((character) => el("li", {},
-      el("span", { text: `${character.name || "Unnamed"} · UID ${character.gameUid} · ${character.source === "meter" ? "detected by the meter" : "added by hand"}` }),
-      el("button", {
-        type: "button", class: "quiet-button", text: "Unlink",
-        onclick: async () => {
-          if (!window.confirm(`Unlink ${character.name || character.gameUid} from your account?`)) return;
-          await apiFetch(`/leaderboard/characters/${character.gameUid}`, { method: "DELETE" });
-          void loadCharacters();
-        },
-      }))));
-    if (!characters.length) list.replaceChildren(el("li", { class: "lb-empty", text: "No characters linked yet. The meter links yours automatically once submissions are on." }));
-  }
-  $("[data-character-link]").addEventListener("click", async () => {
-    const uid = $("[data-character-uid]").value.trim();
-    const name = $("[data-character-name]").value.trim();
-    const status = $("[data-character-status]");
-    if (!/^\d{1,24}$/u.test(uid)) {
-      status.textContent = "Enter the numeric UID shown at the bottom right of the game screen.";
-      return;
-    }
-    const response = await apiFetch("/leaderboard/characters", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ gameUid: uid, name: name || null, source: "manual" }),
-    });
-    const result = await response.json().catch(() => ({}));
-    status.textContent = response.ok ? "Linked." : (result.error || "Could not link this character.");
-    if (response.ok) void loadCharacters();
-  });
-
   // ---------------------------------------------------------------- events
   document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
     tab.addEventListener("click", async () => {
@@ -451,14 +381,6 @@
       void loadEntries();
     });
   });
-  els.kind.addEventListener("change", () => {
-    state.kind = els.kind.value;
-    state.sort = "";
-    state.order = "";
-    state.offset = 0;
-    renderControls();
-    void loadEntries();
-  });
   els.sort.addEventListener("change", () => {
     state.sort = els.sort.value;
     state.order = "";
@@ -467,7 +389,7 @@
   });
   let searchTimer = 0;
   els.filters.addEventListener("input", (event) => {
-    if (event.target === els.kind || event.target === els.sort) return;
+    if (event.target === els.sort) return;
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => {
       state.offset = 0;
@@ -544,16 +466,11 @@
     }
     els.gate.hidden = true;
     els.board.hidden = false;
-    els.tools.hidden = !status.canSubmit;
     readUrl();
     renderControls();
     await loadFacets();
     renderControls();
     void loadEntries();
-    if (status.canSubmit) {
-      void loadTokens();
-      void loadCharacters();
-    }
   }
 
   void start();
