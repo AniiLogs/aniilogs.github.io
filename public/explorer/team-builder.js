@@ -25,7 +25,7 @@
     Object.freeze({ id: "holosim", label: "Holo-Sim", share: "h" }),
   ]);
   const MODE_NOTES = Object.freeze({
-    standard: "Four Aniimo, each with two active skills and an optional Core switch-skill. Ultimates come with the Aniimo.",
+    standard: "Four Aniimo, each with two picked active skills. Each Aniimo's Core switch-skill and Ultimate are always available.",
     interlink: "You control the first Aniimo and pick its skills. The other three bring their Core skills.",
     holosim: "Like Standard, plus a reserve you can swap in and out between battles in the Holo-Battle Simulator.",
   });
@@ -86,7 +86,7 @@
   }
 
   function defaultMember() {
-    return { formId: "", activeSkills: ["", ""], switchSkill: "" };
+    return { formId: "", activeSkills: ["", ""] };
   }
 
   function defaultModel() {
@@ -125,7 +125,6 @@
     return {
       formId: String(value?.formId || ""),
       activeSkills,
-      switchSkill: String(value?.switchSkill || ""),
     };
   }
 
@@ -277,7 +276,7 @@
   function teamPayload() {
     return {
       m: MODES.find((mode) => mode.id === model.mode)?.share || "s",
-      t: model.members.slice(0, slotCount()).map((member) => [member.formId, ...member.activeSkills, member.switchSkill]),
+      t: model.members.slice(0, slotCount()).map((member) => [member.formId, ...member.activeSkills]),
     };
   }
 
@@ -288,7 +287,6 @@
       members: payload.t.slice(0, MEMBER_SLOTS).map((row) => (Array.isArray(row) ? {
         formId: row[0],
         activeSkills: [row[1], row[2]],
-        switchSkill: row[3],
       } : {})),
     });
   }
@@ -428,8 +426,6 @@
       seen.add(id);
       return id;
     });
-    const switchSkill = skillFor(form, member.switchSkill);
-    if (!switchSkill?.core || member.activeSkills.includes(member.switchSkill)) member.switchSkill = "";
   }
 
   async function ensureData() {
@@ -527,11 +523,18 @@
     if (supportOnly(index)) {
       return skillsOf(form, "skill").filter((skill) => skill.core).map((skill) => ({ skill, slot: "Core skill" }));
     }
-    const rows = member.activeSkills.map((id) => skillFor(form, id)).filter(Boolean).map((skill) => ({ skill, slot: "Active" }));
-    const switchSkill = skillFor(form, member.switchSkill);
-    if (switchSkill) rows.push({ skill: switchSkill, slot: "Switch-skill" });
+    // The Core skill is the switch-skill: always usable through the switch shortcut, picked or not.
+    const core = coreSkill(form);
+    const rows = member.activeSkills.map((id) => skillFor(form, id)).filter(Boolean)
+      .map((skill) => ({ skill, slot: skill === core ? "Active · Switch-skill" : "Active" }));
+    if (core && !rows.some((row) => row.skill === core)) rows.push({ skill: core, slot: "Switch-skill" });
     skillsOf(form, "ultimate").forEach((skill) => rows.push({ skill, slot: "Ultimate" }));
     return rows;
+  }
+
+  // Every form has at most one Core skill in the current data.
+  function coreSkill(form) {
+    return skillsOf(form, "skill").find((skill) => skill.core) || null;
   }
 
   // --- How a skill works ----------------------------------------------------------------------
@@ -1000,21 +1003,17 @@
           render();
         }));
       }
-      const cores = skillsOf(form, "skill").filter((skill) => skill.core && !member.activeSkills.includes(String(skill.id)));
-      grid.append(selectControl("Switch-skill (Core)", [
-        { value: "", label: skillsOf(form, "skill").some((skill) => skill.core) ? "No switch-skill" : "No Core skill" },
-        ...cores.map((skill) => ({ value: String(skill.id), label: skill.name })),
-      ], member.switchSkill, (value) => {
-        member.switchSkill = value;
-        validateMember(member);
-        persist();
-        render();
-      }, "team-field--wide"));
       section.append(grid);
+      const core = coreSkill(form);
       const ultimate = skillsOf(form, "ultimate")[0];
-      section.append(el("p", "team-skill-variant-note", ultimate
-        ? `Ultimate: ${ultimate.name} (comes with this Aniimo).`
-        : "This Aniimo has no Ultimate."));
+      section.append(
+        el("p", "team-skill-variant-note", core
+          ? `Switch-skill: ${core.name} (its Core skill, always usable with the switch shortcut).`
+          : "This Aniimo has no Core skill, so no switch-skill."),
+        el("p", "team-skill-variant-note", ultimate
+          ? `Ultimate: ${ultimate.name} (comes with this Aniimo).`
+          : "This Aniimo has no Ultimate."),
+      );
     }
     const chosen = memberSkills(member, index);
     if (!chosen.length) {

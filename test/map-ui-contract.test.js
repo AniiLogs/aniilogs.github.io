@@ -315,6 +315,9 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.doesNotMatch(teamBuilder, /ultimateSkill|Choose an Ultimate/u);
   // Synergy covers the whole battle roster, not just the selected slot.
   assert.match(teamBuilder, /function renderTeamPage\(\)/u);
+  // The Core skill is the switch-skill and is always available, so it is never picked.
+  assert.match(teamBuilder, /function coreSkill\(form\)/u);
+  assert.doesNotMatch(teamBuilder, /switchSkill|Switch-skill \(Core\)/u);
   assert.doesNotMatch(teamBuilder, /index === focus|Selected Aniimo's own buffs/u);
   assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);
 });
