@@ -338,3 +338,82 @@ test("completion flags merge by newest change, so stale copies cannot undo the d
   assert.equal(bad.status, 400);
   assert.equal((await call(env, "/api/progress/completed", { method: "PATCH", body: { set: ["x"] } })).status, 401);
 });
+
+test("the profile overview gathers the owner's characters, board positions and collection progress", async () => {
+  const checklist = {
+    entries: [
+      { category: "aniimo", completion_states: [{ id: "aniimo:1:standard" }, { id: "aniimo:1:sparkling" }] },
+      { category: "aniimo", completion_states: [{ id: "aniimo:2:standard" }, { id: "aniimo:2:sparkling" }] },
+      { category: "aniimo", counts_toward_total: false, completion_states: [{ id: "aniimo:3:standard" }] },
+      { category: "ambers", completion_states: [{ id: "amber:overworld:a:collected", quantity: 1 }] },
+      { category: "ambers", completion_states: [{ id: "amber:quest:b:collected", quantity: 3 }] },
+    ],
+    special_entries: [{ id: "aniimo-special:9" }],
+  };
+  const CONTENT = {
+    async get(key) {
+      return key.endsWith("/data/checklist_data.json") ? { body: JSON.stringify(checklist) } : null;
+    },
+  };
+  const { env } = await setup({ CONTENT, CONTENT_RELEASE_ENABLED: "true" });
+  const devToken = await desktopToken(env, SESSIONS.dev);
+  const dev2Token = await desktopToken(env, SESSIONS.dev2);
+  const submit = async (token, body) => (await call(env, "/api/leaderboard/submissions", { token, method: "POST", body })).status;
+  await call(env, "/api/leaderboard/characters", { token: devToken, method: "POST", body: { gameUid: "302000105986", name: "MinMax" } });
+  await submit(devToken, run("a1", { score: 20000, gameUid: "302000105986" }));
+  await submit(devToken, run("a2", { score: 22000, gameUid: "302000105986" }));
+  await submit(dev2Token, run("b1", { score: 25000 }));
+  await submit(devToken, run("t1", { score: 9000, boss: { id: "80000100", name: "Omega Tucking", level: 60 } }));
+  await submit(dev2Token, run("w1", { kind: "interlink_week", score: 70000 }));
+  await submit(devToken, { kind: "sim_run", clientRunId: "s1", clearTimeS: 1800, cleared: true, floors: 16 });
+  await submit(dev2Token, { kind: "sim_run", clientRunId: "s2", clearTimeS: 2400, cleared: true, floors: 16 });
+  await submit(devToken, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475 });
+  await submit(dev2Token, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 3100, stars: 500 });
+  await call(env, "/api/progress/completed", {
+    token: devToken,
+    method: "PATCH",
+    body: { set: ["aniimo:1:standard", "aniimo:1:sparkling", "aniimo:2:standard", "amber:quest:b:collected", "pin:m:1:c:collected", "pin:m:2:c:collected"] },
+  });
+
+  const response = await call(env, "/api/profile/overview", { session: SESSIONS.dev });
+  assert.equal(response.status, 200);
+  const overview = await response.json();
+  assert.equal(overview.profile.displayName, "dev name");
+  assert.equal(overview.profile.isPublic, false);
+  assert.deepEqual(overview.characters.map((row) => [row.gameUid, row.name]), [["302000105986", "MinMax"]]);
+
+  const { interlink_run: runs, interlink_week: weeks, sim_run: sims, eggheist_season: heists } = overview.leaderboards;
+  // Best per boss, ranked among every player on that boss, as the board shows it.
+  assert.deepEqual(runs.map((row) => [row.boss.name, row.score, row.position, row.players, row.character]),
+    [["Omega Infergon", 22000, 2, 2, "MinMax"], ["Omega Tucking", 9000, 1, 1, null]]);
+  assert.deepEqual(weeks, []);
+  assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 2]]);
+  assert.deepEqual(heists.map((row) => [row.cycle, row.seasonRank.name, row.stars, row.score, row.position, row.players]),
+    [["S1", "Egg Emperor", 475, 2900, 2, 2]]);
+
+  assert.deepEqual(overview.collection, {
+    aniilog: { standard: 2, sparkling: 1, forms: 2, special: 0, specialTotal: 1 },
+    lumens: { sources: 1, sourceTotal: 2, collected: 3, total: 4 },
+    pins: { collected: 2 },
+  });
+});
+
+test("the profile overview is owner-only, follows the leaderboard gate and counts flags without a checklist", async () => {
+  const { env } = await setup();
+  assert.equal((await call(env, "/api/profile/overview")).status, 401);
+  const devToken = await desktopToken(env, SESSIONS.dev);
+  // A desktop token can't read the overview; it is the website's signed-in owner view.
+  assert.equal((await call(env, "/api/profile/overview", { token: devToken })).status, 401);
+  await call(env, "/api/progress", {
+    session: SESSIONS.user,
+    method: "PUT",
+    body: { progress: { tracking: [], completed: ["aniimo:5:sparkling", "amber:quest:x:collected"], preferences: {} } },
+  });
+  const overview = await (await call(env, "/api/profile/overview", { session: SESSIONS.user })).json();
+  assert.equal(overview.leaderboards, null);
+  assert.deepEqual(overview.collection, {
+    aniilog: { standard: 0, sparkling: 1, forms: null, special: 0, specialTotal: null },
+    lumens: { sources: 1, sourceTotal: null, collected: null, total: null },
+    pins: { collected: 0 },
+  });
+});

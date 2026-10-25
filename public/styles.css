@@ -412,6 +412,30 @@ footer a { font-weight: 800; text-decoration: none; }
   box-shadow: 0 24px 45px rgba(0, 0, 0, 0.4);
 }
 
+.profile-overview { padding: 0 0 6rem; }
+.profile-overview-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; }
+.profile-overview-header h2 { margin: 0.35rem 0 0.4rem; color: var(--ink); font-size: clamp(1.9rem, 3.5vw, 2.8rem); font-weight: 760; line-height: 1.05; letter-spacing: -0.035em; }
+.profile-avatar { flex: none; width: 64px; height: 64px; border: 3px solid var(--lavender); border-radius: 50%; object-fit: cover; }
+.profile-overview-bio, .profile-overview-characters { margin: 0.2rem 0 0; color: var(--ink-soft); line-height: 1.5; }
+.profile-overview-characters { font-size: 0.82rem; }
+.profile-overview-status { min-height: 1.2em; margin: 0 0 0.8rem; color: var(--ink-soft); font-size: 0.82rem; }
+.profile-overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; }
+.profile-panel { min-width: 0; padding: 1.2rem 1.3rem; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--cream) 88%, transparent); color: var(--ink); }
+.profile-panel h3 { margin: 0 0 0.75rem; font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; }
+.profile-panel p { margin: 0; color: var(--ink-soft); font-size: 0.86rem; line-height: 1.5; }
+.profile-panel h4 { margin: 0.9rem 0 0.35rem; color: var(--teal); font-size: 0.7rem; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
+.profile-panel h4:first-child { margin-top: 0; }
+.profile-rows { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.profile-rows li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 0.2rem 0.75rem; padding: 0.45rem 0.6rem; border-radius: 12px; background: color-mix(in srgb, var(--paper) 60%, transparent); font-size: 0.86rem; }
+.profile-rows li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-rows small { grid-column: 1 / -1; color: var(--ink-soft); font-size: 0.74rem; }
+.profile-rows strong { font-variant-numeric: tabular-nums; }
+.profile-position { color: var(--teal); font-weight: 900; font-variant-numeric: tabular-nums; text-decoration: none; }
+.profile-position:hover { text-decoration: underline; }
+.profile-meter { height: 6px; margin-top: 0.3rem; grid-column: 1 / -1; overflow: hidden; border-radius: 999px; background: var(--line); }
+.profile-meter i { display: block; height: 100%; border-radius: inherit; background: var(--mint); }
+.profile-panel-soon { border-style: dashed; background: transparent; }
+
 :root:not([data-color-mode="light"]) .map-toolbar {
   background: rgba(18, 29, 33, 0.95);
 }

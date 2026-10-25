@@ -6,11 +6,11 @@
     <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo Pathfinders.">
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Your Aniimo adventure journal</title>
-    <link rel="stylesheet" href="/styles.css?v=0.9.1-header-language">
+    <link rel="stylesheet" href="/styles.css?v=0.10.0-profile-overview">
     <script src="/explorer/app-config.js?v=20261024-build3535596-team-conditions-r75" defer></script>
     <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
     <script src="/explorer/localization.js?v=0.6.1-header-language" data-auto-start="true" defer></script>
-    <script src="/app.js?v=0.6.1-account-settings" defer></script>
+    <script src="/app.js?v=0.7.0-profile-overview" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -64,7 +64,7 @@
             <span class="account-menu-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div class="account-menu-popover">
-            <a href="#profiles" data-profile-link hidden>My Profile</a>
+            <a href="#my-profile" data-profile-link hidden>My Profile</a>
             <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
             <a href="/explorer/?settings=1">Settings</a>
             <button type="button" data-logout hidden>Log out</button>
@@ -165,6 +165,41 @@
                 <span role="status" aria-live="polite" data-profile-status></span>
               </div>
             </form>
+          </article>
+        </div>
+      </section>
+
+      <section id="my-profile" class="profile-overview" aria-labelledby="my-profile-title" data-profile-overview hidden>
+        <header class="profile-overview-header">
+          <img class="profile-avatar" alt="" width="64" height="64" data-overview-avatar hidden>
+          <div>
+            <p class="eyebrow">Private · only you can see this</p>
+            <h2 id="my-profile-title" data-overview-name>My profile</h2>
+            <p class="profile-overview-bio" data-overview-bio></p>
+            <p class="profile-overview-characters" data-overview-characters></p>
+          </div>
+        </header>
+        <p class="profile-overview-status" role="status" aria-live="polite" data-overview-status></p>
+        <div class="profile-overview-grid">
+          <article class="profile-panel" data-overview-panel="interlink">
+            <h3>Holo-Battle Interlink</h3>
+            <div data-overview-body></div>
+          </article>
+          <article class="profile-panel" data-overview-panel="sim">
+            <h3>Holo-Battle Sim</h3>
+            <div data-overview-body></div>
+          </article>
+          <article class="profile-panel" data-overview-panel="eggheist">
+            <h3>Egg Heist</h3>
+            <div data-overview-body></div>
+          </article>
+          <article class="profile-panel" data-overview-panel="collection">
+            <h3>Collection</h3>
+            <div data-overview-body></div>
+          </article>
+          <article class="profile-panel profile-panel-soon">
+            <h3>Badges &amp; fashion</h3>
+            <p>Your in-game badges, fashion score and outfit will appear here once the AniiLogs desktop app can read them from the game.</p>
           </article>
         </div>
       </section>

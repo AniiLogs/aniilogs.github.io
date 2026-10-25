@@ -12,6 +12,7 @@ const profileDisplayName = document.querySelector("[data-profile-display-name]")
 const profileBio = document.querySelector("[data-profile-bio]");
 const profileSaveButton = document.querySelector("[data-profile-save]");
 const profileStatus = document.querySelector("[data-profile-status]");
+const profileOverview = document.querySelector("[data-profile-overview]");
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
@@ -93,6 +94,7 @@ function showSignedOut(message = "Sign in to sync progress. Profiles remain priv
   profileEditor.hidden = true;
   profileEditor.reset();
   profileStatus.textContent = "";
+  profileOverview.hidden = true;
   status.textContent = message;
 }
 
@@ -117,6 +119,7 @@ function showSignedIn(account) {
   }
   if (leaderboardNav) leaderboardNav.hidden = !(account.developerModeAvailable && developerMode);
   void loadPrivateProfile(name);
+  void loadProfileOverview();
 }
 
 async function loadPrivateProfile(fallbackName = "") {
@@ -136,6 +139,195 @@ async function loadPrivateProfile(fallbackName = "") {
     profileEditor.hidden = true;
     profileStatus.textContent = "";
     status.textContent = "Signed in, but your private profile could not be loaded.";
+  }
+}
+
+// ---------------------------------------------------------------- profile overview
+// The owner's records gathered in one place: board standing from the desktop app and collection progress from the map.
+const numberFormat = new Intl.NumberFormat("en");
+
+function element(tag, className = "", text = "") {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text) node.textContent = text;
+  return node;
+}
+
+function overviewBody(panel) {
+  return profileOverview.querySelector(`[data-overview-panel="${panel}"] [data-overview-body]`);
+}
+
+function clockTime(seconds) {
+  const total = Math.round(Number(seconds) || 0);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function boardLink(entry, kind) {
+  const params = new URLSearchParams({ mode: kind.split("_")[0], kind });
+  if (entry.boss?.id && (kind === "interlink_run" || kind === "interlink_best")) params.set("boss", entry.boss.id);
+  if (entry.cycle && kind === "eggheist_season") params.set("cycle", entry.cycle);
+  const link = element("a", "profile-position", `#${entry.position}`);
+  link.href = `/leaderboard/?${params}`;
+  link.title = `Position ${entry.position} of ${entry.players} players · open the board`;
+  return link;
+}
+
+// One row per board entry: label, position link to the board, and a detail line.
+function standingRow(label, entry, kind, detail) {
+  const row = element("li");
+  row.append(element("span", "", label), boardLink(entry, kind));
+  const extra = [`of ${numberFormat.format(entry.players)}`, ...detail.filter(Boolean)];
+  if (entry.character) extra.push(entry.character);
+  row.append(element("small", "", extra.join(" · ")));
+  return row;
+}
+
+function rowList(rows) {
+  const list = element("ul", "profile-rows");
+  list.append(...rows);
+  return list;
+}
+
+function standingList(heading, rows) {
+  const fragment = document.createDocumentFragment();
+  if (rows.length) fragment.append(element("h4", "", heading), rowList(rows));
+  return fragment;
+}
+
+function renderInterlink(boards) {
+  const body = overviewBody("interlink");
+  const bosses = new Map();
+  // Result-screen runs and battle-prep bests describe the same boss; show the higher of the two.
+  for (const kind of ["interlink_best", "interlink_run"]) {
+    for (const entry of boards[kind] || []) {
+      const key = entry.boss?.id || entry.boss?.name;
+      const prior = bosses.get(key);
+      if (!prior || (entry.score || 0) > (prior.entry.score || 0)) bosses.set(key, { entry, kind });
+    }
+  }
+  const bossRows = [...bosses.values()].map(({ entry, kind }) => standingRow(
+    entry.boss?.level ? `${entry.boss.name || entry.boss.id} · Lv ${entry.boss.level}` : (entry.boss?.name || "Boss"),
+    entry,
+    kind,
+    [`${numberFormat.format(entry.score || 0)} pts`],
+  ));
+  const weekRows = (boards.interlink_week || []).map((entry) => standingRow(
+    entry.cycle ? `Week ${entry.cycle}` : "Weekly total",
+    entry,
+    "interlink_week",
+    [`${numberFormat.format(entry.score || 0)} pts`],
+  ));
+  if (!bossRows.length && !weekRows.length) {
+    body.replaceChildren(element("p", "", "No Interlink scores yet. The desktop app sends them after each boss fight."));
+    return;
+  }
+  body.replaceChildren(standingList("Best per boss", bossRows), standingList("Weekly total", weekRows));
+}
+
+function renderSim(boards) {
+  const body = overviewBody("sim");
+  const rows = (boards.sim_run || []).map((entry) => standingRow(
+    `Best clear ${clockTime(entry.clearTimeS)}`,
+    entry,
+    "sim_run",
+    [entry.floors != null ? `${entry.floors} floors` : "", entry.partySize ? `party of ${entry.partySize}` : ""],
+  ));
+  if (!rows.length) body.replaceChildren(element("p", "", "No Holo-Battle Sim clears yet."));
+  else body.replaceChildren(standingList("Fastest clear", rows));
+}
+
+function renderEggHeist(boards) {
+  const body = overviewBody("eggheist");
+  const rows = (boards.eggheist_season || []).map((entry) => {
+    const rank = entry.seasonRank?.name || (entry.seasonRank ? `Tier ${entry.seasonRank.tier}` : "Unranked");
+    return standingRow(
+      entry.cycle ? `${entry.cycle} · ${rank}` : rank,
+      entry,
+      "eggheist_season",
+      [
+        entry.score != null ? `${numberFormat.format(entry.score)} rank points` : "",
+        entry.stars != null && entry.seasonRank?.tier === 7 ? `${numberFormat.format(entry.stars)} ★` : "",
+      ],
+    );
+  });
+  if (!rows.length) body.replaceChildren(element("p", "", "No Egg Heist season rank yet."));
+  else body.replaceChildren(standingList("Season standing", rows));
+}
+
+function progressRow(label, done, total) {
+  const row = element("li");
+  row.append(element("span", "", label));
+  row.append(element("strong", "", total
+    ? `${numberFormat.format(done)} / ${numberFormat.format(total)}`
+    : numberFormat.format(done)));
+  if (total) {
+    const meter = element("span", "profile-meter");
+    const fill = element("i");
+    fill.style.width = `${Math.min(100, Math.round((done / total) * 100))}%`;
+    meter.setAttribute("aria-hidden", "true");
+    meter.append(fill);
+    row.append(meter);
+  }
+  return row;
+}
+
+function renderCollection(collection) {
+  const { aniilog = {}, lumens = {}, pins = {} } = collection || {};
+  const aniilogRows = [
+    progressRow("Standard", aniilog.standard || 0, aniilog.forms),
+    progressRow("Sparkling", aniilog.sparkling || 0, aniilog.forms),
+  ];
+  if (aniilog.specialTotal) aniilogRows.push(progressRow("Special records", aniilog.special || 0, aniilog.specialTotal));
+  const lumenRow = lumens.collected != null
+    ? progressRow("Lumens collected", lumens.collected, lumens.total)
+    : progressRow("Lumen sources collected", lumens.sources || 0, lumens.sourceTotal);
+  const note = element("p", "", "Counted from your map checklist and the desktop app. ");
+  const mapLink = element("a", "profile-position", "Open the map");
+  mapLink.href = "/explorer/";
+  note.append(mapLink);
+  overviewBody("collection").replaceChildren(
+    element("h4", "", "Aniilog"),
+    rowList(aniilogRows),
+    element("h4", "", "Lumens"),
+    rowList([lumenRow]),
+    element("h4", "", "Map"),
+    rowList([progressRow("Pins collected", pins.collected || 0, null)]),
+    note,
+  );
+}
+
+async function loadProfileOverview() {
+  const overviewStatus = profileOverview.querySelector("[data-overview-status]");
+  profileOverview.hidden = false;
+  overviewStatus.textContent = "Loading your records…";
+  try {
+    const response = await apiFetch("/profile/overview");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const overview = await response.json();
+    const avatar = profileOverview.querySelector("[data-overview-avatar]");
+    avatar.hidden = !overview.profile?.avatarUrl;
+    if (overview.profile?.avatarUrl) avatar.src = overview.profile.avatarUrl;
+    profileOverview.querySelector("[data-overview-name]").textContent = overview.profile?.displayName || "My profile";
+    profileOverview.querySelector("[data-overview-bio]").textContent = overview.profile?.bio || "";
+    const characters = (overview.characters || []).map((character) => character.name || `UID ${character.gameUid}`);
+    profileOverview.querySelector("[data-overview-characters]").textContent = characters.length
+      ? `Characters: ${characters.join(", ")}`
+      : "No game characters linked yet. The desktop app links yours when it sees you in game.";
+    // Board standing follows the leaderboard gate; the server sends none while the owner can't read the boards.
+    for (const panel of ["interlink", "sim", "eggheist"]) {
+      profileOverview.querySelector(`[data-overview-panel="${panel}"]`).hidden = !overview.leaderboards;
+    }
+    if (overview.leaderboards) {
+      renderInterlink(overview.leaderboards);
+      renderSim(overview.leaderboards);
+      renderEggHeist(overview.leaderboards);
+    }
+    renderCollection(overview.collection);
+    overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
+    // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
+    if (window.location.hash === "#my-profile") profileOverview.scrollIntoView({ behavior: "instant" });
+  } catch {
+    overviewStatus.textContent = "Your records could not be loaded right now.";
   }
 }
 
@@ -164,6 +356,7 @@ profileEditor.addEventListener("submit", async (event) => {
     profileBio.value = payload.profile.bio || "";
     accountButton.textContent = payload.profile.displayName;
     profileStatus.textContent = "Saved privately · visible only to you";
+    void loadProfileOverview();
   } catch {
     profileStatus.textContent = "Could not save. Nothing was published.";
   } finally {

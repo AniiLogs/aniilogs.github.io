@@ -1102,6 +1102,162 @@ async function updateOwnProfile(request, env) {
   return json({ ok: true, profile: { displayName, bio: bio || null, isPublic: false, updatedAt: now } });
 }
 
+// ---------------------------------------------------------------- profile overview
+// Everything the owner's profile gathers: linked characters, leaderboard standing and collection progress.
+// Profiles are private, so this is only ever the signed-in owner's own overview.
+
+// Parsed once per content bucket binding for the life of the isolate.
+const checklistCache = new WeakMap();
+
+// The release checklist gives the totals and Lumen amounts; without it the overview still counts flags.
+async function releaseChecklist(env) {
+  if (String(env.CONTENT_RELEASE_ENABLED || "").toLowerCase() !== "true" || !env.CONTENT) return null;
+  if (checklistCache.has(env.CONTENT)) return checklistCache.get(env.CONTENT);
+  try {
+    const key = `releases/${CONTENT_RELEASE}/data/checklist_data.json`;
+    const object = await env.CONTENT.get(key)
+      || await materializeReleaseData(key, env)
+      || await env.CONTENT.get(`releases/${ASSET_FALLBACK_RELEASE}/data/checklist_data.json`);
+    if (!object) return null;
+    const checklist = await new Response(object.body).json();
+    checklistCache.set(env.CONTENT, checklist);
+    return checklist;
+  } catch (error) {
+    console.error("Could not read the release checklist", error);
+    return null;
+  }
+}
+
+function completionQuantity(state) {
+  const value = Number(state?.quantity ?? 1);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
+
+// Collection progress from completion flags: Aniilog standard/sparkling, special records, Lumens and map pins.
+export function collectionSummary(completedIds, checklist = null) {
+  const completed = new Set(completedIds || []);
+  const flagged = (pattern) => [...completed].filter((id) => pattern.test(id)).length;
+  const summary = {
+    aniilog: {
+      standard: flagged(/^aniimo:[^:]+:standard$/u),
+      sparkling: flagged(/^aniimo:[^:]+:sparkling$/u),
+      forms: null,
+      special: flagged(/^aniimo-special:[^:]+:recorded$/u),
+      specialTotal: null,
+    },
+    lumens: { sources: flagged(/^amber:.+:collected$/u), sourceTotal: null, collected: null, total: null },
+    pins: { collected: flagged(/^pin:.+:collected$/u) },
+  };
+  if (!checklist || !Array.isArray(checklist.entries)) return summary;
+  const forms = checklist.entries.filter((entry) => entry?.category === "aniimo" && entry.counts_toward_total !== false);
+  summary.aniilog.forms = forms.length;
+  summary.aniilog.specialTotal = Array.isArray(checklist.special_entries) ? checklist.special_entries.length : null;
+  const seen = new Set();
+  const lumens = { sources: 0, sourceTotal: 0, collected: 0, total: 0 };
+  for (const entry of checklist.entries) {
+    if (entry?.category !== "ambers") continue;
+    for (const state of entry.completion_states || []) {
+      const id = String(state?.id || "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      lumens.sourceTotal += 1;
+      lumens.total += completionQuantity(state);
+      if (completed.has(id)) {
+        lumens.sources += 1;
+        lumens.collected += completionQuantity(state);
+      }
+    }
+  }
+  summary.lumens = lumens;
+  return summary;
+}
+
+// The owner's best entry on each board (as the board shows it) and its position among every player on that board.
+// Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone.
+async function boardStandings(env, discordId, kind) {
+  const sortKey = LEADERBOARD_DEFAULT_SORT[kind];
+  const order = LEADERBOARD_SORTS[sortKey];
+  const orderBy = (prefix) => (sortKey === "standing"
+    ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
+    : `${prefix}${sortKey} ${order}`);
+  const where = ["s.kind = ?", "s.status = 'visible'"];
+  if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
+  else where.push(`s.${sortKey} IS NOT NULL`);
+  if (sortKey === "clear_time_s") where.push("COALESCE(s.cleared, 1) = 1");
+  const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle" : "";
+  const partition = group ? `s.discord_id, s.${group}` : "s.discord_id";
+  const { results } = await env.DB.prepare(
+    `WITH best AS (
+       SELECT s.*, ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
+       FROM leaderboard_submissions s WHERE ${where.join(" AND ")}
+     ), ranked AS (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY ${group || "kind"} ORDER BY ${orderBy("")}, created_at ASC) AS position,
+         COUNT(*) OVER (PARTITION BY ${group || "kind"}) AS players
+       FROM best WHERE playerRank = 1
+     )
+     SELECT ranked.*, gc.character_name AS characterName FROM ranked
+     LEFT JOIN game_characters gc ON gc.game_uid = ranked.game_uid AND gc.discord_id = ranked.discord_id
+     WHERE ranked.discord_id = ?
+     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : group ? "boss_name, boss_id" : "position"}`,
+  ).bind(kind, discordId).all();
+  return (results || []).map((row) => ({
+    position: Number(row.position),
+    players: Number(row.players),
+    submissionId: row.submission_id,
+    character: row.characterName || null,
+    gameUid: row.game_uid,
+    cycle: row.cycle,
+    boss: row.boss_id == null ? null : { id: row.boss_id, name: row.boss_name, level: row.boss_level },
+    score: row.score,
+    seasonRank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
+    stars: row.stars,
+    clearTimeS: row.clear_time_s,
+    floors: row.floors,
+    partySize: row.party_size,
+    playedAt: row.played_at,
+  }));
+}
+
+async function ownProfileOverview(request, env) {
+  const account = await currentAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  const [profile, characters, progressRow] = await Promise.all([
+    env.DB.prepare(
+      "SELECT display_name AS displayName, bio, is_public AS isPublic FROM profiles WHERE discord_id = ?",
+    ).bind(account.discordId).first(),
+    env.DB.prepare(
+      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt
+       FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
+    ).bind(account.discordId).all(),
+    storedProgressRow(env, account.discordId),
+  ]);
+  let completed = [];
+  try {
+    completed = progressRow ? progressPayload(JSON.parse(progressRow.dataJson))?.completed || [] : [];
+  } catch {
+    completed = [];
+  }
+  // Board positions follow the leaderboard gate: hidden while leaderboards are a preview the owner can't read.
+  let leaderboards = null;
+  if (leaderboardAllowed(account, env)) {
+    const kinds = Object.keys(LEADERBOARD_KINDS);
+    const standings = await Promise.all(kinds.map((kind) => boardStandings(env, account.discordId, kind)));
+    leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
+  }
+  return json({
+    profile: {
+      displayName: profile?.displayName || account.globalName || account.username,
+      bio: profile?.bio || null,
+      avatarUrl: account.avatarUrl,
+      isPublic: Number(profile?.isPublic || 0) === 1,
+    },
+    characters: characters.results || [],
+    leaderboards,
+    collection: collectionSummary(completed, await releaseChecklist(env)),
+    progressUpdatedAt: progressRow ? Number(progressRow.updatedAt) : null,
+  });
+}
+
 async function deleteOwnAccount(request, env) {
   if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await currentAccount(request, env);
@@ -1834,6 +1990,7 @@ async function api(request, env) {
   if (url.pathname === "/api/progress/completed" && request.method === "PATCH") return patchCompletion(request, env);
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
+  if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);
   if (url.pathname === "/api/admin/developers" && request.method === "GET") {
     return listDeveloperAccounts(request, env);
