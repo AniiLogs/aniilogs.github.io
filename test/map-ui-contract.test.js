@@ -305,7 +305,14 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0\.17\.15-checklist-sparkling/u);
+  assert.match(explorerHtml, /styles\.css\?v=0\.17\.16-team-modes/u);
+  // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);
+  // Ultimates come with the Aniimo rather than being picked.
+  assert.match(teamBuilder, /id: "interlink", label: "Interlink"/u);
+  assert.match(teamBuilder, /id: "holosim", label: "Holo-Sim"/u);
+  assert.match(teamBuilder, /const MEMBER_SLOTS = 5;/u);
+  assert.match(teamBuilder, /if \(value === "coop"\) return "interlink";/u);
+  assert.doesNotMatch(teamBuilder, /ultimateSkill|Choose an Ultimate/u);
   assert.doesNotMatch(teamBuilder, /\/data\/|localhost|127\.0\.0\.1/u);
 });
 

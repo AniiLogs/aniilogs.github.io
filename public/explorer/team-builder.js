@@ -14,12 +14,21 @@
   const MAX_LOCAL_LOADOUTS = 50;
   const MAX_LOADOUT_FILE_BYTES = 256 * 1024;
   const SHARE_HASH_KEY = "t";
+  // Four Aniimo fight; Holo-Sim adds a fifth reserve that can be swapped in outside battle.
   const TEAM_SIZE = 4;
+  const RESERVE_SLOT = 4;
+  const MEMBER_SLOTS = 5;
   const MAX_ACTIVE_SKILLS = 2;
   const MODES = Object.freeze([
-    Object.freeze({ id: "standard", label: "Standard" }),
-    Object.freeze({ id: "coop", label: "Co-op" }),
+    Object.freeze({ id: "standard", label: "Standard", share: "s" }),
+    Object.freeze({ id: "interlink", label: "Interlink", share: "c" }),
+    Object.freeze({ id: "holosim", label: "Holo-Sim", share: "h" }),
   ]);
+  const MODE_NOTES = Object.freeze({
+    standard: "Four Aniimo, each with two active skills and an optional Core switch-skill. Ultimates come with the Aniimo.",
+    interlink: "You control the first Aniimo and pick its skills. The other three bring their Core skills.",
+    holosim: "Like Standard, plus a reserve you can swap in and out between battles in the Holo-Battle Simulator.",
+  });
   const WHO_LABELS = Object.freeze({
     self: "Self",
     enemy: "Enemies",
@@ -77,16 +86,35 @@
   }
 
   function defaultMember() {
-    return { formId: "", activeSkills: ["", ""], switchSkill: "", ultimateSkill: "" };
+    return { formId: "", activeSkills: ["", ""], switchSkill: "" };
   }
 
   function defaultModel() {
     return {
       mode: "standard",
       activeSlot: 0,
-      members: Array.from({ length: TEAM_SIZE }, defaultMember),
+      members: Array.from({ length: MEMBER_SLOTS }, defaultMember),
       scenario: {},
     };
+  }
+
+  // Older saves call Interlink "coop".
+  function normalizeMode(value) {
+    if (value === "coop") return "interlink";
+    return MODES.some((mode) => mode.id === value) ? value : "standard";
+  }
+
+  function slotCount(mode = model.mode) {
+    return mode === "holosim" ? MEMBER_SLOTS : TEAM_SIZE;
+  }
+
+  function slotIndexes() {
+    return Array.from({ length: slotCount() }, (_, index) => index);
+  }
+
+  function battleMembers() {
+    return model.members.slice(0, TEAM_SIZE).map((member, index) => ({ member, index, form: formFor(member) }))
+      .filter((row) => row.form);
   }
 
   function normalizeMember(value) {
@@ -98,20 +126,20 @@
       formId: String(value?.formId || ""),
       activeSkills,
       switchSkill: String(value?.switchSkill || ""),
-      ultimateSkill: String(value?.ultimateSkill || ""),
     };
   }
 
   function normalizeModel(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return defaultModel();
-    const members = Array.isArray(value.members) ? value.members.slice(0, TEAM_SIZE).map(normalizeMember) : [];
-    while (members.length < TEAM_SIZE) members.push(defaultMember());
+    const members = Array.isArray(value.members) ? value.members.slice(0, MEMBER_SLOTS).map(normalizeMember) : [];
+    while (members.length < MEMBER_SLOTS) members.push(defaultMember());
     const scenario = value.scenario && typeof value.scenario === "object" && !Array.isArray(value.scenario)
       ? Object.fromEntries(Object.entries(value.scenario).slice(0, 500).map(([key, enabled]) => [String(key), Boolean(enabled)]))
       : {};
+    const mode = normalizeMode(value.mode);
     return {
-      mode: value.mode === "coop" ? "coop" : "standard",
-      activeSlot: Math.min(TEAM_SIZE - 1, Math.max(0, Math.round(Number(value.activeSlot) || 0))),
+      mode,
+      activeSlot: Math.min(slotCount(mode) - 1, Math.max(0, Math.round(Number(value.activeSlot) || 0))),
       members,
       scenario,
     };
@@ -248,20 +276,19 @@
   // Compact team payload used by both the export file and the share link.
   function teamPayload() {
     return {
-      m: model.mode === "coop" ? "c" : "s",
-      t: model.members.map((member) => [member.formId, ...member.activeSkills, member.switchSkill, member.ultimateSkill]),
+      m: MODES.find((mode) => mode.id === model.mode)?.share || "s",
+      t: model.members.slice(0, slotCount()).map((member) => [member.formId, ...member.activeSkills, member.switchSkill]),
     };
   }
 
   function modelFromPayload(payload) {
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.t)) throw new Error("This team link or file is not valid.");
     return normalizeModel({
-      mode: payload.m === "c" ? "coop" : "standard",
-      members: payload.t.slice(0, TEAM_SIZE).map((row) => (Array.isArray(row) ? {
+      mode: MODES.find((mode) => mode.share === payload.m)?.id || "standard",
+      members: payload.t.slice(0, MEMBER_SLOTS).map((row) => (Array.isArray(row) ? {
         formId: row[0],
         activeSkills: [row[1], row[2]],
         switchSkill: row[3],
-        ultimateSkill: row[4],
       } : {})),
     });
   }
@@ -403,7 +430,6 @@
     });
     const switchSkill = skillFor(form, member.switchSkill);
     if (!switchSkill?.core || member.activeSkills.includes(member.switchSkill)) member.switchSkill = "";
-    if (!skillsOf(form, "ultimate").some((skill) => String(skill.id) === member.ultimateSkill)) member.ultimateSkill = "";
   }
 
   async function ensureData() {
@@ -484,21 +510,27 @@
   }
 
   function slotRole(index) {
-    if (model.mode !== "coop") return `Team slot ${index + 1}`;
-    return index === 0 ? "Main Aniimo" : `Core skill ally ${index}`;
+    if (model.mode === "interlink") return index === 0 ? "Controlled Aniimo" : `Interlink ally ${index}`;
+    if (model.mode === "holosim" && index === RESERVE_SLOT) return "Reserve";
+    return `Team slot ${index + 1}`;
+  }
+
+  // Interlink allies only bring their Core skills; everyone else has their picks plus the Ultimate
+  // that comes with the Aniimo.
+  function supportOnly(index) {
+    return model.mode === "interlink" && index > 0;
   }
 
   function memberSkills(member, index) {
     const form = formFor(member);
     if (!form) return [];
-    if (model.mode === "coop" && index > 0) {
+    if (supportOnly(index)) {
       return skillsOf(form, "skill").filter((skill) => skill.core).map((skill) => ({ skill, slot: "Core skill" }));
     }
     const rows = member.activeSkills.map((id) => skillFor(form, id)).filter(Boolean).map((skill) => ({ skill, slot: "Active" }));
     const switchSkill = skillFor(form, member.switchSkill);
     if (switchSkill) rows.push({ skill: switchSkill, slot: "Switch-skill" });
-    const ultimate = skillFor(form, member.ultimateSkill);
-    if (ultimate) rows.push({ skill: ultimate, slot: "Ultimate" });
+    skillsOf(form, "ultimate").forEach((skill) => rows.push({ skill, slot: "Ultimate" }));
     return rows;
   }
 
@@ -614,14 +646,13 @@
 
   // --- Team synergy ---------------------------------------------------------------------------
 
-  // Every buff and ally-side operation the team's chosen skills and traits put out, with whether it
-  // can reach the selected Aniimo (the one being built around).
+  // Every buff and ally-side operation the four fighting Aniimo's skills and traits put out, with
+  // whether it can reach the selected Aniimo (the one being built around). A Holo-Sim reserve is not
+  // in the fight until it is swapped in.
   function synergyEffects() {
     const effects = [];
     const focus = model.activeSlot;
-    model.members.forEach((member, index) => {
-      const form = formFor(member);
-      if (!form) return;
+    battleMembers().forEach(({ member, index, form }) => {
       const source = formLabel(entryForForm(member.formId), form);
       const consider = (origin, kind, links, operations = []) => {
         links.forEach((link) => {
@@ -663,9 +694,12 @@
     heading.append(el("div", "", "Team synergy"), el("small", "", `${enabled.length} of ${effects.length} on`));
     section.append(heading);
     const focus = formFor(model.members[model.activeSlot]);
-    section.append(el("p", "team-section-copy", focus
-      ? `Effects your team can put on ${formLabel(entryForForm(model.members[model.activeSlot].formId), focus)}. Switch on the ones active in the fight you want to model.`
-      : "Choose team members and skills to see the effects they share."));
+    const focusName = focus ? formLabel(entryForForm(model.members[model.activeSlot].formId), focus) : "";
+    section.append(el("p", "team-section-copy", !focus
+      ? "Choose team members and skills to see the effects they share."
+      : model.activeSlot === RESERVE_SLOT
+        ? `${focusName} is in reserve. These are the effects the four fighting Aniimo would put on it once it's swapped in (the one it replaces would leave).`
+        : `Effects your team can put on ${focusName}. Switch on the ones active in the fight you want to model.`));
     if (!effects.length) {
       if (focus) section.append(el("p", "team-empty-copy", "No shared effects from the current picks."));
     }
@@ -755,6 +789,7 @@
     MODES.forEach((mode) => {
       const control = button(mode.label, "team-mode-button", () => {
         model.mode = mode.id;
+        model.activeSlot = Math.min(model.activeSlot, slotCount() - 1);
         persist();
         render();
       });
@@ -770,6 +805,7 @@
     const entry = entryForForm(member.formId);
     const card = el("article", "team-sidebar-slot");
     if (model.activeSlot === index) card.classList.add("is-active");
+    if (index === RESERVE_SLOT) card.classList.add("team-slot--reserve");
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-pressed", String(model.activeSlot === index));
@@ -875,11 +911,9 @@
       render();
     }));
     sidebar.append(heading, renderLoadoutControls(), renderModeSwitch(true));
-    sidebar.append(el("p", "team-sidebar-description", model.mode === "coop"
-      ? "Control one main Aniimo and bring the Core skills of three allies."
-      : "Build a four-Aniimo team with two active skills, an optional Core switch-skill, and an Ultimate each."));
+    sidebar.append(el("p", "team-sidebar-description", MODE_NOTES[model.mode]));
     const slots = el("div", "team-sidebar-slots");
-    model.members.forEach((member, index) => slots.append(renderSidebarSlot(member, index)));
+    slotIndexes().forEach((index) => slots.append(renderSidebarSlot(model.members[index], index)));
     const shareWrap = el("div", "team-share-wrap");
     shareWrap.append(button("Copy team link", "team-share-button", shareTeam));
     if (status) shareWrap.append(el("p", "team-share-status", status));
@@ -889,9 +923,13 @@
   function renderOverview() {
     const section = el("section", "team-overview");
     const heading = el("div", "team-section-heading");
-    heading.append(el("div", "", "Team overview"), el("small", "", model.mode === "coop" ? "1 main + 3 Core allies" : "Up to 4 Aniimo"));
+    heading.append(el("div", "", "Team overview"), el("small", "", {
+      interlink: "1 controlled + 3 Core allies",
+      holosim: "4 in battle + 1 reserve",
+    }[model.mode] || "Up to 4 Aniimo"));
     const grid = el("div", "team-overview-grid");
-    model.members.forEach((member, index) => {
+    slotIndexes().forEach((index) => {
+      const member = model.members[index];
       const form = formFor(member);
       const entry = entryForForm(member.formId);
       const card = button("", "team-overview-card", () => {
@@ -900,6 +938,7 @@
         render();
       });
       if (model.activeSlot === index) card.classList.add("is-active");
+      if (index === RESERVE_SLOT) card.classList.add("team-slot--reserve");
       if (entry?.icon) card.append(icon(entry.icon, "team-overview-icon"));
       else card.append(el("span", "team-overview-icon team-overview-icon--empty", "+"));
       const copy = el("span", "team-overview-copy");
@@ -918,10 +957,10 @@
   function renderSkillLoadout(member, form, index) {
     const section = el("section", "team-config-section");
     const heading = el("div", "team-section-heading");
-    const supportOnly = model.mode === "coop" && index > 0;
-    heading.append(el("div", "", supportOnly ? "Core skills brought to the team" : "Skill loadout"));
+    const allyOnly = supportOnly(index);
+    heading.append(el("div", "", allyOnly ? "Core skills brought to the team" : "Skill loadout"));
     section.append(heading);
-    if (!supportOnly) {
+    if (!allyOnly) {
       const skills = skillsOf(form, "skill");
       const grid = el("div", "team-field-grid");
       for (let position = 0; position < MAX_ACTIVE_SKILLS; position += 1) {
@@ -948,27 +987,22 @@
         persist();
         render();
       }, "team-field--wide"));
-      const ultimates = skillsOf(form, "ultimate");
-      grid.append(selectControl("Ultimate", [
-        { value: "", label: ultimates.length ? "Choose an Ultimate" : "No Ultimate" },
-        ...ultimates.map((skill) => ({ value: String(skill.id), label: skill.name })),
-      ], member.ultimateSkill, (value) => {
-        member.ultimateSkill = value;
-        persist();
-        render();
-      }, "team-field--wide"));
       section.append(grid);
+      const ultimate = skillsOf(form, "ultimate")[0];
+      section.append(el("p", "team-skill-variant-note", ultimate
+        ? `Ultimate: ${ultimate.name} (comes with this Aniimo).`
+        : "This Aniimo has no Ultimate."));
     }
     const chosen = memberSkills(member, index);
     if (!chosen.length) {
-      section.append(el("p", "team-empty-copy", supportOnly ? "This Aniimo has no Core skill." : "Choose skills to see how they work."));
+      section.append(el("p", "team-empty-copy", allyOnly ? "This Aniimo has no Core skill." : "Choose skills to see how they work."));
     } else {
       const cards = el("div", "team-skill-cards");
       chosen.forEach(({ skill, slot }) => cards.append(renderSkillCard(skill, slot)));
       section.append(cards);
     }
     const normal = skillsOf(form, "normal")[0];
-    if (normal && !supportOnly) {
+    if (normal && !allyOnly) {
       const details = el("details", "team-skill-description");
       details.append(el("summary", "", `Normal attack: ${normal.name}`), renderMechanics(normal));
       section.append(details);
@@ -1003,6 +1037,37 @@
     return section;
   }
 
+  // Holo-Sim: the reserve and a battle slot trade places, skills and all.
+  function swapWithReserve(slot) {
+    const reserve = model.members[RESERVE_SLOT];
+    model.members[RESERVE_SLOT] = model.members[slot];
+    model.members[slot] = reserve;
+    model.activeSlot = slot;
+    const name = formFor(reserve) ? entryForForm(reserve.formId)?.name || formFor(reserve).name : "Reserve";
+    status = `${name} swapped into team slot ${slot + 1}.`;
+    persist();
+    render();
+  }
+
+  function renderSwapBar(index) {
+    const reserve = model.members[RESERVE_SLOT];
+    const bar = el("section", "team-swap-bar");
+    if (index === RESERVE_SLOT) {
+      bar.append(el("span", "team-field-label", "Swap in for"));
+      for (let slot = 0; slot < TEAM_SIZE; slot += 1) {
+        const member = model.members[slot];
+        const name = formFor(member) ? entryForForm(member.formId)?.name || formFor(member).name : "empty";
+        bar.append(button(`Slot ${slot + 1} · ${name}`, "team-loadout-action", () => swapWithReserve(slot)));
+      }
+      bar.append(el("p", "team-skill-variant-note", "In the Holo-Battle Simulator the reserve can be swapped in and out any time outside a battle."));
+      return bar;
+    }
+    if (!formFor(reserve)) return null;
+    const name = entryForForm(reserve.formId)?.name || formFor(reserve).name;
+    bar.append(button(`Swap with reserve (${name})`, "team-loadout-action", () => swapWithReserve(index)));
+    return bar;
+  }
+
   function renderMember(member, index) {
     const form = formFor(member);
     if (!form) {
@@ -1028,6 +1093,10 @@
     }
     identity.append(copy);
     wrapper.append(identity);
+    if (model.mode === "holosim") {
+      const swap = renderSwapBar(index);
+      if (swap) wrapper.append(swap);
+    }
     const columns = el("div", "team-builder-columns");
     const main = el("div", "team-builder-main-column");
     main.append(renderSkillLoadout(member, form, index), renderTraits(form));
@@ -1079,8 +1148,8 @@
   }
 
   function addToTeam(formId) {
-    const empty = model.members.findIndex((member) => !member.formId);
-    const slot = empty >= 0 ? empty : model.activeSlot;
+    const empty = slotIndexes().find((index) => !model.members[index].formId);
+    const slot = empty ?? model.activeSlot;
     model.members[slot] = { ...defaultMember(), formId };
     model.activeSlot = slot;
     persist();
@@ -1106,7 +1175,7 @@
       grid.append(control);
     });
     section.append(grid);
-    const team = model.members.map((member) => ({ member, form: formFor(member) })).filter((row) => row.form);
+    const team = slotIndexes().map((index) => ({ member: model.members[index], form: formFor(model.members[index]) })).filter((row) => row.form);
     if (team.length) {
       const quick = el("div", "team-type-quick");
       quick.append(el("span", "team-field-label", "Your team"));
@@ -1190,7 +1259,7 @@
           el("small", "", [entry?.form_label, entry?.role].filter(Boolean).join(" · ")),
           chipRow(form.elements),
         );
-        const inTeam = model.members.some((member) => member.formId === formId);
+        const inTeam = slotIndexes().some((index) => model.members[index].formId === formId);
         const add = button(inTeam ? "In team" : "Add to team", "team-loadout-action", () => addToTeam(formId));
         add.disabled = inTeam;
         card.append(copy, add);
@@ -1205,9 +1274,11 @@
   function renderTeamCoverage() {
     const section = el("section", "team-config-section");
     const heading = el("div", "team-section-heading");
-    heading.append(el("div", "", "Team coverage"), el("small", "", "From your team's elements"));
+    heading.append(el("div", "", "Team coverage"), el("small", "", model.mode === "holosim"
+      ? "From the four Aniimo in battle"
+      : "From your team's elements"));
     section.append(heading);
-    const team = model.members.map((member) => ({ member, form: formFor(member) })).filter((row) => row.form);
+    const team = battleMembers();
     if (!team.length) {
       section.append(el("p", "team-empty-copy", "Add Aniimo to your team to see which elements it covers."));
       return section;
@@ -1265,9 +1336,7 @@
     const typesPage = viewState.page === "types";
     copy.append(el("h1", "", typesPage ? "Type matchups" : "Team Builder"), el("p", "", typesPage
       ? "See what an element or pair of elements is weak to and strong against, and which Aniimo have that typing."
-      : model.mode === "coop"
-        ? "Configure one controlled Aniimo and the Core skills your three allies bring."
-        : "Pick four Aniimo and their skills, see how each skill works, and model the effects they share."));
+      : MODE_NOTES[model.mode]));
     const controls = el("div", "team-header-controls");
     controls.append(renderPageSwitch());
     if (!typesPage) controls.append(renderModeSwitch());
