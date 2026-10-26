@@ -8284,7 +8284,7 @@ function renderCatalogPreview(options = {}) {
       modelButton.textContent = state.aniilogModelMode ? "Back to Aniilog UI" : "View Model";
       modelButton.setAttribute("aria-pressed", String(state.aniilogModelMode));
       modelButton.addEventListener("click", () => setAniilogModelMode(!state.aniilogModelMode));
-      headingActions.append(modelButton);
+      headingActions.prepend(modelButton);
       attachViewModel(els.catalogPanel.querySelector(".catalog-aniilog-record"), selected, modelAppearances);
     }
     els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
@@ -8478,7 +8478,7 @@ function setAniilogShowcaseMode(enabled) {
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
   const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
   if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
-  els.catalogPanel.querySelectorAll(".catalog-showcase-variant-select").forEach((select) => {
+  els.catalogPanel.querySelectorAll(".catalog-artwork-controls:not(.catalog-model-controls) .catalog-showcase-variant-select").forEach((select) => {
     select.hidden = !state.aniilogShowcaseMode;
   });
   els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.toggle("is-visible", state.aniilogShowcaseMode);
@@ -8584,9 +8584,11 @@ function setAniilogModelMode(enabled) {
     modelButton.textContent = on ? "Back to Aniilog UI" : "View Model";
     modelButton.setAttribute("aria-pressed", String(on));
   }
-  const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
-  if (showcaseButton) showcaseButton.hidden = on;
-  els.catalogPanel.querySelector(".catalog-model-controls")?.classList.toggle("is-visible", on);
+  const modelControls = els.catalogPanel.querySelector(".catalog-model-controls");
+  modelControls?.classList.toggle("is-visible", on);
+  modelControls?.querySelectorAll(".catalog-showcase-variant-select").forEach((select) => {
+    select.hidden = !on;
+  });
   if (on) els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.remove("is-visible");
   document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", on || showcase);
   if (record && on) record.setAttribute("aria-label", "Aniimo 3D model");

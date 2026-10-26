@@ -8878,6 +8878,54 @@ body.aniilog-model-mode .catalog-aniilog-record.is-model-view > .catalog-model-v
   display: none;
 }
 
+/* The model's menus share one header row with the buttons, like the artwork
+   menus, so the header keeps the artwork header's height. */
+body.aniilog-model-mode .catalog-heading .catalog-model-controls.is-visible {
+  flex-wrap: nowrap;
+  gap: 0.6rem;
+}
+
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu {
+  flex: 0 1 13rem;
+  min-width: 0;
+}
+
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select {
+  min-width: 0;
+}
+
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu > span,
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select-button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* On phones every model menu sits side by side in a single row (the artwork
+   menus do the same), so the header stays two short rows. */
+@media (max-width: 760px) {
+  body.aniilog-model-mode .catalog-heading .catalog-model-controls.is-visible {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 0.4rem;
+  }
+
+  body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu {
+    gap: 0.2rem;
+  }
+
+  body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu > span {
+    font-size: 0.62rem;
+  }
+
+  body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select-button {
+    padding-left: 0.55rem;
+    padding-right: 1.3rem;
+    font-size: 0.72rem;
+  }
+}
+
 @media (min-width: 821px) and (pointer: fine) {
   body.aniilog-model-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniilog-record.is-model-view > .catalog-model-viewer {
     left: 360px;
