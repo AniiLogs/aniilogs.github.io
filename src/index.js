@@ -1573,6 +1573,7 @@ export function leaderboardSubmission(value) {
     meterDamage: boundedInteger(value.meterDamage, 0, 1e15),
     partySize: boundedInteger(value.partySize, 1, 4),
     clientVersion: boundedText(value.clientVersion, 40),
+    server: boundedText(value.server, 40),
     playedAt: boundedInteger(value.playedAt, 1.5e9, 4e9),
   };
   const bad = Object.entries(record).find(([, field]) => field === undefined);
@@ -1663,7 +1664,7 @@ async function corroborateRun(env, submissionId) {
   const me = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
        clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson,
-       json_extract(extra_json, '$.instanceId') AS instanceId
+       json_extract(extra_json, '$.instanceId') AS instanceId, server
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   if (!me || me.kind !== "interlink_run" || me.score == null || !me.gameUid) return;
@@ -1673,9 +1674,10 @@ async function corroborateRun(env, submissionId) {
      WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
        AND cycle IS ? AND boss_id IS ? AND score = ? AND stars IS ? AND clear_time_s IS ?
        AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
-       AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)`,
+       AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)
+       AND (? IS NULL OR server IS NULL OR server = ?)`,
   ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.score, me.stars, me.clearTimeS, me.at, CORROBORATE_WINDOW_S,
-    me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId).all();
+    me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
   // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
   const ownName = async (row, players) => players.find((player) => player?.self)?.name
     || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
@@ -1741,8 +1743,8 @@ async function submitLeaderboardRecord(request, env) {
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
       score, rank_tier, rank_subtier, rank_name, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
-      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
@@ -1752,13 +1754,13 @@ async function submitLeaderboardRecord(request, env) {
       meter_damage = excluded.meter_damage, party_size = excluded.party_size,
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
-      played_at = excluded.played_at, updated_at = excluded.updated_at`,
+      played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server`,
   ).bind(
     submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
     record.bossId, record.bossName, record.bossLevel, record.score, record.rankTier, record.rankSubtier, record.rankName, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
-    record.playedAt, now, now,
+    record.playedAt, now, now, record.server,
   ).run();
   await corroborateRun(env, submissionId);
   return json({
@@ -2017,7 +2019,7 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
     binds.push(mode);
   }
   if (!includeHidden) where.push("s.status = 'visible'");
-  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"]];
+  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"]];
   for (const [name, column] of exact) {
     const value = String(params.get(name) || "").trim();
     if (value && value.length <= 40) {
@@ -2224,7 +2226,7 @@ function clearedSql(kind) {
 }
 
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
-async function interlinkBests(env, cycles, list) {
+async function interlinkBests(env, cycles, list, server = null) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
@@ -2240,9 +2242,9 @@ async function interlinkBests(env, cycles, list) {
        MIN(s.created_at) AS firstAt
      FROM ${CREDITED_RUNS} s
      WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.score IS NOT NULL AND ${NAMED_ON_BOARDS}
-       AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})
+       AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND s.server = ?" : ""}
      GROUP BY s.who, s.cycle, s.boss_id`,
-  ).bind(...cycles).all();
+  ).bind(...cycles, ...(server ? [server] : [])).all();
   // a teammate's name nobody claimed yet: marked when it looks like a claimed one
   const identities = await nameIdentities(env, (results || []).filter((row) => String(row.discordId).startsWith("name:")).map((row) => row.player));
   for (const row of results || []) {
@@ -2296,6 +2298,8 @@ async function interlinkBoards(request, env) {
   const params = new URL(request.url).searchParams;
   const own = (discordId) => Boolean(account && discordId === account.discordId);
   const list = await interlinkCycles(env);
+  const server = String(params.get("server") || "").trim().slice(0, 40) || null;
+  const servers = await gameServers(env, "interlink");
   const weeks = list.map(publicCycle);
   const seasonParam = params.get("season");
   if (seasonParam !== null) {
@@ -2304,7 +2308,7 @@ async function interlinkBoards(request, env) {
     const cycles = list.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
     if (!cycles.length) return json({ error: "Unknown season." }, 404);
     const players = new Map();
-    for (const row of await interlinkBests(env, cycles, list)) {
+    for (const row of await interlinkBests(env, cycles, list, server)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
         total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
@@ -2316,11 +2320,11 @@ async function interlinkBoards(request, env) {
     const standings = ranked([...players.values()], "total").map(({ discordId, weeks: played, firstAt, ...row }) => ({
       ...row, weeks: played.size, own: own(discordId),
     }));
-    return json({ season, weeks: weeks.filter((week) => week.season === season), standings });
+    return json({ season, weeks: weeks.filter((week) => week.season === season), standings, server, servers });
   }
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
-  const rows = await interlinkBests(env, [cycle.id], list);
+  const rows = await interlinkBests(env, [cycle.id], list, server);
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
@@ -2342,7 +2346,7 @@ async function interlinkBoards(request, env) {
     totals.set(row.discordId, player);
   }
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
-  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week });
+  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers });
 }
 
 async function leaderboardEntries(request, env) {
@@ -2429,6 +2433,7 @@ async function leaderboardEntries(request, env) {
       meterDps: row.meter_dps,
       meterDamage: row.meter_damage,
       partySize: row.party_size,
+      server: row.server || null,
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
@@ -2442,6 +2447,15 @@ async function leaderboardEntries(request, env) {
 }
 
 // Distinct values present in the data, for the page's filter menus.
+// The game servers records came from, most records first (records from older apps have none).
+async function gameServers(env, mode) {
+  const { results } = await env.DB.prepare(
+    `SELECT server AS value, COUNT(*) AS count FROM leaderboard_submissions
+     WHERE mode = ? AND status = 'visible' AND server IS NOT NULL GROUP BY server ORDER BY count DESC`,
+  ).bind(mode).all();
+  return results || [];
+}
+
 async function leaderboardFacets(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
@@ -2465,6 +2479,7 @@ async function leaderboardFacets(request, env) {
   }
   return json({
     mode,
+    servers: await gameServers(env, mode),
     cycles,
     bosses,
     levels,

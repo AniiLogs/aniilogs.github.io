@@ -462,6 +462,33 @@ test("the boards list only players with a name; a nameless account's records wai
   assert.deepEqual(await board(), ["LateName", "DevOne"]);
 });
 
+test("boards filter by game server; runs from different servers never vouch for each other", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.dev2);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const shared = { score: 24459, stars: 15, clearTimeS: 120, cleared: true, playedAt: 1792700000 };
+  await send(a, run("na", { ...shared, server: "Aniimo-Americas", players: [{ name: "DevOne", ai: false, self: true }, { name: "DevTwo", ai: false }] }));
+  await send(b, run("eu", { ...shared, server: "Aniimo-Europe", players: [{ name: "DevTwo", ai: false, self: true }, { name: "DevOne", ai: false }] }));
+  await send(b, run("old", { score: 9000, stars: 9 }));                                    // an older app: no server
+
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=interlink")).json();
+  assert.deepEqual(facets.servers.map((x) => x.value).sort(), ["Aniimo-Americas", "Aniimo-Europe"]);
+  const players = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&best=0&${query}`)).json()).entries
+    .filter((e) => !e.teammate).map((e) => [e.player, e.server]);
+  assert.deepEqual(await players("server=Aniimo-Americas"), [["DevOne", "Aniimo-Americas"]]);
+  assert.equal((await players("")).length, 3);                                            // all servers
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005&server=Aniimo-Europe")).json();
+  assert.equal(week.server, "Aniimo-Europe");
+  assert.deepEqual(week.servers.map((x) => x.value).sort(), ["Aniimo-Americas", "Aniimo-Europe"]);
+  assert.deepEqual(week.bosses.flatMap((x) => x.entries).filter((e) => !e.unclaimed).map((e) => e.player), ["DevTwo"]);
+
+  // same week, boss, score, stars, time and moment - but two servers: not the same run, so nobody vouches
+  const slots = (id) => JSON.parse(sqlite.prepare("SELECT players_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).players_json);
+  assert.equal(slots("na").some((p) => p.confirmed), false);
+  assert.equal(slots("eu").some((p) => p.confirmed), false);
+});
+
 test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {
   const { env } = await setup();
   const devToken = await namedToken(env, SESSIONS.dev);

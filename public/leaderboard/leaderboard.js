@@ -73,10 +73,11 @@
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"), account: $("[data-account]"),
     weekly: $("[data-weekly]"), weekSelect: $("[data-week-select]"), seasonSelect: $("[data-season-select]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"),
     weekPick: $("[data-week-pick]"), seasonPick: $("[data-season-pick]"), subTabs: $("[data-sub-tabs]"),
   };
   const state = {
-    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "",
+    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "", server: "",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0,
   };
 
@@ -152,6 +153,7 @@
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
     state.week = params.get("week") || ""; state.sub = params.get("board") || "total"; state.season = params.get("season") || "";
+    state.server = params.get("server") || "";
     for (const name of ["cycle", "boss", "level", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
@@ -163,6 +165,7 @@
   }
   function query() {
     const params = new URLSearchParams({ mode: state.mode, kind: state.kind });
+    if (state.server) params.set("server", state.server);              // every board: one game server, or all
     if (board().custom === "week") {
       if (state.week) params.set("week", state.week);
       if (state.sub !== "total") params.set("board", state.sub);
@@ -243,6 +246,12 @@
     if (!response.ok) return;
     const facets = await response.json();
     state.facets = facets;
+    // the game servers this mode has records from (records from older apps have none and show under "All servers")
+    const servers = facets.servers || [];
+    els.serverPick.hidden = !servers.length;
+    els.serverSelect.replaceChildren(el("option", { value: "", text: "All servers" }),
+      ...servers.map((row) => el("option", { value: row.value, text: row.value })));
+    els.serverSelect.value = servers.some((row) => row.value === state.server) ? state.server : "";
     const f = els.filters.elements;
     const seasonMode = state.mode === "eggheist";
     fillSelect(f.cycle, facets.cycles.map((row) => ({ value: row.value, label: seasonMode ? `Season ${row.value}` : `Cycle ${row.value}` })),
@@ -383,15 +392,16 @@
   }
   async function loadInterlink(requestId) {
     const custom = board().custom;
-    let url = "/leaderboard/interlink";
-    if (custom === "week") url += state.week ? `?cycle=${encodeURIComponent(state.week)}` : "";
-    else if (state.season) url += `?season=${encodeURIComponent(state.season)}`;
-    let response = await apiFetch(url);
+    const ask = new URLSearchParams();
+    if (custom === "week" && state.week) ask.set("cycle", state.week);
+    else if (custom === "season" && state.season) ask.set("season", state.season);
+    if (state.server) ask.set("server", state.server);
+    let response = await apiFetch(`/leaderboard/interlink${ask.size ? `?${ask}` : ""}`);
     if (requestId !== state.requestId) return;
     let data = response.ok ? await response.json() : null;
     if (custom === "season" && data && !state.season) {            // no season picked: the current week's season
       state.season = String(data.cycle?.season ?? "");
-      response = await apiFetch(`/leaderboard/interlink?season=${encodeURIComponent(state.season)}`);
+      response = await apiFetch(`/leaderboard/interlink?season=${encodeURIComponent(state.season)}${state.server ? `&server=${encodeURIComponent(state.server)}` : ""}`);
       if (requestId !== state.requestId) return;
       data = response.ok ? await response.json() : null;
     }
@@ -535,6 +545,7 @@
   });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.weekSelect.addEventListener("change", () => { state.week = els.weekSelect.value; void loadEntries(); });
+  els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
   els.seasonSelect.addEventListener("change", () => { state.season = els.seasonSelect.value; void loadEntries(); });
   els.prev.addEventListener("click", () => {
     state.offset = Math.max(0, state.offset - PAGE_SIZE);
