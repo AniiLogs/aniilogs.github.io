@@ -475,3 +475,37 @@ test("profiles are public only by opt-in; leaderboard entries show either way an
   assert.equal(entry.profileId, lead.profile.publicId);
   assert.equal(entry.players[0].profileId, lead.profile.publicId);
 });
+
+test("Interlink weeks: best per boss, week totals, every week kept, and season totals", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const boss = (id, name) => ({ id, name, level: 60 });
+  // week 3005: Sherro, Infergon, Tucking. dev: two Sherro runs (best counts) + an Infergon prep-screen best
+  assert.equal((await send(a, run("w1", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 11000 }))).status, 201);
+  assert.equal((await send(a, run("w2", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 12000 }))).status, 201);
+  assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-80000107", cycle: "3005", boss: boss("80000107", "Omega Infergon"), score: 9000, stars: 9 })).status, 201);
+  assert.equal((await send(b, run("u1", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 15000 }))).status, 201);
+  // an older week of the same season
+  assert.equal((await send(b, run("u2", { cycle: "3003", boss: boss("80000096", "Omega Chubbi"), score: 7000 }))).status, 201);
+
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  assert.equal(week.cycle.id, "3005");
+  assert.deepEqual(week.bosses.map((x) => x.name), ["Omega Sherro", "Omega Infergon", "Omega Tucking"]);
+  assert.deepEqual(week.bosses[0].entries.map((e) => [e.rank, e.score]), [[1, 15000], [2, 12000]]);
+  assert.deepEqual(week.week.map((e) => [e.rank, e.total]), [[1, 21000], [2, 15000]]);   // 12000 + 9000 beats 15000
+  assert.equal(JSON.stringify(week).includes(IDS.dev), false);                              // no Discord ids
+  assert.ok(week.weeks.some((w) => w.id === "3003"));                                       // past weeks listed
+
+  const old = await (await call(env, "/api/leaderboard/interlink?cycle=3003")).json();
+  assert.deepEqual(old.week.map((e) => e.total), [7000]);
+
+  const season = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
+  assert.deepEqual(season.standings.map((e) => [e.total, e.weeks]), [[22000, 2], [21000, 1]]);
+  assert.deepEqual(week.week.map((e) => e.stars), [29, 20]);                // best stars per boss, added up
+  assert.deepEqual(week.week[0].bossStars, { 80000109: 20, 80000107: 9 });   // and per boss
+  const profile = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
+  assert.deepEqual(profile.leaderboards.interlinkSeason, { season: 1, total: 21000, stars: 29, weeks: 1, rank: 2, players: 2 });
+  assert.equal((await call(env, "/api/leaderboard/interlink?season=99")).status, 404);
+});

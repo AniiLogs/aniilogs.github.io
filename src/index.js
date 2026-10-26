@@ -1253,6 +1253,7 @@ async function ownProfileOverview(request, env) {
     const kinds = Object.keys(LEADERBOARD_KINDS);
     const standings = await Promise.all(kinds.map((kind) => boardStandings(env, account.discordId, kind)));
     leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
+    leaderboards.interlinkSeason = await interlinkSeasonStanding(env, account.discordId);
   }
   return json({
     profile: {
@@ -1291,6 +1292,7 @@ async function publicProfile(request, env, publicId) {
     const kinds = Object.keys(LEADERBOARD_KINDS);
     const standings = await Promise.all(kinds.map((kind) => boardStandings(env, profile.discordId, kind)));
     leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index].map(({ gameUid, ...entry }) => entry)]));
+    leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
   }
   return json({
     profile: { displayName: characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
@@ -1338,6 +1340,24 @@ async function deleteOwnAccount(request, env) {
 // ---------------------------------------------------------------- leaderboards
 // Holo-Battle Interlink and Holo-Battle Sim records submitted by the desktop meter, which reads the game's own
 // result screens. Gated: until LEADERBOARD_PUBLIC is "true", only developer accounts can submit or read.
+
+// Interlink (boss rush) weeks from the game client data (bossrush cycle table, region 1 times): which three bosses
+// each week has and the season it belongs to. Regenerate when a game patch adds weeks.
+const INTERLINK_CYCLES = Object.freeze([
+  {"id":"1","season":0,"start":1760644800,"end":1769155199,"level":36,"bosses":[{"id":"80000095","name":"Alpha Geoclaw"},{"id":"80000096","name":"Alpha Minespine"},{"id":"80000097","name":"Alpha Tubster"}]},
+  {"id":"1000","season":0,"start":1769630400,"end":1770278399,"level":36,"bosses":[{"id":"80000095","name":"Alpha Geoclaw"},{"id":"80000096","name":"Alpha Minespine"},{"id":"80000097","name":"Alpha Tubster"}]},
+  {"id":"1001","season":0,"start":1770235200,"end":1770623999,"level":36,"bosses":[{"id":"80000098","name":"Alpha Scorchhowl"},{"id":"80000096","name":"Alpha Minespine"},{"id":"80000097","name":"Alpha Tubster"}]},
+  {"id":"1002","season":1,"start":1770580800,"end":1775375999,"level":60,"bosses":[{"id":"80000095","name":"Alpha Geoclaw"},{"id":"80000096","name":"Alpha Minespine"},{"id":"80000097","name":"Alpha Tubster"}]},
+  {"id":"1003","season":0,"start":1775332800,"end":1782806399,"level":36,"bosses":[{"id":"80000099","name":"Alpha Irisal"},{"id":"80000097","name":"Alpha Tubster"},{"id":"80000101","name":"Alpha Bouldus"}]},
+  {"id":"2000","season":116,"start":1783540800,"end":1784534399,"level":60,"bosses":[{"id":"80000099","name":"Alpha Irisal"},{"id":"80000097","name":"Alpha Tubster"},{"id":"80000101","name":"Alpha Bouldus"}]},
+  {"id":"2001","season":116,"start":1784145600,"end":1785139199,"level":60,"bosses":[{"id":"80000098","name":"Alpha Scorchhowl"},{"id":"80000096","name":"Alpha Minespine"},{"id":"80000102","name":"Alpha Panpanta"}]},
+  {"id":"2002","season":116,"start":1784750400,"end":1785743999,"level":60,"bosses":[{"id":"80000099","name":"Alpha Irisal"},{"id":"80000097","name":"Alpha Tubster"},{"id":"80000101","name":"Alpha Bouldus"}]},
+  {"id":"3000","season":1,"start":1790193600,"end":1790582399,"level":1,"bosses":[{"id":"80000099","name":"Alpha Irisal"},{"id":"80000097","name":"Alpha Tubster"},{"id":"80000101","name":"Alpha Bouldus"}]},
+  {"id":"3001","season":1,"start":1790798400,"end":1791187199,"level":1,"bosses":[{"id":"80000098","name":"Alpha Scorchhowl"},{"id":"80000096","name":"Alpha Minespine"},{"id":"80000103","name":"Alpha Luminelle"}]},
+  {"id":"3002","season":1,"start":1791403200,"end":1791791999,"level":1,"bosses":[{"id":"80000104","name":"Alpha Blazen"},{"id":"80000105","name":"Omega Sherro"},{"id":"80000106","name":"Alpha Grizbo"}]},
+  {"id":"3003","season":1,"start":1792008000,"end":1792396799,"level":1,"bosses":[{"id":"80000099","name":"Alpha Irisal"},{"id":"80000102","name":"Alpha Panpanta"},{"id":"80000108","name":"Alpha Rookey"}]},
+  {"id":"3005","season":1,"start":1792612800,"end":1793001599,"level":1,"bosses":[{"id":"80000109","name":"Omega Sherro"},{"id":"80000107","name":"Omega Infergon"},{"id":"80000100","name":"Omega Tucking"}]},
+]);
 
 const LEADERBOARD_TOKEN_PREFIX = "alb_";
 const MAX_SUBMISSION_BYTES = 64 * 1024;
@@ -1858,6 +1878,114 @@ function withProfiles(players, profiles) {
   });
 }
 
+// ---------------------------------------------------------------- Interlink weeks and seasons
+// Interlink runs weekly: each week (cycle) has three bosses, and a player's week score is their best score on each
+// of them added up; a season adds up its weeks. A player's best on a boss is the highest score from any of their
+// result-screen runs or battle-prep bests for that week. Every past week stays viewable.
+
+function interlinkCycle(id) {
+  return INTERLINK_CYCLES.find((cycle) => cycle.id === String(id)) || null;
+}
+
+function currentInterlinkCycle(now = Math.floor(Date.now() / 1000)) {
+  const started = INTERLINK_CYCLES.filter((cycle) => cycle.start <= now);
+  return started.length ? started[started.length - 1] : INTERLINK_CYCLES[INTERLINK_CYCLES.length - 1];
+}
+
+// Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
+async function interlinkBests(env, cycles) {
+  if (!cycles.length) return [];
+  const { results } = await env.DB.prepare(
+    `SELECT s.discord_id AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
+       MAX(s.score) AS score, MAX(s.stars) AS stars,
+       (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
+        ORDER BY gc.last_seen_at DESC LIMIT 1) AS player,
+       (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.discord_id) AS profileId,
+       MIN(s.created_at) AS firstAt
+     FROM leaderboard_submissions s
+     WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.score IS NOT NULL
+       AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})
+     GROUP BY s.discord_id, s.cycle, s.boss_id`,
+  ).bind(...cycles).all();
+  return results || [];
+}
+
+function ranked(rows, key) {
+  return rows.sort((a, b) => b[key] - a[key] || a.firstAt - b.firstAt).map((row, index) => ({ rank: index + 1, ...row }));
+}
+
+function publicCycle(cycle) {
+  return cycle ? { id: cycle.id, season: cycle.season, start: cycle.start, end: cycle.end, bosses: cycle.bosses } : null;
+}
+
+// One player's standing in an Interlink season (score, stars, weeks played, rank among everyone), for profiles.
+async function interlinkSeasonStanding(env, discordId, season = currentInterlinkCycle().season) {
+  const cycles = INTERLINK_CYCLES.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
+  const totals = new Map();
+  for (const row of await interlinkBests(env, cycles)) {
+    const player = totals.get(row.discordId) || { total: 0, stars: 0, weeks: new Set(), firstAt: row.firstAt };
+    player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.weeks.add(row.cycle);
+    player.firstAt = Math.min(player.firstAt, row.firstAt);
+    totals.set(row.discordId, player);
+  }
+  const mine = totals.get(discordId);
+  if (!mine) return { season, total: 0, stars: 0, weeks: 0, rank: null, players: totals.size };
+  const rank = 1 + [...totals.values()].filter((p) => p.total > mine.total || (p.total === mine.total && p.firstAt < mine.firstAt)).length;
+  return { season, total: mine.total, stars: mine.stars, weeks: mine.weeks.size, rank, players: totals.size };
+}
+
+async function interlinkBoards(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!leaderboardAllowed(account, env)) return gatedResponse(account);
+  const params = new URL(request.url).searchParams;
+  const own = (discordId) => Boolean(account && discordId === account.discordId);
+  const weeks = INTERLINK_CYCLES.map(publicCycle);
+  const seasonParam = params.get("season");
+  if (seasonParam !== null) {
+    // Season standings: every week of the season added up.
+    const season = Number(seasonParam);
+    const cycles = INTERLINK_CYCLES.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
+    if (!cycles.length) return json({ error: "Unknown season." }, 404);
+    const players = new Map();
+    for (const row of await interlinkBests(env, cycles)) {
+      const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
+        profileId: row.profileId || null, total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
+      player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
+      player.weeks.add(row.cycle); player.bosses += 1;
+      player.firstAt = Math.min(player.firstAt, row.firstAt);
+      players.set(row.discordId, player);
+    }
+    const standings = ranked([...players.values()], "total").map(({ discordId, weeks: played, firstAt, ...row }) => ({
+      ...row, weeks: played.size, own: own(discordId),
+    }));
+    return json({ season, weeks: weeks.filter((week) => week.season === season), standings });
+  }
+  // One week: the three boss boards and the week total.
+  const cycle = interlinkCycle(params.get("cycle")) || currentInterlinkCycle();
+  const rows = await interlinkBests(env, [cycle.id]);
+  const bossIds = cycle.bosses.map((boss) => boss.id);
+  for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
+    if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
+  }
+  const bosses = bossIds.map((id) => {
+    const listed = cycle.bosses.find((boss) => boss.id === id);
+    const entries = ranked(rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row })), "score")
+      .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder", own: own(discordId) }));
+    return { id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id, entries };
+  });
+  const totals = new Map();
+  for (const row of rows) {
+    const player = totals.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
+      profileId: row.profileId || null, total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt };
+    player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.scores[row.bossId] = row.score;
+    player.bossStars[row.bossId] = row.stars;
+    player.firstAt = Math.min(player.firstAt, row.firstAt);
+    totals.set(row.discordId, player);
+  }
+  const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
+  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle().id, weeks, bosses, week });
+}
+
 async function leaderboardEntries(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
@@ -2084,6 +2212,7 @@ async function api(request, env) {
   }
   if (url.pathname === "/api/leaderboard/status" && request.method === "GET") return leaderboardStatus(request, env);
   if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return leaderboardEntries(request, env);
+  if (url.pathname === "/api/leaderboard/interlink" && request.method === "GET") return interlinkBoards(request, env);
   if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
   if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
   if (url.pathname === "/api/leaderboard/tokens" && request.method === "GET") return listLeaderboardTokens(request, env);

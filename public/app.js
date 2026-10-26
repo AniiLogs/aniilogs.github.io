@@ -191,12 +191,18 @@ function boardLink(entry, kind) {
 }
 
 // One row per board entry: label, position link to the board, and a detail line.
-function standingRow(label, entry, kind, detail) {
+function standingRow(label, entry, kind, detail, withStars = false) {
   const row = element("li");
   row.append(element("span", "", label), boardLink(entry, kind));
   const extra = [`of ${numberFormat.format(entry.players)}`, ...detail.filter(Boolean)];
   if (entry.character) extra.push(entry.character);
-  row.append(element("small", "", extra.join(" · ")));
+  const small = element("small", "", extra.join(" · "));
+  if (withStars && entry.stars != null) {                   // challenge-rating stars on that boss
+    const stars = element("span", "profile-stars");
+    stars.append(starIcon(), element("span", "", numberFormat.format(entry.stars)));
+    small.append(" · ", stars);
+  }
+  row.append(small);
   return row;
 }
 
@@ -210,6 +216,15 @@ function standingList(heading, rows) {
   const fragment = document.createDocumentFragment();
   if (rows.length) fragment.append(element("h4", "", heading), rowList(rows));
   return fragment;
+}
+
+// The game's challenge-rating star (drawn, not the game's art).
+function starIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("class", "profile-star"); svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = '<circle cx="12" cy="12" r="11" fill="#f2c230" stroke="#c98e12" stroke-width="1.5"/>'
+    + '<path d="M12 5.2l1.95 4.1 4.5.55-3.3 3.1.85 4.45L12 15.2l-4 2.2.85-4.45-3.3-3.1 4.5-.55z" fill="#7a4b00"/>';
+  return svg;
 }
 
 function renderInterlink(boards) {
@@ -228,6 +243,7 @@ function renderInterlink(boards) {
     entry,
     kind,
     [`${numberFormat.format(entry.score || 0)} pts`],
+    true,
   ));
   const weekRows = (boards.interlink_week || []).map((entry) => standingRow(
     entry.cycle ? `Week ${entry.cycle}` : "Weekly total",
@@ -235,11 +251,27 @@ function renderInterlink(boards) {
     "interlink_week",
     [`${numberFormat.format(entry.score || 0)} pts`],
   ));
-  if (!bossRows.length && !weekRows.length) {
+  const season = boards.interlinkSeason;
+  const seasonRows = [];
+  if (season && season.total) {
+    // Season standing: every week's best scores added up, with the challenge-rating stars earned
+    const row = element("li");
+    const link = element("a", "profile-position", `#${season.rank}`);
+    link.href = `/leaderboard/?mode=interlink&kind=interlink_season_view&season=${season.season}`;
+    link.title = `Position ${season.rank} of ${season.players} players this season · open the season board`;
+    const stars = element("span", "profile-stars");
+    stars.append(starIcon(), element("span", "", numberFormat.format(season.stars)));
+    row.append(element("span", "", `Season ${season.season}`), link);
+    const detail = element("small", "", `of ${numberFormat.format(season.players)} · ${numberFormat.format(season.total)} pts · `);
+    detail.append(stars, ` · ${season.weeks} week${season.weeks === 1 ? "" : "s"}`);
+    row.append(detail);
+    seasonRows.push(row);
+  }
+  if (!bossRows.length && !weekRows.length && !seasonRows.length) {
     body.replaceChildren(element("p", "", "No Interlink scores yet. The desktop app sends them after each boss fight."));
     return;
   }
-  body.replaceChildren(standingList("Best per boss", bossRows), standingList("Weekly total", weekRows));
+  body.replaceChildren(standingList("This season", seasonRows), standingList("Best per boss", bossRows), standingList("Weekly total", weekRows));
 }
 
 function renderSim(boards) {

@@ -494,3 +494,5 @@ footer a { font-weight: 800; text-decoration: none; }
 .profile-public-toggle input { margin-top: 0.2rem; }
 .profile-public-toggle small { display: block; opacity: 0.75; font-size: 0.82em; }
 .profile-public-link { margin: 0; font-size: 0.85em; overflow-wrap: anywhere; }
+.profile-stars { display: inline-flex; align-items: center; gap: 0.25rem; vertical-align: middle; }
+.profile-star { width: 1em; height: 1em; }

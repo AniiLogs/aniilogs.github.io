@@ -7,10 +7,11 @@
 
   // Boards per mode: which records they rank, what they can be ranked by, and which filters apply.
   const BOARDS = Object.freeze({
+    // Interlink runs weekly (a new week starts Wednesday 20:00 UTC) with three bosses; seasons add the weeks up.
     interlink: [
-      { kind: "interlink_run", label: "Boss runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
-      { kind: "interlink_week", label: "Weekly total", sorts: ["score", "stars"], fields: ["cycle"] },
-      { kind: "interlink_best", label: "Best per boss", sorts: ["score", "stars"], fields: ["cycle", "boss", "level"] },
+      { kind: "interlink_week_view", label: "This week", custom: "week", sorts: [], fields: [] },
+      { kind: "interlink_season_view", label: "Season", custom: "season", sorts: [], fields: [] },
+      { kind: "interlink_run", label: "All runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
     ],
     sim: [
       { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
@@ -71,9 +72,11 @@
     boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"), account: $("[data-account]"),
+    weekly: $("[data-weekly]"), weekSelect: $("[data-week-select]"), seasonSelect: $("[data-season-select]"),
+    weekPick: $("[data-week-pick]"), seasonPick: $("[data-season-pick]"), subTabs: $("[data-sub-tabs]"),
   };
   const state = {
-    mode: "interlink", kind: "interlink_run", sort: "", order: "", offset: 0,
+    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0,
   };
 
@@ -139,6 +142,7 @@
     state.sort = params.get("sort") || "";
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
+    state.week = params.get("week") || ""; state.sub = params.get("board") || "total"; state.season = params.get("season") || "";
     for (const name of ["cycle", "boss", "level", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
@@ -150,6 +154,15 @@
   }
   function query() {
     const params = new URLSearchParams({ mode: state.mode, kind: state.kind });
+    if (board().custom === "week") {
+      if (state.week) params.set("week", state.week);
+      if (state.sub !== "total") params.set("board", state.sub);
+      return params;
+    }
+    if (board().custom === "season") {
+      if (state.season) params.set("season", state.season);
+      return params;
+    }
     if (state.sort) params.set("sort", state.sort);
     if (state.order) params.set("order", state.order);
     const fields = board().fields;
@@ -199,6 +212,14 @@
       },
     })));
     els.boardTabs.hidden = BOARDS[state.mode].length < 2;
+    const custom = board().custom;
+    els.filters.hidden = Boolean(custom);
+    els.weekly.hidden = !custom;
+    els.weekPick.hidden = custom !== "week";
+    els.subTabs.hidden = custom !== "week";
+    els.seasonPick.hidden = custom !== "season";
+    for (const node of [els.prev, els.next, els.page]) node.hidden = Boolean(custom);
+    if (custom) return;
     const sorts = board().sorts;
     if (!sorts.includes(state.sort)) state.sort = sorts[0];
     els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: SORT_LABELS[key] })));
@@ -313,8 +334,95 @@
     if (!rows.length) rows.push(el("tr", {}, el("td", { colspan: span, class: "lb-empty", text: "No records match these filters yet." })));
     els.rows.replaceChildren(...rows);
   }
+  // ---------------------------------------------------------------- Interlink weeks and seasons
+  // The game's challenge-rating star, drawn for the boards (not the game's art).
+  function starIcon() {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("class", "lb-star"); svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = '<circle cx="12" cy="12" r="11" fill="#f2c230" stroke="#c98e12" stroke-width="1.5"/>'
+      + '<path d="M12 5.2l1.95 4.1 4.5.55-3.3 3.1.85 4.45L12 15.2l-4 2.2.85-4.45-3.3-3.1 4.5-.55z" fill="#7a4b00"/>';
+    return svg;
+  }
+  function stars(value) {
+    return el("span", { class: "lb-stars" }, starIcon(), el("span", { text: number(value) }));
+  }
+  function weekLabel(week, current) {
+    const start = new Date(week.start * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")}${week.id === current ? " (this week)" : ""}`;
+  }
+  function playerCell(entry) {
+    return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId),
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null);
+  }
+  function table(headers, rows, empty) {
+    els.head.replaceChildren(el("tr", {}, headers.map((text) => el("th", { scope: "col", text }))));
+    els.rows.replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: String(headers.length), class: "lb-empty", text: empty }))]));
+  }
+  async function loadInterlink(requestId) {
+    const custom = board().custom;
+    let url = "/leaderboard/interlink";
+    if (custom === "week") url += state.week ? `?cycle=${encodeURIComponent(state.week)}` : "";
+    else if (state.season) url += `?season=${encodeURIComponent(state.season)}`;
+    let response = await apiFetch(url);
+    if (requestId !== state.requestId) return;
+    let data = response.ok ? await response.json() : null;
+    if (custom === "season" && data && !state.season) {            // no season picked: the current week's season
+      state.season = String(data.cycle?.season ?? "");
+      response = await apiFetch(`/leaderboard/interlink?season=${encodeURIComponent(state.season)}`);
+      if (requestId !== state.requestId) return;
+      data = response.ok ? await response.json() : null;
+    }
+    if (!data) { els.summary.textContent = "The leaderboard could not be loaded."; els.rows.replaceChildren(); return; }
+    if (custom === "week") {
+      state.week = data.cycle.id;
+      const now = Date.now() / 1000;
+      const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id).reverse();
+      els.weekSelect.replaceChildren(...weeks.map((week) => el("option", { value: week.id, text: weekLabel(week, data.current) })));
+      els.weekSelect.value = state.week;
+      const subs = [{ id: "total", name: "Week total" }, ...data.bosses];
+      if (!subs.some((sub) => sub.id === state.sub)) state.sub = "total";
+      els.subTabs.replaceChildren(...subs.map((sub) => el("button", {
+        type: "button", role: "tab", "aria-selected": String(sub.id === state.sub), text: sub.name,
+        onclick: () => { state.sub = sub.id; void loadEntries(); },
+      })));
+      writeUrl();
+      if (state.sub === "total") {
+        table(["#", "Player", "Week score", "Stars", ...data.bosses.map((boss) => boss.name)],
+          data.week.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
+            playerCell(entry), el("td", { text: number(entry.total) }), el("td", {}, stars(entry.stars)),
+            ...data.bosses.map((boss) => el("td", {}, entry.scores[boss.id] == null ? "—"
+              : el("span", { class: "lb-boss-cell" }, el("span", { text: number(entry.scores[boss.id]) }), stars(entry.bossStars?.[boss.id])))))),
+          "No scores this week yet.");
+        els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
+      } else {
+        const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
+        table(["#", "Player", "Best score", "Stars"],
+          bossBoard.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
+            playerCell(entry), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)))),
+          "No scores on this boss this week yet.");
+        els.summary.textContent = `${bossBoard.name} · each player's best score this week · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
+      }
+      return;
+    }
+    const seasons = [...new Set(data.weeks.map((week) => week.season))].filter((value) => value != null);
+    els.seasonSelect.replaceChildren(...seasons.map((value) => el("option", { value: String(value), text: `Season ${value}` })));
+    els.seasonSelect.value = String(data.season);
+    writeUrl();
+    table(["#", "Player", "Season score", "Stars", "Weeks played"],
+      data.standings.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
+        playerCell(entry), el("td", { text: number(entry.total) }), el("td", {}, stars(entry.stars)), el("td", { text: number(entry.weeks) }))),
+      "No scores this season yet.");
+    els.summary.textContent = `Season ${data.season} · every week's scores added up (${number(data.weeks.length)} weeks) · ${number(data.standings.length)} player${data.standings.length === 1 ? "" : "s"}`;
+  }
+
   async function loadEntries() {
     const requestId = ++state.requestId;
+    if (board().custom) {
+      renderControls();
+      els.summary.textContent = "Loading…";
+      await loadInterlink(requestId);
+      return;
+    }
     writeUrl();
     renderHead();
     els.summary.textContent = "Loading…";
@@ -402,6 +510,8 @@
     }, event.target.type === "search" ? 300 : 0);
   });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
+  els.weekSelect.addEventListener("change", () => { state.week = els.weekSelect.value; void loadEntries(); });
+  els.seasonSelect.addEventListener("change", () => { state.season = els.seasonSelect.value; void loadEntries(); });
   els.prev.addEventListener("click", () => {
     state.offset = Math.max(0, state.offset - PAGE_SIZE);
     void loadEntries();
