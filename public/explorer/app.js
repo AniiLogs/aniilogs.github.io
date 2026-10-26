@@ -1986,8 +1986,6 @@ function applyDeveloperVisibility() {
   const enabled = developerModeEnabled();
   if (els.mapMeta) els.mapMeta.hidden = !enabled;
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
-  // Leaderboards are a developer preview until they open to everyone.
-  if (els.topNavLeaderboards) els.topNavLeaderboards.hidden = !enabled;
 }
 
 async function logoutCloudAccount() {
