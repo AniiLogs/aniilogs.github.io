@@ -396,7 +396,7 @@
         els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
       } else {
         const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
-        table(["#", "Player", "Best score", "Stars", "Fastest kill"],
+        table(["#", "Player", "Best score", "Stars", "Fastest clear"],
           bossBoard.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
             playerCell(entry), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
             el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }))),
