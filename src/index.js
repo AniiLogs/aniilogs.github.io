@@ -1443,7 +1443,9 @@ const INTERLINK_CYCLES = Object.freeze([
 
 const LEADERBOARD_TOKEN_PREFIX = "alb_";
 const MAX_SUBMISSION_BYTES = 64 * 1024;
-const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+// A run's proof: the app sends a 1280x720 JPEG (real screens ~60-180 KB). The largest a 1280x720 JPEG can be, even at
+// quality 100 and pure noise, is ~1.3 MB: anything over this limit isn't a 720p proof and is refused.
+const MAX_EVIDENCE_BYTES = 1536 * 1024;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -2408,6 +2410,8 @@ async function interlinkBoards(request, env) {
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
   const rows = await interlinkBests(env, [cycle.id], list, server);
+  const proofs = await interlinkProofs(env, [cycle.id], server);
+  for (const row of rows) row.proofId = proofs.get(`${row.discordId}|${row.cycle}|${row.bossId}`) || null;
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
@@ -2608,22 +2612,45 @@ async function deleteSubmission(request, env, submissionId) {
 }
 
 // Screenshot evidence: visible to the submitter and to developers only.
+// A run's proof screenshot. Anyone may see the proof of an entry shown on the boards (the camera icon next to the
+// name); a hidden entry's only its submitter and developers.
 async function submissionEvidence(request, env, submissionId) {
-  const account = await leaderboardAccount(request, env);
-  if (!account) return json({ error: "Authentication required." }, 401);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, status FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
   if (!row?.evidenceKey || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
-  if (row.discordId !== account.discordId && !account.developerModeAvailable) {
-    return json({ error: "Evidence is visible to its submitter and developers only." }, 403);
+  const visible = row.status === "visible";
+  if (!visible) {
+    const account = await leaderboardAccount(request, env);
+    if (!account) return json({ error: "Authentication required." }, 401);
+    if (row.discordId !== account.discordId && !account.developerModeAvailable) {
+      return json({ error: "This entry is hidden: its proof is visible to its submitter and developers only." }, 403);
+    }
   }
   const object = await env.EVIDENCE.get(row.evidenceKey);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
-  headers.set("cache-control", "private, no-store");
+  headers.set("cache-control", visible ? "public, max-age=86400" : "private, no-store");
   return new Response(object.body, { status: 200, headers });
+}
+
+// The proof to show for each player's row on the Interlink boards: their best run on that boss (that week) that has
+// a screenshot - for a teammate's row, the screenshot of the run they were in.
+async function interlinkProofs(env, cycles, server) {
+  if (!cycles.length) return new Map();
+  const { results } = await env.DB.prepare(
+    `SELECT s.who, s.cycle, s.boss_id AS bossId, s.submission_id AS id FROM ${CREDITED_RUNS} s
+     WHERE s.status = 'visible' AND s.evidence_key IS NOT NULL AND s.kind IN ('interlink_run', 'interlink_best')
+       AND s.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND s.server = ?" : ""}
+     ORDER BY s.score DESC, s.created_at ASC`,
+  ).bind(...cycles, ...(server ? [server] : [])).all();
+  const best = new Map();
+  for (const row of results || []) {
+    const key = `${row.who}|${row.cycle}|${row.bossId}`;
+    if (!best.has(key)) best.set(key, row.id);
+  }
+  return best;
 }
 
 async function api(request, env) {

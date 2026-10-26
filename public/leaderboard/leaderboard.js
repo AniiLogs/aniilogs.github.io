@@ -316,7 +316,7 @@
     if (entry.status === "hidden") facts.push("hidden by a moderator");
     if (facts.length) parts.push(el("p", { class: "lb-facts", text: facts.join(" · ") }));
     const actions = [];
-    if (entry.hasEvidence && (entry.own || state.status?.canModerate)) {
+    if (entry.hasEvidence) {
       actions.push(el("button", { type: "button", class: "secondary-button", text: "View screenshot", onclick: (event) => showEvidence(entry, event.currentTarget) }));
     }
     if (state.status?.canModerate) {
@@ -345,6 +345,7 @@
             renderRows(entries);
           },
         }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
+        entry.hasEvidence ? proofButton(entry.submissionId) : null,
         entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
       ];
@@ -372,7 +373,70 @@
   }
   function playerCell(entry) {
     return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId, {}, entry.uid),
-      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry));
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), proofButton(entry.proofId));
+  }
+  // A picture icon next to a name when the run has its result screenshot, for anyone: hover it to see the screenshot
+  // as large as the window allows, click (or tap) to keep it open.
+  const proofImages = new Map();                       // submission id -> object URL, loaded once per page
+  async function proofImage(submissionId) {
+    if (!proofImages.has(submissionId)) {
+      proofImages.set(submissionId, (async () => {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return URL.createObjectURL(await response.blob());
+      })().catch((error) => { proofImages.delete(submissionId); throw error; }));
+    }
+    return proofImages.get(submissionId);
+  }
+  function proofButton(submissionId) {
+    if (!submissionId) return null;
+    const button = el("button", { type: "button", class: "lb-proof", title: "Hover to see this run's screenshot, click to keep it open",
+      "aria-label": "View this run's screenshot", onclick: () => { hideProofPreview(); openProof(submissionId); } });
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
+    // hover (mouse or pen only: a tap goes straight to the click)
+    button.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") showProofPreview(submissionId); });
+    button.addEventListener("pointerleave", hideProofPreview);
+    button.addEventListener("focus", () => showProofPreview(submissionId));
+    button.addEventListener("blur", hideProofPreview);
+    return button;
+  }
+  let previewFor = null;
+  async function showProofPreview(submissionId) {
+    previewFor = submissionId;
+    let preview = document.querySelector(".lb-proof-preview");
+    if (!preview) { preview = el("div", { class: "lb-proof-preview", "aria-hidden": "true" }); document.body.append(preview); }
+    preview.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
+    preview.hidden = false;
+    try {
+      const url = await proofImage(submissionId);
+      if (previewFor === submissionId) preview.replaceChildren(el("img", { src: url, alt: "" }));
+    } catch {
+      if (previewFor === submissionId) preview.replaceChildren(el("p", { class: "lb-empty", text: "This screenshot isn't available." }));
+    }
+  }
+  function hideProofPreview() {
+    previewFor = null;
+    const preview = document.querySelector(".lb-proof-preview");
+    if (preview) preview.hidden = true;
+  }
+  async function openProof(submissionId) {
+    let dialog = document.querySelector("dialog.lb-proof-dialog");
+    if (!dialog) {
+      dialog = el("dialog", { class: "lb-proof-dialog" },
+        el("form", { method: "dialog" }, el("button", { type: "submit", class: "lb-proof-close", "aria-label": "Close", text: "×" })),
+        el("div", { class: "lb-proof-body" }));
+      dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });   // click outside
+      document.body.append(dialog);
+    }
+    const body = dialog.querySelector(".lb-proof-body");
+    body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
+    dialog.showModal();
+    try {
+      const url = await proofImage(submissionId);
+      body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: "The run's result screenshot" }));
+    } catch {
+      body.replaceChildren(el("p", { class: "lb-empty", text: "This screenshot isn't available." }));
+    }
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   function scoreHeader(text) {

@@ -232,7 +232,7 @@ test("sim runs rank by clear time and filter by rogue buffs", async () => {
   assert.deepEqual(facets.buffs, [{ name: "Multi-Cast", count: 2 }, { name: "Trick Bomb", count: 1 }]);
 });
 
-test("developers can hide entries; evidence is private to the submitter and developers", async () => {
+test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
   const userToken = await namedToken(env, SESSIONS.user);
@@ -247,11 +247,24 @@ test("developers can hide entries; evidence is private to the submitter and deve
 
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.user })).status, 200);
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.dev })).status, 200);
-  const outsider = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
-  assert.equal((await call(outsider.env, `/api/leaderboard/submissions/${submissionId}/evidence`)).status, 401);
+  // shown on the boards: anyone (no sign-in) can open its proof, and the boards point at it
+  const shown = await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`);
+  assert.equal(shown.status, 200);
+  assert.match(shown.headers.get("cache-control"), /public/u);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  assert.deepEqual(week.bosses.flatMap((b) => b.entries).filter((e) => e.proofId).map((e) => e.proofId), [submissionId]);
+  // too big: refused
+  const huge = new FormData();
+  huge.set("submission", JSON.stringify(run("huge-shot")));
+  huge.set("evidence", new Blob([new Uint8Array(2 * 1024 * 1024)], { type: "image/jpeg" }), "result.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: userToken, method: "POST", form: huge })).status, 413);
 
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.user, method: "PATCH", body: { status: "hidden" } })).status, 403);
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "PATCH", body: { status: "hidden" } })).status, 200);
+  // hidden: only its submitter and developers
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`)).status, 401);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.dev2 })).status, 200);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { token: userToken })).status, 200);
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run", { session: SESSIONS.user })).json()).total, 0);
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&hidden=1", { session: SESSIONS.dev })).json()).total, 1);
 
