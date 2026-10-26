@@ -799,8 +799,9 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   // an older week of the same season
   assert.equal((await send(b, run("u2", { cycle: "3003", boss: boss("80000099", "Alpha Irisal"), score: 7000 }))).status, 201);
 
-  // a misread boss on the prep screen (not one of the week's bosses) must not count
-  assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-x", cycle: "3005", boss: boss("80000999", "Omega Tuekin"), score: 9000, stars: 9 })).status, 201);
+  // a misread boss (not one of the week's bosses) is refused, and a misread name of a real one takes the week's name
+  assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-x", cycle: "3005", boss: boss("80000999", "Omega Tuekin"), score: 9000, stars: 9 })).status, 400);
+  assert.equal((await send(a, run("w4", { cycle: "3005", boss: boss("80000109", "Omega Sherr0"), score: 100 }))).status, 201);
   const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
   assert.equal(week.cycle.id, "3005");
   assert.deepEqual(week.bosses.map((x) => x.name), ["Omega Sherro", "Omega Infergon", "Omega Tucking"]);

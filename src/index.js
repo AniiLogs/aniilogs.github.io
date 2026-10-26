@@ -1809,6 +1809,16 @@ async function submitLeaderboardRecord(request, env) {
   }
   const { record, error } = leaderboardSubmission(parsed.body);
   if (error) return json({ error }, 400);
+  // An Interlink run must be on one of its week's three bosses, and takes that boss's name from the week's list
+  // (a misread name on the screen never reaches the boards).
+  if ((record.kind === "interlink_run" || record.kind === "interlink_best") && record.cycle != null) {
+    const week = interlinkCycle(await interlinkCycles(env), record.cycle);
+    if (week) {
+      const boss = week.bosses.find((b) => String(b.id) === String(record.bossId));
+      if (!boss) return json({ error: "That boss isn't one of this week's Interlink bosses." }, 400);
+      record.bossName = boss.name;
+    }
+  }
   if (record.gameUid) {
     const owner = await env.DB.prepare(
       "SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1",
