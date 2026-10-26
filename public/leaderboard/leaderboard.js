@@ -105,10 +105,19 @@
     for (const child of children.flat()) if (child !== null && child !== undefined) node.append(child);
     return node;
   }
-  // A name linked to its owner's public profile (only profiles their owners made public carry an id).
-  function profileName(name, profileId, props = {}) {
-    if (!profileId) return el("span", { ...props, text: name });
-    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}#my-profile`, title: "Open their profile", text: name });
+  // A name linked to its owner's public profile (only profiles their owners made public carry an id). A claimed
+  // character shows its UID on hover: names can look alike (or use lookalike letters), UIDs can't.
+  function profileName(name, profileId, props = {}, uid = null) {
+    const title = [uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""].filter(Boolean).join(" · ") || null;
+    if (!profileId) return el("span", { ...props, title, text: name });
+    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}#my-profile`, title, text: name });
+  }
+  // Marks after a name: a teammate's row nobody claimed yet, and a name that looks like a claimed one.
+  function nameMarks(entry) {
+    return [
+      entry.unclaimed ? el("span", { class: "lb-mark", title: "From a teammate's run. Not claimed: no UID was recorded for this player with the run.", text: "unclaimed" }) : null,
+      entry.lookalike ? el("span", { class: "lb-mark lb-lookalike", title: "This name looks like a claimed player's name but isn't theirs. Only the UID tells players apart.", text: "≈" }) : null,
+    ];
   }
   function number(value) {
     return value === null || value === undefined ? "—" : Number(value).toLocaleString();
@@ -277,7 +286,8 @@
     const parts = [];
     if (entry.players?.length) {
       const rows = entry.players.map((player) => el("tr", {},
-        el("td", {}, profileName(player.name || "—", player.profileId), player.ai ? el("span", { class: "lb-ai", text: "AI" }) : null),
+        el("td", {}, profileName(player.name || "—", player.profileId), player.ai ? el("span", { class: "lb-ai", text: "AI" }) : null,
+          player.lookalike ? el("span", { class: "lb-mark lb-lookalike", title: "This name looks like a claimed player's name. Only the UID tells players apart.", text: "≈" }) : null),
         el("td", { text: player.stat ? `${player.stat}: ${number(player.value)}` : "—" }),
         el("td", { text: number(player.avgDps) }),
         el("td", { text: number(player.breakValue) }),
@@ -319,12 +329,13 @@
         el("td", { class: "lb-rank", text: String(entry.rank) }),
         el("td", { class: "lb-player" }, el("button", {
           type: "button", class: "lb-expand", "aria-expanded": String(open), text: entry.player || "—",
+          title: entry.uid ? `UID ${entry.uid}` : null,
           onclick: () => {
             if (state.expanded.has(entry.submissionId)) state.expanded.delete(entry.submissionId);
             else state.expanded.add(entry.submissionId);
             renderRows(entries);
           },
-        }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null,
+        }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
         entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
       ];
@@ -351,8 +362,8 @@
     return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")}${week.id === current ? " (this week)" : ""}`;
   }
   function playerCell(entry) {
-    return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId),
-      entry.own ? el("span", { class: "lb-you", text: "you" }) : null);
+    return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId, {}, entry.uid),
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry));
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   function scoreHeader(text) {

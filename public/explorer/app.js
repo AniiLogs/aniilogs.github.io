@@ -2965,6 +2965,77 @@ function settingsCard(title, detail) {
   return card;
 }
 
+// Developers: "that character is mine" requests players sent from the desktop app. Each shows the player's proof next
+// to the proof of the account holding the UID now; granting moves the UID, rejecting leaves it. Nothing is automatic.
+function characterDisputesCard() {
+  const card = settingsCard("Character disputes",
+    "Sent by players whose game-menu proof was refused because another account proved that UID first. Compare the two proofs before deciding.");
+  const list = document.createElement("div");
+  list.className = "dispute-list";
+  const status = document.createElement("p");
+  status.setAttribute("role", "status");
+  card.append(list, status);
+  const proofImage = async (path) => {
+    const image = document.createElement("img");
+    image.className = "dispute-proof";
+    image.alt = "Game menu proof";
+    try {
+      const response = await apiFetch(path);
+      if (response.ok) image.src = URL.createObjectURL(await response.blob());
+      else image.alt = "No proof on file";
+    } catch {
+      image.alt = "Proof could not be loaded";
+    }
+    return image;
+  };
+  async function load() {
+    try {
+      const response = await apiFetch("/admin/character-disputes");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { disputes } = await response.json();
+      list.replaceChildren(...await Promise.all(disputes.map(async (dispute) => {
+        const item = document.createElement("article");
+        item.className = `dispute${dispute.status === "open" ? "" : " is-closed"}`;
+        const head = document.createElement("p");
+        head.textContent = `UID ${dispute.gameUid}: ${dispute.claimant} says "${dispute.name}" is theirs. `
+          + `Held by ${dispute.holder || "nobody"}${dispute.holderName ? ` as "${dispute.holderName}"` : ""}`
+          + `${dispute.holderVerifiedAt ? " (proven)" : ""}. ${settingsDate(dispute.createdAt)}`
+          + `${dispute.status === "open" ? "" : ` - ${dispute.status}`}`;
+        item.append(head);
+        if (dispute.note) item.append(Object.assign(document.createElement("blockquote"), { textContent: dispute.note }));
+        const proofs = document.createElement("div");
+        proofs.className = "dispute-proofs";
+        proofs.append(await proofImage(`/admin/character-disputes/${dispute.id}/proof`), await proofImage(`/admin/characters/${dispute.gameUid}/proof`));
+        item.append(proofs);
+        if (dispute.status === "open") {
+          const row = document.createElement("div");
+          row.className = "desktop-settings-row";
+          for (const [action, label] of [["grant", `Give the UID to ${dispute.claimant}`], ["reject", "Reject"]]) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = label;
+            button.addEventListener("click", async () => {
+              const result = await apiFetch(`/admin/character-disputes/${dispute.id}`, {
+                method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action }),
+              });
+              status.textContent = result.ok ? (action === "grant" ? "UID moved." : "Dispute rejected.") : "Could not update the dispute.";
+              void load();
+            });
+            row.append(button);
+          }
+          item.append(row);
+        }
+        return item;
+      })));
+      status.textContent = disputes.length ? "" : "No disputes.";
+    } catch {
+      status.textContent = "Disputes could not be loaded.";
+    }
+  }
+  void load();
+  return card;
+}
+
 function settingsDate(unix) {
   return unix ? new Date(unix * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "never";
 }
@@ -3000,29 +3071,15 @@ function renderDesktopSettings(container) {
 
   const charactersCard = settingsCard(
     "Linked characters",
-    "Your in-game characters, so your records show under your character name. The desktop app links the character it sees automatically; a UID can belong to only one account.",
+    "Your in-game characters, so your records show under your character name. Only the desktop app links them: it reads your name from the game menu (Esc or Start), right above your UID, and sends that as proof. A UID belongs to one account.",
   );
   const characterList = document.createElement("ul");
   characterList.className = "desktop-settings-list";
-  const linkRow = document.createElement("div");
-  linkRow.className = "desktop-settings-row";
-  const uid = document.createElement("input");
-  uid.type = "text";
-  uid.inputMode = "numeric";
-  uid.maxLength = 24;
-  uid.placeholder = "Game UID";
-  const name = document.createElement("input");
-  name.type = "text";
-  name.maxLength = 40;
-  name.placeholder = "Character name (optional)";
-  const link = document.createElement("button");
-  link.type = "button";
-  link.textContent = "Link by hand";
-  linkRow.append(uid, name, link);
   const characterStatus = document.createElement("p");
   characterStatus.setAttribute("role", "status");
-  charactersCard.append(characterList, linkRow, characterStatus);
+  charactersCard.append(characterList, characterStatus);
   container.append(tokensCard, charactersCard);
+  if (state.developerModeAvailable) container.append(characterDisputesCard());
 
   function listItem(text, actionLabel, action) {
     const item = document.createElement("li");
@@ -3063,7 +3120,7 @@ function renderDesktopSettings(container) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const { characters } = await response.json();
       characterList.replaceChildren(...characters.map((character) => listItem(
-        `${character.name || "Unnamed"} - UID ${character.gameUid} (${character.source === "meter" ? "detected by the app" : "added by hand"})`,
+        `${character.name || "Unnamed"} - UID ${character.gameUid} (${character.verified ? "proven in the game menu" : "not proven yet: open the game menu with the app running"})`,
         "Unlink",
         async () => {
           if (!window.confirm(`Unlink ${character.name || character.gameUid} from your account?`)) return;
@@ -3104,24 +3161,6 @@ function renderDesktopSettings(container) {
       copy.textContent = "Copied";
     } catch {
       copy.textContent = "Select and copy it";
-    }
-  });
-  link.addEventListener("click", async () => {
-    if (!/^\d{1,24}$/u.test(uid.value.trim())) {
-      characterStatus.textContent = "Enter the numeric UID shown at the bottom right of the game screen.";
-      return;
-    }
-    const response = await apiFetch("/leaderboard/characters", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ gameUid: uid.value.trim(), name: name.value.trim() || null, source: "manual" }),
-    });
-    const result = await response.json().catch(() => ({}));
-    characterStatus.textContent = response.ok ? "Linked." : (result.error || "Could not link this character.");
-    if (response.ok) {
-      uid.value = "";
-      name.value = "";
-      void loadCharacters();
     }
   });
   void loadTokens();

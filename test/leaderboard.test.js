@@ -258,7 +258,7 @@ test("characters link to one account, show on the board, and protect submissions
 
   const claimed = await link(devToken, { gameUid: "302000105986", name: "MinMax" });
   assert.equal(claimed.status, 201);
-  assert.equal((await claimed.json()).source, "meter");
+  assert.equal((await claimed.json()).verified, false);                      // no game-menu proof sent
   assert.equal((await link(devToken, { gameUid: "302000105986", name: "MinMax2" })).status, 200);
   assert.equal((await link(dev2Token, { gameUid: "302000105986", name: "Thief" })).status, 409);
   assert.equal((await link(devToken, { gameUid: "abc" })).status, 400);
@@ -279,6 +279,155 @@ test("characters link to one account, show on the board, and protect submissions
   assert.equal((await call(env, "/api/leaderboard/submissions", { token: devToken, method: "POST", body: run("z", { gameUid: "302000105986" }) })).status, 409);
   assert.equal((await call(env, "/api/admin/characters/302000105986", { session: SESSIONS.user, method: "PUT", body: { discordId: IDS.user } })).status, 403);
   assert.equal((await call(env, "/api/leaderboard/characters/302000105986", { token: dev2Token, method: "DELETE" })).status, 200);
+});
+
+// A link with the game menu's proof, as the desktop app sends it.
+function proofForm(fields, bytes = [137, 80, 78, 71, 1, 2, 3]) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.set(key, value);
+  form.set("proof", new Blob([new Uint8Array(bytes)], { type: "image/png" }), "menu.png");
+  return form;
+}
+
+test("characters are linked from the app only; proof takes over an unproven link; proven ones only move by dispute", async () => {
+  const { env } = await setup();
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.dev2);
+  const link = (token, form) => call(env, "/api/leaderboard/characters", { token, method: "POST", form });
+  const uid = "302000555555";
+
+  // the website can't link one by hand
+  assert.equal((await call(env, "/api/leaderboard/characters", { session: SESSIONS.dev, method: "POST", body: { gameUid: uid, name: "Typed" } })).status, 403);
+
+  // an unproven link (an older app) is taken over by a proven one from another account
+  assert.equal((await call(env, "/api/leaderboard/characters", { token: a, method: "POST", body: { gameUid: uid, name: "Troll" } })).status, 201);
+  const proven = await link(b, proofForm({ gameUid: uid, name: "Kaela" }));
+  assert.equal(proven.status, 201);
+  assert.equal((await proven.json()).verified, true);
+
+  // once proven, an unproven reading can't rename it and another account's proof can't take it: it may send a dispute
+  assert.equal((await call(env, "/api/leaderboard/characters", { token: b, method: "POST", body: { gameUid: uid, name: "Typo" } })).status, 200);
+  const held = await (await call(env, "/api/leaderboard/characters", { session: SESSIONS.dev2 })).json();
+  assert.deepEqual(held.characters.map((c) => [c.name, Boolean(c.verified)]), [["Kaela", true]]);
+  const refused = await link(a, proofForm({ gameUid: uid, name: "Kaela" }));
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).dispute, true);
+
+  // a dispute needs proof, comes from the app, and changes nothing until a developer decides
+  const dispute = (form) => call(env, "/api/leaderboard/characters/disputes", { token: a, method: "POST", form });
+  const noProof = new FormData(); noProof.set("gameUid", uid); noProof.set("name", "Kaela");
+  assert.equal((await dispute(noProof)).status, 400);
+  const sent = await dispute(proofForm({ gameUid: uid, name: "Kaela", note: "My main" }));
+  assert.equal(sent.status, 201);
+  const { disputeId } = await sent.json();
+  assert.equal((await call(env, "/api/admin/character-disputes", { session: SESSIONS.user })).status, 403);
+  const list = await (await call(env, "/api/admin/character-disputes", { session: SESSIONS.dev })).json();
+  assert.deepEqual(list.disputes.map((d) => [d.gameUid, d.status, d.holderId]), [[uid, "open", IDS.dev2]]);
+  assert.equal((await call(env, `/api/admin/character-disputes/${disputeId}/proof`, { session: SESSIONS.dev })).headers.get("content-type"), "image/png");
+  assert.equal((await call(env, `/api/admin/characters/${uid}/proof`, { session: SESSIONS.dev })).status, 200);
+  assert.equal((await call(env, `/api/admin/character-disputes/${disputeId}`, { session: SESSIONS.dev, method: "PATCH", body: { action: "grant" } })).status, 200);
+  const moved = await (await call(env, "/api/leaderboard/characters", { session: SESSIONS.dev })).json();
+  assert.deepEqual(moved.characters.map((c) => [c.gameUid, c.name, Boolean(c.verified)]), [[uid, "Kaela", true]]);
+  assert.equal((await call(env, `/api/admin/character-disputes/${disputeId}`, { session: SESSIONS.dev, method: "PATCH", body: { action: "grant" } })).status, 409);
+});
+
+test("every real teammate gets a row; only a UID recorded with the run claims it, never a name", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.dev2);
+  const c = await desktopToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const link = (token, gameUid, name) => call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid, name }) });
+  await link(a, "302000000001", "MinMax");
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  // dev's run: dev (self), Kaela (real, her UID known), Rook (real, no UID), Tammy (AI)
+  assert.equal((await send(a, run("t1", { gameUid: "302000000001", boss: sherro, score: 14000, stars: 14, players: [
+    { name: "MinMax", self: true, ai: false }, { name: "Kaela", ai: false, uid: "302000000002" },
+    { name: "Rook", ai: false }, { name: "Tammy", ai: true }] }))).status, 201);
+  const board = async () => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries;
+  assert.deepEqual((await board()).map((e) => [e.player, e.score, e.uid, e.unclaimed]),
+    [["MinMax", 14000, "302000000001", false], ["Kaela", 14000, null, true], ["Rook", 14000, null, true]]);   // no AI row
+
+  // someone proves the name "Rook" later: a name alone claims nothing, so Rook's row stays where it is
+  await link(c, "302000000099", "Rook");
+  assert.deepEqual((await board()).filter((e) => e.player === "Rook").map((e) => e.unclaimed), [true]);
+
+  // Kaela proves her UID: the row recorded with it becomes hers, with her UID on hover
+  await link(b, "302000000002", "Kaela");
+  const kaela = (await board()).find((e) => e.player === "Kaela");
+  assert.deepEqual([kaela.unclaimed, kaela.uid], [false, "302000000002"]);
+
+  // a lookalike of a claimed name is marked on unclaimed rows
+  await send(a, run("t2", { gameUid: "302000000001", boss: sherro, score: 9000, stars: 9, players: [
+    { name: "MinMax", self: true, ai: false }, { name: "Ka3la", ai: false }] }));
+  assert.equal((await board()).find((e) => e.player === "Ka3la").lookalike, true);
+  assert.equal((await board()).find((e) => e.player === "Rook").lookalike, false);
+});
+
+test("two app users sending the same run vouch for each other: each teammate slot gets the other's UID", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.dev2);
+  const c = await desktopToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  // Kaela's app linked her character without menu proof (an older app): the vouching alone ties her slot to her
+  await call(env, "/api/leaderboard/characters", { token: b, method: "POST", body: { gameUid: "302000000002", name: "Kaela" } });
+  await call(env, "/api/leaderboard/characters", { token: a, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
+  await call(env, "/api/leaderboard/characters", { token: c, method: "POST", form: proofForm({ gameUid: "302000000003", name: "Rook" }) });
+  const tucking = { id: "80000100", name: "Omega Tucking", level: 60 };
+  const party = (me) => [{ name: "MinMax", ai: false, self: me === "MinMax" }, { name: "Kaela", ai: false, self: me === "Kaela" }, { name: "Tammy", ai: true }];
+  const shared = { boss: tucking, score: 16064, stars: 15, clearTimeS: 150, cleared: true, playedAt: 1792700000 };
+  await send(a, run("m1", { ...shared, gameUid: "302000000001", players: party("MinMax") }));
+  await send(b, run("k1", { ...shared, gameUid: "302000000002", playedAt: 1792700060, players: party("Kaela") }));
+  // a different run (another score) sent by someone else is not the same run
+  await send(c, run("x1", { ...shared, score: 15000, gameUid: "302000000003", players: [{ name: "Rook", ai: false, self: true }, { name: "MinMax", ai: false }] }));
+
+  const entries = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000100").entries;
+  // MinMax and Kaela once each (their teammate rows merged into their own), plus Rook's run with its unclaimed MinMax row
+  assert.deepEqual(entries.map((e) => [e.player, e.score, e.unclaimed]).sort(),
+    [["Kaela", 16064, false], ["MinMax", 15000, true], ["MinMax", 16064, false], ["Rook", 15000, false]].sort());
+  const mine = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0", { session: SESSIONS.dev })).json();
+  const myRun = mine.entries.find((e) => e.submissionId && e.own && e.player === "MinMax" && e.score === 16064 && !e.teammate);
+  assert.ok(myRun);
+  assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side
+});
+
+test("only runs played and sent within five minutes vouch; prep-screen scores and late runs never do", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.dev2);
+  const c = await desktopToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  for (const [token, gameUid, name] of [[a, "302000000001", "MinMax"], [b, "302000000002", "Kaela"], [c, "302000000003", "Rook"]]) {
+    await call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid, name }) });
+  }
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const shared = { boss: sherro, score: 24459, stars: 15, clearTimeS: 120, cleared: true };
+  const vouched = (sqlRow) => (JSON.parse(sqlRow.players_json).find((p) => p.name === "Kaela") || {}).confirmed === true;
+  await send(a, run("m1", { ...shared, gameUid: "302000000001", playedAt: 1792700000,
+    players: [{ name: "MinMax", ai: false, self: true }, { name: "Kaela", ai: false }, { name: "Rook", ai: false }] }));
+
+  // the same best score read off the prep screen (no run, no timer, no party) proves nothing
+  await send(b, { kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 24459, stars: 15 });
+  const mine = () => sqlite.prepare("SELECT players_json FROM leaderboard_submissions WHERE client_run_id = 'm1'").get();
+  assert.equal(vouched(mine()), false);
+
+  // the same score from a run played more than five minutes apart is another run
+  await send(b, run("k-other", { ...shared, gameUid: "302000000002", playedAt: 1792700000 + 6 * 60,
+    players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
+  assert.equal(vouched(mine()), false);
+
+  // played together, but sent more than five minutes after the first one: too late to vouch
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id = 'm1'").run();
+  await send(b, run("k-late", { ...shared, gameUid: "302000000002", playedAt: 1792700030,
+    players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
+  assert.equal(vouched(mine()), false);
+
+  // played together and sent together: vouched
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at + 600 WHERE client_run_id = 'm1'").run();
+  await send(b, run("k-now", { ...shared, gameUid: "302000000002", playedAt: 1792700030,
+    players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
+  assert.equal(vouched(mine()), true);
 });
 
 test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {

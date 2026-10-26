@@ -10844,6 +10844,13 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 .desktop-settings-token code { flex: 1 1 100%; border: 1px dashed var(--accent-2); border-radius: 8px; color: var(--accent-2); font-size: 12px; overflow-wrap: anywhere; padding: 6px 8px; }
 .desktop-settings-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .desktop-settings-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); padding: 4px 0; }
+/* developer settings: character disputes */
+.dispute-list { display: grid; gap: 12px; }
+.dispute { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; font-size: 13px; }
+.dispute.is-closed { opacity: 0.6; }
+.dispute p, .dispute blockquote { margin: 0; }
+.dispute-proofs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.dispute-proof { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #000; }
 .settings-card .desktop-settings-list button { width: auto; flex: 0 0 auto; }
 
 .show-collected-toggle {

@@ -1520,6 +1520,22 @@ function boundedNumber(value, min, max) {
   return Number.isFinite(number) && number >= min && number <= max ? number : undefined;
 }
 
+// Names that look the same: accents and width forms dropped, lookalike letters folded together (Cyrillic and Greek
+// letters to Latin, 0/O, 1/l/I/|, rn/m, vv/w), after Unicode's confusable-skeleton idea (UTS #39). Two characters with
+// one skeleton but different UIDs are lookalikes: the boards mark them, and only the UID tells them apart.
+const CONFUSABLE_LETTERS = Object.freeze({
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s", "һ": "h", "ԁ": "d",
+  "ӏ": "l", "к": "k", "м": "m", "н": "h", "т": "t", "в": "b", "ɡ": "g", "α": "a", "ο": "o", "ρ": "p", "ν": "v", "τ": "t",
+  "κ": "k", "ι": "i", "υ": "u", "χ": "x", "ε": "e", "β": "b", "μ": "u", "0": "o", "1": "l", "|": "l", "!": "l", "5": "s",
+  "$": "s", "@": "a", "3": "e", "ø": "o", "ł": "l", "đ": "d", "ß": "ss",
+});
+export function nameSkeleton(name) {
+  const folded = String(name || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+  return [...folded].map((letter) => CONFUSABLE_LETTERS[letter] ?? letter).join("")
+    .replace(/i/gu, "l").replace(/rn/gu, "m").replace(/vv/gu, "w").replace(/cl/gu, "d")
+    .replace(/[\s_.\-·•'`´]/gu, "");
+}
+
 function boundedText(value, maxLength, pattern = null) {
   if (value === null || value === undefined || value === "") return null;
   const text = String(value).trim();
@@ -1577,8 +1593,11 @@ export function leaderboardSubmission(value) {
       damageTaken: boundedInteger(player.damageTaken, 0, 1e15),
       heal: boundedInteger(player.heal, 0, 1e15),
       ai: player.ai === undefined ? null : Boolean(player.ai),
+      self: player.self === undefined ? null : Boolean(player.self),
+      uid: boundedText(player.uid, 24, /^\d+$/u),     // the teammate's UID, when the game showed it with the run
     };
     if (Object.values(clean).some((field) => field === undefined)) return { error: "A player field is invalid." };
+    if (clean.name) clean.skel = nameSkeleton(clean.name);
     cleanPlayers.push(clean);
   }
 
@@ -1631,6 +1650,53 @@ async function readSubmissionRequest(request) {
   if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Evidence must be a JPEG, PNG or WebP image.");
   if (file.size > MAX_EVIDENCE_BYTES) throw new RangeError("Evidence image is too large.");
   return { body, evidence: file };
+}
+
+// Two app users in one Interlink run both send it: same week, boss, score, stars and time, played and sent within five
+// minutes of each other. Only full runs (result screen, timer, party) count: a best score read off the prep screen
+// says nothing about who was in a run. Each submission then vouches for the other: the other player's slot in this run's party gets their UID
+// (from their own submission, whose UID only their account can send) and is marked confirmed, and the same the other
+// way round. That is how a teammate's row gets a UID with the run - no name matching after the fact.
+const CORROBORATE_WINDOW_S = 5 * 60;
+async function corroborateRun(env, submissionId) {
+  const me = await env.DB.prepare(
+    `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
+       clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson
+     FROM leaderboard_submissions WHERE submission_id = ?`,
+  ).bind(submissionId).first();
+  if (!me || me.kind !== "interlink_run" || me.score == null || !me.gameUid) return;
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS id, discord_id AS discordId, game_uid AS gameUid, players_json AS playersJson
+     FROM leaderboard_submissions
+     WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
+       AND cycle IS ? AND boss_id IS ? AND score = ? AND stars IS ? AND clear_time_s IS ?
+       AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?`,
+  ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.score, me.stars, me.clearTimeS, me.at, CORROBORATE_WINDOW_S,
+    me.sentAt, CORROBORATE_WINDOW_S).all();
+  // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
+  const ownName = async (row, players) => players.find((player) => player?.self)?.name
+    || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
+  // put the other sender's UID on their slot (matched by lookalike-folded name, never an AI or the sender's own slot)
+  const vouch = (players, name, gameUid) => {
+    if (!name) return false;
+    const skeleton = nameSkeleton(name);
+    const slot = players.find((player) => player?.name && player.ai !== true && !player.self && (player.skel || nameSkeleton(player.name)) === skeleton);
+    if (!slot || (slot.uid === gameUid && slot.confirmed)) return false;
+    Object.assign(slot, { uid: gameUid, confirmed: true });
+    return true;
+  };
+  const mine = parseJsonColumn(me.playersJson) || [];
+  let mineChanged = false;
+  for (const other of results || []) {
+    const theirs = parseJsonColumn(other.playersJson) || [];
+    if (vouch(mine, await ownName(other, theirs), other.gameUid)) mineChanged = true;
+    if (vouch(theirs, await ownName(me, mine), me.gameUid)) {
+      await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").bind(JSON.stringify(theirs), other.id).run();
+    }
+  }
+  if (mineChanged) {
+    await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").bind(JSON.stringify(mine), me.id).run();
+  }
 }
 
 async function submitLeaderboardRecord(request, env) {
@@ -1691,6 +1757,7 @@ async function submitLeaderboardRecord(request, env) {
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
     record.playedAt, now, now,
   ).run();
+  await corroborateRun(env, submissionId);
   return json({
     ok: true,
     submissionId,
@@ -1704,7 +1771,8 @@ async function listCharacters(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
   const { results } = await env.DB.prepare(
-    `SELECT game_uid AS gameUid, character_name AS name, source, linked_at AS linkedAt, last_seen_at AS lastSeenAt
+    `SELECT game_uid AS gameUid, character_name AS name, source, linked_at AS linkedAt, last_seen_at AS lastSeenAt,
+       verified_at IS NOT NULL AS verified
      FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
   ).bind(account.discordId).all();
   return json({ characters: results || [] });
@@ -1712,13 +1780,45 @@ async function listCharacters(request, env) {
 
 // Claims a character for the signed-in account. The desktop meter calls this with the UID it reads from the game's
 // own log ("meter"); the website can add one by hand ("manual"). A UID linked to another account is refused.
+const MAX_PROOF_BYTES = 512 * 1024;
+
+// A character link or dispute from the desktop app: JSON {gameUid, name}, or a form with the same fields plus "proof",
+// the strip of the game menu showing the name with the UID under it (and "note" on a dispute).
+async function readCharacterRequest(request) {
+  const type = request.headers.get("content-type") || "";
+  if (!type.toLowerCase().startsWith("multipart/form-data")) return { ...(await readJsonBody(request, 1024)), proof: null };
+  if (Number(request.headers.get("content-length") || 0) > MAX_PROOF_BYTES + 4096) throw new RangeError("Request body is too large.");
+  const form = await request.formData();
+  const file = form.get("proof");
+  let proof = null;
+  if (file && typeof file !== "string") {
+    if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Proof must be a JPEG, PNG or WebP image.");
+    if (file.size > MAX_PROOF_BYTES) throw new RangeError("Proof image is too large.");
+    proof = { bytes: new Uint8Array(await file.arrayBuffer()), type: file.type };
+  }
+  return { gameUid: form.get("gameUid"), name: form.get("name"), note: form.get("note"), proof };
+}
+
+// Every name a UID has gone by (names can be bought), so runs keep going to whoever held the name when they were played.
+async function recordCharacterName(env, gameUid, name, verified, now) {
+  if (!name) return;
+  await env.DB.prepare(
+    `INSERT INTO character_names (game_uid, character_name, skeleton, verified, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(game_uid, character_name) DO UPDATE SET last_seen_at = excluded.last_seen_at, skeleton = excluded.skeleton,
+       verified = MAX(verified, excluded.verified)`,
+  ).bind(gameUid, name, nameSkeleton(name), verified ? 1 : 0, now, now).run();
+}
+
+// Characters are linked only by the desktop app, from the game itself: the UID from the game's log and the name from the
+// game menu, sent with the menu as proof. A proven link takes a UID over from an unproven one; a UID another account
+// already proved stays put, and the app offers to send a dispute instead.
 async function linkCharacter(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
-  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  if (!account.viaToken) return json({ error: "Characters are linked by the desktop app when it sees you in game." }, 403);
   let body;
   try {
-    body = await readJsonBody(request, 1024);
+    body = await readCharacterRequest(request);
   } catch (error) {
     return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
   }
@@ -1726,27 +1826,145 @@ async function linkCharacter(request, env) {
   const name = boundedText(body.name, 40);
   if (!gameUid) return json({ error: "A numeric game UID is required." }, 400);
   if (name === undefined) return json({ error: "Character name is invalid." }, 400);
-  const source = account.viaToken && body.source !== "manual" ? "meter" : "manual";
+  const proven = Boolean(body.proof && name);
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    "SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1",
+    "SELECT discord_id AS discordId, verified_at AS verifiedAt, character_name AS name FROM game_characters WHERE game_uid = ? LIMIT 1",
   ).bind(gameUid).first();
   if (existing && existing.discordId !== account.discordId) {
-    return json({ error: "This character is already linked to another account. Ask a developer if it is yours." }, 409);
-  }
-  if (existing) {
+    if (!proven || existing.verifiedAt) {
+      return json({
+        error: existing.verifiedAt
+          ? "Another account proved this character from the game menu. If it is yours, send a dispute from the app."
+          : "This character is linked to another account. Open the game menu (Esc or Start) so the app can prove it is yours.",
+        dispute: Boolean(proven && existing.verifiedAt),
+      }, 409);
+    }
     await env.DB.prepare(
-      `UPDATE game_characters SET character_name = COALESCE(?, character_name), last_seen_at = ?,
-         source = CASE WHEN ? = 'meter' THEN 'meter' ELSE source END
+      `UPDATE game_characters SET discord_id = ?, character_name = ?, source = 'meter', linked_at = ?, last_seen_at = ?,
+         verified_at = ? WHERE game_uid = ?`,
+    ).bind(account.discordId, name, now, now, now, gameUid).run();
+  } else if (existing) {
+    // a proven name always wins; an unproven reading never renames a proven character
+    await env.DB.prepare(
+      `UPDATE game_characters SET last_seen_at = ?, source = 'meter',
+         character_name = CASE WHEN ? = 1 OR verified_at IS NULL THEN COALESCE(?, character_name) ELSE character_name END,
+         verified_at = CASE WHEN ? = 1 THEN ? ELSE verified_at END
        WHERE game_uid = ?`,
-    ).bind(name, now, source, gameUid).run();
+    ).bind(now, proven ? 1 : 0, name, proven ? 1 : 0, now, gameUid).run();
   } else {
     await env.DB.prepare(
-      `INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(gameUid, account.discordId, name, source, now, now).run();
+      `INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at, verified_at)
+       VALUES (?, ?, ?, 'meter', ?, ?, ?)`,
+    ).bind(gameUid, account.discordId, name, now, now, proven ? now : null).run();
   }
-  return json({ ok: true, gameUid, name, source, linked: !existing }, existing ? 200 : 201);
+  if (proven) {
+    await env.DB.prepare(
+      `INSERT INTO character_proofs (game_uid, discord_id, character_name, image, mime, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(game_uid) DO UPDATE SET discord_id = excluded.discord_id, character_name = excluded.character_name,
+         image = excluded.image, mime = excluded.mime, created_at = excluded.created_at`,
+    ).bind(gameUid, account.discordId, name, body.proof.bytes, body.proof.type, now).run();
+  }
+  if (proven || !existing?.verifiedAt) await recordCharacterName(env, gameUid, name, proven, now);
+  const taken = Boolean(existing && existing.discordId !== account.discordId);
+  return json({ ok: true, gameUid, name, verified: proven || Boolean(existing?.verifiedAt && !taken), linked: !existing || taken },
+    existing && !taken ? 200 : 201);
+}
+
+// "That character is mine": a player whose proof was refused because another account proved the UID first sends their
+// own proof and an optional note. Nothing changes until a developer compares the two proofs.
+async function disputeCharacter(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
+  if (!account.viaToken) return json({ error: "Disputes are sent from the desktop app, with the game menu as proof." }, 403);
+  let body;
+  try {
+    body = await readCharacterRequest(request);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
+  const name = boundedText(body.name, 40);
+  const note = boundedText(body.note, 500);
+  if (!gameUid || !name || note === undefined) return json({ error: "A UID, a name and an optional short note are required." }, 400);
+  if (!body.proof) return json({ error: "A dispute needs the game menu as proof." }, 400);
+  const owner = await env.DB.prepare("SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ?").bind(gameUid).first();
+  if (!owner || owner.discordId === account.discordId) return json({ error: "This character isn't held by another account." }, 409);
+  const open = await env.DB.prepare(
+    "SELECT dispute_id AS id FROM character_disputes WHERE game_uid = ? AND discord_id = ? AND status = 'open'",
+  ).bind(gameUid, account.discordId).first();
+  if (open) return json({ ok: true, disputeId: open.id, alreadyOpen: true });
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    `INSERT INTO character_disputes (game_uid, discord_id, character_name, note, image, mime, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'open', ?) RETURNING dispute_id AS id`,
+  ).bind(gameUid, account.discordId, name, note, body.proof.bytes, body.proof.type, now).first();
+  return json({ ok: true, disputeId: result?.id ?? null }, 201);
+}
+
+async function developerAccount(request, env) {
+  const account = await currentAccount(request, env);
+  return account?.developerModeAvailable ? account : null;
+}
+
+// Developers: the disputes players sent, newest first, with who holds each UID now.
+async function listCharacterDisputes(request, env) {
+  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  const { results } = await env.DB.prepare(
+    `SELECT d.dispute_id AS id, d.game_uid AS gameUid, d.character_name AS name, d.note, d.status, d.created_at AS createdAt,
+       d.resolved_at AS resolvedAt, du.discord_username AS claimant, d.discord_id AS claimantId,
+       gc.character_name AS holderName, hu.discord_username AS holder, gc.discord_id AS holderId, gc.verified_at AS holderVerifiedAt
+     FROM character_disputes d
+     JOIN users du ON du.discord_id = d.discord_id
+     LEFT JOIN game_characters gc ON gc.game_uid = d.game_uid
+     LEFT JOIN users hu ON hu.discord_id = gc.discord_id
+     ORDER BY d.status = 'open' DESC, d.created_at DESC LIMIT 100`,
+  ).all();
+  return json({ disputes: results || [] });
+}
+
+// Developers: one proof image - a dispute's ("dispute") or the one the current holder sent ("holder").
+async function characterProofImage(request, env, which, id) {
+  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  const row = which === "dispute"
+    ? await env.DB.prepare("SELECT image, mime FROM character_disputes WHERE dispute_id = ?").bind(Number(id)).first()
+    : await env.DB.prepare("SELECT image, mime FROM character_proofs WHERE game_uid = ?").bind(String(id)).first();
+  if (!row) return json({ error: "Proof not found." }, 404);
+  return new Response(row.image, { headers: { "content-type": row.mime, "cache-control": "private, no-store" } });
+}
+
+// Developers: grant a dispute (the UID moves to the player who sent it, with their proof) or reject it.
+async function resolveCharacterDispute(request, env, id) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 256);
+  } catch (error) {
+    return json({ error: error.message }, 400);
+  }
+  if (!["grant", "reject"].includes(body.action)) return json({ error: "action must be grant or reject." }, 400);
+  const dispute = await env.DB.prepare(
+    "SELECT game_uid AS gameUid, discord_id AS discordId, character_name AS name, image, mime, status FROM character_disputes WHERE dispute_id = ?",
+  ).bind(Number(id)).first();
+  if (!dispute) return json({ error: "Dispute not found." }, 404);
+  if (dispute.status !== "open") return json({ error: "This dispute is already resolved." }, 409);
+  const now = Math.floor(Date.now() / 1000);
+  if (body.action === "grant") {
+    await env.DB.prepare(
+      `UPDATE game_characters SET discord_id = ?, character_name = ?, source = 'meter', linked_at = ?, last_seen_at = ?,
+         verified_at = ? WHERE game_uid = ?`,
+    ).bind(dispute.discordId, dispute.name, now, now, now, dispute.gameUid).run();
+    await env.DB.prepare(
+      `INSERT INTO character_proofs (game_uid, discord_id, character_name, image, mime, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(game_uid) DO UPDATE SET discord_id = excluded.discord_id, character_name = excluded.character_name,
+         image = excluded.image, mime = excluded.mime, created_at = excluded.created_at`,
+    ).bind(dispute.gameUid, dispute.discordId, dispute.name, dispute.image, dispute.mime, now).run();
+    await recordCharacterName(env, dispute.gameUid, dispute.name, true, now);
+  }
+  await env.DB.prepare("UPDATE character_disputes SET status = ?, resolved_at = ? WHERE dispute_id = ?")
+    .bind(body.action === "grant" ? "granted" : "rejected", now, Number(id)).run();
+  return json({ ok: true, status: body.action === "grant" ? "granted" : "rejected" });
 }
 
 async function unlinkCharacter(request, env, gameUid) {
@@ -1844,30 +2062,79 @@ function parseJsonColumn(value) {
   }
 }
 
+// Every Interlink run counts for each real player in it, not only the one who sent it: one row per submission for its
+// sender (who = their account), plus one per non-AI teammate the sender's app saw on the prep screen. A teammate's row
+// belongs to an account only through the teammate's UID recorded with the run (proven by that player in their own game
+// menu); a name alone never claims anything - names can be bought, given up and imitated - so without a UID the row
+// stays under the name ("name:<name>") for good. The sender's own slot is marked self by the app and isn't counted twice.
+const CREDITED_RUNS = `(
+  SELECT c.*, c.discord_id AS who, NULL AS teammate, NULL AS teammate_uid FROM leaderboard_submissions c
+  UNION ALL
+  SELECT * FROM (
+    SELECT c.*, COALESCE(
+        (SELECT gc2.discord_id FROM game_characters gc2
+         WHERE gc2.game_uid = json_extract(pl.value, '$.uid')
+           AND (gc2.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)),
+        'name:' || lower(json_extract(pl.value, '$.name'))) AS who,
+      json_extract(pl.value, '$.name') AS teammate,
+      (SELECT gc3.game_uid FROM game_characters gc3
+       WHERE gc3.game_uid = json_extract(pl.value, '$.uid')
+         AND (gc3.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)) AS teammate_uid
+    FROM leaderboard_submissions c, json_each(c.players_json) pl
+    WHERE c.kind = 'interlink_run' AND json_extract(pl.value, '$.ai') = 0
+      AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
+  ) WHERE who <> discord_id
+)`;
+
+
+// Whether a name nobody claimed looks like a claimed character's name (same skeleton): the boards mark it, since only a
+// UID tells two such players apart. A name is never matched to a UID - only a UID recorded with the run is.
+async function nameIdentities(env, names) {
+  const list = [...new Set(names.filter(Boolean).map((name) => String(name)))].slice(0, 300);
+  const skeletons = [...new Set(list.map(nameSkeleton))];
+  const rows = skeletons.length ? (await env.DB.prepare(
+    `SELECT cn.character_name AS name, cn.skeleton, cn.game_uid AS gameUid, cn.verified, cn.last_seen_at AS lastSeenAt
+     FROM character_names cn JOIN game_characters gc ON gc.game_uid = cn.game_uid
+     WHERE cn.skeleton IN (${skeletons.map(() => "?").join(", ")})`,
+  ).bind(...skeletons).all()).results || [] : [];
+  return (name) => {
+    if (!name) return { lookalike: false };
+    const skeleton = nameSkeleton(name);
+    const same = rows.filter((row) => row.skeleton === skeleton);
+    const exact = same.filter((row) => String(row.name).toLowerCase() === String(name).toLowerCase())
+      .sort((a, b) => b.verified - a.verified || b.lastSeenAt - a.lastSeenAt)[0];
+    return { lookalike: same.length > 0 && !exact };
+  };
+}
+
 // Party members are matched to accounts by character name (names are unique in the game). Only members whose owner
 // made their profile public get a link; everyone else, and AI teammates, show as plain names.
 async function partyProfiles(env, rows) {
   const names = new Set();
+  const shown = [];
   for (const row of rows) {
     for (const player of parseJsonColumn(row.players_json) || []) {
-      if (player?.name && !player.ai) names.add(String(player.name).toLowerCase());
+      if (player?.name && !player.ai) { names.add(String(player.name).toLowerCase()); shown.push(String(player.name)); }
     }
   }
-  if (!names.size) return new Map();
+  const identities = await nameIdentities(env, shown);
+  if (!names.size) return Object.assign(new Map(), { identities });
   const list = [...names].slice(0, 200);
   const { results } = await env.DB.prepare(
     `SELECT lower(gc.character_name) AS name, p.public_id AS publicId FROM game_characters gc
      JOIN profiles p ON p.discord_id = gc.discord_id
      WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND lower(gc.character_name) IN (${list.map(() => "?").join(", ")})`,
   ).bind(...list).all();
-  return new Map((results || []).map((row) => [row.name, row.publicId]));
+  return Object.assign(new Map((results || []).map((row) => [row.name, row.publicId])), { identities });
 }
-
 function withProfiles(players, profiles) {
   if (!Array.isArray(players)) return players;
   return players.map((player) => {
-    const publicId = player?.name && !player.ai ? profiles.get(String(player.name).toLowerCase()) : null;
-    return publicId ? { ...player, profileId: publicId } : player;
+    if (!player?.name || player.ai) return player;
+    const { skel: _skeleton, uid: _uid, confirmed: _confirmed, ...shown } = player;
+    const publicId = profiles.get(String(player.name).toLowerCase());
+    const identity = profiles.identities ? profiles.identities(player.name) : { lookalike: false };
+    return { ...shown, ...(publicId ? { profileId: publicId } : {}), ...(identity.lookalike ? { lookalike: true } : {}) };
   });
 }
 
@@ -1948,18 +2215,28 @@ function clearedSql(kind) {
 async function interlinkBests(env, cycles, list) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
-    `SELECT s.discord_id AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
+    `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
        MIN(CASE WHEN ${clearedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
-       (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
-        ORDER BY gc.last_seen_at DESC LIMIT 1) AS player,
-       (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.discord_id) AS profileId,
+       CASE WHEN s.who LIKE 'name:%' THEN MAX(s.teammate) ELSE
+         (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
+          ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
+       CASE WHEN s.who LIKE 'name:%' THEN NULL ELSE COALESCE(MAX(s.teammate_uid),
+         (SELECT game_uid FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
+          ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS uid,
+       (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
        MIN(s.created_at) AS firstAt
-     FROM leaderboard_submissions s
+     FROM ${CREDITED_RUNS} s
      WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.score IS NOT NULL
        AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})
-     GROUP BY s.discord_id, s.cycle, s.boss_id`,
+     GROUP BY s.who, s.cycle, s.boss_id`,
   ).bind(...cycles).all();
+  // a teammate's name nobody claimed yet: marked when it looks like a claimed one
+  const identities = await nameIdentities(env, (results || []).filter((row) => String(row.discordId).startsWith("name:")).map((row) => row.player));
+  for (const row of results || []) {
+    row.unclaimed = String(row.discordId).startsWith("name:");
+    row.lookalike = row.unclaimed && identities(row.player).lookalike;
+  }
   // A week the game data lists only counts its own three bosses: a misread boss name (the battle prep screen's name
   // sits over the boss art) can't add a fourth board or count a score twice.
   return (results || []).filter((row) => {
@@ -2017,7 +2294,8 @@ async function interlinkBoards(request, env) {
     const players = new Map();
     for (const row of await interlinkBests(env, cycles, list)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
-        profileId: row.profileId || null, total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
+        profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
+        total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
       player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
       player.weeks.add(row.cycle); player.bosses += 1;
       player.firstAt = Math.min(player.firstAt, row.firstAt);
@@ -2044,7 +2322,8 @@ async function interlinkBoards(request, env) {
   const totals = new Map();
   for (const row of rows) {
     const player = totals.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
-      profileId: row.profileId || null, total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt };
+      profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
+      total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt };
     player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.scores[row.bossId] = row.score;
     player.bossStars[row.bossId] = row.stars;
     player.firstAt = Math.min(player.firstAt, row.firstAt);
@@ -2061,7 +2340,7 @@ async function leaderboardEntries(request, env) {
   const moderator = Boolean(account?.developerModeAvailable);
   const { where, binds, kind } = leaderboardFilters(params, { includeHidden: moderator && params.get("hidden") === "1" });
   if (params.get("mine") === "1" && account) {
-    where.push("s.discord_id = ?");
+    where.push("s.who = ?");
     binds.push(account.discordId);
   }
   const sortKey = Object.hasOwn(LEADERBOARD_SORTS, params.get("sort") || "")
@@ -2081,17 +2360,21 @@ async function leaderboardEntries(request, env) {
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
   // One row per player (their best on each boss) unless every submission is requested.
   const bestPerPlayer = params.get("best") !== "0";
-  const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.discord_id, s.boss_id"
-    : kind === "eggheist_season" ? "s.discord_id, s.cycle" : "s.discord_id";
+  // one row per player: the sender, or a teammate credited with the run (see CREDITED_RUNS)
+  const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.who, s.boss_id"
+    : kind === "eggheist_season" ? "s.who, s.cycle" : "s.who";
   const base = `
     SELECT s.*, gc.character_name AS characterName,
-      (SELECT character_name FROM game_characters WHERE discord_id = s.discord_id AND character_name IS NOT NULL
-       ORDER BY last_seen_at DESC LIMIT 1) AS anyCharacter, CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
+      (SELECT character_name FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
+       ORDER BY last_seen_at DESC LIMIT 1) AS anyCharacter,
+      (SELECT game_uid FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
+       ORDER BY last_seen_at DESC LIMIT 1) AS anyUid,
+      CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
       ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
-    FROM leaderboard_submissions s
+    FROM ${CREDITED_RUNS} s
     JOIN users u ON u.discord_id = s.discord_id
-    LEFT JOIN profiles p ON p.discord_id = s.discord_id
-    LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id
+    LEFT JOIN profiles p ON p.discord_id = s.who
+    LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id AND s.teammate IS NULL
     WHERE ${where.join(" AND ")}`;
   const filtered = bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base;
   const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...binds).first();
@@ -2099,6 +2382,7 @@ async function leaderboardEntries(request, env) {
     `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
   ).bind(...binds, limit, offset).all();
   const profiles = await partyProfiles(env, results || []);
+  const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
   return json({
     kind,
     sort: sortKey,
@@ -2110,10 +2394,15 @@ async function leaderboardEntries(request, env) {
     entries: (results || []).map((row, index) => ({
       rank: offset + index + 1,
       submissionId: row.submission_id,
-      // the run's own linked character, else any the account linked. Never a party slot: the submitter isn't always 1P.
-      player: row.characterName || row.anyCharacter || "Pathfinder",
-      character: row.characterName || null,
-      own: Boolean(account && row.discord_id === account.discordId),
+      // the run's own linked character, else any the account linked; for a teammate's row, the name in the party.
+      // Never a party slot for the sender: the sender isn't always 1P.
+      player: row.teammate || row.characterName || row.anyCharacter || "Pathfinder",
+      character: row.teammate || row.characterName || null,
+      uid: (row.teammate ? row.teammate_uid : (row.characterName ? row.game_uid : row.anyUid)) || null,
+      teammate: Boolean(row.teammate),
+      unclaimed: String(row.who).startsWith("name:"),
+      lookalike: String(row.who).startsWith("name:") && teammates(row.teammate).lookalike,
+      own: Boolean(account && row.who === account.discordId),
       kind: row.kind,
       mode: row.mode,
       cycle: row.cycle,
@@ -2295,6 +2584,13 @@ async function api(request, env) {
   if (submissionMatch && submissionMatch[2] && request.method === "GET") return submissionEvidence(request, env, submissionMatch[1]);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "GET") return listCharacters(request, env);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "POST") return linkCharacter(request, env);
+  if (url.pathname === "/api/leaderboard/characters/disputes" && request.method === "POST") return disputeCharacter(request, env);
+  if (url.pathname === "/api/admin/character-disputes" && request.method === "GET") return listCharacterDisputes(request, env);
+  const disputeMatch = url.pathname.match(/^\/api\/admin\/character-disputes\/(\d{1,12})(\/proof)?$/u);
+  if (disputeMatch && disputeMatch[2] && request.method === "GET") return characterProofImage(request, env, "dispute", disputeMatch[1]);
+  if (disputeMatch && !disputeMatch[2] && request.method === "PATCH") return resolveCharacterDispute(request, env, disputeMatch[1]);
+  const holderProofMatch = url.pathname.match(/^\/api\/admin\/characters\/(\d{1,24})\/proof$/u);
+  if (holderProofMatch && request.method === "GET") return characterProofImage(request, env, "holder", holderProofMatch[1]);
   const characterMatch = url.pathname.match(/^\/api\/leaderboard\/characters\/(\d{1,24})$/u);
   if (characterMatch && request.method === "DELETE") return unlinkCharacter(request, env, characterMatch[1]);
   const characterAdminMatch = url.pathname.match(/^\/api\/admin\/characters\/(\d{1,24})$/u);

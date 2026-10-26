@@ -117,3 +117,8 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-info-pop ul { margin: 0.5rem 0; padding-left: 1.1rem; color: var(--ink-soft); }
 .lb-info-pop p { margin: 0; color: var(--ink-soft); }
 .lb-boss-cell .lb-stars { opacity: 0.9; font-size: 0.9em; }
+
+/* a teammate's unclaimed row, a lookalike name */
+.lb-mark { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 12%, transparent); font-size: 0.72em; font-weight: 700; letter-spacing: 0.03em; opacity: 0.75; cursor: help; }
+.lb-lookalike { background: color-mix(in srgb, var(--coral) 22%, transparent); color: var(--coral); opacity: 1; }
+.lb-player [title] { cursor: help; }
