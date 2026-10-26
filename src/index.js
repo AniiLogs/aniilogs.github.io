@@ -1265,10 +1265,51 @@ async function boardStandings(env, discordId, kind) {
   }));
 }
 
+// The account's main character: the one it picked (profiles.main_game_uid, while still linked to it), else the most
+// recently seen character proven in the game menu, else the most recently seen one. Null without characters.
+async function mainCharacter(env, discordId) {
+  return env.DB.prepare(
+    `SELECT gc.game_uid AS gameUid, gc.character_name AS name, gc.verified_at IS NOT NULL AS verified,
+       gc.game_uid = p.main_game_uid AS picked
+     FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id
+     WHERE gc.discord_id = ?
+     ORDER BY gc.game_uid = p.main_game_uid DESC, gc.verified_at IS NOT NULL DESC, gc.last_seen_at DESC LIMIT 1`,
+  ).bind(discordId).first();
+}
+
+// The collection progress a profile shows: its main character's checklists (kept per UID), else the account's.
+async function profileProgressRow(env, discordId, main) {
+  return (main && await storedProgressRow(env, { uid: main.gameUid, discordId })) || storedProgressRow(env, discordId);
+}
+
+// PUT /api/profile/main {gameUid}: pick the main character (one of the account's), or null for automatic.
+async function setMainCharacter(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 256);
+  } catch (error) {
+    return json({ error: error.message }, 400);
+  }
+  const gameUid = body.gameUid === null ? null : boundedText(body.gameUid, 24, /^\d+$/u);
+  if (gameUid === undefined) return json({ error: "gameUid must be a game UID or null." }, 400);
+  if (gameUid && !await env.DB.prepare("SELECT 1 AS ok FROM game_characters WHERE game_uid = ? AND discord_id = ?")
+    .bind(gameUid, account.discordId).first()) return json({ error: "That character isn't linked to this account." }, 404);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at, main_game_uid)
+     VALUES (?, NULL, NULL, 0, ?, ?, ?)
+     ON CONFLICT(discord_id) DO UPDATE SET main_game_uid = excluded.main_game_uid, updated_at = excluded.updated_at`,
+  ).bind(account.discordId, now, now, gameUid).run();
+  return json({ ok: true, main: await mainCharacter(env, account.discordId) });
+}
+
 async function ownProfileOverview(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
-  const [profile, characters, progressRow] = await Promise.all([
+  const [profile, characters, main] = await Promise.all([
     env.DB.prepare(
       "SELECT display_name AS displayName, bio, is_public AS isPublic FROM profiles WHERE discord_id = ?",
     ).bind(account.discordId).first(),
@@ -1276,11 +1317,12 @@ async function ownProfileOverview(request, env) {
       `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt
        FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
     ).bind(account.discordId).all(),
-    storedProgressRow(env, account.discordId),
+    mainCharacter(env, account.discordId),
   ]);
+  const ownProgress = await profileProgressRow(env, account.discordId, main);
   let completed = [];
   try {
-    completed = progressRow ? progressPayload(JSON.parse(progressRow.dataJson))?.completed || [] : [];
+    completed = ownProgress ? progressPayload(JSON.parse(ownProgress.dataJson))?.completed || [] : [];
   } catch {
     completed = [];
   }
@@ -1300,9 +1342,10 @@ async function ownProfileOverview(request, env) {
       isPublic: Number(profile?.isPublic || 0) === 1,
     },
     characters: characters.results || [],
+    main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     leaderboards,
     collection: collectionSummary(completed, await releaseChecklist(env)),
-    progressUpdatedAt: progressRow ? Number(progressRow.updatedAt) : null,
+    progressUpdatedAt: ownProgress ? Number(ownProgress.updatedAt) : null,
   });
 }
 
@@ -1313,11 +1356,12 @@ async function publicProfile(request, env, publicId) {
     "SELECT discord_id AS discordId, bio FROM profiles WHERE public_id = ? AND is_public = 1",
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
-  const [characters, progressRow] = await Promise.all([
+  const [characters, main] = await Promise.all([
     env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC")
       .bind(profile.discordId).all(),
-    storedProgressRow(env, profile.discordId),
+    mainCharacter(env, profile.discordId),
   ]);
+  const progressRow = await profileProgressRow(env, profile.discordId, main);
   let completed = [];
   try {
     completed = progressRow ? progressPayload(JSON.parse(progressRow.dataJson))?.completed || [] : [];
@@ -1332,7 +1376,8 @@ async function publicProfile(request, env, publicId) {
     leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
   }
   return json({
-    profile: { displayName: characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    profile: { displayName: main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    main: main?.name ? { name: main.name } : null,
     characters: (characters.results || []).map((row) => ({ name: row.name })),
     leaderboards,
     collection: collectionSummary(completed, await releaseChecklist(env)),
@@ -1817,7 +1862,8 @@ async function listCharacters(request, env) {
        verified_at IS NOT NULL AS verified
      FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
   ).bind(account.discordId).all();
-  return json({ characters: results || [] });
+  const main = await mainCharacter(env, account.discordId);
+  return json({ characters: (results || []).map((row) => ({ ...row, main: row.gameUid === main?.gameUid })) });
 }
 
 // Claims a character for the signed-in account. The desktop meter calls this with the UID it reads from the game's
@@ -2619,6 +2665,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
+  if (url.pathname === "/api/profile/main" && request.method === "PUT") return setMainCharacter(request, env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);

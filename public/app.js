@@ -357,9 +357,13 @@ async function loadProfileOverview(publicId = "") {
     profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
       : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
     profileOverview.querySelector("[data-overview-bio]").textContent = overview.profile?.bio || "";
-    const characters = (overview.characters || []).map((character) => character.name || `UID ${character.gameUid}`);
+    const mainName = overview.main?.name;
+    const characters = (overview.characters || []).map((character) => {
+      const name = character.name || `UID ${character.gameUid}`;
+      return mainName && character.name === mainName ? `${name} (main)` : name;
+    });
     profileOverview.querySelector("[data-overview-characters]").textContent = characters.length
-      ? `Characters: ${characters.join(", ")}`
+      ? `Characters: ${characters.join(", ")}${mainName ? ` · collection progress is ${mainName}'s` : ""}`
       : publicId ? "" : "No game characters linked yet. The desktop app links yours when it sees you in game.";
     // Board standing follows the leaderboard gate; the server sends none while the owner can't read the boards.
     for (const panel of ["interlink", "sim", "eggheist"]) {

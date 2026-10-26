@@ -3168,6 +3168,18 @@ function renderDesktopSettings(container) {
         pick.title = ACTIVE_CHARACTER_FROM_APP ? "Inside the companion app, the character you're playing is used." : "";
         pick.addEventListener("click", () => useFor(character.gameUid));
         item.insertBefore(pick, item.lastElementChild);
+        const main = document.createElement("button");
+        main.type = "button";
+        main.textContent = character.main ? "Main" : "Make main";
+        main.disabled = Boolean(character.main);
+        main.title = "Your profile's collection progress and name follow your main character.";
+        main.addEventListener("click", async () => {
+          const response = await apiFetch("/profile/main", { method: "PUT", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ gameUid: character.gameUid }) });
+          characterStatus.textContent = response.ok ? `${character.name || character.gameUid} is now your main character.` : "Could not change your main character.";
+          void loadCharacters();
+        });
+        item.insertBefore(main, pick);
         return item;
       }));
       if (characters.length && ACTIVE_CHARACTER && !ACTIVE_CHARACTER_FROM_APP) {

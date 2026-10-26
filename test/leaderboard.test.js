@@ -576,6 +576,30 @@ test("each character (UID) keeps its own progress, starting from the account's",
   assert.equal((await call(env, "/api/progress?uid=abc", { session: SESSIONS.user })).status, 400);
 });
 
+test("the profile follows a main character: automatic first, then the one picked", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.user);
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", body: { gameUid: "302000000011", name: "MainNA" } });
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid: "303000000022", name: "AltEU" }) });
+  await call(env, "/api/progress/completed?uid=302000000011", { token, method: "PATCH", body: { set: ["aniimo:1:standard"] } });
+  await call(env, "/api/progress/completed?uid=303000000022", { token, method: "PATCH", body: { set: ["aniimo:2:standard", "aniimo:3:standard"] } });
+  const overview = async () => (await call(env, "/api/profile/overview", { session: SESSIONS.user })).json();
+
+  // automatic: the character proven in the game menu
+  let o = await overview();
+  assert.deepEqual([o.main.name, o.main.picked, o.collection.aniilog.standard], ["AltEU", false, 2]);
+  // picked: the profile's collection follows it
+  assert.equal((await call(env, "/api/profile/main", { session: SESSIONS.user, method: "PUT", body: { gameUid: "302000000011" } })).status, 200);
+  o = await overview();
+  assert.deepEqual([o.main.name, o.main.picked, o.collection.aniilog.standard], ["MainNA", true, 1]);
+  const listed = await (await call(env, "/api/leaderboard/characters", { session: SESSIONS.user })).json();
+  assert.deepEqual(listed.characters.filter((c) => c.main).map((c) => c.name), ["MainNA"]);
+  // someone else's character can't be the main; null goes back to automatic
+  assert.equal((await call(env, "/api/profile/main", { session: SESSIONS.user, method: "PUT", body: { gameUid: "302000000099" } })).status, 404);
+  assert.equal((await call(env, "/api/profile/main", { session: SESSIONS.user, method: "PUT", body: { gameUid: null } })).status, 200);
+  assert.equal((await overview()).main.name, "AltEU");
+});
+
 test("the profile overview gathers the owner's characters, board positions and collection progress", async () => {
   const checklist = {
     entries: [
