@@ -183,7 +183,7 @@ test("entries rank best per player, sort by any board, and filter by the data", 
 
   const get = async (query) => (await call(env, `/api/leaderboard/entries?${query}`, { session: SESSIONS.dev })).json();
   const byScore = await get("kind=interlink_run&boss=80000107");
-  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score, entry.rank]), [["MinMax", 22652, 1], ["Solo", 21000, 2]]);   // in-game names (1P), never account names
+  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score, entry.rank]), [["Pathfinder", 22652, 1], ["Pathfinder", 21000, 2]]);   // no linked character yet: never a party slot (the submitter isn't always 1P) or an account name
   assert.equal(JSON.stringify(byScore).includes("name\""), true);
   assert.equal(/dev2? name|"dev"|"dev2"/u.test(JSON.stringify(byScore.entries.map((entry) => entry.player))), false);
   assert.equal(byScore.entries[0].own, true);

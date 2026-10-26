@@ -1846,13 +1846,6 @@ function parseJsonColumn(value) {
 
 // Party members are matched to accounts by character name (names are unique in the game). Only members whose owner
 // made their profile public get a link; everyone else, and AI teammates, show as plain names.
-// Who a run belongs to, by in-game name: the linked character, else the 1P name from the result screen.
-function firstPlayerName(playersJson) {
-  const players = parseJsonColumn(playersJson);
-  const name = Array.isArray(players) ? players[0]?.name : null;
-  return name ? String(name).slice(0, 40) : null;
-}
-
 async function partyProfiles(env, rows) {
   const names = new Set();
   for (const row of rows) {
@@ -2117,7 +2110,8 @@ async function leaderboardEntries(request, env) {
     entries: (results || []).map((row, index) => ({
       rank: offset + index + 1,
       submissionId: row.submission_id,
-      player: row.characterName || firstPlayerName(row.players_json) || row.anyCharacter || "Pathfinder",
+      // the run's own linked character, else any the account linked. Never a party slot: the submitter isn't always 1P.
+      player: row.characterName || row.anyCharacter || "Pathfinder",
       character: row.characterName || null,
       own: Boolean(account && row.discord_id === account.discordId),
       kind: row.kind,
