@@ -73,11 +73,11 @@
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"), account: $("[data-account]"),
     weekly: $("[data-weekly]"), weekSelect: $("[data-week-select]"), seasonSelect: $("[data-season-select]"),
-    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), rankBy: $("[data-rank-by]"),
     weekPick: $("[data-week-pick]"), seasonPick: $("[data-season-pick]"), subTabs: $("[data-sub-tabs]"),
   };
   const state = {
-    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "", server: "",
+    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "", server: "", rankBy: "score",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0,
   };
 
@@ -371,6 +371,15 @@
     const start = new Date(week.start * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")}${week.id === current ? " (this week)" : ""}`;
   }
+  // What a boss board can rank by: each one is a separate best (the app sends a run when it beats any of them).
+  const BOSS_METRICS = [
+    { id: "score", label: "Score", value: (e) => e.score },
+    { id: "clear", label: "Fastest clear", value: (e) => e.clearTimeS, low: true },
+    { id: "dps", label: "Avg DPS", value: (e) => e.avgDps },
+    { id: "break", label: "BREAK", value: (e) => e.breakValue },
+    { id: "taken", label: "Damage taken", value: (e) => e.damageTaken },
+    { id: "heal", label: "Healing", value: (e) => e.heal },
+  ];
   function playerCell(entry) {
     return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId, {}, entry.uid),
       entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), proofButton(entry.proofId));
@@ -498,6 +507,7 @@
         onclick: () => { state.sub = sub.id; void loadEntries(); },
       })));
       writeUrl();
+      els.rankBy.hidden = true;
       if (state.sub === "total") {
         table(["#", "Player", "Week score", "Stars", ...data.bosses.map((boss) => boss.name)],
           data.week.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
@@ -508,11 +518,24 @@
         els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
       } else {
         const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
-        table(["#", "Player", "Best score", "Stars", "Fastest clear"],
-          bossBoard.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
-            playerCell(entry), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
-            el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }))),
-          "No scores on this boss this week yet.");
+        // each best is a board of its own: score (stars, then score), fastest clear, and each player's own card
+        const metric = BOSS_METRICS.find((m) => m.id === state.rankBy) || BOSS_METRICS[0];
+        const sorted = metric.id === "score" ? bossBoard.entries : [...bossBoard.entries]
+          .filter((entry) => metric.value(entry) != null)
+          .sort((a, b) => (metric.low ? metric.value(a) - metric.value(b) : metric.value(b) - metric.value(a)));
+        els.rankBy.hidden = false;
+        els.rankBy.replaceChildren(el("span", { text: "Rank by" }), ...BOSS_METRICS.map((m) => el("button", {
+          type: "button", "aria-pressed": String(m.id === metric.id), text: m.label,
+          onclick: () => { state.rankBy = m.id; void loadEntries(); },
+        })));
+        table(["#", "Player", "Best score", "Stars", "Fastest clear", "Avg DPS", "BREAK", "Damage taken", "Healing"],
+          sorted.map((entry, index) => el("tr", { class: entry.own ? "is-own" : null },
+            el("td", { class: "lb-rank", text: String(metric.id === "score" ? entry.rank : index + 1) }),
+            playerCell({ ...entry, proofId: entry.proofIds?.[metric.id] || entry.proofId }), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
+            el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }),
+            el("td", { text: number(entry.avgDps) }), el("td", { text: number(entry.breakValue) }),
+            el("td", { text: number(entry.damageTaken) }), el("td", { text: number(entry.heal) }))),
+          metric.id === "score" ? "No scores on this boss this week yet." : `No ${metric.label.toLowerCase()} on this boss this week yet.`);
         els.summary.textContent = `${bossBoard.name} · each player's best score this week · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
       }
       return;

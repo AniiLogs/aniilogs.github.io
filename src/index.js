@@ -2174,7 +2174,10 @@ function parseJsonColumn(value) {
 // menu); a name alone never claims anything - names can be bought, given up and imitated - so without a UID the row
 // stays under the name ("name:<name>") for good. The sender's own slot is marked self by the app and isn't counted twice.
 const CREDITED_RUNS = `(
-  SELECT c.*, c.discord_id AS who, NULL AS teammate, NULL AS teammate_uid FROM leaderboard_submissions c
+  SELECT c.*, c.discord_id AS who, NULL AS teammate, NULL AS teammate_uid,
+    (SELECT json_extract(me.value, '$.avgDps') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_dps, (SELECT json_extract(me.value, '$.breakValue') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_break,
+    (SELECT json_extract(me.value, '$.damageTaken') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_taken, (SELECT json_extract(me.value, '$.heal') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_heal
+  FROM leaderboard_submissions c
   UNION ALL
   SELECT * FROM (
     SELECT c.*, COALESCE(
@@ -2185,7 +2188,9 @@ const CREDITED_RUNS = `(
       json_extract(pl.value, '$.name') AS teammate,
       (SELECT gc3.game_uid FROM game_characters gc3
        WHERE gc3.game_uid = json_extract(pl.value, '$.uid')
-         AND (gc3.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)) AS teammate_uid
+         AND (gc3.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)) AS teammate_uid,
+      json_extract(pl.value, '$.avgDps') AS p_dps, json_extract(pl.value, '$.breakValue') AS p_break,
+      json_extract(pl.value, '$.damageTaken') AS p_taken, json_extract(pl.value, '$.heal') AS p_heal
     FROM leaderboard_submissions c, json_each(c.players_json) pl
     WHERE c.kind = 'interlink_run' AND json_extract(pl.value, '$.ai') = 0
       AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
@@ -2333,6 +2338,7 @@ async function interlinkBests(env, cycles, list, server = null) {
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
        MIN(CASE WHEN ${clearedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
+       MAX(s.p_dps) AS avgDps, MAX(s.p_break) AS breakValue, MAX(s.p_taken) AS damageTaken, MAX(s.p_heal) AS heal,
        CASE WHEN s.who LIKE 'name:%' THEN MAX(s.teammate) ELSE
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
@@ -2427,7 +2433,10 @@ async function interlinkBoards(request, env) {
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
   const rows = await interlinkBests(env, [cycle.id], list, server);
   const proofs = await interlinkProofs(env, [cycle.id], server);
-  for (const row of rows) row.proofId = proofs.get(`${row.discordId}|${row.cycle}|${row.bossId}`) || null;
+  for (const row of rows) {
+    row.proofIds = proofs.get(`${row.discordId}|${row.cycle}|${row.bossId}`) || {};
+    row.proofId = row.proofIds.score || null;
+  }
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
@@ -2655,20 +2664,36 @@ async function submissionEvidence(request, env, submissionId) {
 
 // The proof to show for each player's row on the Interlink boards: their best run on that boss (that week) that has
 // a screenshot - for a teammate's row, the screenshot of the run they were in.
+// The proof to show for each of a player's bests on an Interlink board (score, fastest clear, and their own Average
+// DPS, BREAK, damage taken and healing): the run that set it, with its screenshots - for a teammate's row, the run
+// they were in. { "<who>|<cycle>|<boss>": { score: id, clear: id, dps: id, ... } }
+const PROOF_METRICS = Object.freeze({
+  score: (r) => [r.stars ?? -1, r.score ?? -1], clear: (r) => (r.cleared === 1 && r.clear != null ? [-r.clear] : null),
+  dps: (r) => (r.dps != null ? [r.dps] : null), break: (r) => (r.brk != null ? [r.brk] : null),
+  taken: (r) => (r.taken != null ? [r.taken] : null), heal: (r) => (r.heal != null ? [r.heal] : null),
+});
 async function interlinkProofs(env, cycles, server) {
   if (!cycles.length) return new Map();
   const { results } = await env.DB.prepare(
-    `SELECT s.who, s.cycle, s.boss_id AS bossId, s.submission_id AS id FROM ${CREDITED_RUNS} s
+    `SELECT s.who, s.cycle, s.boss_id AS bossId, s.submission_id AS id, s.score, s.stars, s.cleared, s.clear_time_s AS clear,
+       s.p_dps AS dps, s.p_break AS brk, s.p_taken AS taken, s.p_heal AS heal
+     FROM ${CREDITED_RUNS} s
      WHERE s.status = 'visible' AND s.evidence_key IS NOT NULL AND s.kind IN ('interlink_run', 'interlink_best')
        AND s.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND s.server = ?" : ""}
-     ORDER BY s.score DESC, s.created_at ASC`,
+     ORDER BY s.created_at ASC`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
+  const better = (a, b) => { for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
   const best = new Map();
   for (const row of results || []) {
     const key = `${row.who}|${row.cycle}|${row.bossId}`;
-    if (!best.has(key)) best.set(key, row.id);
+    const slot = best.get(key) || {};
+    for (const [metric, value] of Object.entries(PROOF_METRICS)) {
+      const mine = value(row);
+      if (mine && (!slot[metric] || better(mine, slot[metric].value))) slot[metric] = { value: mine, id: row.id };
+    }
+    best.set(key, slot);
   }
-  return best;
+  return new Map([...best].map(([key, slot]) => [key, Object.fromEntries(Object.entries(slot).map(([m, v]) => [m, v.id]))]));
 }
 
 async function api(request, env) {

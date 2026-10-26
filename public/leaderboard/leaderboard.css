@@ -151,3 +151,9 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-proof-tabs { display: flex; gap: 6px; padding: 8px 52px 8px 10px; }
 .lb-proof-tabs button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 .lb-proof-tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* boss boards: rank by score, fastest clear or a Battle Data stat */
+.lb-rank-by { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; color: var(--ink-soft); font-size: 0.85rem; }
+.lb-rank-by[hidden] { display: none; }
+.lb-rank-by button { padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.lb-rank-by button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }

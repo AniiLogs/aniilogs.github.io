@@ -509,6 +509,31 @@ test("boards filter by game server; runs from different servers never vouch for 
   assert.equal(slots("eu").some((p) => p.confirmed), false);
 });
 
+test("boss boards carry each player's own Battle Data bests, with the run behind each best as proof", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const send = async (id, overrides, cards) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(id, { boss: sherro, ...overrides, players: [
+      { name: "DevOne", ai: false, self: true, ...cards[0] }, { name: "Kaela", ai: false, ...cards[1] }] })));
+    form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" }), "result.jpg");
+    const response = await call(env, "/api/leaderboard/submissions", { token: a, method: "POST", form });
+    return (await response.json()).submissionId;
+  };
+  // run 1: best score; run 2: a clear, and my best DPS; Kaela's numbers come from the runs she was in
+  const high = await send("r1", { stars: 16, score: 20000 }, [{ avgDps: 15000, breakValue: 280000, damageTaken: 4000, heal: 0 }, { avgDps: 16000, heal: 900 }]);
+  const fast = await send("r2", { stars: 15, score: 16000, cleared: true, clearTimeS: 140 }, [{ avgDps: 19000, breakValue: 200000, damageTaken: 6000, heal: 50 }, { avgDps: 12000, heal: 1200 }]);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  const rows = week.bosses.find((b) => b.id === "80000109").entries;
+  const me = rows.find((e) => e.player === "DevOne");
+  assert.deepEqual([me.score, me.clearTimeS, me.avgDps, me.breakValue, me.damageTaken, me.heal], [20000, 140, 19000, 280000, 6000, 50]);
+  assert.deepEqual(me.proofIds, { score: high, clear: fast, dps: fast, break: high, taken: fast, heal: fast });
+  const kaela = rows.find((e) => e.player === "Kaela");
+  assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 1200, high, fast]);
+});
+
 test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {
   const { env } = await setup();
   const devToken = await namedToken(env, SESSIONS.dev);
