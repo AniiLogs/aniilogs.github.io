@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AniiLogs Companion: a free Windows app with a boss DPS meter, automatic result and Battle Data records, leaderboard submissions and Sanctum Helper for Aniimo.">
+    <meta name="theme-color" content="#f5eecb">
+    <title>AniiLogs — Companion App</title>
+    <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
+    <link rel="stylesheet" href="/companion/companion.css?v=0.1.0">
+    <script src="/explorer/app-config.js?v=0.6.3" defer></script>
+    <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
+  </head>
+  <body>
+    <div class="sky-speckles" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="AniiLogs home">
+        <span class="brand-mark" aria-hidden="true"><span class="brand-spark">✦</span><span class="brand-letter">A</span></span>
+        <span class="brand-name">Anii<span>Logs</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/explorer/">Map</a>
+        <a href="/explorer/?view=aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog">Item-log</a>
+        <a href="/explorer/?view=team">Team Builder</a>
+        <a href="/companion/" aria-current="page">Companion App</a>
+        <a href="/#profiles">Profiles</a>
+      </nav>
+      <div class="account-actions">
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <main class="cp-main">
+      <section class="cp-hero">
+        <div>
+          <p class="eyebrow"><span aria-hidden="true">✦</span> For Windows</p>
+          <h1>AniiLogs <span>Companion</span></h1>
+          <p class="cp-intro">A free desktop app that sits next to Aniimo: a boss DPS meter in the game's own style, your
+            fight results and Battle Data kept automatically, and your records on the AniiLogs leaderboards if you want them there.</p>
+          <div class="cp-download">
+            <a class="cp-button" href="https://github.com/AniiLogs/aniilogs.github.io/releases/latest/download/AniiLogs-Companion-Setup.exe">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V4a1 1 0 0 1 1-1ZM5 19h14a1 1 0 1 1 0 2H5a1 1 0 1 1 0-2Z"/></svg>
+              Download for Windows
+            </a>
+            <small>Windows 10 or 11 · about 100 MB · <a href="https://github.com/AniiLogs/aniilogs.github.io/releases">all versions</a></small>
+          </div>
+        </div>
+      </section>
+
+      <section class="cp-grid" aria-label="What it does">
+        <article class="cp-card">
+          <h2>Boss DPS meter</h2>
+          <p>Team DPS, the last five seconds and team damage while you fight, with the boss's HP left right on its bar.
+            It also tracks the BREAK gauge: break points left, how fast your team drains it, and how many breaks you landed.</p>
+        </article>
+        <article class="cp-card">
+          <h2>Results kept for you</h2>
+          <p>Every Holo-Battle result screen and Battle Data screen is saved with its numbers. The app can open View Battle Data
+            for you, so button-mashing past the result screen doesn't lose it.</p>
+        </article>
+        <article class="cp-card">
+          <h2>Leaderboards</h2>
+          <p>Opt in and your Interlink scores, stars and clear times go to the <a href="/leaderboard/">AniiLogs leaderboards</a>
+            under your in-game name: each week's bosses, the week total and the season. AI teammates are marked.</p>
+        </article>
+        <article class="cp-card">
+          <h2>Sanctum Helper included</h2>
+          <p>The Egg Heist companion by sargeeva: the whole Lost Sanctum layout on your map, egg nests, key rooms and where you
+            are. Its options have their own page in the app.</p>
+        </article>
+      </section>
+
+      <section class="cp-steps">
+        <h2>Getting started</h2>
+        <ol>
+          <li><strong>Run the installer.</strong> Windows may say "Windows protected your PC" because the app isn't code-signed
+            yet: choose <em>More info</em>, then <em>Run anyway</em>. It installs for your Windows user only.</li>
+          <li><strong>Play Aniimo in Borderless or Windowed mode.</strong> The meter appears with a boss's HP bar and hides again
+            after the fight.</li>
+          <li><strong>Optional: connect your account.</strong> Sign in on AniiLogs, open Settings › Desktop app, create a token
+            and paste it into the app under DPS Meter › Leaderboards &amp; account.</li>
+        </ol>
+      </section>
+
+      <section class="cp-fair">
+        <h2>Fair play</h2>
+        <p>The app only looks at screen pixels, using Windows' own window capture (no yellow capture border), and reads the
+          game's own text log. It never reads or changes the game's memory, never injects anything and never modifies the
+          game's files. It reads the game's HUD font and weekly boss schedule from your own game install.</p>
+        <p class="cp-small">An unofficial, independent community project, not affiliated with Aniimo or its developers. The
+          installer also includes HidHide by Nefarius (MIT License) for the optional controller hold on the result screen; it
+          asks for administrator approval to install. See the <a href="/privacy.html">privacy policy</a> for what the
+          leaderboards store.</p>
+      </section>
+    </main>
+
+    <footer>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+/* AniiLogs Companion download page */
+.cp-main { width: min(1080px, calc(100% - 2rem)); margin: 0 auto; padding: 2.5rem 0 4rem; position: relative; z-index: 1; }
+.cp-hero h1 { margin: 0.5rem 0 0.6rem; font-size: clamp(2.2rem, 5vw, 3.6rem); }
+.cp-hero h1 span { color: var(--coral); }
+.cp-intro { max-width: 680px; margin: 0; color: var(--ink-soft); line-height: 1.65; font-size: 1.05rem; }
+.cp-download { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin-top: 1.6rem; }
+.cp-download small { color: var(--ink-soft); }
+.cp-download small a { color: inherit; }
+.cp-button { display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.85rem 1.4rem; border-radius: 999px;
+  background: var(--teal); color: #0b211c; font-weight: 800; text-decoration: none; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22); }
+.cp-button:hover { filter: brightness(1.06); }
+.cp-button svg { width: 1.2em; height: 1.2em; }
+.cp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-top: 2.6rem; }
+.cp-card, .cp-steps, .cp-fair { padding: 1.2rem 1.3rem; border: 1px solid var(--line, rgba(127, 127, 127, 0.25)); border-radius: 18px;
+  background: var(--panel, rgba(255, 255, 255, 0.04)); }
+.cp-card h2, .cp-steps h2, .cp-fair h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.cp-card p, .cp-fair p { margin: 0; color: var(--ink-soft); line-height: 1.6; }
+.cp-card a, .cp-steps a, .cp-fair a { color: var(--teal); }
+.cp-steps, .cp-fair { margin-top: 1rem; }
+.cp-steps ol { margin: 0; padding-left: 1.2rem; color: var(--ink-soft); line-height: 1.65; }
+.cp-steps li + li { margin-top: 0.5rem; }
+.cp-steps strong { color: var(--ink, inherit); }
+.cp-fair p + p { margin-top: 0.7rem; }
+.cp-small { font-size: 0.86rem; }
