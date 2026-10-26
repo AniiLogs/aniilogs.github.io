@@ -487,6 +487,8 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   assert.equal((await send(a, run("w2", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 12000 }))).status, 201);
   assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-80000107", cycle: "3005", boss: boss("80000107", "Omega Infergon"), score: 9000, stars: 9 })).status, 201);
   assert.equal((await send(b, run("u1", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 15000 }))).status, 201);
+  // ended early by the team leader: under the clock but 0 stars, which older apps sent as a kill
+  assert.equal((await send(a, run("w3", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 408, stars: 0, clearTimeS: 23, cleared: true }))).status, 201);
   // a kill before the 3 minutes: its time shows on the boss board (fastest kill)
   assert.equal((await send(b, run("u3", { cycle: "3005", boss: boss("80000107", "Omega Infergon"), score: 5000, clearTimeS: 142, cleared: true }))).status, 201);
   // an older week of the same season

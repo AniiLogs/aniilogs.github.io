@@ -1193,7 +1193,7 @@ async function boardStandings(env, discordId, kind) {
   const where = ["s.kind = ?", "s.status = 'visible'"];
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push("COALESCE(s.cleared, 1) = 1");
+  if (sortKey === "clear_time_s") where.push(killedSql(kind));
   const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle" : "";
   const partition = group ? `s.discord_id, s.${group}` : "s.discord_id";
   const { results } = await env.DB.prepare(
@@ -1942,13 +1942,19 @@ async function uploadInterlinkCycles(request, env) {
   return json({ ok: true, stored: cycles.length });
 }
 
+// A run counts as a kill only when it ended early with stars: an Interlink run the team leader ended early also
+// finishes under the clock, with 0 stars, and older app versions sent those as cleared.
+function killedSql(kind) {
+  return kind === "interlink_run" ? "(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) > 0)" : "COALESCE(s.cleared, 1) = 1";
+}
+
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
 async function interlinkBests(env, cycles, list) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
     `SELECT s.discord_id AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
-       MIN(CASE WHEN s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
+       MIN(CASE WHEN ${killedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
        (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
         ORDER BY gc.last_seen_at DESC LIMIT 1) AS player,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.discord_id) AS profileId,
@@ -2067,7 +2073,7 @@ async function leaderboardEntries(request, env) {
     : `${prefix}${sortKey} ${order}`);
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push("COALESCE(s.cleared, 1) = 1");
+  if (sortKey === "clear_time_s") where.push(killedSql(kind));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
   // One row per player (their best on each boss) unless every submission is requested.
