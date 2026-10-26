@@ -354,8 +354,20 @@
     return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId),
       entry.own ? el("span", { class: "lb-you", text: "you" }) : null);
   }
+  // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
+  function scoreHeader(text) {
+    const tip = el("div", { id: "lbScoreInfo", class: "lb-info-pop", popover: "auto" },
+      el("strong", { text: "How Challenge Score works" }),
+      el("ul", {},
+        el("li", { text: "Each star is worth 1,000: 500 for reaching it, plus up to 500 for the boss HP you take off on the way to the next star." }),
+        el("li", { text: "15 stars = 15,000. Taking the boss down after that is worth up to 5,000 more." }),
+        el("li", { text: "Finishing early adds a further bonus that the game doesn't publish. We're still working it out from recorded runs." })),
+      el("p", { text: "Boss boards rank by stars, then score, then fastest clear. A clear means 15 stars, then ending early." }));
+    return el("th", { scope: "col" }, el("span", { class: "lb-th-info" }, el("span", { text }),
+      el("button", { type: "button", class: "lb-info", popovertarget: "lbScoreInfo", "aria-label": "How Challenge Score works", text: "i" })), tip);
+  }
   function table(headers, rows, empty) {
-    els.head.replaceChildren(el("tr", {}, headers.map((text) => el("th", { scope: "col", text }))));
+    els.head.replaceChildren(el("tr", {}, headers.map((text) => (/score$/u.test(text) ? scoreHeader(text) : el("th", { scope: "col", text })))));
     els.rows.replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: String(headers.length), class: "lb-empty", text: empty }))]));
   }
   async function loadInterlink(requestId) {
@@ -396,7 +408,7 @@
         els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
       } else {
         const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
-        table(["#", "Player", "Best score", "Stars", "Fastest kill"],
+        table(["#", "Player", "Best score", "Stars", "Fastest clear"],
           bossBoard.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
             playerCell(entry), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
             el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }))),

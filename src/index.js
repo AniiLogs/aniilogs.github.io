@@ -1193,7 +1193,7 @@ async function boardStandings(env, discordId, kind) {
   const where = ["s.kind = ?", "s.status = 'visible'"];
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push("COALESCE(s.cleared, 1) = 1");
+  if (sortKey === "clear_time_s") where.push(clearedSql(kind));
   const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle" : "";
   const partition = group ? `s.discord_id, s.${group}` : "s.discord_id";
   const { results } = await env.DB.prepare(
@@ -1942,13 +1942,22 @@ async function uploadInterlinkCycles(request, env) {
   return json({ ok: true, stored: cycles.length });
 }
 
+// An Interlink run is a clear only with the full 15 stars: the game offers ending early from there. A run quit
+// early also finishes under the clock, with fewer stars, and app versions up to 0.1.21 sent those as cleared.
+const INTERLINK_CLEAR_STARS = 15;
+function clearedSql(kind) {
+  return kind === "interlink_run"
+    ? `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= ${INTERLINK_CLEAR_STARS})`
+    : "COALESCE(s.cleared, 1) = 1";
+}
+
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
 async function interlinkBests(env, cycles, list) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
     `SELECT s.discord_id AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
-       MIN(CASE WHEN s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
+       MIN(CASE WHEN ${clearedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
        (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
         ORDER BY gc.last_seen_at DESC LIMIT 1) AS player,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.discord_id) AS profileId,
@@ -1964,6 +1973,13 @@ async function interlinkBests(env, cycles, list) {
     const cycle = interlinkCycle(list, row.cycle);
     return !cycle || cycle.bosses.some((boss) => boss.id === String(row.bossId));
   });
+}
+
+// A boss board: most stars, then highest score, then fastest clear (no clear last), then whoever got there first.
+function rankedBossRuns(rows) {
+  const time = (row) => (row.clearTimeS == null ? Infinity : Number(row.clearTimeS));
+  return rows.sort((a, b) => (Number(b.stars) || 0) - (Number(a.stars) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0)
+    || time(a) - time(b) || a.firstAt - b.firstAt).map((row, index) => ({ rank: index + 1, ...row }));
 }
 
 function ranked(rows, key) {
@@ -2028,7 +2044,7 @@ async function interlinkBoards(request, env) {
   }
   const bosses = bossIds.map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
-    const entries = ranked(rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row })), "score")
+    const entries = rankedBossRuns(rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row })))
       .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder", own: own(discordId) }));
     return { id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id, entries };
   });
@@ -2067,7 +2083,7 @@ async function leaderboardEntries(request, env) {
     : `${prefix}${sortKey} ${order}`);
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push("COALESCE(s.cleared, 1) = 1");
+  if (sortKey === "clear_time_s") where.push(clearedSql(kind));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
   // One row per player (their best on each boss) unless every submission is requested.
