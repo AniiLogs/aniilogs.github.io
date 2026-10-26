@@ -8441,7 +8441,7 @@ select option:hover {
   }
 }
 
-.catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-aniimo-live-viewer) {
+.catalog-aniilog-record > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-aniimo-live-viewer):not(.catalog-model-viewer) {
   position: relative;
   z-index: 1;
 }
@@ -8537,6 +8537,7 @@ select option:hover {
 }
 
 .catalog-showcase-button,
+.catalog-model-button,
 .catalog-showcase-variant-select {
   border: 1px solid var(--accent-2);
   border-radius: 999px;
@@ -8712,7 +8713,7 @@ select option:hover {
   display: none;
 }
 
-.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-aniimo-live-viewer):not(.catalog-identity) {
+.catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-aniimo-live-viewer):not(.catalog-model-viewer):not(.catalog-identity) {
   display: none;
 }
 
@@ -8824,6 +8825,109 @@ select option:hover {
   }
 
   body.aniilog-artwork-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniimo-live-viewer {
+    left: 360px;
+    width: calc(100vw - 360px);
+  }
+}
+
+/* View Model: the live 3D model in place of the artwork (same page layout). */
+.catalog-model-viewer {
+  display: none;
+}
+
+body.aniilog-model-mode .catalog-aniilog-record.is-model-view > .catalog-model-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.catalog-aniilog-record.is-model-view .catalog-aniimo-turntable,
+.catalog-aniilog-record.is-model-view .catalog-aniimo-video-backdrop,
+.catalog-aniilog-record.is-model-view .catalog-aniimo-video-source,
+.catalog-aniilog-record.is-model-view .catalog-aniimo-model-canvas,
+.catalog-aniilog-record.is-model-view .catalog-aniimo-live-viewer {
+  display: none;
+}
+
+.catalog-model-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.catalog-model-status {
+  position: absolute;
+  inset: auto 1rem 1rem auto;
+  z-index: 1;
+  max-width: min(24rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.75rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.catalog-model-status[hidden] {
+  display: none;
+}
+
+/* The model's menus share one header row with the buttons, like the artwork
+   menus, so the header keeps the artwork header's height. */
+body.aniilog-model-mode .catalog-heading .catalog-model-controls.is-visible {
+  flex-wrap: nowrap;
+  gap: 0.6rem;
+}
+
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu {
+  flex: 0 1 13rem;
+  min-width: 0;
+}
+
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select {
+  min-width: 0;
+}
+
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu > span,
+body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select-button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* On phones every model menu sits side by side in a single row (the artwork
+   menus do the same), so the header stays two short rows. */
+@media (max-width: 760px) {
+  body.aniilog-model-mode .catalog-heading .catalog-model-controls.is-visible {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 0.4rem;
+  }
+
+  body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu {
+    gap: 0.2rem;
+  }
+
+  body.aniilog-model-mode .catalog-model-controls .catalog-artwork-menu > span {
+    font-size: 0.62rem;
+  }
+
+  body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select-button {
+    padding-left: 0.55rem;
+    padding-right: 1.3rem;
+    font-size: 0.72rem;
+  }
+}
+
+@media (min-width: 821px) and (pointer: fine) {
+  body.aniilog-model-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniilog-record.is-model-view > .catalog-model-viewer {
     left: 360px;
     width: calc(100vw - 360px);
   }
@@ -8998,7 +9102,8 @@ body.aniilog-artwork-mode .sidebar-collapse-button {
   pointer-events: auto;
 }
 
-body.aniilog-artwork-mode .catalog-showcase-button {
+body.aniilog-artwork-mode .catalog-showcase-button,
+body.aniilog-artwork-mode .catalog-model-button {
   flex: 0 0 auto;
   margin: 0;
 }
@@ -9032,7 +9137,7 @@ body.aniilog-artwork-mode .catalog-aniilog-record {
   background: transparent;
 }
 
-body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-aniimo-live-viewer):not(.catalog-identity) {
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-aniimo-video-backdrop):not(.catalog-aniimo-video-source):not(.catalog-aniimo-model-canvas):not(.catalog-aniimo-turntable):not(.catalog-aniimo-live-viewer):not(.catalog-model-viewer):not(.catalog-identity) {
   display: none;
 }
 

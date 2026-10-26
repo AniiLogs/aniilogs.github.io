@@ -1,4 +1,7 @@
 const SITE_CONFIG = window.ANIILOGS_CONFIG || window.ANIIPEDIA_CONFIG || {};
+// View Model: live 3D viewer origin and the released forms/appearances it shows.
+const VIEW_MODEL_ORIGIN = String(SITE_CONFIG.modelViewerOrigin || "").replace(/\/+$/u, "");
+const VIEW_MODEL_CATALOG = window.ANIILOGS_VIEW_MODEL_CATALOG ?? null;
 const CONTENT_AVAILABLE = SITE_CONFIG.contentAvailable !== false;
 const CONTENT_BASE_URL = String(SITE_CONFIG.contentBaseUrl || ".").replace(/\/+$/u, "");
 const CONTENT_REVISION = String(SITE_CONFIG.contentRevision || "");
@@ -595,6 +598,10 @@ const state = {
   },
   aniilogFiltersOpen: false,
   aniilogShowcaseMode: REQUESTED_ANIIMO_ARTWORK && REQUESTED_WORKSPACE_VIEW === "aniilog",
+  aniilogModelMode: false,
+  aniilogModelAppearance: {},
+  aniilogModelGender: "",
+  aniilogModelMotion: "",
   aniilogFilterSectionsOpen: new Set(["classes"]),
   aniilogFilterScroll: 0,
   aniilogFilters: {
@@ -8269,18 +8276,16 @@ function renderCatalogPreview(options = {}) {
     const headingActions = document.createElement("div");
     headingActions.className = "catalog-heading-actions";
     headingActions.append(showcaseButton);
-    if (developerModeEnabled()) {
-      const previewButton = document.createElement("button");
-      previewButton.type = "button";
-      previewButton.className = "catalog-showcase-button developer-preview-button";
-      previewButton.textContent = "Work-in-progress viewer";
-      previewButton.addEventListener("click", () => void openDeveloperModelPreview(previewButton, {
-        formId: String(selected.form_id || ""), formKey: selected.form_key,
-        appearanceId: selected.showcase_media?.id,
-        requestedAppearance: state.aniilogAppearanceSelection[String(selected.form_id || "")],
-        gender: state.aniilogGenderSelection || "male",
-      }));
-      headingActions.append(previewButton);
+    const modelAppearances = viewModelAppearances(selected);
+    if (modelAppearances.length) {
+      const modelButton = document.createElement("button");
+      modelButton.type = "button";
+      modelButton.className = "catalog-model-button";
+      modelButton.textContent = state.aniilogModelMode ? "Back to Aniilog UI" : "View Model";
+      modelButton.setAttribute("aria-pressed", String(state.aniilogModelMode));
+      modelButton.addEventListener("click", () => setAniilogModelMode(!state.aniilogModelMode));
+      headingActions.prepend(modelButton);
+      attachViewModel(els.catalogPanel.querySelector(".catalog-aniilog-record"), selected, modelAppearances);
     }
     els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
     const selectedFamily = String(selected.base_id || selected.research_id || selected.name || "");
@@ -8391,12 +8396,72 @@ function renderCatalogPreview(options = {}) {
     if (artworkControls.children.length) {
       els.catalogPanel.querySelector(".catalog-heading")?.append(artworkControls);
     }
+    if (modelAppearances.length) {
+      // View Model menus: form and appearance reload the model; gender and
+      // animation are filled in by the viewer once the model is ready and are
+      // applied inside it without a reload.
+      const modelControls = document.createElement("div");
+      modelControls.className = "catalog-artwork-controls catalog-model-controls";
+      modelControls.setAttribute("aria-label", "3D model form, appearance, gender, and animation controls");
+      const addModelMenu = (labelText, select, slot = "") => {
+        const field = document.createElement("label");
+        field.className = "catalog-artwork-menu";
+        if (slot) field.dataset.modelSlot = slot;
+        const label = document.createElement("span");
+        label.textContent = labelText;
+        field.append(label, select);
+        modelControls.append(field);
+        return field;
+      };
+      const modelVariants = variants.filter((candidate) => viewModelAppearances(candidate).length);
+      addModelMenu("Form", createArtworkSelect({
+        label: "Choose Aniimo form for the 3D model",
+        value: selected.id,
+        disabled: modelVariants.length < 2,
+        options: modelVariants.map((candidate) => ({ value: candidate.id, label: candidate.form_label || candidate.form_name || "Variant" })),
+        onChange: (value) => { state.catalogSelection.aniilog = value; renderCatalogPreview(); },
+      }));
+      addModelMenu("Rarity / appearance", createArtworkSelect({
+        label: "Choose the 3D model's appearance",
+        value: viewModelAppearanceFor(selected, modelAppearances),
+        disabled: modelAppearances.length < 2,
+        options: modelAppearances.map(([value, label]) => ({ value, label })),
+        onChange: (value) => {
+          state.aniilogModelAppearance[String(selected.form_id || "")] = value;
+          renderCatalogPreview();
+        },
+      }));
+      const renderModelOptionMenu = (slot, labelText, values, current, onChange) => {
+        modelControls.querySelector(`[data-model-slot="${slot}"]`)?.remove();
+        if (!values?.length) return;
+        addModelMenu(labelText, createArtworkSelect({
+          label: `Choose the 3D model's ${labelText.toLowerCase()}`,
+          value: current,
+          disabled: values.length < 2,
+          options: values,
+          onChange,
+        }), slot);
+      };
+      modelControls.updateViewerOptions = (options) => {
+        renderModelOptionMenu("gender", "Gender", (options.genders || []).map((g) => ({ value: g.value, label: g.value === "female" ? "Female" : g.value === "male" ? "Male" : g.label })), options.gender, (value) => {
+          state.aniilogModelGender = value;
+          els.catalogPanel.querySelector(".catalog-model-viewer")?.control({ gender: value });
+        });
+        renderModelOptionMenu("motion", "Animation", (options.motions || []).map((m) => ({ value: m.value, label: m.value ? m.label : "Idle" })), options.motion, (value) => {
+          state.aniilogModelMotion = value;
+          els.catalogPanel.querySelector(".catalog-model-viewer")?.control({ motion: value });
+        });
+      };
+      els.catalogPanel.querySelector(".catalog-heading")?.append(modelControls);
+    }
     setAniilogShowcaseMode(state.aniilogShowcaseMode);
+    setAniilogModelMode(state.aniilogModelMode);
   }
   scheduleMobileCatalogStickyIdentity();
 }
 
 function setAniilogShowcaseMode(enabled) {
+  if (enabled && state.aniilogModelMode) setAniilogModelMode(false);
   state.aniilogShowcaseMode = Boolean(enabled) && state.sidebarView === "aniilog";
   document.body.classList.toggle("aniilog-artwork-mode", state.aniilogShowcaseMode);
   const record = els.catalogPanel.querySelector(".catalog-aniilog-record");
@@ -8413,12 +8478,120 @@ function setAniilogShowcaseMode(enabled) {
   els.catalogPanel.classList.toggle("is-aniilog-showcase", state.aniilogShowcaseMode);
   const showcaseButton = els.catalogPanel.querySelector(".catalog-showcase-button");
   if (showcaseButton) showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
-  els.catalogPanel.querySelectorAll(".catalog-showcase-variant-select").forEach((select) => {
+  els.catalogPanel.querySelectorAll(".catalog-artwork-controls:not(.catalog-model-controls) .catalog-showcase-variant-select").forEach((select) => {
     select.hidden = !state.aniilogShowcaseMode;
   });
-  els.catalogPanel.querySelector(".catalog-artwork-controls")?.classList.toggle("is-visible", state.aniilogShowcaseMode);
+  els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.toggle("is-visible", state.aniilogShowcaseMode);
   document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
+}
+
+// ---- View Model: the released Aniimo's live 3D model in place of the page UI.
+// The model loads only after the button is pressed (the page never waits on
+// it); leaving the mode removes the frame and keeps the same Aniimo selected.
+
+function viewModelAppearances(entry) {
+  if (!VIEW_MODEL_ORIGIN || !VIEW_MODEL_CATALOG?.forms) return [];
+  const list = VIEW_MODEL_CATALOG.forms[String(entry?.form_id ?? "")];
+  return Array.isArray(list) ? list : [];
+}
+
+function viewModelAppearanceFor(entry, appearances = viewModelAppearances(entry)) {
+  const formId = String(entry?.form_id ?? "");
+  const wanted = state.aniilogModelAppearance[formId];
+  if (appearances.some(([value]) => value === wanted)) return wanted;
+  // Start from the appearance the artwork shows when the model has it.
+  const artwork = /^sparkling-(\d\d)$/u.exec(String(state.aniilogAppearanceSelection[formId] ?? entry?.showcase_media?.id ?? ""));
+  const fromArtwork = artwork ? `style-${artwork[1]}` : "common";
+  return appearances.some(([value]) => value === fromArtwork) ? fromArtwork : appearances[0]?.[0] ?? "common";
+}
+
+function attachViewModel(record, entry, appearances) {
+  if (!record || !appearances.length) return;
+  const formId = String(entry.form_id ?? "");
+  const host = document.createElement("div");
+  host.className = "catalog-model-viewer";
+  host.setAttribute("role", "group");
+  host.setAttribute("aria-label", `${entry.name} ${entry.form_label || ""} 3D model`.replace(/\s+/gu, " ").trim());
+  const status = document.createElement("p");
+  status.className = "catalog-model-status";
+  status.setAttribute("role", "status");
+  status.hidden = true;
+  host.append(status);
+  record.append(host);
+  let frame = null;
+  const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
+  const onMessage = (event) => {
+    const message = event.data;
+    if (!frame || event.origin !== VIEW_MODEL_ORIGIN || event.source !== frame.contentWindow || message?.source !== "aniilogs-viewer") return;
+    if (message.type === "state") {
+      host.dataset.state = message.state;
+      setStatus(message.state === "failed" ? "This model could not be loaded right now." : "");
+    } else if (message.type === "options") {
+      els.catalogPanel.querySelector(".catalog-model-controls")?.updateViewerOptions?.(message);
+    }
+  };
+  host.start = () => {
+    if (frame || !record.isConnected) return;
+    const appearance = viewModelAppearanceFor(entry, appearances);
+    const url = new URL(`${VIEW_MODEL_ORIGIN}/qa/current3634150/source-v21/index.html`);
+    url.searchParams.set("choice", `${formId}:${appearance}`);
+    url.searchParams.set("mode", "lit");
+    if (state.aniilogModelGender) url.searchParams.set("gender", state.aniilogModelGender);
+    if (state.aniilogModelMotion) url.searchParams.set("motion", state.aniilogModelMotion);
+    url.searchParams.set("embed", "1");
+    frame = document.createElement("iframe");
+    frame.className = "catalog-model-frame";
+    frame.title = `${entry.name} ${entry.form_label || ""} 3D model`.replace(/\s+/gu, " ").trim();
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    frame.setAttribute("allow", "webgpu");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.src = url.href;
+    host.dataset.state = "loading";
+    window.addEventListener("message", onMessage);
+    host.prepend(frame);
+    if (!("gpu" in navigator)) setStatus("3D models need a browser with WebGPU (recent Chrome, Edge, or Safari).");
+  };
+  host.stop = () => {
+    window.removeEventListener("message", onMessage);
+    frame?.remove();
+    frame = null;
+    delete host.dataset.state;
+    setStatus("");
+  };
+  host.control = (change) => {
+    if (frame?.contentWindow) frame.contentWindow.postMessage({ source: "aniilogs-site", type: "control", ...change }, VIEW_MODEL_ORIGIN);
+  };
+}
+
+function setAniilogModelMode(enabled) {
+  const on = Boolean(enabled) && state.sidebarView === "aniilog"
+    && Boolean(els.catalogPanel.querySelector(".catalog-model-viewer"));
+  if (on && state.aniilogShowcaseMode) setAniilogShowcaseMode(false);
+  state.aniilogModelMode = on;
+  const record = els.catalogPanel.querySelector(".catalog-aniilog-record");
+  const showcase = state.aniilogShowcaseMode;
+  document.body.classList.toggle("aniilog-artwork-mode", on || showcase);
+  document.body.classList.toggle("aniilog-model-mode", on);
+  record?.classList.toggle("is-showcase", on || showcase);
+  record?.classList.toggle("is-model-view", on);
+  els.catalogPanel.classList.toggle("is-aniilog-showcase", on || showcase);
+  const viewer = record?.querySelector(".catalog-model-viewer");
+  if (on) viewer?.start();
+  else viewer?.stop();
+  const modelButton = els.catalogPanel.querySelector(".catalog-model-button");
+  if (modelButton) {
+    modelButton.textContent = on ? "Back to Aniilog UI" : "View Model";
+    modelButton.setAttribute("aria-pressed", String(on));
+  }
+  const modelControls = els.catalogPanel.querySelector(".catalog-model-controls");
+  modelControls?.classList.toggle("is-visible", on);
+  modelControls?.querySelectorAll(".catalog-showcase-variant-select").forEach((select) => {
+    select.hidden = !on;
+  });
+  if (on) els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.remove("is-visible");
+  document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", on || showcase);
+  if (record && on) record.setAttribute("aria-label", "Aniimo 3D model");
 }
 
 function removeMobileCatalogStickyIdentity() {

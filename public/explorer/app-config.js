@@ -19,5 +19,9 @@
     // site's iframe in frame-ancestors (without X-Frame-Options: DENY). Its
     // runtime must post the matching ready message after its first usable frame.
     liveViewerOrigin: "",
+    // View Model: the 3D viewer for released Aniimo (embed mode, no sign-in).
+    modelViewerOrigin: isLocalPreview
+      ? "http://127.0.0.1:49574"
+      : "https://aniilogs-renderer-qa-3634150.pages.dev",
   });
 })();
