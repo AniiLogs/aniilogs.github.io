@@ -119,7 +119,8 @@ function showSignedIn(account) {
   }
   if (leaderboardNav) leaderboardNav.hidden = !(account.developerModeAvailable && developerMode);
   void loadPrivateProfile(name);
-  void loadProfileOverview();
+  // The profile overview (standing, collection) is a developer preview too.
+  if (account.developerModeAvailable && developerMode) void loadProfileOverview();
 }
 
 async function loadPrivateProfile(fallbackName = "") {
