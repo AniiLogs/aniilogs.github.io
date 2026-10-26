@@ -1883,17 +1883,67 @@ function withProfiles(players, profiles) {
 // of them added up; a season adds up its weeks. A player's best on a boss is the highest score from any of their
 // result-screen runs or battle-prep bests for that week. Every past week stays viewable.
 
-function interlinkCycle(id) {
-  return INTERLINK_CYCLES.find((cycle) => cycle.id === String(id)) || null;
+// The weeks: built in, plus what developer accounts' desktop apps uploaded from the game data (newer patches).
+async function interlinkCycles(env) {
+  const byId = new Map(INTERLINK_CYCLES.map((cycle) => [cycle.id, cycle]));
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, season, start_at AS start, end_at AS end, bosses_json AS bossesJson FROM interlink_cycles",
+    ).all();
+    for (const row of results || []) {
+      const bosses = parseJsonColumn(row.bossesJson);
+      if (Array.isArray(bosses) && bosses.length === 3) {
+        byId.set(String(row.id), { id: String(row.id), season: row.season, start: Number(row.start), end: Number(row.end), bosses });
+      }
+    }
+  } catch (error) {
+    console.error("Could not read uploaded Interlink weeks", error);
+  }
+  return [...byId.values()].sort((a, b) => a.start - b.start);
 }
 
-function currentInterlinkCycle(now = Math.floor(Date.now() / 1000)) {
-  const started = INTERLINK_CYCLES.filter((cycle) => cycle.start <= now);
-  return started.length ? started[started.length - 1] : INTERLINK_CYCLES[INTERLINK_CYCLES.length - 1];
+function interlinkCycle(list, id) {
+  return list.find((cycle) => cycle.id === String(id)) || null;
+}
+
+function currentInterlinkCycle(list, now = Math.floor(Date.now() / 1000)) {
+  const started = list.filter((cycle) => cycle.start <= now);
+  return started.length ? started[started.length - 1] : list[list.length - 1];
+}
+
+// Developer accounts' desktop apps send the schedule they read from the game data after a patch.
+async function uploadInterlinkCycles(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!account.developerModeAvailable) return json({ error: "Only developer accounts can update the Interlink weeks." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 64 * 1024);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const cycles = Array.isArray(body?.cycles) ? body.cycles : null;
+  const valid = (cycle) => cycle && /^\d{1,12}$/u.test(String(cycle.id)) && Number.isSafeInteger(cycle.start)
+    && Number.isSafeInteger(cycle.end) && cycle.end > cycle.start && (cycle.season == null || Number.isSafeInteger(cycle.season))
+    && Array.isArray(cycle.bosses) && cycle.bosses.length === 3
+    && cycle.bosses.every((boss) => /^\d{1,12}$/u.test(String(boss?.id)) && typeof boss.name === "string" && boss.name.length <= 80);
+  if (!cycles || !cycles.length || cycles.length > 200 || !cycles.every(valid)) {
+    return json({ error: "Send cycles: [{ id, season, start, end, bosses: [{ id, name } x 3] }]." }, 400);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.batch(cycles.map((cycle) => env.DB.prepare(
+    `INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET season = excluded.season, start_at = excluded.start_at, end_at = excluded.end_at,
+       bosses_json = excluded.bosses_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+  ).bind(String(cycle.id), cycle.season ?? null, cycle.start, cycle.end,
+    JSON.stringify(cycle.bosses.map((boss) => ({ id: String(boss.id), name: boss.name.trim() || String(boss.id) }))),
+    account.discordId, now)));
+  return json({ ok: true, stored: cycles.length });
 }
 
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
-async function interlinkBests(env, cycles) {
+async function interlinkBests(env, cycles, list) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
     `SELECT s.discord_id AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
@@ -1911,7 +1961,7 @@ async function interlinkBests(env, cycles) {
   // A week the game data lists only counts its own three bosses: a misread boss name (the battle prep screen's name
   // sits over the boss art) can't add a fourth board or count a score twice.
   return (results || []).filter((row) => {
-    const cycle = interlinkCycle(row.cycle);
+    const cycle = interlinkCycle(list, row.cycle);
     return !cycle || cycle.bosses.some((boss) => boss.id === String(row.bossId));
   });
 }
@@ -1925,10 +1975,12 @@ function publicCycle(cycle) {
 }
 
 // One player's standing in an Interlink season (score, stars, weeks played, rank among everyone), for profiles.
-async function interlinkSeasonStanding(env, discordId, season = currentInterlinkCycle().season) {
-  const cycles = INTERLINK_CYCLES.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
+async function interlinkSeasonStanding(env, discordId, season = null) {
+  const list = await interlinkCycles(env);
+  if (season == null) season = currentInterlinkCycle(list).season;
+  const cycles = list.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
   const totals = new Map();
-  for (const row of await interlinkBests(env, cycles)) {
+  for (const row of await interlinkBests(env, cycles, list)) {
     const player = totals.get(row.discordId) || { total: 0, stars: 0, weeks: new Set(), firstAt: row.firstAt };
     player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.weeks.add(row.cycle);
     player.firstAt = Math.min(player.firstAt, row.firstAt);
@@ -1945,15 +1997,16 @@ async function interlinkBoards(request, env) {
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
   const params = new URL(request.url).searchParams;
   const own = (discordId) => Boolean(account && discordId === account.discordId);
-  const weeks = INTERLINK_CYCLES.map(publicCycle);
+  const list = await interlinkCycles(env);
+  const weeks = list.map(publicCycle);
   const seasonParam = params.get("season");
   if (seasonParam !== null) {
     // Season standings: every week of the season added up.
     const season = Number(seasonParam);
-    const cycles = INTERLINK_CYCLES.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
+    const cycles = list.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
     if (!cycles.length) return json({ error: "Unknown season." }, 404);
     const players = new Map();
-    for (const row of await interlinkBests(env, cycles)) {
+    for (const row of await interlinkBests(env, cycles, list)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
       player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
@@ -1967,8 +2020,8 @@ async function interlinkBoards(request, env) {
     return json({ season, weeks: weeks.filter((week) => week.season === season), standings });
   }
   // One week: the three boss boards and the week total.
-  const cycle = interlinkCycle(params.get("cycle")) || currentInterlinkCycle();
-  const rows = await interlinkBests(env, [cycle.id]);
+  const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
+  const rows = await interlinkBests(env, [cycle.id], list);
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
@@ -1989,7 +2042,7 @@ async function interlinkBoards(request, env) {
     totals.set(row.discordId, player);
   }
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
-  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle().id, weeks, bosses, week });
+  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week });
 }
 
 async function leaderboardEntries(request, env) {
@@ -2219,6 +2272,7 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/status" && request.method === "GET") return leaderboardStatus(request, env);
   if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return leaderboardEntries(request, env);
   if (url.pathname === "/api/leaderboard/interlink" && request.method === "GET") return interlinkBoards(request, env);
+  if (url.pathname === "/api/leaderboard/interlink/cycles" && request.method === "POST") return uploadInterlinkCycles(request, env);
   if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
   if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
   if (url.pathname === "/api/leaderboard/tokens" && request.method === "GET") return listLeaderboardTokens(request, env);

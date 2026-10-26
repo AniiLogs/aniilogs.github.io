@@ -515,3 +515,21 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   assert.deepEqual(profile.leaderboards.interlinkSeason, { season: 1, total: 21000, stars: 29, weeks: 1, rank: 2, players: 2 });
   assert.equal((await call(env, "/api/leaderboard/interlink?season=99")).status, 404);
 });
+
+test("developer apps can add Interlink weeks from the game data; others can't", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const dev = await desktopToken(env, SESSIONS.dev);
+  const user = await desktopToken(env, SESSIONS.user);
+  const next = { id: "3006", season: 1, start: 1793217600, end: 1793606399,
+    bosses: [{ id: "80000095", name: "Omega Geoclaw" }, { id: "80000096", name: "Omega Minespine" }, { id: "80000097", name: "Omega Tubster" }] };
+  const upload = (token, cycles) => call(env, "/api/leaderboard/interlink/cycles", { token, method: "POST", body: { cycles } });
+  assert.equal((await upload(user, [next])).status, 403);
+  assert.equal((await upload(dev, [{ ...next, bosses: next.bosses.slice(0, 2) }])).status, 400);
+  assert.equal((await upload(dev, [next])).status, 200);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3006")).json();
+  assert.equal(week.cycle.id, "3006");
+  assert.deepEqual(week.bosses.map((b) => b.name), ["Omega Geoclaw", "Omega Minespine", "Omega Tubster"]);
+  assert.ok(week.weeks.some((w) => w.id === "3006"));
+  const season = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
+  assert.ok(season.weeks.some((w) => w.id === "3006"));
+});
