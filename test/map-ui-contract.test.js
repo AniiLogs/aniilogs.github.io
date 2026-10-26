@@ -305,7 +305,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.17.18-collected-pins/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.17.19-view-model/u);
   // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);
   // Ultimates come with the Aniimo rather than being picked.
   assert.match(teamBuilder, /id: "interlink", label: "Interlink"/u);
@@ -375,7 +375,8 @@ test("in-progress model QA opens only through active developer mode and a one-us
   assert.match(explorer, /if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated\) return;/u);
   assert.match(explorer, /apiFetch\("\/dev-preview\/ticket", \{ method: "POST" \}\)/u);
   assert.match(explorer, /previewButton\.hidden = !developerModeEnabled\(\)/u);
-  assert.match(explorer, /if \(developerModeEnabled\(\)\) \{\s*const previewButton/u);
+  // The Aniilog record's model button is public View Model, not developer QA.
+  assert.doesNotMatch(explorer, /"Work-in-progress viewer"/u);
   assert.match(explorer, /form\.method = "POST";[\s\S]*input\.name = "ticket";[\s\S]*form\.submit\(\)/u);
   assert.doesNotMatch(explorer, /[?&]ticket=/u);
   assert.match(explorerStyles, /body\.aniilog-artwork-mode \.developer-preview-button \{\s*display: none;/u);

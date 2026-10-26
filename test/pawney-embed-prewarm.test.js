@@ -27,12 +27,18 @@ function functionSource(name){
   return explorer.slice(declaration.index,declaration.index+declaration[0].length+next.index).trimEnd();
 }
 
-test('public Aniilog opens only the current ticket viewer without background Pawney prewarm',()=>{
-  assert.match(explorer,/openDeveloperModelPreview\(previewButton, \{\s*formId: String\(selected\.form_id \|\| ""\), formKey: selected\.form_key,\s*appearanceId: selected\.showcase_media\?\.id,\s*requestedAppearance: state\.aniilogAppearanceSelection\[String\(selected\.form_id \|\| ""\)\],\s*gender: state\.aniilogGenderSelection \|\| "male",\s*\}\)/u);
+test('public Aniilog offers View Model (no sign-in) and no background Pawney prewarm',()=>{
+  // The Aniilog record's model button is public: it opens the released model in
+  // embed mode on demand; the old developer-only button is gone from the record.
+  assert.match(explorer,/modelButton\.textContent = state\.aniilogModelMode \? "Back to Aniilog UI" : "View Model";/u);
+  assert.match(explorer,/url\.searchParams\.set\("embed", "1"\);/u);
+  assert.match(explorer,/frame\.setAttribute\("sandbox", "allow-scripts allow-same-origin"\);/u);
+  assert.doesNotMatch(explorer,/"Work-in-progress viewer"/u);
+  // Developers keep the account-menu ticket preview.
   assert.match(explorer,/openDeveloperModelPreview\(previewButton\)/u);
   assert.doesNotMatch(explorer,/pawney-embed-prewarm|pawneyPrewarm|PawneyPrewarm|PAWNEY_PREWARM|Fast desktop viewer|Preload on desktop Map/u);
   assert.match(explorer,/const handoff = await response\.json\(\);\s*current\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff, selectedFields\)/u);
-  assert.match(explorerHtml,/\.\/app\.js\?v=0.17.29-collected-pins/u);
+  assert.match(explorerHtml,/\.\/app\.js\?v=0.17.30-view-model/u);
   assert.doesNotMatch(functionSource('openDeveloperModelPreview'),/controller\.show\(/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
