@@ -549,6 +549,33 @@ test("completion flags merge by newest change, so stale copies cannot undo the d
   assert.equal((await call(env, "/api/progress/completed", { method: "PATCH", body: { set: ["x"] } })).status, 401);
 });
 
+test("each character (UID) keeps its own progress, starting from the account's", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.user);
+  for (const [gameUid, name] of [["302000000011", "MainNA"], ["303000000022", "AltEU"]]) {
+    await call(env, "/api/leaderboard/characters", { token, method: "POST", body: { gameUid, name } });
+  }
+  const save = (progress, uid = "") => call(env, `/api/progress${uid ? `?uid=${uid}` : ""}`, { session: SESSIONS.user, method: "PUT", body: { progress } });
+  const read = async (uid = "") => (await (await call(env, `/api/progress${uid ? `?uid=${uid}` : ""}`, { session: SESSIONS.user })).json()).progress;
+  await save({ tracking: [], completed: ["pin:before"], preferences: {} });          // tracked before characters existed
+
+  // each character starts from the account's progress, then goes its own way
+  assert.deepEqual((await read("302000000011")).completed, ["pin:before"]);
+  assert.deepEqual((await read("303000000022")).completed, ["pin:before"]);
+  assert.equal((await save({ tracking: [], completed: ["pin:before", "pin:na-only"], preferences: {} }, "302000000011")).status, 200);
+  const patch = await call(env, "/api/progress/completed?uid=303000000022", { token, method: "PATCH", body: { set: ["aniimo:7:caught"] } });
+  assert.equal(patch.status, 200);
+  assert.deepEqual((await read("302000000011")).completed.sort(), ["pin:before", "pin:na-only"]);
+  assert.deepEqual((await read("303000000022")).completed.sort(), ["aniimo:7:caught", "pin:before"]);
+  assert.deepEqual((await read()).completed, ["pin:before"]);                             // the account copy is untouched
+
+  // someone else's character, or a made-up UID, is refused
+  const other = await desktopToken(env, SESSIONS.dev);
+  await call(env, "/api/leaderboard/characters", { token: other, method: "POST", body: { gameUid: "302000000099", name: "Someone" } });
+  assert.equal((await call(env, "/api/progress/completed?uid=302000000099", { token })).status, 404);
+  assert.equal((await call(env, "/api/progress?uid=abc", { session: SESSIONS.user })).status, 400);
+});
+
 test("the profile overview gathers the owner's characters, board positions and collection progress", async () => {
   const checklist = {
     entries: [

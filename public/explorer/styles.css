@@ -10861,3 +10861,8 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
   font-size: 12px;
   cursor: pointer;
 }
+
+/* Inside the AniiLogs Companion app (theme-shell.js): the app's own tabs replace the site's logo, page links and footer */
+html[data-embed="app"] .site-header .brand, html[data-embed="app"] .site-header nav,
+html[data-embed="app"] .app-topbar-brand, html[data-embed="app"] .app-topbar nav,
+html[data-embed="app"] body > footer { display: none !important; }

@@ -496,3 +496,8 @@ footer a { font-weight: 800; text-decoration: none; }
 .profile-public-link { margin: 0; font-size: 0.85em; overflow-wrap: anywhere; }
 .profile-stars { display: inline-flex; align-items: center; gap: 0.25rem; vertical-align: middle; }
 .profile-star { width: 1em; height: 1em; }
+
+/* Inside the AniiLogs Companion app (theme-shell.js): the app's own tabs replace the site's logo, page links and footer */
+html[data-embed="app"] .site-header .brand, html[data-embed="app"] .site-header nav,
+html[data-embed="app"] .app-topbar-brand, html[data-embed="app"] .app-topbar nav,
+html[data-embed="app"] body > footer { display: none !important; }

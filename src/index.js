@@ -885,16 +885,42 @@ function withCompletion(progress, completion) {
   return next;
 }
 
-async function storedProgressRow(env, discordId) {
+// Where progress is kept: the account's own copy (a Discord id, as before) or one game character's copy
+// ({ uid, discordId }, see progressScope), so characters on different servers keep their own checklists.
+const progressTable = (scope) => (typeof scope === "string"
+  ? { table: "progress_snapshots", key: "discord_id", id: scope, owner: scope }
+  : { table: "character_progress", key: "game_uid", id: scope.uid, owner: scope.discordId });
+
+async function storedProgressRow(env, scope) {
+  const { table, key, id } = progressTable(scope);
   return env.DB.prepare(
-    "SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
-  ).bind(discordId).first();
+    `SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM ${table} WHERE ${key} = ?`,
+  ).bind(id).first();
+}
+
+// ?uid=<game UID>: that character's progress. It must be one of the account's linked characters; the first time, its
+// copy starts as the account's progress, so nothing tracked before is lost. No uid: the account's progress.
+async function progressScope(request, env, account) {
+  const uid = new URL(request.url).searchParams.get("uid");
+  if (!uid) return { scope: account.discordId };
+  if (!/^\d{1,24}$/u.test(uid)) return { error: json({ error: "uid must be a game UID." }, 400) };
+  const owned = await env.DB.prepare("SELECT 1 AS ok FROM game_characters WHERE game_uid = ? AND discord_id = ?")
+    .bind(uid, account.discordId).first();
+  if (!owned) return { error: json({ error: "That character isn't linked to this account." }, 404) };
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO character_progress (game_uid, discord_id, revision, data_json, created_at, updated_at)
+     SELECT ?, ?, 1, COALESCE((SELECT data_json FROM progress_snapshots WHERE discord_id = ?),
+       '{"schemaVersion":1,"tracking":[],"completed":[],"preferences":{}}'), ?, ?`,
+  ).bind(uid, account.discordId, account.discordId, now, now).run();
+  return { scope: { uid, discordId: account.discordId } };
 }
 
 // Read-modify-write of one account's snapshot, retried when another write lands in between.
-async function updateProgress(env, discordId, change) {
+async function updateProgress(env, scope, change) {
+  const { table, key, id, owner } = progressTable(scope);
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const row = await storedProgressRow(env, discordId);
+    const row = await storedProgressRow(env, scope);
     let previous = null;
     if (row) {
       try {
@@ -909,14 +935,19 @@ async function updateProgress(env, discordId, change) {
     const now = Math.floor(Date.now() / 1000);
     const result = row
       ? await env.DB.prepare(
-        "UPDATE progress_snapshots SET revision = revision + 1, data_json = ?, updated_at = ? WHERE discord_id = ? AND revision = ?",
-      ).bind(encoded, now, discordId, Number(row.revision)).run()
-      : await env.DB.prepare(
-        `INSERT INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at)
-         VALUES (?, 1, ?, ?, ?) ON CONFLICT(discord_id) DO NOTHING`,
-      ).bind(discordId, encoded, now, now).run();
+        `UPDATE ${table} SET revision = revision + 1, data_json = ?, updated_at = ? WHERE ${key} = ? AND revision = ?`,
+      ).bind(encoded, now, id, Number(row.revision)).run()
+      : table === "progress_snapshots"
+        ? await env.DB.prepare(
+          `INSERT INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at)
+           VALUES (?, 1, ?, ?, ?) ON CONFLICT(discord_id) DO NOTHING`,
+        ).bind(id, encoded, now, now).run()
+        : await env.DB.prepare(
+          `INSERT INTO character_progress (game_uid, discord_id, revision, data_json, created_at, updated_at)
+           VALUES (?, ?, 1, ?, ?, ?) ON CONFLICT(game_uid) DO NOTHING`,
+        ).bind(id, owner, encoded, now, now).run();
     if (Number(result?.meta?.changes) === 1) {
-      const saved = await storedProgressRow(env, discordId);
+      const saved = await storedProgressRow(env, scope);
       return { progress: next, revision: Number(saved.revision), updatedAt: Number(saved.updatedAt) };
     }
   }
@@ -926,9 +957,9 @@ async function updateProgress(env, discordId, change) {
 async function getProgress(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
-  const row = await env.DB.prepare(
-    "SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
-  ).bind(account.discordId).first();
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
+  const row = await storedProgressRow(env, scope);
   if (!row) return json({ revision: 0, progress: null, updatedAt: null });
   try {
     return json({ revision: Number(row.revision), progress: JSON.parse(row.dataJson), updatedAt: Number(row.updatedAt) });
@@ -949,9 +980,11 @@ async function putProgress(request, env) {
   }
   const progress = progressPayload(body.progress);
   if (!progress) return json({ error: "Progress payload has an invalid shape." }, 400);
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
   // Only the explicit owner mode endpoint may change this server-owned flag; an old tab's stale value is ignored.
   delete progress.preferences.developerMode;
-  const saved = await updateProgress(env, account.discordId, (previous) => {
+  const saved = await updateProgress(env, scope, (previous) => {
     const next = withCompletion(progress, mergeCompletion(previous, progress));
     const developerMode = previous?.preferences?.developerMode;
     if (typeof developerMode === "boolean") next.preferences = { ...next.preferences, developerMode };
@@ -965,7 +998,9 @@ async function putProgress(request, env) {
 async function getCompletion(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
-  const row = await storedProgressRow(env, account.discordId);
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
+  const row = await storedProgressRow(env, scope);
   let progress = null;
   try {
     progress = row ? progressPayload(JSON.parse(row.dataJson)) : null;
@@ -997,9 +1032,11 @@ async function patchCompletion(request, env) {
   if (!set || !clear || !(set.length + clear.length)) {
     return json({ error: "Send set and/or clear as lists of completion ids." }, 400);
   }
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
   const now = Date.now();
   const changes = Object.fromEntries([...clear.map((id) => [id, [0, now]]), ...set.map((id) => [id, [1, now]])]);
-  const saved = await updateProgress(env, account.discordId, (previous) => withCompletion(
+  const saved = await updateProgress(env, scope, (previous) => withCompletion(
     previous || { schemaVersion: 1, tracking: [], completed: [], preferences: {} },
     mergeCompletion(previous, { completed: [], completedChanges: changes }),
   ));

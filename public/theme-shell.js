@@ -1,4 +1,23 @@
 (() => {
+  // Inside the AniiLogs Companion app (?embed=app, remembered for the visit): the app shows its own tabs for the
+  // pages, so the site hides its logo, page links and footer (styles.css: html[data-embed="app"]). The app can also
+  // pass its theme (&theme=), used for the visit without changing the theme saved for the website.
+  const pageParams = new URLSearchParams(window.location.search);
+  let embedded = pageParams.get("embed") === "app";
+  let embedTheme = pageParams.get("theme");
+  try {
+    if (embedded) {
+      window.sessionStorage.setItem("aniilogs:embed", "app");
+      if (embedTheme) window.sessionStorage.setItem("aniilogs:embed-theme", embedTheme);
+    } else {
+      embedded = window.sessionStorage.getItem("aniilogs:embed") === "app";
+      embedTheme = embedTheme || window.sessionStorage.getItem("aniilogs:embed-theme");
+    }
+  } catch {
+    // no session storage: only the first page knows it is embedded
+  }
+  if (embedded) document.documentElement.dataset.embed = "app";
+
   const PREFERENCES_KEY = "aniilogs:explorer:preferences:v1";
   const LEGACY_MODE_KEY = "aniilogs:color-mode:v1";
   const PRESETS = Object.freeze({
@@ -163,6 +182,7 @@
     document.querySelectorAll("[data-site-theme-select]").forEach((select) => {
       select.addEventListener("change", () => {
         const preferences = readPreferences();
+        try { window.sessionStorage.removeItem("aniilogs:embed-theme"); } catch { /* picked here: the app's theme no longer applies */ }
         apply(select.value, preferences.customTheme, { persist: true, notify: true });
       });
     });
@@ -212,7 +232,8 @@
   }
 
   const initial = readPreferences();
-  apply(String(initial.theme || "default").toLowerCase(), initial.customTheme);
+  const appTheme = embedded && embedTheme && Object.hasOwn(PRESETS, embedTheme) ? embedTheme : null;
+  apply(appTheme || String(initial.theme || "default").toLowerCase(), initial.customTheme);
   window.AniiLogsTheme = Object.freeze({ PRESETS, apply, bindControls, readPreferences, syncControls });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindShell, { once: true });
   else bindShell();
