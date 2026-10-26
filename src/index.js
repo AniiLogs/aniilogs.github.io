@@ -1907,7 +1907,12 @@ async function interlinkBests(env, cycles) {
        AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})
      GROUP BY s.discord_id, s.cycle, s.boss_id`,
   ).bind(...cycles).all();
-  return results || [];
+  // A week the game data lists only counts its own three bosses: a misread boss name (the battle prep screen's name
+  // sits over the boss art) can't add a fourth board or count a score twice.
+  return (results || []).filter((row) => {
+    const cycle = interlinkCycle(row.cycle);
+    return !cycle || cycle.bosses.some((boss) => boss.id === String(row.bossId));
+  });
 }
 
 function ranked(rows, key) {
