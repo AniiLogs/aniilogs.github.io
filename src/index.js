@@ -1975,6 +1975,13 @@ async function interlinkBests(env, cycles, list) {
   });
 }
 
+// A boss board: most stars, then highest score, then fastest clear (no clear last), then whoever got there first.
+function rankedBossRuns(rows) {
+  const time = (row) => (row.clearTimeS == null ? Infinity : Number(row.clearTimeS));
+  return rows.sort((a, b) => (Number(b.stars) || 0) - (Number(a.stars) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0)
+    || time(a) - time(b) || a.firstAt - b.firstAt).map((row, index) => ({ rank: index + 1, ...row }));
+}
+
 function ranked(rows, key) {
   return rows.sort((a, b) => b[key] - a[key] || a.firstAt - b.firstAt).map((row, index) => ({ rank: index + 1, ...row }));
 }
@@ -2037,7 +2044,7 @@ async function interlinkBoards(request, env) {
   }
   const bosses = bossIds.map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
-    const entries = ranked(rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row })), "score")
+    const entries = rankedBossRuns(rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row })))
       .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder", own: own(discordId) }));
     return { id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id, entries };
   });

@@ -106,4 +106,14 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-star { width: 1.1em; height: 1.1em; flex: none; }
 .lb-empty { padding: 1.2rem; text-align: center; opacity: 0.7; }
 .lb-boss-cell { display: inline-flex; align-items: center; gap: 0.6rem; }
+.lb-th-info { display: inline-flex; align-items: center; gap: 0.4rem; }
+.lb-info { display: inline-grid; width: 1.25rem; height: 1.25rem; place-items: center; padding: 0; border: 1px solid var(--line);
+  border-radius: 50%; background: transparent; color: var(--ink-soft); font: italic 700 0.75rem/1 Georgia, serif; text-transform: none; cursor: pointer; }
+.lb-info:hover, .lb-info:focus-visible { border-color: var(--teal); color: var(--teal); outline: none; }
+.lb-info-pop { width: min(360px, calc(100vw - 2rem)); margin: auto; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 16px;
+  background: rgb(var(--panel-rgb)); color: var(--ink); box-shadow: var(--shadow); font-size: 0.9rem; font-weight: 400;
+  letter-spacing: normal; line-height: 1.55; text-align: left; text-transform: none; white-space: normal; overflow: visible; }
+.lb-info-pop::backdrop { background: rgba(0, 0, 0, 0.35); }
+.lb-info-pop ul { margin: 0.5rem 0; padding-left: 1.1rem; color: var(--ink-soft); }
+.lb-info-pop p { margin: 0; color: var(--ink-soft); }
 .lb-boss-cell .lb-stars { opacity: 0.9; font-size: 0.9em; }

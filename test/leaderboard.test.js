@@ -503,7 +503,7 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   assert.deepEqual(week.bosses[0].entries.map((e) => [e.rank, e.score]), [[1, 15000], [2, 12000]]);
   assert.deepEqual(week.bosses[0].entries.map((e) => e.clearTimeS), [null, null]);           // time ups: no kill time
   assert.deepEqual(week.week.map((e) => [e.rank, e.total]), [[1, 21000], [2, 20000]]);   // 12000 + 9000 beats 15000 + 5000
-  assert.deepEqual(week.bosses[1].entries.map((e) => [e.score, e.clearTimeS]), [[9000, null], [5000, 142]]);   // kill time
+  assert.deepEqual(week.bosses[1].entries.map((e) => [e.stars, e.score, e.clearTimeS]), [[20, 5000, 142], [9, 9000, null]]);   // stars first; clear time
   assert.equal(JSON.stringify(week).includes(IDS.dev), false);                              // no Discord ids
   assert.ok(week.weeks.some((w) => w.id === "3003"));                                       // past weeks listed
 
@@ -517,6 +517,19 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   const profile = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
   assert.deepEqual(profile.leaderboards.interlinkSeason, { season: 1, total: 21000, stars: 29, weeks: 1, rank: 2, players: 2 });
   assert.equal((await call(env, "/api/leaderboard/interlink?season=99")).status, 404);
+});
+
+test("Interlink boss boards rank by stars, then score, then fastest clear", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const tucking = { id: "80000100", name: "Omega Tucking", level: 60 };
+  const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await desktopToken(env, session), method: "POST", body });
+  assert.equal((await send(SESSIONS.dev, run("t1", { boss: tucking, stars: 15, score: 16000, clearTimeS: 150, cleared: true }))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("t2", { boss: tucking, stars: 15, score: 16000, clearTimeS: 120, cleared: true }))).status, 201);
+  assert.equal((await send(SESSIONS.dev2, run("t3", { boss: tucking, stars: 16, score: 15500, clearTimeS: 175, cleared: true }))).status, 201);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  const board = week.bosses.find((boss) => boss.id === "80000100");
+  assert.deepEqual(board.entries.map((e) => [e.rank, e.stars, e.score, e.clearTimeS]),
+    [[1, 16, 15500, 175], [2, 15, 16000, 120], [3, 15, 16000, 150]]);
 });
 
 test("developer apps can add Interlink weeks from the game data; others can't", async () => {
