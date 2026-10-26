@@ -239,11 +239,18 @@ test("anyone can see a shown entry's proof; a hidden entry's is its submitter's 
   const form = new FormData();
   form.set("submission", JSON.stringify(run("with-shot")));
   form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" }), "result.jpg");
+  form.set("battle", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0x01])], { type: "image/jpeg" }), "battle.jpg");
   const submitted = await call(env, "/api/leaderboard/submissions", { token: userToken, method: "POST", form });
   assert.equal(submitted.status, 201);
-  const { submissionId, evidenceStored } = await submitted.json();
+  const { submissionId, evidenceStored, battleEvidenceStored } = await submitted.json();
   assert.equal(evidenceStored, true);
-  assert.equal(EVIDENCE.objects.size, 1);
+  assert.equal(battleEvidenceStored, true);
+  assert.equal(EVIDENCE.objects.size, 2);                                          // result screen + Battle Data
+  const battle = await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=battle`);
+  assert.equal(battle.status, 200);
+  assert.equal((await battle.arrayBuffer()).byteLength, 4);
+  const listed = await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json();
+  assert.deepEqual([listed.entries[0].hasEvidence, listed.entries[0].hasBattleEvidence], [true, true]);
 
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.user })).status, 200);
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.dev })).status, 200);

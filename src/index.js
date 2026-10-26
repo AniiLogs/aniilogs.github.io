@@ -1401,9 +1401,12 @@ async function deleteOwnAccount(request, env) {
   const discordId = account.discordId;
   if (env.EVIDENCE) {
     const { results } = await env.DB.prepare(
-      "SELECT evidence_key AS evidenceKey FROM leaderboard_submissions WHERE discord_id = ? AND evidence_key IS NOT NULL",
+      `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions
+       WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL)`,
     ).bind(discordId).all();
-    for (const row of results || []) await env.EVIDENCE.delete(row.evidenceKey);
+    for (const row of results || []) {
+      for (const key of [row.evidenceKey, row.battleKey]) if (key) await env.EVIDENCE.delete(key);
+    }
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM auth_handoffs WHERE discord_id = ?").bind(discordId),
@@ -1720,7 +1723,7 @@ async function readSubmissionRequest(request) {
     return { body: await readJsonBody(request, MAX_SUBMISSION_BYTES), evidence: null };
   }
   const declared = Number(request.headers.get("content-length") || 0);
-  if (declared > MAX_SUBMISSION_BYTES + MAX_EVIDENCE_BYTES + 4096) throw new RangeError("Request body is too large.");
+  if (declared > MAX_SUBMISSION_BYTES + 2 * MAX_EVIDENCE_BYTES + 8192) throw new RangeError("Request body is too large.");
   const form = await request.formData();
   const text = String(form.get("submission") || "");
   if (encoder.encode(text).byteLength > MAX_SUBMISSION_BYTES) throw new RangeError("Submission is too large.");
@@ -1730,11 +1733,16 @@ async function readSubmissionRequest(request) {
   } catch {
     throw new TypeError("Submission must be valid JSON.");
   }
-  const file = form.get("evidence");
-  if (!file || typeof file === "string") return { body, evidence: null };
-  if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Evidence must be a JPEG, PNG or WebP image.");
-  if (file.size > MAX_EVIDENCE_BYTES) throw new RangeError("Evidence image is too large.");
-  return { body, evidence: file };
+  // the result screen ("evidence") and, for a best run, its Battle Data screen ("battle")
+  const picture = (name) => {
+    const file = form.get(name);
+    if (!file || typeof file === "string") return null;
+    if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Evidence must be a JPEG, PNG or WebP image.");
+    if (file.size > MAX_EVIDENCE_BYTES) throw new RangeError("Evidence image is too large.");
+    return file;
+  };
+  const evidence = picture("evidence");
+  return { body, evidence, battle: evidence ? picture("battle") : null };
 }
 
 // Two app users in one Interlink run both send it: same week, boss, score, stars and time, played and sent within five
@@ -1812,11 +1820,16 @@ async function submitLeaderboardRecord(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey FROM leaderboard_submissions
+    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
   const submissionId = existing?.submissionId || randomToken(12);
   let evidenceKey = existing?.evidenceKey || null;
+  let battleKey = existing?.battleKey || null;
+  if (parsed.battle && env.EVIDENCE) {
+    battleKey = `evidence/${account.discordId}/${submissionId}-battle.${EVIDENCE_TYPES[parsed.battle.type]}`;
+    await env.EVIDENCE.put(battleKey, parsed.battle.stream(), { httpMetadata: { contentType: parsed.battle.type } });
+  }
   if (parsed.evidence && env.EVIDENCE) {
     evidenceKey = `evidence/${account.discordId}/${submissionId}.${EVIDENCE_TYPES[parsed.evidence.type]}`;
     await env.EVIDENCE.put(evidenceKey, parsed.evidence.stream(), {
@@ -1827,8 +1840,9 @@ async function submitLeaderboardRecord(request, env) {
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
       score, rank_tier, rank_subtier, rank_name, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
-      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server,
+      battle_evidence_key
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
@@ -1838,13 +1852,14 @@ async function submitLeaderboardRecord(request, env) {
       meter_damage = excluded.meter_damage, party_size = excluded.party_size,
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
-      played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server`,
+      played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server,
+      battle_evidence_key = excluded.battle_evidence_key`,
   ).bind(
     submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
     record.bossId, record.bossName, record.bossLevel, record.score, record.rankTier, record.rankSubtier, record.rankName, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
-    record.playedAt, now, now, record.server,
+    record.playedAt, now, now, record.server, battleKey,
   ).run();
   await corroborateRun(env, submissionId);
   return json({
@@ -1852,6 +1867,7 @@ async function submitLeaderboardRecord(request, env) {
     submissionId,
     updated: Boolean(existing),
     evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
+    battleEvidenceStored: Boolean(parsed.battle && env.EVIDENCE),
   }, existing ? 200 : 201);
 }
 
@@ -2526,6 +2542,7 @@ async function leaderboardEntries(request, env) {
       buffs: parseJsonColumn(row.buffs_json),
       extra: (({ instanceId: _instance, ...extra }) => extra)(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
+      hasBattleEvidence: Boolean(row.battle_evidence_key),
       status: row.status,
       playedAt: row.played_at,
       submittedAt: row.created_at,
@@ -2600,14 +2617,14 @@ async function deleteSubmission(request, env, submissionId) {
   if (!account) return json({ error: "Authentication required." }, 401);
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
   if (!row) return json({ error: "Submission not found." }, 404);
   if (row.discordId !== account.discordId && !account.developerModeAvailable) {
     return json({ error: "You can only delete your own submissions." }, 403);
   }
   await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
-  if (row.evidenceKey && env.EVIDENCE) await env.EVIDENCE.delete(row.evidenceKey);
+  for (const key of [row.evidenceKey, row.battleKey]) if (key && env.EVIDENCE) await env.EVIDENCE.delete(key);
   return json({ ok: true });
 }
 
@@ -2616,9 +2633,10 @@ async function deleteSubmission(request, env, submissionId) {
 // name); a hidden entry's only its submitter and developers.
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, status FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, status FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
-  if (!row?.evidenceKey || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
+  const key = new URL(request.url).searchParams.get("shot") === "battle" ? row?.battleKey : row?.evidenceKey;
+  if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
     const account = await leaderboardAccount(request, env);
@@ -2627,7 +2645,7 @@ async function submissionEvidence(request, env, submissionId) {
       return json({ error: "This entry is hidden: its proof is visible to its submitter and developers only." }, 403);
     }
   }
-  const object = await env.EVIDENCE.get(row.evidenceKey);
+  const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);

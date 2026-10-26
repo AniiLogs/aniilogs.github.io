@@ -378,15 +378,17 @@
   // A picture icon next to a name when the run has its result screenshot, for anyone: hover it to see the screenshot
   // as large as the window allows, click (or tap) to keep it open.
   const proofImages = new Map();                       // submission id -> object URL, loaded once per page
-  async function proofImage(submissionId) {
-    if (!proofImages.has(submissionId)) {
-      proofImages.set(submissionId, (async () => {
-        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence`);
+  // shot: "summary" (the result screen) or "battle" (Battle Data)
+  async function proofImage(submissionId, shot = "summary") {
+    const key = `${submissionId}|${shot}`;
+    if (!proofImages.has(key)) {
+      proofImages.set(key, (async () => {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence${shot === "battle" ? "?shot=battle" : ""}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return URL.createObjectURL(await response.blob());
-      })().catch((error) => { proofImages.delete(submissionId); throw error; }));
+      })().catch((error) => { proofImages.delete(key); throw error; }));
     }
-    return proofImages.get(submissionId);
+    return proofImages.get(key);
   }
   function proofButton(submissionId) {
     if (!submissionId) return null;
@@ -429,14 +431,27 @@
       document.body.append(dialog);
     }
     const body = dialog.querySelector(".lb-proof-body");
-    body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
     dialog.showModal();
-    try {
-      const url = await proofImage(submissionId);
-      body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: "The run's result screenshot" }));
-    } catch {
-      body.replaceChildren(el("p", { class: "lb-empty", text: "This screenshot isn't available." }));
+    // the result screen, and the run's Battle Data when it was sent with it
+    const show = async (shot) => {
+      body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
+      try {
+        const url = await proofImage(submissionId, shot);
+        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: shot === "battle" ? "The run's Battle Data" : "The run's result screen" }));
+      } catch {
+        body.replaceChildren(el("p", { class: "lb-empty", text: shot === "battle" ? "This run has no Battle Data screenshot." : "This screenshot isn't available." }));
+      }
+      for (const tab of dialog.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(tab.dataset.proofShot === shot));
+    };
+    let tabs = dialog.querySelector(".lb-proof-tabs");
+    if (!tabs) {
+      tabs = el("div", { class: "lb-proof-tabs", role: "tablist" },
+        el("button", { type: "button", role: "tab", "data-proof-shot": "summary", text: "Summary" }),
+        el("button", { type: "button", role: "tab", "data-proof-shot": "battle", text: "Battle Data" }));
+      dialog.insertBefore(tabs, body);
     }
+    for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.onclick = () => show(tab.dataset.proofShot);
+    await show("summary");
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   function scoreHeader(text) {
