@@ -2094,6 +2094,11 @@ const CREDITED_RUNS = `(
 )`;
 
 
+// The boards only list players with a name: a teammate's name from the run, or a character the sender's account linked.
+// A record from an account with no character yet (its app couldn't read the name) stays saved and shows up under the
+// name once that player's app links one - nobody is listed as a generic "Pathfinder".
+const NAMED_ON_BOARDS = "(s.teammate IS NOT NULL OR EXISTS (SELECT 1 FROM game_characters named WHERE named.discord_id = s.who AND named.character_name IS NOT NULL))";
+
 // Whether a name nobody claimed looks like a claimed character's name (same skeleton): the boards mark it, since only a
 // UID tells two such players apart. A name is never matched to a UID - only a UID recorded with the run is.
 async function nameIdentities(env, names) {
@@ -2234,7 +2239,7 @@ async function interlinkBests(env, cycles, list) {
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
        MIN(s.created_at) AS firstAt
      FROM ${CREDITED_RUNS} s
-     WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.score IS NOT NULL
+     WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.score IS NOT NULL AND ${NAMED_ON_BOARDS}
        AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})
      GROUP BY s.who, s.cycle, s.boss_id`,
   ).bind(...cycles).all();
@@ -2349,7 +2354,7 @@ async function leaderboardEntries(request, env) {
   if (params.get("mine") === "1" && account) {
     where.push("s.who = ?");
     binds.push(account.discordId);
-  }
+  } else where.push(NAMED_ON_BOARDS);   // your own list shows everything; the boards only players with a name
   const sortKey = Object.hasOwn(LEADERBOARD_SORTS, params.get("sort") || "")
     ? params.get("sort")
     : LEADERBOARD_DEFAULT_SORT[kind] || "score";
