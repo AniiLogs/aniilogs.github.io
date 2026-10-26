@@ -1898,6 +1898,7 @@ async function interlinkBests(env, cycles) {
   const { results } = await env.DB.prepare(
     `SELECT s.discord_id AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
+       MIN(CASE WHEN s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
        (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
         ORDER BY gc.last_seen_at DESC LIMIT 1) AS player,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.discord_id) AS profileId,

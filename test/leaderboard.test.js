@@ -487,6 +487,8 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   assert.equal((await send(a, run("w2", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 12000 }))).status, 201);
   assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-80000107", cycle: "3005", boss: boss("80000107", "Omega Infergon"), score: 9000, stars: 9 })).status, 201);
   assert.equal((await send(b, run("u1", { cycle: "3005", boss: boss("80000109", "Omega Sherro"), score: 15000 }))).status, 201);
+  // a kill before the 3 minutes: its time shows on the boss board (fastest kill)
+  assert.equal((await send(b, run("u3", { cycle: "3005", boss: boss("80000107", "Omega Infergon"), score: 5000, clearTimeS: 142, cleared: true }))).status, 201);
   // an older week of the same season
   assert.equal((await send(b, run("u2", { cycle: "3003", boss: boss("80000099", "Alpha Irisal"), score: 7000 }))).status, 201);
 
@@ -496,7 +498,9 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   assert.equal(week.cycle.id, "3005");
   assert.deepEqual(week.bosses.map((x) => x.name), ["Omega Sherro", "Omega Infergon", "Omega Tucking"]);
   assert.deepEqual(week.bosses[0].entries.map((e) => [e.rank, e.score]), [[1, 15000], [2, 12000]]);
-  assert.deepEqual(week.week.map((e) => [e.rank, e.total]), [[1, 21000], [2, 15000]]);   // 12000 + 9000 beats 15000
+  assert.deepEqual(week.bosses[0].entries.map((e) => e.clearTimeS), [null, null]);           // time ups: no kill time
+  assert.deepEqual(week.week.map((e) => [e.rank, e.total]), [[1, 21000], [2, 20000]]);   // 12000 + 9000 beats 15000 + 5000
+  assert.deepEqual(week.bosses[1].entries.map((e) => [e.score, e.clearTimeS]), [[9000, null], [5000, 142]]);   // kill time
   assert.equal(JSON.stringify(week).includes(IDS.dev), false);                              // no Discord ids
   assert.ok(week.weeks.some((w) => w.id === "3003"));                                       // past weeks listed
 
@@ -504,8 +508,8 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   assert.deepEqual(old.week.map((e) => e.total), [7000]);
 
   const season = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
-  assert.deepEqual(season.standings.map((e) => [e.total, e.weeks]), [[22000, 2], [21000, 1]]);
-  assert.deepEqual(week.week.map((e) => e.stars), [29, 20]);                // best stars per boss, added up
+  assert.deepEqual(season.standings.map((e) => [e.total, e.weeks]), [[27000, 2], [21000, 1]]);
+  assert.deepEqual(week.week.map((e) => e.stars), [29, 40]);                // best stars per boss, added up
   assert.deepEqual(week.week[0].bossStars, { 80000109: 20, 80000107: 9 });   // and per boss
   const profile = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
   assert.deepEqual(profile.leaderboards.interlinkSeason, { season: 1, total: 21000, stars: 29, weeks: 1, rank: 2, players: 2 });
