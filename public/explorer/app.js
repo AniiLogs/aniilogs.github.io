@@ -8518,15 +8518,37 @@ function attachViewModel(record, entry, appearances) {
   status.setAttribute("role", "status");
   status.hidden = true;
   host.append(status);
+  // While the viewer loads, its Aniimo's portrait and the viewer's own progress
+  // (forwarded by the embed) stand in front of the still-transparent frame.
+  const loading = document.createElement("div");
+  loading.className = "catalog-model-loading";
+  loading.setAttribute("aria-hidden", "true");
+  const loadingArt = makeIcon("catalog-model-loading-art", entry.icon);
+  loadingArt.alt = "";
+  const loadingLabel = document.createElement("p");
+  loadingLabel.className = "catalog-model-loading-label";
+  loadingLabel.textContent = "Loading 3D model";
+  const loadingBar = document.createElement("div");
+  loadingBar.className = "catalog-model-loading-bar";
+  const loadingFill = document.createElement("i");
+  loadingBar.append(loadingFill);
+  loading.append(loadingArt, loadingLabel, loadingBar);
+  host.append(loading);
   record.append(host);
   let frame = null;
   const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
+  const setProgress = (label, pct) => {
+    loadingLabel.textContent = label || "Loading 3D model";
+    loadingFill.style.transform = `scaleX(${Math.max(0, Math.min(100, Number(pct) || 0)) / 100})`;
+  };
   const onMessage = (event) => {
     const message = event.data;
     if (!frame || event.origin !== VIEW_MODEL_ORIGIN || event.source !== frame.contentWindow || message?.source !== "aniilogs-viewer") return;
     if (message.type === "state") {
       host.dataset.state = message.state;
       setStatus(message.state === "failed" ? "This model could not be loaded right now." : "");
+    } else if (message.type === "progress") {
+      if (typeof message.stage === "string") setProgress(message.stage.slice(0, 80), message.pct);
     } else if (message.type === "options") {
       els.catalogPanel.querySelector(".catalog-model-controls")?.updateViewerOptions?.(message);
     }
@@ -8548,9 +8570,13 @@ function attachViewModel(record, entry, appearances) {
     frame.setAttribute("referrerpolicy", "no-referrer");
     frame.src = url.href;
     host.dataset.state = "loading";
+    setProgress("", 0);
     window.addEventListener("message", onMessage);
     host.prepend(frame);
-    if (!("gpu" in navigator)) setStatus("3D models need a browser with WebGPU (recent Chrome, Edge, or Safari).");
+    if (!("gpu" in navigator)) {
+      host.dataset.state = "failed";
+      setStatus("3D models need a browser with WebGPU (recent Chrome, Edge, or Safari).");
+    }
   };
   host.stop = () => {
     window.removeEventListener("message", onMessage);

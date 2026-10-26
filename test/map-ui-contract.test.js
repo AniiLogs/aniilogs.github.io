@@ -305,7 +305,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.17.20-view-model/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.17.21-view-model-loading/u);
   // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);
   // Ultimates come with the Aniimo rather than being picked.
   assert.match(teamBuilder, /id: "interlink", label: "Interlink"/u);
