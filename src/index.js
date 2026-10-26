@@ -1653,15 +1653,17 @@ async function readSubmissionRequest(request) {
 }
 
 // Two app users in one Interlink run both send it: same week, boss, score, stars and time, played and sent within five
-// minutes of each other. Only full runs (result screen, timer, party) count: a best score read off the prep screen
-// says nothing about who was in a run. Each submission then vouches for the other: the other player's slot in this run's party gets their UID
+// minutes of each other, and - when both apps read it from the game log - in the same dungeon instance. Only full runs
+// (result screen, timer, party) count: a best score read off the prep screen says nothing about who was in a run.
+// The instance id stays server-side (see leaderboardEntries), so nobody can copy it into a made-up run. Each submission then vouches for the other: the other player's slot in this run's party gets their UID
 // (from their own submission, whose UID only their account can send) and is marked confirmed, and the same the other
 // way round. That is how a teammate's row gets a UID with the run - no name matching after the fact.
 const CORROBORATE_WINDOW_S = 5 * 60;
 async function corroborateRun(env, submissionId) {
   const me = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
-       clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson
+       clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson,
+       json_extract(extra_json, '$.instanceId') AS instanceId
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   if (!me || me.kind !== "interlink_run" || me.score == null || !me.gameUid) return;
@@ -1670,9 +1672,10 @@ async function corroborateRun(env, submissionId) {
      FROM leaderboard_submissions
      WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
        AND cycle IS ? AND boss_id IS ? AND score = ? AND stars IS ? AND clear_time_s IS ?
-       AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?`,
+       AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
+       AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)`,
   ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.score, me.stars, me.clearTimeS, me.at, CORROBORATE_WINDOW_S,
-    me.sentAt, CORROBORATE_WINDOW_S).all();
+    me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId).all();
   // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
   const ownName = async (row, players) => players.find((player) => player?.self)?.name
     || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
@@ -2083,6 +2086,10 @@ const CREDITED_RUNS = `(
     FROM leaderboard_submissions c, json_each(c.players_json) pl
     WHERE c.kind = 'interlink_run' AND json_extract(pl.value, '$.ai') = 0
       AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
+      -- older apps don't mark the sender's own slot: skip the slot with the sender's linked character name
+      AND json_extract(pl.value, '$.name') <> COALESCE(
+        (SELECT character_name FROM game_characters me WHERE me.game_uid = c.game_uid AND me.discord_id = c.discord_id), '')
+        COLLATE NOCASE
   ) WHERE who <> discord_id
 )`;
 
@@ -2420,7 +2427,7 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: parseJsonColumn(row.extra_json),
+      extra: (({ instanceId: _instance, ...extra }) => extra)(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
       status: row.status,
       playedAt: row.played_at,

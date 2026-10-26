@@ -423,9 +423,14 @@ test("only runs played and sent within five minutes vouch; prep-screen scores an
     players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
   assert.equal(vouched(mine()), false);
 
-  // played together and sent together: vouched
-  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at + 600 WHERE client_run_id = 'm1'").run();
-  await send(b, run("k-now", { ...shared, gameUid: "302000000002", playedAt: 1792700030,
+  // played together and sent together: vouched (a run from another dungeon instance with everything else equal isn't)
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at + 600, extra_json = '{\"instanceId\":\"at74A81j3-Zl0_Dm\"}' WHERE client_run_id = 'm1'").run();
+  await send(b, run("k-elsewhere", { ...shared, gameUid: "302000000002", playedAt: 1792700030, extra: { instanceId: "zzOtherDungeon" },
+    players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
+  assert.equal(vouched(mine()), false);
+  const listed = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0", { session: SESSIONS.dev })).json();
+  assert.equal(JSON.stringify(listed).includes("at74A81j3"), false);                        // the instance id stays private
+  await send(b, run("k-now", { ...shared, gameUid: "302000000002", playedAt: 1792700030, extra: { instanceId: "at74A81j3-Zl0_Dm" },
     players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
   assert.equal(vouched(mine()), true);
 });
