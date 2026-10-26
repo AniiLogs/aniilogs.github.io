@@ -127,9 +127,10 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-server { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0 0.2rem; color: var(--ink-soft); font-size: 0.9rem; }
 
 /* the run's screenshot: a camera next to the name, and the viewer */
-.lb-proof { display: inline-grid; width: 1.5rem; height: 1.5rem; place-items: center; margin-left: 6px; padding: 0; border: 1px solid var(--line);
-  border-radius: 6px; background: transparent; color: var(--ink-soft); vertical-align: middle; cursor: pointer; }
-.lb-proof:hover, .lb-proof:focus-visible { border-color: var(--teal); color: var(--teal); outline: none; }
+.lb-proof { display: inline-grid; width: 1.4rem; height: 1.4rem; place-items: center; margin-left: 4px; padding: 0; border: 0;
+  background: none; color: var(--ink-soft); vertical-align: middle; cursor: pointer; }
+.lb-proof:hover { color: var(--teal); }
+.lb-proof:focus-visible { color: var(--teal); outline: 2px solid var(--teal); outline-offset: 1px; border-radius: 4px; }
 .lb-proof svg { width: 0.95rem; height: 0.95rem; }
 .lb-proof-dialog { width: min(1280px, calc(100vw - 2rem)); padding: 0; border: 1px solid var(--line); border-radius: 14px;
   background: rgb(var(--panel-rgb)); color: var(--ink); box-shadow: var(--shadow); }
