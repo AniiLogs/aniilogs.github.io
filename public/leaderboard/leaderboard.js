@@ -304,8 +304,7 @@
             renderRows(entries);
           },
         }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null,
-        entry.character || entry.profileId
-          ? profileName(entry.character || "View profile", entry.profileId, { class: "lb-character" }) : null),
+        entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
       ];
       rows.push(el("tr", { class: [entry.own ? "is-own" : "", entry.status === "hidden" ? "is-hidden" : ""].join(" ").trim() || null }, cells));

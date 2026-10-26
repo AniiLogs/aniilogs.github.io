@@ -183,7 +183,9 @@ test("entries rank best per player, sort by any board, and filter by the data", 
 
   const get = async (query) => (await call(env, `/api/leaderboard/entries?${query}`, { session: SESSIONS.dev })).json();
   const byScore = await get("kind=interlink_run&boss=80000107");
-  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score, entry.rank]), [["dev name", 22652, 1], ["dev2 name", 21000, 2]]);
+  assert.deepEqual(byScore.entries.map((entry) => [entry.player, entry.score, entry.rank]), [["MinMax", 22652, 1], ["Solo", 21000, 2]]);   // in-game names (1P), never account names
+  assert.equal(JSON.stringify(byScore).includes("name\""), true);
+  assert.equal(/dev2? name|"dev"|"dev2"/u.test(JSON.stringify(byScore.entries.map((entry) => entry.player))), false);
   assert.equal(byScore.entries[0].own, true);
   assert.equal((await get("kind=interlink_run&boss=80000107&best=0")).total, 3);
 
@@ -298,11 +300,11 @@ test("Egg Heist season standings rank by tier, then Emperor stars, then rank poi
   assert.equal(s1.sort, "standing");
   // Both Emperors; more stars first even though the other has more rank points.
   assert.deepEqual(s1.entries.map((entry) => [entry.player, entry.seasonRank.name, entry.stars]),
-    [["dev name", "Egg Emperor", 475], ["dev2 name", "Egg Emperor", 300]]);
+    [["Pathfinder", "Egg Emperor", 475], ["Pathfinder", "Egg Emperor", 300]]);   // no character linked: no name shown
   const all = await get("kind=eggheist_season");
   // One standing per player per season; Emperors above a lower tier with more points.
   assert.deepEqual(all.entries.map((entry) => [entry.player, entry.cycle, entry.seasonRank.tier]),
-    [["dev name", "S1", 7], ["dev2 name", "S1", 7], ["dev2 name", "S0", 4]]);
+    [["Pathfinder", "S1", 7], ["Pathfinder", "S1", 7], ["Pathfinder", "S0", 4]]);
   const byPoints = await get("kind=eggheist_season&sort=score");
   assert.deepEqual(byPoints.entries.map((entry) => entry.score), [3100, 2900, 2400]);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist", { session: SESSIONS.dev })).json();
@@ -449,7 +451,7 @@ test("profiles are public only by opt-in; leaderboard entries show either way an
   const page = await call(env, `/api/profiles/${id}`);
   assert.equal(page.status, 200);
   const body = await page.json();
-  assert.equal(body.profile.displayName, "Friend 2");
+  assert.equal(body.profile.displayName, "Friend");                      // titled by the character, not the account name
   assert.deepEqual(body.characters, [{ name: "Friend" }]);
   assert.equal(JSON.stringify(body).includes(IDS.user), false);          // no Discord id anywhere
 
