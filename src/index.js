@@ -1075,9 +1075,10 @@ async function ownProfile(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
   const row = await env.DB.prepare(
-    "SELECT display_name AS displayName, bio, is_public AS isPublic, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
+    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
   ).bind(account.discordId).first();
-  return json({ profile: { ...row, isPublic: Number(row?.isPublic || 0) === 1 } });
+  const isPublic = Number(row?.isPublic || 0) === 1;
+  return json({ profile: { ...row, isPublic, publicId: isPublic ? row?.publicId || null : null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1095,11 +1096,20 @@ async function updateOwnProfile(request, env) {
   if (!displayName || displayName.length > 80 || bio.length > 500) {
     return json({ error: "Profile fields are invalid." }, 400);
   }
+  if (body.isPublic !== undefined && typeof body.isPublic !== "boolean") {
+    return json({ error: "isPublic must be true or false." }, 400);
+  }
+  // Private by default: a profile only becomes public when its owner sends isPublic: true, and editing the name or
+  // bio never changes its visibility. A public profile gets a random id for its link (never the Discord id).
+  const current = await env.DB.prepare("SELECT is_public AS isPublic, public_id AS publicId FROM profiles WHERE discord_id = ?")
+    .bind(account.discordId).first();
+  const isPublic = typeof body.isPublic === "boolean" ? body.isPublic : Number(current?.isPublic || 0) === 1;
+  const publicId = current?.publicId || (isPublic ? shareId() + shareId().slice(0, 4) : null);
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
-    "UPDATE profiles SET display_name = ?, bio = ?, is_public = 0, updated_at = ? WHERE discord_id = ?",
-  ).bind(displayName, bio || null, now, account.discordId).run();
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic: false, updatedAt: now } });
+    "UPDATE profiles SET display_name = ?, bio = ?, is_public = ?, public_id = ?, updated_at = ? WHERE discord_id = ?",
+  ).bind(displayName, bio || null, isPublic ? 1 : 0, publicId, now, account.discordId).run();
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1255,6 +1265,38 @@ async function ownProfileOverview(request, env) {
     leaderboards,
     collection: collectionSummary(completed, await releaseChecklist(env)),
     progressUpdatedAt: progressRow ? Number(progressRow.updatedAt) : null,
+  });
+}
+
+// A profile its owner made public: name, about, characters, board standing and collection progress. No Discord
+// identity (id, username, avatar). Private or unknown ids are a plain 404.
+async function publicProfile(request, env, publicId) {
+  const profile = await env.DB.prepare(
+    "SELECT discord_id AS discordId, display_name AS displayName, bio FROM profiles WHERE public_id = ? AND is_public = 1",
+  ).bind(publicId).first();
+  if (!profile) return json({ error: "Profile not found." }, 404);
+  const [characters, progressRow] = await Promise.all([
+    env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC")
+      .bind(profile.discordId).all(),
+    storedProgressRow(env, profile.discordId),
+  ]);
+  let completed = [];
+  try {
+    completed = progressRow ? progressPayload(JSON.parse(progressRow.dataJson))?.completed || [] : [];
+  } catch {
+    completed = [];
+  }
+  let leaderboards = null;
+  if (leaderboardPublic(env)) {
+    const kinds = Object.keys(LEADERBOARD_KINDS);
+    const standings = await Promise.all(kinds.map((kind) => boardStandings(env, profile.discordId, kind)));
+    leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index].map(({ gameUid, ...entry }) => entry)]));
+  }
+  return json({
+    profile: { displayName: profile.displayName || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    characters: (characters.results || []).map((row) => ({ name: row.name })),
+    leaderboards,
+    collection: collectionSummary(completed, await releaseChecklist(env)),
   });
 }
 
@@ -1783,6 +1825,33 @@ function parseJsonColumn(value) {
   }
 }
 
+// Party members are matched to accounts by character name (names are unique in the game). Only members whose owner
+// made their profile public get a link; everyone else, and AI teammates, show as plain names.
+async function partyProfiles(env, rows) {
+  const names = new Set();
+  for (const row of rows) {
+    for (const player of parseJsonColumn(row.players_json) || []) {
+      if (player?.name && !player.ai) names.add(String(player.name).toLowerCase());
+    }
+  }
+  if (!names.size) return new Map();
+  const list = [...names].slice(0, 200);
+  const { results } = await env.DB.prepare(
+    `SELECT lower(gc.character_name) AS name, p.public_id AS publicId FROM game_characters gc
+     JOIN profiles p ON p.discord_id = gc.discord_id
+     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND lower(gc.character_name) IN (${list.map(() => "?").join(", ")})`,
+  ).bind(...list).all();
+  return new Map((results || []).map((row) => [row.name, row.publicId]));
+}
+
+function withProfiles(players, profiles) {
+  if (!Array.isArray(players)) return players;
+  return players.map((player) => {
+    const publicId = player?.name && !player.ai ? profiles.get(String(player.name).toLowerCase()) : null;
+    return publicId ? { ...player, profileId: publicId } : player;
+  });
+}
+
 async function leaderboardEntries(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
@@ -1814,7 +1883,7 @@ async function leaderboardEntries(request, env) {
     : kind === "eggheist_season" ? "s.discord_id, s.cycle" : "s.discord_id";
   const base = `
     SELECT s.*, COALESCE(p.display_name, u.discord_global_name, u.discord_username) AS playerName,
-      gc.character_name AS characterName,
+      gc.character_name AS characterName, CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
       ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
     FROM leaderboard_submissions s
     JOIN users u ON u.discord_id = s.discord_id
@@ -1826,6 +1895,7 @@ async function leaderboardEntries(request, env) {
   const { results } = await env.DB.prepare(
     `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
   ).bind(...binds, limit, offset).all();
+  const profiles = await partyProfiles(env, results || []);
   return json({
     kind,
     sort: sortKey,
@@ -1854,7 +1924,8 @@ async function leaderboardEntries(request, env) {
       meterDps: row.meter_dps,
       meterDamage: row.meter_damage,
       partySize: row.party_size,
-      players: parseJsonColumn(row.players_json),
+      profileId: row.profileId || null,
+      players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
       extra: parseJsonColumn(row.extra_json),
       hasEvidence: Boolean(row.evidence_key),
@@ -1991,6 +2062,8 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
+  const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
+  if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);
   if (url.pathname === "/api/admin/developers" && request.method === "GET") {
     return listDeveloperAccounts(request, env);

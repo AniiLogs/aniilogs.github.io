@@ -102,6 +102,11 @@
     for (const child of children.flat()) if (child !== null && child !== undefined) node.append(child);
     return node;
   }
+  // A name linked to its owner's public profile (only profiles their owners made public carry an id).
+  function profileName(name, profileId, props = {}) {
+    if (!profileId) return el("span", { ...props, text: name });
+    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}#my-profile`, title: "Open their profile", text: name });
+  }
   function number(value) {
     return value === null || value === undefined ? "—" : Number(value).toLocaleString();
   }
@@ -251,7 +256,7 @@
     const parts = [];
     if (entry.players?.length) {
       const rows = entry.players.map((player) => el("tr", {},
-        el("td", { text: `${player.name || "—"}${player.ai ? " (AI)" : ""}` }),
+        el("td", {}, profileName(player.name || "—", player.profileId), player.ai ? el("span", { class: "lb-ai", text: "AI" }) : null),
         el("td", { text: player.stat ? `${player.stat}: ${number(player.value)}` : "—" }),
         el("td", { text: number(player.avgDps) }),
         el("td", { text: number(player.breakValue) }),
@@ -299,7 +304,8 @@
             renderRows(entries);
           },
         }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null,
-        entry.character ? el("span", { class: "lb-character", text: entry.character }) : null),
+        entry.character || entry.profileId
+          ? profileName(entry.character || "View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
       ];
       rows.push(el("tr", { class: [entry.own ? "is-own" : "", entry.status === "hidden" ? "is-hidden" : ""].join(" ").trim() || null }, cells));

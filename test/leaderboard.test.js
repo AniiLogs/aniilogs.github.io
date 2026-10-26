@@ -46,7 +46,7 @@ async function database() {
   const now = Math.floor(Date.now() / 1000);
   for (const [key, discordId] of Object.entries(IDS)) {
     sqlite.prepare("INSERT INTO users VALUES (?, ?, ?, NULL, ?, ?)").run(discordId, key, `${key} name`, now, now);
-    sqlite.prepare("INSERT INTO profiles VALUES (?, ?, NULL, 0, ?, ?)").run(discordId, `${key} name`, now, now);
+    sqlite.prepare("INSERT INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at) VALUES (?, ?, NULL, 0, ?, ?)").run(discordId, `${key} name`, now, now);
     sqlite.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?)").run(await tokenHash(SESSIONS[key]), discordId, now, now + 3600);
   }
   return { DB, sqlite };
@@ -416,4 +416,60 @@ test("the profile overview is owner-only, follows the leaderboard gate and count
     lumens: { sources: 1, sourceTotal: null, collected: null, total: null },
     pins: { collected: 0 },
   });
+});
+
+test("profiles are public only by opt-in; leaderboard entries show either way and link public profiles", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const save = (session, body) => call(env, "/api/profile", { session, method: "PATCH", body });
+  // dev submits a run with user's character in the party, plus an AI teammate
+  const devToken = await desktopToken(env, SESSIONS.dev);
+  const userToken = await desktopToken(env, SESSIONS.user);
+  assert.equal((await call(env, "/api/leaderboard/characters", { token: devToken, method: "POST", body: { gameUid: "111", name: "Lead", source: "meter" } })).status, 201);
+  assert.equal((await call(env, "/api/leaderboard/characters", { token: userToken, method: "POST", body: { gameUid: "222", name: "Friend", source: "meter" } })).status, 201);
+  const party = run("p1", { gameUid: "111", players: [{ name: "Lead", avgDps: 1 }, { name: "friend", avgDps: 2 }, { name: "Tammy", ai: true }] });
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: devToken, method: "POST", body: party })).status, 201);
+
+  const entries = async () => (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries;
+  let [entry] = await entries();
+  assert.equal(entry.profileId, null);
+  assert.deepEqual(entry.players.map((p) => p.profileId), [undefined, undefined, undefined]);
+
+  // editing without isPublic keeps a profile private; opting in publishes it under a random id
+  let saved = await (await save(SESSIONS.user, { displayName: "Friend", bio: "hi" })).json();
+  assert.equal(saved.profile.isPublic, false);
+  saved = await (await save(SESSIONS.user, { displayName: "Friend", bio: "hi", isPublic: true })).json();
+  assert.equal(saved.profile.isPublic, true);
+  assert.match(saved.profile.publicId, /^[A-Za-z0-9]{12}$/u);
+  const id = saved.profile.publicId;
+  // a later edit without the flag keeps it public and keeps the same link
+  saved = await (await save(SESSIONS.user, { displayName: "Friend 2", bio: "" })).json();
+  assert.equal(saved.profile.isPublic, true);
+  assert.equal(saved.profile.publicId, id);
+
+  const page = await call(env, `/api/profiles/${id}`);
+  assert.equal(page.status, 200);
+  const body = await page.json();
+  assert.equal(body.profile.displayName, "Friend 2");
+  assert.deepEqual(body.characters, [{ name: "Friend" }]);
+  assert.equal(JSON.stringify(body).includes(IDS.user), false);          // no Discord id anywhere
+
+  [entry] = await entries();
+  assert.deepEqual(entry.players.map((p) => p.profileId), [undefined, id, undefined]);   // AI and private stay plain
+
+  // turning it off hides the page and the link; the entry itself still shows
+  await save(SESSIONS.user, { displayName: "Friend 2", isPublic: false });
+  assert.equal((await call(env, `/api/profiles/${id}`)).status, 404);
+  [entry] = await entries();
+  assert.equal(entry.players[1].profileId, undefined);
+  assert.equal(entry.players[1].name, "friend");
+  assert.equal((await save(SESSIONS.user, { displayName: "x", isPublic: "yes" })).status, 400);
+
+  // a public profile shows its owner's board standing (no game UID), and the entry links its submitter
+  const lead = await (await save(SESSIONS.dev, { displayName: "Lead", isPublic: true })).json();
+  const leadPage = await (await call(env, `/api/profiles/${lead.profile.publicId}`)).json();
+  assert.equal(leadPage.leaderboards.interlink_run[0].position, 1);
+  assert.equal(leadPage.leaderboards.interlink_run[0].gameUid, undefined);
+  [entry] = await entries();
+  assert.equal(entry.profileId, lead.profile.publicId);
+  assert.equal(entry.players[0].profileId, lead.profile.publicId);
 });

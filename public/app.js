@@ -13,6 +13,13 @@ const profileBio = document.querySelector("[data-profile-bio]");
 const profileSaveButton = document.querySelector("[data-profile-save]");
 const profileStatus = document.querySelector("[data-profile-status]");
 const profileOverview = document.querySelector("[data-profile-overview]");
+const profilePublic = document.querySelector("[data-profile-public]");
+const profilePublicRow = document.querySelector("[data-profile-public-row]");
+const profilePublicLink = document.querySelector("[data-profile-public-link]");
+// /?profile=<id> shows someone's public profile (read-only) in the profile section.
+const PUBLIC_PROFILE_ID = /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
+  ? new URLSearchParams(window.location.search).get("profile")
+  : "";
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
@@ -83,7 +90,7 @@ async function consumeAuthHandoff() {
   window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, result.token);
 }
 
-function showSignedOut(message = "Sign in to sync progress. Profiles remain private while sharing controls are being built.") {
+function showSignedOut(message = "Sign in to sync progress. Profiles are private unless their owner makes them public.") {
   for (const link of loginLinks) link.hidden = false;
   accountMenu.hidden = true;
   accountButton.hidden = true;
@@ -94,7 +101,7 @@ function showSignedOut(message = "Sign in to sync progress. Profiles remain priv
   profileEditor.hidden = true;
   profileEditor.reset();
   profileStatus.textContent = "";
-  profileOverview.hidden = true;
+  profileOverview.hidden = !PUBLIC_PROFILE_ID;
   status.textContent = message;
 }
 
@@ -118,9 +125,21 @@ function showSignedIn(account) {
     developerMode = false;
   }
   if (leaderboardNav) leaderboardNav.hidden = !(account.developerModeAvailable && developerMode);
+  // The profile overview (standing, collection) and making a profile public are a developer preview too.
+  profilePublicRow.hidden = !(account.developerModeAvailable && developerMode);
   void loadPrivateProfile(name);
-  // The profile overview (standing, collection) is a developer preview too.
-  if (account.developerModeAvailable && developerMode) void loadProfileOverview();
+  if (account.developerModeAvailable && developerMode && !PUBLIC_PROFILE_ID) void loadProfileOverview();
+}
+
+function showVisibility(profile) {
+  profilePublic.checked = Boolean(profile.isPublic);
+  profileStatus.textContent = profile.isPublic ? "Public · anyone with the link can see it" : "Private · visible only to you";
+  profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
+  if (profile.isPublic && profile.publicId) {
+    const link = element("a", "", `${window.location.origin}/?profile=${profile.publicId}`);
+    link.href = `/?profile=${profile.publicId}#my-profile`;
+    profilePublicLink.replaceChildren("Your profile link: ", link);
+  }
 }
 
 async function loadPrivateProfile(fallbackName = "") {
@@ -133,9 +152,7 @@ async function loadPrivateProfile(fallbackName = "") {
     const profile = payload.profile || {};
     profileDisplayName.value = String(profile.displayName || fallbackName).slice(0, 80);
     profileBio.value = String(profile.bio || "").slice(0, 500);
-    profileStatus.textContent = profile.isPublic
-      ? "Profile visibility was reset to private."
-      : "Private · visible only to you";
+    showVisibility(profile);
   } catch {
     profileEditor.hidden = true;
     profileStatus.textContent = "";
@@ -272,7 +289,7 @@ function progressRow(label, done, total) {
   return row;
 }
 
-function renderCollection(collection) {
+function renderCollection(collection, publicView = false) {
   const { aniilog = {}, lumens = {}, pins = {} } = collection || {};
   const aniilogRows = [
     progressRow("Standard", aniilog.standard || 0, aniilog.forms),
@@ -282,7 +299,7 @@ function renderCollection(collection) {
   const lumenRow = lumens.collected != null
     ? progressRow("Lumens collected", lumens.collected, lumens.total)
     : progressRow("Lumen sources collected", lumens.sources || 0, lumens.sourceTotal);
-  const note = element("p", "", "Counted from your map checklist and the desktop app. ");
+  const note = element("p", "", publicView ? "Counted from the AniiLogs map checklist and desktop app. " : "Counted from your map checklist and the desktop app. ");
   const mapLink = element("a", "profile-position", "Open the map");
   mapLink.href = "/explorer/";
   note.append(mapLink);
@@ -297,23 +314,31 @@ function renderCollection(collection) {
   );
 }
 
-async function loadProfileOverview() {
+async function loadProfileOverview(publicId = "") {
   const overviewStatus = profileOverview.querySelector("[data-overview-status]");
   profileOverview.hidden = false;
-  overviewStatus.textContent = "Loading your records…";
+  overviewStatus.textContent = publicId ? "Loading this profile…" : "Loading your records…";
   try {
-    const response = await apiFetch("/profile/overview");
+    const response = await apiFetch(publicId ? `/profiles/${encodeURIComponent(publicId)}` : "/profile/overview");
+    if (response.status === 404 && publicId) {
+      for (const panel of profileOverview.querySelectorAll("[data-overview-panel]")) panel.hidden = true;
+      profileOverview.querySelector("[data-overview-name]").textContent = "Profile not found";
+      overviewStatus.textContent = "This profile is private or doesn't exist.";
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const overview = await response.json();
     const avatar = profileOverview.querySelector("[data-overview-avatar]");
     avatar.hidden = !overview.profile?.avatarUrl;
     if (overview.profile?.avatarUrl) avatar.src = overview.profile.avatarUrl;
     profileOverview.querySelector("[data-overview-name]").textContent = overview.profile?.displayName || "My profile";
+    profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
+      : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
     profileOverview.querySelector("[data-overview-bio]").textContent = overview.profile?.bio || "";
     const characters = (overview.characters || []).map((character) => character.name || `UID ${character.gameUid}`);
     profileOverview.querySelector("[data-overview-characters]").textContent = characters.length
       ? `Characters: ${characters.join(", ")}`
-      : "No game characters linked yet. The desktop app links yours when it sees you in game.";
+      : publicId ? "" : "No game characters linked yet. The desktop app links yours when it sees you in game.";
     // Board standing follows the leaderboard gate; the server sends none while the owner can't read the boards.
     for (const panel of ["interlink", "sim", "eggheist"]) {
       profileOverview.querySelector(`[data-overview-panel="${panel}"]`).hidden = !overview.leaderboards;
@@ -323,12 +348,12 @@ async function loadProfileOverview() {
       renderSim(overview.leaderboards);
       renderEggHeist(overview.leaderboards);
     }
-    renderCollection(overview.collection);
+    renderCollection(overview.collection, Boolean(publicId));
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
     // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
     if (window.location.hash === "#my-profile") profileOverview.scrollIntoView({ behavior: "instant" });
   } catch {
-    overviewStatus.textContent = "Your records could not be loaded right now.";
+    overviewStatus.textContent = publicId ? "This profile could not be loaded right now." : "Your records could not be loaded right now.";
   }
 }
 
@@ -342,24 +367,25 @@ profileEditor.addEventListener("submit", async (event) => {
     return;
   }
   profileSaveButton.disabled = true;
-  profileStatus.textContent = "Saving privately…";
+  profileStatus.textContent = "Saving…";
+  // Visibility is only sent when the public switch is offered (developer preview); otherwise it stays as it is.
+  const visibility = profilePublicRow.hidden ? {} : { isPublic: profilePublic.checked };
   try {
     const response = await apiFetch("/profile", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName, bio }),
+      body: JSON.stringify({ displayName, bio, ...visibility }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.profile?.isPublic !== false) {
-      throw new Error(payload.error || `HTTP ${response.status}`);
-    }
+    if (!response.ok || !payload.profile) throw new Error(payload.error || `HTTP ${response.status}`);
     profileDisplayName.value = payload.profile.displayName;
     profileBio.value = payload.profile.bio || "";
     accountButton.textContent = payload.profile.displayName;
-    profileStatus.textContent = "Saved privately · visible only to you";
-    void loadProfileOverview();
+    showVisibility(payload.profile);
+    profileStatus.textContent = `Saved · ${profileStatus.textContent}`;
+    if (!profileOverview.hidden && !PUBLIC_PROFILE_ID) void loadProfileOverview();
   } catch {
-    profileStatus.textContent = "Could not save. Nothing was published.";
+    profileStatus.textContent = "Could not save. Nothing changed.";
   } finally {
     profileSaveButton.disabled = false;
   }
@@ -449,4 +475,5 @@ if (!API_URL) {
 } else {
   configureLoginLinks();
   void refreshAccount();
+  if (PUBLIC_PROFILE_ID) void loadProfileOverview(PUBLIC_PROFILE_ID);
 }

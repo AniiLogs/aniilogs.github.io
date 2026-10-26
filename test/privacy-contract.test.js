@@ -13,17 +13,15 @@ const landing = await readFile(new URL("../public/index.html", import.meta.url),
 const landingApp = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
 const privacy = await readFile(new URL("../public/privacy.html", import.meta.url), "utf8");
 
-test("profiles are private by default and profile edits cannot publish them", () => {
+test("profiles are private by default and only an explicit opt-in publishes them", () => {
   assert.match(accountMigration, /is_public INTEGER NOT NULL DEFAULT 0/u);
   assert.match(source, /INSERT OR IGNORE INTO profiles[\s\S]*VALUES \(\?, \?, NULL, 0, \?, \?\)/u);
-  assert.match(source, /UPDATE profiles SET display_name = \?, bio = \?, is_public = 0/u);
-  assert.doesNotMatch(source, /\/api\/profiles\//u);
+  assert.match(source, /typeof body\.isPublic === "boolean" \? body\.isPublic : Number\(current\?\.isPublic \|\| 0\) === 1/u);
+  assert.match(source, /WHERE public_id = \? AND is_public = 1/u);
+  assert.doesNotMatch(source, /\/api\/profiles\/\(\d/u);
   assert.match(landing, /data-profile-editor hidden/u);
-  assert.match(landing, /Only you can access this profile\. Saving cannot publish it\./u);
   assert.match(landingApp, /apiFetch\("\/profile"\)/u);
   assert.match(landingApp, /method: "PATCH"/u);
-  assert.match(landingApp, /payload\.profile\?\.isPublic !== false/u);
-  assert.match(landingApp, /Nothing was published\./u);
 });
 
 test("cloud progress is owner-scoped and map shares expose only compact selections", () => {
@@ -63,6 +61,7 @@ test("the public site discloses its unofficial status and links its privacy poli
   assert.match(privacy, /not affiliated with Aniimo or its developers/u);
   assert.match(privacy, /Discord sign-in requests only the <strong>identify<\/strong> scope/u);
   assert.match(privacy, /Profiles are private by default/u);
+  assert.match(privacy, /Leaderboard entries are public/u);
   assert.match(privacy, /Map share links expire after 3 hours/u);
 });
 

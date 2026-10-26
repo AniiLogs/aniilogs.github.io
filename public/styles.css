@@ -487,3 +487,10 @@ footer a { font-weight: 800; text-decoration: none; }
   @keyframes float-in { from { opacity: 0; transform: translateY(18px) rotate(1deg); } to { opacity: 1; transform: translateY(0) rotate(0); } }
   @keyframes twinkle { 50% { transform: rotate(35deg) scale(1.3); } }
 }
+
+/* Profile visibility opt-in and the public link */
+.profile-editor label.profile-public-toggle { display: flex; align-items: flex-start; gap: 0.6rem; cursor: pointer; }
+.profile-public-toggle input { width: auto; flex: none; }
+.profile-public-toggle input { margin-top: 0.2rem; }
+.profile-public-toggle small { display: block; opacity: 0.75; font-size: 0.82em; }
+.profile-public-link { margin: 0; font-size: 0.85em; overflow-wrap: anywhere; }

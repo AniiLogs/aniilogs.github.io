@@ -864,20 +864,6 @@ test("cloud progress writes and reads only the authenticated owner snapshot", as
   assert.deepEqual(ownerPayload.progress, { schemaVersion: 1, ...snapshot });
 });
 
-test("profile updates force an authenticated public profile back to private", async () => {
-  const state = await authenticatedTestDatabase();
-  const env = { DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io" };
-  const response = await worker.fetch(apiRequest("/api/profile", state.tokens.owner, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: "New Owner", bio: "Private achievements" }),
-  }), env);
-  assert.equal(response.status, 200);
-  const payload = await response.json();
-  assert.equal(payload.profile.isPublic, false);
-  assert.equal(state.profiles.get(state.discordIds.owner).isPublic, 0);
-});
-
 test("map shares are anonymous on read and never expose creator identity", async () => {
   const state = await authenticatedTestDatabase();
   const env = { DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io" };
