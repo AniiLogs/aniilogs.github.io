@@ -217,7 +217,8 @@
       tab.setAttribute("aria-selected", String(tab.dataset.modeTab === state.mode));
     });
     els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
-      type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), text: item.label,
+      type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), "data-kind": item.kind,
+      text: item.kind === "interlink_week_view" && weekTabLabel ? weekTabLabel : item.label,
       onclick: () => {
         if (state.kind === item.kind) return;
         state.kind = item.kind;
@@ -373,9 +374,20 @@
   function stars(value) {
     return el("span", { class: "lb-stars" }, starIcon(), el("span", { text: number(value) }));
   }
-  function weekLabel(week, current) {
+  // When a week ran, said the way people do: "this week" while it runs, then "last week", "2 weeks ago", ... counted
+  // in whole weeks since it ended, so a week that ended stops calling itself "this week" even before the next one is known.
+  function weekAgo(week, now = Date.now() / 1000) {
+    if (!week) return "this week";
+    if (now < week.start) return "upcoming";
+    if (now <= week.end) return "this week";
+    const weeks = Math.max(1, Math.ceil((now - week.end) / (7 * 86400)));
+    return weeks === 1 ? "last week" : `${weeks} weeks ago`;
+  }
+  let weekTabLabel = "";   // "This week", or "Last week" / "N weeks ago" once the newest known week has ended
+  const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+  function weekLabel(week) {
     const start = new Date(week.start * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")}${week.id === current ? " (this week)" : ""}`;
+    return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")} (${weekAgo(week)})`;
   }
   // What a boss board can rank by: each one is a separate best (the app sends a run when it beats any of them).
   const BOSS_METRICS = [
@@ -504,7 +516,13 @@
       state.week = data.cycle.id;
       const now = Date.now() / 1000;
       const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id).reverse();
-      els.weekSelect.replaceChildren(...weeks.map((week) => el("option", { value: week.id, text: weekLabel(week, data.current) })));
+      els.weekSelect.replaceChildren(...weeks.map((week) => el("option", { value: week.id, text: weekLabel(week) })));
+      // the tab names the newest week the way it is now: "This week" while it runs, then "Last week", "2 weeks ago"
+      const newest = data.weeks.find((week) => week.id === data.current) || data.cycle;
+      const tab = [...els.boardTabs.children].find((button) => button.dataset.kind === "interlink_week_view");
+      weekTabLabel = capital(weekAgo(newest));
+      if (tab) tab.textContent = weekTabLabel;
+      const when = weekAgo(data.cycle);
       els.weekSelect.value = state.week;
       const subs = [{ id: "total", name: "Week total" }, ...data.bosses];
       if (!subs.some((sub) => sub.id === state.sub)) state.sub = "total";
@@ -520,8 +538,8 @@
             playerCell(entry), el("td", { text: number(entry.total) }), el("td", {}, stars(entry.stars)),
             ...data.bosses.map((boss) => el("td", {}, entry.scores[boss.id] == null ? "—"
               : el("span", { class: "lb-boss-cell" }, el("span", { text: number(entry.scores[boss.id]) }), stars(entry.bossStars?.[boss.id])))))),
-          "No scores this week yet.");
-        els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
+          when === "this week" ? "No scores this week yet." : "No scores that week.");
+        els.summary.textContent = `Week total · each player's best score on each of ${when === "this week" ? "this week's" : "that week's"} three bosses (${when}), added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
       } else {
         const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
         // each best is a board of its own: score (stars, then score), fastest clear, and each player's own card
@@ -541,8 +559,8 @@
             el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }),
             el("td", { text: number(entry.avgDps) }), el("td", { text: number(entry.breakValue) }),
             el("td", { text: number(entry.damageTaken) }), el("td", { text: number(entry.heal) }))),
-          metric.id === "score" ? "No scores on this boss this week yet." : `No ${metric.label.toLowerCase()} on this boss this week yet.`);
-        els.summary.textContent = `${bossBoard.name} · each player's best score this week · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
+          metric.id === "score" ? `No scores on this boss ${when === "this week" ? "this week yet" : "that week"}.` : `No ${metric.label.toLowerCase()} on this boss ${when === "this week" ? "this week yet" : "that week"}.`);
+        els.summary.textContent = `${bossBoard.name} · each player's best score (${when}) · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
       }
       return;
     }
