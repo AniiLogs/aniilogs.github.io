@@ -505,9 +505,17 @@ async function startDiscordLogin(request, env) {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
   const state = randomToken();
+  // The desktop app's sign-in: it listens on 127.0.0.1:<app_port> and holds the secret behind app_challenge
+  const appPort = Number.parseInt(url.searchParams.get("app_port") || "", 10);
+  const appChallenge = url.searchParams.get("app_challenge") || "";
+  const app = url.searchParams.has("app_port")
+    ? (appPort >= 1024 && appPort <= 65535 && /^[A-Za-z0-9_-]{43}$/u.test(appChallenge) ? { port: appPort, challenge: appChallenge } : null)
+    : undefined;
+  if (app === null) return json({ error: "Invalid app sign-in request." }, 400);
   const stateCookie = await signedValue({
     state,
     returnTo: safeClientReturnTo(url.searchParams.get("return_to"), request, env),
+    app: app || null,
     expiresAt: now + OAUTH_LIFETIME_SECONDS,
   }, env.SESSION_SECRET);
   const authorize = new URL("https://discord.com/oauth2/authorize");
@@ -560,6 +568,7 @@ async function completeDiscordLogin(request, env) {
   const code = url.searchParams.get("code") || "";
   const stored = await readSignedValue(parseCookies(request.headers.get("cookie"))[OAUTH_COOKIE], env.SESSION_SECRET);
   if (url.searchParams.get("error")) {
+    if (stored?.app?.port) return redirect(`http://127.0.0.1:${stored.app.port}/callback?error=cancelled`, [clearCookie(OAUTH_COOKIE)]);
     return redirect(failureLocation("cancelled", stored?.returnTo), [clearCookie(OAUTH_COOKIE)]);
   }
   const now = Math.floor(Date.now() / 1000);
@@ -602,10 +611,12 @@ async function completeDiscordLogin(request, env) {
 
     const rawHandoff = randomToken(48);
     const handoffHash = await sha256(rawHandoff);
+    const app = stored.app && Number.isInteger(stored.app.port) ? stored.app : null;
     await env.DB.prepare(
-      "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-    ).bind(handoffHash, String(user.id), now, now + AUTH_HANDOFF_LIFETIME_SECONDS).run();
+      "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at, app_challenge) VALUES (?, ?, ?, ?, ?)",
+    ).bind(handoffHash, String(user.id), now, now + AUTH_HANDOFF_LIFETIME_SECONDS, app ? app.challenge : null).run();
     await env.DB.prepare("DELETE FROM auth_handoffs WHERE expires_at <= ?").bind(now).run();
+    if (app) return redirect(`http://127.0.0.1:${app.port}/callback?code=${encodeURIComponent(rawHandoff)}`, [clearCookie(OAUTH_COOKIE)]);
     const destination = new URL(safeClientReturnTo(stored.returnTo, request, env));
     destination.hash = `aniilogs_auth=${encodeURIComponent(rawHandoff)}`;
     return redirect(destination.toString(), [clearCookie(OAUTH_COOKIE)]);
@@ -752,6 +763,14 @@ function corsResponse(request, env, response) {
     headers.set("access-control-max-age", "86400");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
+  if (url.pathname.startsWith("/api/auth/app/")) {
+    const headers = new Headers(response.headers);
+    headers.set("access-control-allow-origin", "*");
+    headers.set("access-control-allow-headers", "authorization, content-type");
+    headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
+    headers.set("access-control-max-age", "600");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
   const origin = request.headers.get("origin") || "";
   if (!origin || origin !== configuredPublicSiteOrigin(env)) return response;
   const headers = new Headers(response.headers);
@@ -776,10 +795,10 @@ async function exchangeAuthHandoff(request, env) {
   const handoffHash = await sha256(rawHandoff);
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, expires_at AS expiresAt FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
+    "SELECT discord_id AS discordId, expires_at AS expiresAt, app_challenge AS appChallenge FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
   ).bind(handoffHash).first();
-  if (!row || Number(row.expiresAt) <= now) {
-    if (row) await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?").bind(handoffHash).run();
+  if (!row || Number(row.expiresAt) <= now || row.appChallenge) {
+    if (row && !row.appChallenge) await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?").bind(handoffHash).run();
     return json({ error: "Sign-in handoff expired or was already used." }, 401);
   }
   const consumed = await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?")
@@ -794,6 +813,74 @@ async function exchangeAuthHandoff(request, env) {
   ).bind(await sha256(rawSession), String(row.discordId), now, now + SESSION_LIFETIME_SECONDS).run();
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
   return json({ token: rawSession, expiresAt: now + SESSION_LIFETIME_SECONDS });
+}
+
+// The desktop app trades its one-time code (plus the secret behind its challenge) for a desktop token: the same kind
+// players used to copy from the website, labelled so they can see and revoke it there.
+async function exchangeAppSignIn(request, env) {
+  let body;
+  try {
+    body = await readJsonBody(request, 4096);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const code = String(body.code || "");
+  const verifier = String(body.verifier || "");
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(code) || !/^[A-Za-z0-9_-]{43,128}$/u.test(verifier)) {
+    return json({ error: "Invalid sign-in code." }, 400);
+  }
+  const handoffHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare(
+    "SELECT discord_id AS discordId, expires_at AS expiresAt, app_challenge AS appChallenge FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
+  ).bind(handoffHash).first();
+  const challenge = base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(verifier))));
+  if (!row || !row.appChallenge || Number(row.expiresAt) <= now || row.appChallenge !== challenge) {
+    return json({ error: "Sign-in code expired or was already used. Try signing in again." }, 401);
+  }
+  const consumed = await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?").bind(handoffHash).run();
+  if (Number(consumed.meta?.changes || 0) !== 1) {
+    return json({ error: "Sign-in code expired or was already used. Try signing in again." }, 401);
+  }
+  const label = `aLogs app (${String(body.device || "this PC").replace(/[^\w .-]/gu, "").slice(0, 40) || "this PC"})`;
+  const raw = `${LEADERBOARD_TOKEN_PREFIX}${randomToken(36)}`;
+  await env.DB.prepare(
+    "INSERT INTO leaderboard_tokens (token_hash, discord_id, label, created_at) VALUES (?, ?, ?, ?)",
+  ).bind(await sha256(raw), String(row.discordId), label, now).run();
+  const user = await env.DB.prepare(
+    "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
+  ).bind(String(row.discordId)).first();
+  return json({ token: raw, account: { name: user?.globalName || user?.username || "Discord account" } });
+}
+
+// Who the app's token belongs to (for "Signed in as ..."), and signing the app out (revokes its token).
+async function appAccount(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account?.viaToken) return json({ authenticated: false }, 401);
+  const user = await env.DB.prepare(
+    "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
+  ).bind(account.discordId).first();
+  return json({ authenticated: true, account: { name: user?.globalName || user?.username || "Discord account" } });
+}
+async function appSignOut(request, env) {
+  const raw = bearerToken(request);
+  if (!raw.startsWith(LEADERBOARD_TOKEN_PREFIX)) return json({ error: "Authentication required." }, 401);
+  await env.DB.prepare("UPDATE leaderboard_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
+    .bind(Math.floor(Date.now() / 1000), await sha256(raw)).run();
+  return json({ ok: true });
+}
+
+// The app's own view of the website signs in with the app's account: a one-time handoff, put in the page's #fragment
+// (never sent to a server), which the page redeems like after a normal sign-in.
+async function appSiteHandoff(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account?.viaToken) return json({ error: "Authentication required." }, 401);
+  const raw = randomToken(48);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+  ).bind(await sha256(raw), account.discordId, now, now + AUTH_HANDOFF_LIFETIME_SECONDS).run();
+  return json({ handoff: raw });
 }
 
 async function logout(request, env) {
@@ -1351,6 +1438,29 @@ async function ownProfileOverview(request, env) {
 
 // A profile its owner made public: name, about, characters, board standing and collection progress. No Discord
 // identity (id, username, avatar). Private or unknown ids are a plain 404.
+// Finds public profiles by a character name (part of it) or a game UID (all of it, or its start). Only profiles their
+// owners made public, and only what a public profile shows anyway: character names and UIDs, never Discord names.
+async function searchProfiles(request, env) {
+  const q = String(new URL(request.url).searchParams.get("q") || "").trim();
+  if (q.length < 2 || q.length > 40) return json({ results: [] });
+  const byUid = /^\d{4,24}$/u.test(q);
+  const like = `%${q.toLowerCase().replace(/[\\%_]/gu, (c) => `\\${c}`)}%`;
+  const { results } = await env.DB.prepare(
+    `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid
+     FROM game_characters gc JOIN profiles p ON p.discord_id = gc.discord_id
+     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND gc.character_name IS NOT NULL
+       AND ${byUid ? "gc.game_uid LIKE ?" : "LOWER(gc.character_name) LIKE ? ESCAPE '\\'"}
+     ORDER BY gc.last_seen_at DESC LIMIT 30`,
+  ).bind(byUid ? `${q}%` : like).all();
+  const seen = new Map();
+  for (const row of results || []) {
+    const entry = seen.get(row.publicId) || { publicId: row.publicId, characters: [] };
+    entry.characters.push({ name: row.name, gameUid: row.gameUid });
+    seen.set(row.publicId, entry);
+  }
+  return json({ results: [...seen.values()].slice(0, 10) });
+}
+
 async function publicProfile(request, env, publicId) {
   const profile = await env.DB.prepare(
     "SELECT discord_id AS discordId, bio FROM profiles WHERE public_id = ? AND is_public = 1",
@@ -1456,6 +1566,7 @@ const LEADERBOARD_KINDS = Object.freeze({
   interlink_best: "interlink",
   sim_run: "sim",
   eggheist_season: "eggheist",
+  eggheist_match: "eggheist",
 });
 const LEADERBOARD_MODES = Object.freeze(["interlink", "sim", "eggheist"]);
 // Sortable columns and their natural direction (lower clear time is better).
@@ -1471,13 +1582,26 @@ const LEADERBOARD_SORTS = Object.freeze({
   party_size: "ASC",
   boss_level: "DESC",
   played_at: "DESC",
+  p_dps: "DESC",
+  p_break: "DESC",
+  p_taken: "DESC",
+  p_heal: "DESC",
+  defeats: "DESC",
+  difficulty: "DESC",
+  player: "ASC",
 });
+// Egg Heist difficulties, hardest first
+const DIFFICULTY_RANK_SQL = (prefix) => `CASE ${prefix}difficulty WHEN 'Chaos' THEN 4 WHEN 'Nightmare' THEN 3 WHEN 'Hard' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END`;
+// Sorts that only order the rows: each player's row is still their best by the board's main measure (best loot,
+// best score...), then the list is ordered by name, date or difficulty.
+const DISPLAY_SORTS = new Set(["player", "played_at", "difficulty"]);
 const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_run: "score",
   interlink_week: "score",
   interlink_best: "score",
   sim_run: "clear_time_s",
   eggheist_season: "standing",
+  eggheist_match: "score",
 });
 
 export function leaderboardPublic(env) {
@@ -1662,6 +1786,9 @@ export function leaderboardSubmission(value) {
     clientVersion: boundedText(value.clientVersion, 40),
     server: boundedText(value.server, 40),
     playedAt: boundedInteger(value.playedAt, 1.5e9, 4e9),
+    // Egg Heist matches: the difficulty shown on the end screen, and Total Defeats
+    difficulty: boundedText(value.difficulty, 20, /^[A-Za-z ]+$/u),
+    defeats: boundedInteger(value.defeats, 0, 1000),
   };
   const bad = Object.entries(record).find(([, field]) => field === undefined);
   if (bad) return { error: `Field ${bad[0]} is invalid.` };
@@ -1851,8 +1978,8 @@ async function submitLeaderboardRecord(request, env) {
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
       score, rank_tier, rank_subtier, rank_name, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
       players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server,
-      battle_evidence_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      battle_evidence_key, difficulty, defeats
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
@@ -1863,13 +1990,13 @@ async function submitLeaderboardRecord(request, env) {
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
       played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server,
-      battle_evidence_key = excluded.battle_evidence_key`,
+      battle_evidence_key = excluded.battle_evidence_key, difficulty = excluded.difficulty, defeats = excluded.defeats`,
   ).bind(
     submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
     record.bossId, record.bossName, record.bossLevel, record.score, record.rankTier, record.rankSubtier, record.rankName, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
-    record.playedAt, now, now, record.server, battleKey,
+    record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats,
   ).run();
   await corroborateRun(env, submissionId);
   return json({
@@ -2130,7 +2257,7 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
     binds.push(mode);
   }
   if (!includeHidden) where.push("s.status = 'visible'");
-  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"]];
+  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"], ["difficulty", "s.difficulty"]];
   for (const [name, column] of exact) {
     const value = String(params.get(name) || "").trim();
     if (value && value.length <= 40) {
@@ -2488,11 +2615,20 @@ async function leaderboardEntries(request, env) {
   const order = params.get("order") === "asc" ? "ASC" : params.get("order") === "desc" ? "DESC" : natural;
   // Clear-time boards only rank finished runs; values the board sorts on must be present.
   // "standing" (Egg Heist season) orders by rank tier, then Emperor stars, then rank points.
-  const orderBy = (prefix) => (sortKey === "standing"
-    ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
-    : `${prefix}${sortKey} ${order}`);
+  const sortBy = (key, direction) => (prefix) => {
+    if (key === "standing") return ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${direction}`).join(", ");
+    if (key === "difficulty") return `${DIFFICULTY_RANK_SQL(prefix)} ${direction}, ${prefix}score DESC`;
+    if (key === "played_at") return `COALESCE(${prefix}played_at, ${prefix}created_at) ${direction}`;
+    if (key === "player") return `LOWER(COALESCE(${prefix}teammate, ${prefix}characterName, ${prefix}anyCharacter, '')) ${direction}`;
+    return `${prefix}${key} ${direction}`;
+  };
+  const mainKey = LEADERBOARD_DEFAULT_SORT[kind] || "score";
+  const orderBy = sortBy(sortKey, order);
+  // which of a player's runs is their row: the sort itself, or for name/date/difficulty the board's main measure
+  const pickBy = DISPLAY_SORTS.has(sortKey) ? sortBy(mainKey, LEADERBOARD_SORTS[mainKey]) : orderBy;
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
-  else where.push(`s.${sortKey} IS NOT NULL`);
+  else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
+  else if (sortKey !== "player" && sortKey !== "played_at") where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
@@ -2508,7 +2644,7 @@ async function leaderboardEntries(request, env) {
       (SELECT game_uid FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
        ORDER BY last_seen_at DESC LIMIT 1) AS anyUid,
       CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
-      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
+      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${pickBy("s.")}, s.created_at ASC) AS playerRank
     FROM ${CREDITED_RUNS} s
     JOIN users u ON u.discord_id = s.discord_id
     LEFT JOIN profiles p ON p.discord_id = s.who
@@ -2552,9 +2688,15 @@ async function leaderboardEntries(request, env) {
       cleared: row.cleared == null ? null : Boolean(row.cleared),
       floors: row.floors,
       teamDps: row.team_dps,
+      avgDps: row.p_dps ?? null,
+      breakValue: row.p_break ?? null,
+      damageTaken: row.p_taken ?? null,
+      heal: row.p_heal ?? null,
       meterDps: row.meter_dps,
       meterDamage: row.meter_damage,
       partySize: row.party_size,
+      difficulty: row.difficulty || null,
+      defeats: row.defeats ?? null,
       server: row.server || null,
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
@@ -2586,6 +2728,7 @@ async function leaderboardFacets(request, env) {
   const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "interlink";
   const all = async (sql) => (await env.DB.prepare(sql).bind(mode).all()).results || [];
   const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible'";
+  const difficulties = await all(`SELECT difficulty AS value, COUNT(*) AS count ${visible} AND difficulty IS NOT NULL GROUP BY difficulty ORDER BY difficulty`);
   const [cycles, bosses, levels, parties, kinds, buffRows] = await Promise.all([
     all(`SELECT cycle AS value, COUNT(*) AS count ${visible} AND cycle IS NOT NULL GROUP BY cycle ORDER BY cycle DESC`),
     all(`SELECT boss_id AS id, MAX(boss_name) AS name, COUNT(*) AS count ${visible} AND boss_id IS NOT NULL GROUP BY boss_id ORDER BY name`),
@@ -2607,6 +2750,7 @@ async function leaderboardFacets(request, env) {
     bosses,
     levels,
     partySizes: parties,
+    difficulties,
     kinds,
     buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     sorts: Object.keys(LEADERBOARD_SORTS),
@@ -2731,6 +2875,10 @@ async function api(request, env) {
   if (url.pathname === "/api/auth/exchange" && request.method === "POST") {
     return exchangeAuthHandoff(request, env);
   }
+  if (url.pathname === "/api/auth/app/exchange" && request.method === "POST") return exchangeAppSignIn(request, env);
+  if (url.pathname === "/api/auth/app/account" && request.method === "GET") return appAccount(request, env);
+  if (url.pathname === "/api/auth/app/sign-out" && request.method === "POST") return appSignOut(request, env);
+  if (url.pathname === "/api/auth/app/site-handoff" && request.method === "POST") return appSiteHandoff(request, env);
   if (url.pathname === "/api/auth/me" && request.method === "GET") {
     const account = await currentAccount(request, env);
     return account ? json({ authenticated: true, account }) : json({ authenticated: false });
@@ -2746,6 +2894,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
   if (url.pathname === "/api/profile/main" && request.method === "PUT") return setMainCharacter(request, env);
+  if (url.pathname === "/api/profiles/search" && request.method === "GET") return searchProfiles(request, env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);

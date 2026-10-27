@@ -532,6 +532,12 @@ test("boss boards carry each player's own Battle Data bests, with the run behind
   assert.deepEqual(me.proofIds, { score: high, clear: fast, dps: fast, break: high, taken: fast, heal: fast });
   const kaela = rows.find((e) => e.player === "Kaela");
   assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 1200, high, fast]);
+
+  // "All runs" ranks by those stats too: each player's own card, their best run for it
+  const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}`)).json()).entries;
+  assert.deepEqual((await all("p_dps")).map((e) => [e.player, e.avgDps]), [["DevOne", 19000], ["Kaela", 16000]]);
+  assert.deepEqual((await all("p_heal")).map((e) => [e.player, e.heal]), [["Kaela", 1200], ["DevOne", 50]]);
+  assert.deepEqual((await all("p_break")).map((e) => [e.player, e.breakValue, e.submissionId]), [["DevOne", 280000, high]]);
 });
 
 test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {
@@ -853,4 +859,116 @@ test("developer apps can add Interlink weeks from the game data; others can't", 
   assert.ok(week.weeks.some((w) => w.id === "3006"));
   const season = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
   assert.ok(season.weeks.some((w) => w.id === "3006"));
+});
+
+test("the desktop app signs in through the player's own browser: one-time code + PKCE secret, never the website's exchange", async () => {
+  const { env } = await setup({ DISCORD_CLIENT_ID: "123", DISCORD_CLIENT_SECRET: "s", SESSION_SECRET: "x".repeat(40), LEADERBOARD_PUBLIC: "true" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => (String(url).includes("/oauth2/token")
+    ? Response.json({ access_token: "discord-access" })
+    : Response.json({ id: IDS.user, username: "user", global_name: "User One" }));
+  try {
+    const verifier = "v".repeat(43);
+    const challenge = await tokenHash(verifier);
+    const start = await worker.fetch(new Request(`https://api.aniilogs.example/api/auth/discord/start?app_port=51234&app_challenge=${challenge}`), env);
+    assert.equal(start.status, 302);
+    const state = new URL(start.headers.get("location")).searchParams.get("state");
+    const cookie = start.headers.get("set-cookie").split(";")[0];
+    assert.equal((await worker.fetch(new Request("https://api.aniilogs.example/api/auth/discord/start?app_port=80&app_challenge=x"), env)).status, 400);
+
+    // Discord sends the browser back; the API hands it to the app on 127.0.0.1, not to the website
+    const back = await worker.fetch(new Request(`https://api.aniilogs.example/api/auth/discord/callback?state=${state}&code=abc`, { headers: { cookie } }), env);
+    const location = new URL(back.headers.get("location"));
+    assert.equal(location.origin, "http://127.0.0.1:51234");
+    const code = location.searchParams.get("code");
+
+    const exchange = (body) => call(env, "/api/auth/app/exchange", { method: "POST", body });
+    assert.equal((await call(env, "/api/auth/exchange", { session: "", method: "POST", body: { handoff: code } })).status, 403);   // no site origin
+    const site = await worker.fetch(new Request("https://api.aniilogs.example/api/auth/exchange", {
+      method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ handoff: code }) }), env);
+    assert.equal(site.status, 401);                                       // the website can't redeem an app code
+    assert.equal((await exchange({ code, verifier: "w".repeat(43) })).status, 401);   // wrong secret
+    const ok = await exchange({ code, verifier, device: "Gaming PC" });
+    assert.equal(ok.status, 200);
+    const { token, account } = await ok.json();
+    assert.match(token, /^alb_/u);
+    assert.equal(account.name, "User One");
+    assert.equal((await exchange({ code, verifier })).status, 401);       // one use only
+    assert.equal(ok.headers.get("access-control-allow-origin"), "*");
+
+    // the token works like a copied desktop token, shows who it is, and signs the app's site view in
+    assert.equal((await (await call(env, "/api/auth/app/account", { token })).json()).account.name, "User One");
+    const { handoff } = await (await call(env, "/api/auth/app/site-handoff", { token, method: "POST" })).json();
+    const session = await worker.fetch(new Request("https://api.aniilogs.example/api/auth/exchange", {
+      method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ handoff }) }), env);
+    assert.equal(session.status, 200);
+    assert.equal((await call(env, "/api/auth/app/site-handoff", { session: SESSIONS.user, method: "POST" })).status, 401);   // tokens only
+
+    // signing out revokes it
+    assert.equal((await call(env, "/api/auth/app/sign-out", { token, method: "POST" })).status, 200);
+    assert.equal((await call(env, "/api/auth/app/account", { token })).status, 401);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("Egg Heist matches: loot, time, escaped or not, difficulty and Total Defeats, best loot per player", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.user);
+  const match = (id, over) => ({ kind: "eggheist_match", clientRunId: id, cycle: "S1", score: 20000, clearTimeS: 224, cleared: true,
+    difficulty: "Normal", defeats: 1, playedAt: Math.floor(Date.now() / 1000), ...over });
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const first = await send(a, match("m1", { score: 23733 }));
+  assert.equal(first.status, 201, await first.clone().text());
+  assert.equal((await send(a, match("m2", { score: 31000, difficulty: "Hard", defeats: 4, clearTimeS: 300 }))).status, 201);
+  assert.equal((await send(b, match("m3", { score: 9000, cleared: false, defeats: 0 }))).status, 201);
+  assert.equal((await send(a, match("bad", { difficulty: "<b>" }))).status, 400);
+
+  const get = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=eggheist_match&${query}`)).json()).entries;
+  assert.deepEqual((await get("")).map((e) => [e.player, e.score, e.difficulty, e.defeats, e.cleared]),
+    [["DevOne", 31000, "Hard", 4, true], ["UserOne", 9000, "Normal", 0, false]]);   // best loot per player
+  assert.deepEqual((await get("difficulty=Normal")).map((e) => [e.player, e.score]), [["DevOne", 23733], ["UserOne", 9000]]);
+  assert.deepEqual((await get("sort=defeats&best=0")).map((e) => e.defeats), [4, 1, 0]);
+  assert.deepEqual((await get("cleared=1&best=0")).map((e) => e.score), [31000, 23733]);   // escapes only
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist")).json();
+  assert.deepEqual(facets.difficulties.map((d) => d.value), ["Hard", "Normal"]);
+});
+
+test("Matches sort by difficulty (Chaos > Nightmare > Hard > Normal), player name and date; each player's row stays their best loot", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.user);
+  const c = await namedToken(env, SESSIONS.dev2);
+  const t = Math.floor(Date.now() / 1000);
+  const send = (token, id, over) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body: {
+    kind: "eggheist_match", clientRunId: id, cycle: "S1", score: 10000, clearTimeS: 200, cleared: true, difficulty: "Normal", defeats: 1, playedAt: t, ...over } });
+  await send(a, "a1", { score: 40000, difficulty: "Normal", playedAt: t - 300 });
+  await send(a, "a2", { score: 15000, difficulty: "Chaos", playedAt: t - 10 });      // harder but less loot: not DevOne's row
+  await send(b, "b1", { score: 20000, difficulty: "Nightmare", playedAt: t - 200 });
+  await send(c, "c1", { score: 30000, difficulty: "Hard", playedAt: t - 100 });
+  const get = async (q) => (await (await call(env, `/api/leaderboard/entries?kind=eggheist_match&${q}`)).json()).entries.map((e) => [e.player, e.difficulty]);
+  assert.deepEqual(await get("sort=difficulty"), [["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
+  assert.deepEqual(await get("sort=difficulty&best=0"), [["DevOne", "Chaos"], ["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
+  assert.deepEqual(await get("sort=player"), [["DevOne", "Normal"], ["DevTwo", "Hard"], ["UserOne", "Nightmare"]]);
+  assert.deepEqual(await get("sort=player&order=desc"), [["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
+  assert.deepEqual(await get("sort=played_at"), [["DevTwo", "Hard"], ["UserOne", "Nightmare"], ["DevOne", "Normal"]]);
+});
+
+test("profile search finds public profiles by character name or UID, and never private ones", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await namedToken(env, SESSIONS.dev);    // DevOne, UID 301000000001
+  await namedToken(env, SESSIONS.user);   // UserOne, UID 301000000003
+  const save = (session, body) => call(env, "/api/profile", { session, method: "PATCH", body });
+  const dev = await (await save(SESSIONS.dev, { displayName: "Secret Discord Name", isPublic: true })).json();
+  await save(SESSIONS.user, { displayName: "Private Person", isPublic: false });
+  const find = async (q) => (await (await call(env, `/api/profiles/search?q=${encodeURIComponent(q)}`)).json()).results;
+
+  assert.deepEqual(await find("devo"), [{ publicId: dev.profile.publicId, characters: [{ name: "DevOne", gameUid: "301000000001" }] }]);
+  assert.deepEqual((await find("3010000000")).map((r) => r.characters[0].name), ["DevOne"]);   // UID start; UserOne is private
+  assert.deepEqual(await find("UserOne"), []);                    // private profile: not findable
+  assert.deepEqual(await find("Secret"), []);                     // display / Discord names are never searched
+  assert.deepEqual(await find("%"), []);                          // wildcards are plain text
+  assert.deepEqual(await find("_"), []);
+  assert.deepEqual(await find("d"), []);                          // too short
 });

@@ -11,18 +11,23 @@
     interlink: [
       { kind: "interlink_week_view", label: "This week", custom: "week", sorts: [], fields: [] },
       { kind: "interlink_season_view", label: "Season", custom: "season", sorts: [], fields: [] },
-      { kind: "interlink_run", label: "All runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
+      { kind: "interlink_run", label: "All runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "p_dps", "p_break", "p_taken", "p_heal", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
     ],
     sim: [
       { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
     ],
-    // Skeleton: the meter doesn't read Egg Heist results yet; entries can only come in through the API for now.
+    // From the desktop meter: the Rank Info screen (season standing) and each match's end screen (Matches)
     eggheist: [
       { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars"], fields: ["cycle"] },
+      // each match, from the game's end screen; best loot per player unless "every run"
+      { kind: "eggheist_match", label: "Matches", sorts: ["score", "difficulty", "clear_time_s", "defeats", "player", "played_at"], fields: ["cycle", "difficulty", "cleared"] },
+      { kind: "eggheist_pvp", label: "PvP (coming soon)", soon: true },
     ],
   });
   const SORT_LABELS = Object.freeze({
     standing: "Rank", score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
+    p_dps: "Avg DPS", p_break: "BREAK", p_taken: "Damage taken", p_heal: "Healing", defeats: "Total Defeats",
+    difficulty: "Difficulty (hardest first)", player: "Player (A–Z)", played_at: "Date (newest first)",
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
@@ -32,9 +37,14 @@
       { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
       { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) + (e.cleared === false ? " (timed out)" : "") },
       { label: "Team DPS", sort: "team_dps", value: (e) => number(e.teamDps) },
+      // the player's own Battle Data card for that run
+      { label: "Avg DPS", sort: "p_dps", value: (e) => number(e.avgDps) },
+      { label: "BREAK", sort: "p_break", value: (e) => number(e.breakValue) },
+      { label: "Damage taken", sort: "p_taken", value: (e) => number(e.damageTaken) },
+      { label: "Healing", sort: "p_heal", value: (e) => number(e.heal) },
       { label: "Party", value: (e) => number(e.partySize) },
       { label: "Week", value: (e) => e.cycle || "—" },
-      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     interlink_week: [
       { label: "Week", value: (e) => e.cycle || "—" },
@@ -56,12 +66,21 @@
       { label: "Season", value: (e) => e.cycle || "—" },
       { label: "Updated", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
+    eggheist_match: [
+      { label: "Loot", sort: "score", value: (e) => number(e.score) },
+      { label: "Difficulty", sort: "difficulty", value: (e) => e.difficulty || "—" },
+      { label: "Outcome", value: (e) => (e.cleared === true ? "Escaped" : e.cleared === false ? "Failed" : "—") },
+      { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
+      { label: "Total Defeats", sort: "defeats", info: "defeats", value: (e) => number(e.defeats) },
+      { label: "Season", value: (e) => e.cycle || "—" },
+      { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
+    ],
     sim_run: [
       { label: "Clear time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Floors", sort: "floors", value: (e) => number(e.floors) },
       { label: "Buffs", value: (e) => number(e.buffs?.length) },
       { label: "Party", value: (e) => number(e.partySize) },
-      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
   });
 
@@ -111,7 +130,7 @@
   function profileName(name, profileId, props = {}, uid = null) {
     const title = [uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""].filter(Boolean).join(" · ") || null;
     if (!profileId) return el("span", { ...props, title, text: name });
-    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}#my-profile`, title, text: name });
+    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}`, title, text: name });
   }
   // Marks after a name: a teammate's row nobody claimed yet, and a name that looks like a claimed one.
   function nameMarks(entry) {
@@ -147,7 +166,7 @@
     const params = new URLSearchParams(window.location.search);
     if (Object.hasOwn(BOARDS, params.get("mode") || "")) state.mode = params.get("mode");
     const kind = params.get("kind");
-    if (BOARDS[state.mode].some((item) => item.kind === kind)) state.kind = kind;
+    if (BOARDS[state.mode].some((item) => item.kind === kind && !item.soon)) state.kind = kind;   // a "coming soon" ladder isn't a board yet
     else state.kind = BOARDS[state.mode][0].kind;
     state.sort = params.get("sort") || "";
     state.order = params.get("order") || "";
@@ -210,20 +229,29 @@
     document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
       tab.setAttribute("aria-selected", String(tab.dataset.modeTab === state.mode));
     });
-    els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
-      type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), text: item.label,
-      onclick: () => {
-        if (state.kind === item.kind) return;
-        state.kind = item.kind;
-        state.sort = "";
-        state.order = "";
-        state.offset = 0;
-        state.expanded.clear();
-        renderControls();
-        void loadEntries();
-      },
+    const pickBoard = (kind) => {
+      if (state.kind === kind) return;
+      state.kind = kind;
+      state.sort = "";
+      state.order = "";
+      state.offset = 0;
+      state.expanded.clear();
+      renderControls();
+      void loadEntries();
+    };
+    // Egg Heist's boards are ranked ladders, picked from one "Ladders" dropdown (PvP listed, not yet selectable)
+    if (state.mode === "eggheist") {
+      const select = el("select", { "aria-label": "Ladder", onchange: (event) => pickBoard(event.target.value) },
+        ...BOARDS.eggheist.map((item) => el("option", { value: item.kind, text: item.label, disabled: item.soon ? "" : null })));
+      select.value = state.kind;
+      els.boardTabs.replaceChildren(el("label", { class: "lb-ladders" }, el("span", { text: "Ladders" }), select));
+      els.boardTabs.hidden = false;
+    } else els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
+      type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), "data-kind": item.kind,
+      text: item.kind === "interlink_week_view" && weekTabLabel ? weekTabLabel : item.label,
+      onclick: () => pickBoard(item.kind),
     })));
-    els.boardTabs.hidden = BOARDS[state.mode].length < 2;
+    if (state.mode !== "eggheist") els.boardTabs.hidden = BOARDS[state.mode].length < 2;
     const custom = board().custom;
     els.filters.hidden = Boolean(custom);
     els.weekly.hidden = !custom;
@@ -234,8 +262,11 @@
     if (custom) return;
     const sorts = board().sorts;
     if (!sorts.includes(state.sort)) state.sort = sorts[0];
-    els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: SORT_LABELS[key] })));
+    // a board can name a measure its own way (Egg Heist matches call their score "Loot")
+    els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: (state.kind === "eggheist_match" && key === "score" ? "Loot" : SORT_LABELS[key]) })));
     els.sort.value = state.sort;
+    const clearedLabel = els.filters.querySelector("[data-cleared-label]");
+    if (clearedLabel) clearedLabel.textContent = state.kind === "eggheist_match" ? "Escapes only" : "Kills only";
     for (const label of els.filters.querySelectorAll("[data-field]")) {
       label.hidden = !board().fields.includes(label.dataset.field);
     }
@@ -258,6 +289,7 @@
       seasonMode ? "All seasons" : "All weeks");
     fillSelect(f.boss, facets.bosses.map((row) => ({ value: row.id, label: row.name || row.id })), "All bosses");
     fillSelect(f.level, facets.levels.map((row) => ({ value: row.value, label: `Lv ${row.value}` })), "Any");
+    if (f.difficulty) fillSelect(f.difficulty, (facets.difficulties || []).map((row) => ({ value: row.value, label: row.value })), "Any difficulty");
     fillSelect(f.party, facets.partySizes.map((row) => ({ value: row.value, label: row.value === 1 ? "Solo" : `${row.value} players` })), "Any size");
     fillSelect(f.buff, (facets.buffs || []).map((row) => ({ value: row.name, label: `${row.name} (${row.count})` })), "Any buff");
   }
@@ -265,10 +297,11 @@
   // ---------------------------------------------------------------- table
   function renderHead() {
     const columns = COLUMNS[state.kind];
-    const headers = [el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" })];
-    for (const column of columns) {
+    const headers = [el("th", { scope: "col", text: "#" })];
+    for (const column of [{ label: "Player", sort: "player", playerColumn: true }, ...columns]) {
+      const info = column.info ? infoButton(column.info) : null;
       if (!column.sort || !board().sorts.includes(column.sort)) {
-        headers.push(el("th", { scope: "col", text: column.label }));
+        headers.push(info ? el("th", { scope: "col" }, el("span", { class: "lb-th-info" }, el("span", { text: column.label }), info)) : el("th", { scope: "col", text: column.label }));
         continue;
       }
       const active = state.sort === column.sort;
@@ -283,13 +316,13 @@
             renderControls();
             void loadEntries();
           },
-        })));
+        }), info));
     }
     els.head.replaceChildren(el("tr", {}, headers));
   }
   function currentOrder() {
     if (state.order) return state.order;
-    return state.sort === "clear_time_s" ? "asc" : "desc";
+    return state.sort === "clear_time_s" || state.sort === "player" ? "asc" : "desc";
   }
   function detailRow(entry, span) {
     const parts = [];
@@ -367,9 +400,20 @@
   function stars(value) {
     return el("span", { class: "lb-stars" }, starIcon(), el("span", { text: number(value) }));
   }
-  function weekLabel(week, current) {
+  // When a week ran, said the way people do: "this week" while it runs, then "last week", "2 weeks ago", ... counted
+  // in whole weeks since it ended, so a week that ended stops calling itself "this week" even before the next one is known.
+  function weekAgo(week, now = Date.now() / 1000) {
+    if (!week) return "this week";
+    if (now < week.start) return "upcoming";
+    if (now <= week.end) return "this week";
+    const weeks = Math.max(1, Math.ceil((now - week.end) / (7 * 86400)));
+    return weeks === 1 ? "last week" : `${weeks} weeks ago`;
+  }
+  let weekTabLabel = "";   // "This week", or "Last week" / "N weeks ago" once the newest known week has ended
+  const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+  function weekLabel(week) {
     const start = new Date(week.start * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")}${week.id === current ? " (this week)" : ""}`;
+    return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")} (${weekAgo(week)})`;
   }
   // What a boss board can rank by: each one is a separate best (the app sends a run when it beats any of them).
   const BOSS_METRICS = [
@@ -463,6 +507,27 @@
     await show("summary");
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
+  // Explanations behind the (i) next to a column name, in a popover (one shared element per explanation)
+  const INFO = Object.freeze({
+    defeats: {
+      title: "What Total Defeats counts",
+      points: [
+        "Opponents you beat in battles during the match: the guard and elite Aniimo you actually fight.",
+        "Not the regular monsters you sneak past or hit out in the open, and not times you were knocked out.",
+        "It's the game's own number from the end screen (the Chinese original says \u201ctotal defeated\u201d).",
+      ],
+    },
+  });
+  function infoButton(key) {
+    const id = `lbInfo-${key}`;
+    if (!document.getElementById(id)) {
+      const info = INFO[key];
+      document.body.append(el("div", { id, class: "lb-info-pop", popover: "auto" },
+        el("strong", { text: info.title }), el("ul", {}, ...info.points.map((text) => el("li", { text })))));
+    }
+    return el("button", { type: "button", class: "lb-info", popovertarget: id, "aria-label": INFO[key].title, text: "i",
+      onclick: (event) => event.stopPropagation() });
+  }
   function scoreHeader(text) {
     const tip = el("div", { id: "lbScoreInfo", class: "lb-info-pop", popover: "auto" },
       el("strong", { text: "How Challenge Score works" }),
@@ -498,7 +563,13 @@
       state.week = data.cycle.id;
       const now = Date.now() / 1000;
       const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id).reverse();
-      els.weekSelect.replaceChildren(...weeks.map((week) => el("option", { value: week.id, text: weekLabel(week, data.current) })));
+      els.weekSelect.replaceChildren(...weeks.map((week) => el("option", { value: week.id, text: weekLabel(week) })));
+      // the tab names the newest week the way it is now: "This week" while it runs, then "Last week", "2 weeks ago"
+      const newest = data.weeks.find((week) => week.id === data.current) || data.cycle;
+      const tab = [...els.boardTabs.children].find((button) => button.dataset.kind === "interlink_week_view");
+      weekTabLabel = capital(weekAgo(newest));
+      if (tab) tab.textContent = weekTabLabel;
+      const when = weekAgo(data.cycle);
       els.weekSelect.value = state.week;
       const subs = [{ id: "total", name: "Week total" }, ...data.bosses];
       if (!subs.some((sub) => sub.id === state.sub)) state.sub = "total";
@@ -514,8 +585,8 @@
             playerCell(entry), el("td", { text: number(entry.total) }), el("td", {}, stars(entry.stars)),
             ...data.bosses.map((boss) => el("td", {}, entry.scores[boss.id] == null ? "—"
               : el("span", { class: "lb-boss-cell" }, el("span", { text: number(entry.scores[boss.id]) }), stars(entry.bossStars?.[boss.id])))))),
-          "No scores this week yet.");
-        els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
+          when === "this week" ? "No scores this week yet." : "No scores that week.");
+        els.summary.textContent = `Week total · each player's best score on each of ${when === "this week" ? "this week's" : "that week's"} three bosses (${when}), added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
       } else {
         const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
         // each best is a board of its own: score (stars, then score), fastest clear, and each player's own card
@@ -535,8 +606,8 @@
             el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }),
             el("td", { text: number(entry.avgDps) }), el("td", { text: number(entry.breakValue) }),
             el("td", { text: number(entry.damageTaken) }), el("td", { text: number(entry.heal) }))),
-          metric.id === "score" ? "No scores on this boss this week yet." : `No ${metric.label.toLowerCase()} on this boss this week yet.`);
-        els.summary.textContent = `${bossBoard.name} · each player's best score this week · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
+          metric.id === "score" ? `No scores on this boss ${when === "this week" ? "this week yet" : "that week"}.` : `No ${metric.label.toLowerCase()} on this boss ${when === "this week" ? "this week yet" : "that week"}.`);
+        els.summary.textContent = `${bossBoard.name} · each player's best score (${when}) · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
       }
       return;
     }
@@ -576,7 +647,7 @@
     renderRows(result.entries);
     const first = result.total ? result.offset + 1 : 0;
     const last = result.offset + result.entries.length;
-    els.summary.textContent = `${board().label} · ranked by ${SORT_LABELS[result.sort] || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
+    els.summary.textContent = `${board().label} · ranked by ${(state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
     els.page.textContent = result.total ? `${first}–${last} of ${number(result.total)}` : "";
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= result.total;
