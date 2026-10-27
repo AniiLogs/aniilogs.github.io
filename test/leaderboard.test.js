@@ -232,26 +232,46 @@ test("sim runs rank by clear time and filter by rogue buffs", async () => {
   assert.deepEqual(facets.buffs, [{ name: "Multi-Cast", count: 2 }, { name: "Trick Bomb", count: 1 }]);
 });
 
-test("developers can hide entries; evidence is private to the submitter and developers", async () => {
+test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
   const userToken = await namedToken(env, SESSIONS.user);
   const form = new FormData();
   form.set("submission", JSON.stringify(run("with-shot")));
   form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" }), "result.jpg");
+  form.set("battle", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0x01])], { type: "image/jpeg" }), "battle.jpg");
   const submitted = await call(env, "/api/leaderboard/submissions", { token: userToken, method: "POST", form });
   assert.equal(submitted.status, 201);
-  const { submissionId, evidenceStored } = await submitted.json();
+  const { submissionId, evidenceStored, battleEvidenceStored } = await submitted.json();
   assert.equal(evidenceStored, true);
-  assert.equal(EVIDENCE.objects.size, 1);
+  assert.equal(battleEvidenceStored, true);
+  assert.equal(EVIDENCE.objects.size, 2);                                          // result screen + Battle Data
+  const battle = await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=battle`);
+  assert.equal(battle.status, 200);
+  assert.equal((await battle.arrayBuffer()).byteLength, 4);
+  const listed = await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json();
+  assert.deepEqual([listed.entries[0].hasEvidence, listed.entries[0].hasBattleEvidence], [true, true]);
 
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.user })).status, 200);
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.dev })).status, 200);
-  const outsider = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
-  assert.equal((await call(outsider.env, `/api/leaderboard/submissions/${submissionId}/evidence`)).status, 401);
+  // shown on the boards: anyone (no sign-in) can open its proof, and the boards point at it
+  const shown = await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`);
+  assert.equal(shown.status, 200);
+  assert.match(shown.headers.get("cache-control"), /public/u);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  assert.deepEqual(week.bosses.flatMap((b) => b.entries).filter((e) => e.proofId).map((e) => e.proofId), [submissionId]);
+  // too big: refused
+  const huge = new FormData();
+  huge.set("submission", JSON.stringify(run("huge-shot")));
+  huge.set("evidence", new Blob([new Uint8Array(2 * 1024 * 1024)], { type: "image/jpeg" }), "result.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: userToken, method: "POST", form: huge })).status, 413);
 
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.user, method: "PATCH", body: { status: "hidden" } })).status, 403);
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "PATCH", body: { status: "hidden" } })).status, 200);
+  // hidden: only its submitter and developers
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`)).status, 401);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { session: SESSIONS.dev2 })).status, 200);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}/evidence`, { token: userToken })).status, 200);
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run", { session: SESSIONS.user })).json()).total, 0);
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&hidden=1", { session: SESSIONS.dev })).json()).total, 1);
 
@@ -462,6 +482,58 @@ test("the boards list only players with a name; a nameless account's records wai
   assert.deepEqual(await board(), ["LateName", "DevOne"]);
 });
 
+test("boards filter by game server; runs from different servers never vouch for each other", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.dev2);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const shared = { score: 24459, stars: 15, clearTimeS: 120, cleared: true, playedAt: 1792700000 };
+  await send(a, run("na", { ...shared, server: "Aniimo-Americas", players: [{ name: "DevOne", ai: false, self: true }, { name: "DevTwo", ai: false }] }));
+  await send(b, run("eu", { ...shared, server: "Aniimo-Europe", players: [{ name: "DevTwo", ai: false, self: true }, { name: "DevOne", ai: false }] }));
+  await send(b, run("old", { score: 9000, stars: 9 }));                                    // an older app: no server
+
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=interlink")).json();
+  assert.deepEqual(facets.servers.map((x) => x.value).sort(), ["Aniimo-Americas", "Aniimo-Europe"]);
+  const players = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&best=0&${query}`)).json()).entries
+    .filter((e) => !e.teammate).map((e) => [e.player, e.server]);
+  assert.deepEqual(await players("server=Aniimo-Americas"), [["DevOne", "Aniimo-Americas"]]);
+  assert.equal((await players("")).length, 3);                                            // all servers
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005&server=Aniimo-Europe")).json();
+  assert.equal(week.server, "Aniimo-Europe");
+  assert.deepEqual(week.servers.map((x) => x.value).sort(), ["Aniimo-Americas", "Aniimo-Europe"]);
+  assert.deepEqual(week.bosses.flatMap((x) => x.entries).filter((e) => !e.unclaimed).map((e) => e.player), ["DevTwo"]);
+
+  // same week, boss, score, stars, time and moment - but two servers: not the same run, so nobody vouches
+  const slots = (id) => JSON.parse(sqlite.prepare("SELECT players_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).players_json);
+  assert.equal(slots("na").some((p) => p.confirmed), false);
+  assert.equal(slots("eu").some((p) => p.confirmed), false);
+});
+
+test("boss boards carry each player's own Battle Data bests, with the run behind each best as proof", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const send = async (id, overrides, cards) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(id, { boss: sherro, ...overrides, players: [
+      { name: "DevOne", ai: false, self: true, ...cards[0] }, { name: "Kaela", ai: false, ...cards[1] }] })));
+    form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: "image/jpeg" }), "result.jpg");
+    const response = await call(env, "/api/leaderboard/submissions", { token: a, method: "POST", form });
+    return (await response.json()).submissionId;
+  };
+  // run 1: best score; run 2: a clear, and my best DPS; Kaela's numbers come from the runs she was in
+  const high = await send("r1", { stars: 16, score: 20000 }, [{ avgDps: 15000, breakValue: 280000, damageTaken: 4000, heal: 0 }, { avgDps: 16000, heal: 900 }]);
+  const fast = await send("r2", { stars: 15, score: 16000, cleared: true, clearTimeS: 140 }, [{ avgDps: 19000, breakValue: 200000, damageTaken: 6000, heal: 50 }, { avgDps: 12000, heal: 1200 }]);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  const rows = week.bosses.find((b) => b.id === "80000109").entries;
+  const me = rows.find((e) => e.player === "DevOne");
+  assert.deepEqual([me.score, me.clearTimeS, me.avgDps, me.breakValue, me.damageTaken, me.heal], [20000, 140, 19000, 280000, 6000, 50]);
+  assert.deepEqual(me.proofIds, { score: high, clear: fast, dps: fast, break: high, taken: fast, heal: fast });
+  const kaela = rows.find((e) => e.player === "Kaela");
+  assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 1200, high, fast]);
+});
+
 test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {
   const { env } = await setup();
   const devToken = await namedToken(env, SESSIONS.dev);
@@ -520,6 +592,57 @@ test("completion flags merge by newest change, so stale copies cannot undo the d
   const bad = await call(env, "/api/progress/completed", { token, method: "PATCH", body: { set: [42] } });
   assert.equal(bad.status, 400);
   assert.equal((await call(env, "/api/progress/completed", { method: "PATCH", body: { set: ["x"] } })).status, 401);
+});
+
+test("each character (UID) keeps its own progress, starting from the account's", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.user);
+  for (const [gameUid, name] of [["302000000011", "MainNA"], ["303000000022", "AltEU"]]) {
+    await call(env, "/api/leaderboard/characters", { token, method: "POST", body: { gameUid, name } });
+  }
+  const save = (progress, uid = "") => call(env, `/api/progress${uid ? `?uid=${uid}` : ""}`, { session: SESSIONS.user, method: "PUT", body: { progress } });
+  const read = async (uid = "") => (await (await call(env, `/api/progress${uid ? `?uid=${uid}` : ""}`, { session: SESSIONS.user })).json()).progress;
+  await save({ tracking: [], completed: ["pin:before"], preferences: {} });          // tracked before characters existed
+
+  // each character starts from the account's progress, then goes its own way
+  assert.deepEqual((await read("302000000011")).completed, ["pin:before"]);
+  assert.deepEqual((await read("303000000022")).completed, ["pin:before"]);
+  assert.equal((await save({ tracking: [], completed: ["pin:before", "pin:na-only"], preferences: {} }, "302000000011")).status, 200);
+  const patch = await call(env, "/api/progress/completed?uid=303000000022", { token, method: "PATCH", body: { set: ["aniimo:7:caught"] } });
+  assert.equal(patch.status, 200);
+  assert.deepEqual((await read("302000000011")).completed.sort(), ["pin:before", "pin:na-only"]);
+  assert.deepEqual((await read("303000000022")).completed.sort(), ["aniimo:7:caught", "pin:before"]);
+  assert.deepEqual((await read()).completed, ["pin:before"]);                             // the account copy is untouched
+
+  // someone else's character, or a made-up UID, is refused
+  const other = await desktopToken(env, SESSIONS.dev);
+  await call(env, "/api/leaderboard/characters", { token: other, method: "POST", body: { gameUid: "302000000099", name: "Someone" } });
+  assert.equal((await call(env, "/api/progress/completed?uid=302000000099", { token })).status, 404);
+  assert.equal((await call(env, "/api/progress?uid=abc", { session: SESSIONS.user })).status, 400);
+});
+
+test("the profile follows a main character: automatic first, then the one picked", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.user);
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", body: { gameUid: "302000000011", name: "MainNA" } });
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid: "303000000022", name: "AltEU" }) });
+  await call(env, "/api/progress/completed?uid=302000000011", { token, method: "PATCH", body: { set: ["aniimo:1:standard"] } });
+  await call(env, "/api/progress/completed?uid=303000000022", { token, method: "PATCH", body: { set: ["aniimo:2:standard", "aniimo:3:standard"] } });
+  const overview = async () => (await call(env, "/api/profile/overview", { session: SESSIONS.user })).json();
+
+  // automatic: the character proven in the game menu
+  let o = await overview();
+  assert.deepEqual([o.main.name, o.main.picked, o.collection.aniilog.standard], ["AltEU", false, 2]);
+  // picked: the profile's collection follows it
+  assert.equal((await call(env, "/api/profile/main", { session: SESSIONS.user, method: "PUT", body: { gameUid: "302000000011" } })).status, 200);
+  o = await overview();
+  assert.deepEqual([o.main.name, o.main.picked, o.collection.aniilog.standard], ["MainNA", true, 1]);
+  const listed = await (await call(env, "/api/leaderboard/characters", { session: SESSIONS.user })).json();
+  assert.deepEqual(listed.characters.filter((c) => c.main).map((c) => c.name), ["MainNA"]);
+  // someone else's character can't be the main; null goes back to automatic
+  assert.equal((await call(env, "/api/profile/main", { session: SESSIONS.user, method: "PUT", body: { gameUid: "302000000099" } })).status, 404);
+  assert.equal((await call(env, "/api/profile/main", { session: SESSIONS.user, method: "PUT", body: { gameUid: null } })).status, 200);
+  assert.equal((await overview()).main.name, "AltEU");
 });
 
 test("the profile overview gathers the owner's characters, board positions and collection progress", async () => {
@@ -676,8 +799,9 @@ test("Interlink weeks: best per boss, week totals, every week kept, and season t
   // an older week of the same season
   assert.equal((await send(b, run("u2", { cycle: "3003", boss: boss("80000099", "Alpha Irisal"), score: 7000 }))).status, 201);
 
-  // a misread boss on the prep screen (not one of the week's bosses) must not count
-  assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-x", cycle: "3005", boss: boss("80000999", "Omega Tuekin"), score: 9000, stars: 9 })).status, 201);
+  // a misread boss (not one of the week's bosses) is refused, and a misread name of a real one takes the week's name
+  assert.equal((await send(a, { kind: "interlink_best", clientRunId: "best-3005-x", cycle: "3005", boss: boss("80000999", "Omega Tuekin"), score: 9000, stars: 9 })).status, 400);
+  assert.equal((await send(a, run("w4", { cycle: "3005", boss: boss("80000109", "Omega Sherr0"), score: 100 }))).status, 201);
   const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
   assert.equal(week.cycle.id, "3005");
   assert.deepEqual(week.bosses.map((x) => x.name), ["Omega Sherro", "Omega Infergon", "Omega Tucking"]);

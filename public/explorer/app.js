@@ -220,9 +220,30 @@ function retainedLiveViewerGender(options, selection) {
 
 const LEGACY_ANIILOG_EXPANDED_GROUPS_STORAGE_KEY = "minmax-aniilog-expanded-groups-v1";
 const TRACKING_TICK_MS = 1000;
-const LOCAL_TRACKING_STORAGE_KEY = "aniilogs:explorer:tracking:v1";
-const LOCAL_COMPLETION_STORAGE_KEY = "aniilogs:explorer:completed:v1";
-const LOCAL_COMPLETION_CHANGES_STORAGE_KEY = "aniilogs:explorer:completed-changes:v1";
+// Which game character's checklists this page shows: progress is kept per character (UID), so characters on
+// different servers keep their own. Inside the AniiLogs Companion app the app says (?uid=, kept for the visit); in a
+// browser it is the one picked in Settings > Linked characters; with none, the account's own progress (as before).
+const ACTIVE_CHARACTER = (() => {
+  try {
+    const fromApp = new URLSearchParams(window.location.search).get("uid");
+    if (fromApp && /^\d{1,24}$/u.test(fromApp)) {
+      window.sessionStorage.setItem("aniilogs:embed-uid", fromApp);
+      return fromApp;
+    }
+    return window.sessionStorage.getItem("aniilogs:embed-uid") || window.localStorage.getItem("aniilogs:active-character") || "";
+  } catch {
+    return "";
+  }
+})();
+const ACTIVE_CHARACTER_FROM_APP = (() => {
+  try { return Boolean(ACTIVE_CHARACTER) && window.sessionStorage.getItem("aniilogs:embed-uid") === ACTIVE_CHARACTER; } catch { return false; }
+})();
+// each character's checklists are also kept apart in this browser, so switching never mixes two characters' marks
+const CHARACTER_STORAGE_SUFFIX = ACTIVE_CHARACTER ? `:uid:${ACTIVE_CHARACTER}` : "";
+const progressPath = (path) => (ACTIVE_CHARACTER ? `${path}?uid=${encodeURIComponent(ACTIVE_CHARACTER)}` : path);
+const LOCAL_TRACKING_STORAGE_KEY = "aniilogs:explorer:tracking:v1" + CHARACTER_STORAGE_SUFFIX;
+const LOCAL_COMPLETION_STORAGE_KEY = "aniilogs:explorer:completed:v1" + CHARACTER_STORAGE_SUFFIX;
+const LOCAL_COMPLETION_CHANGES_STORAGE_KEY = "aniilogs:explorer:completed-changes:v1" + CHARACTER_STORAGE_SUFFIX;
 const LOCAL_PREFERENCES_STORAGE_KEY = "aniilogs:explorer:preferences:v1";
 const LEGACY_LOCAL_TRACKING_STORAGE_KEY = "minmax-map:tracking:v1";
 const LEGACY_LOCAL_COMPLETION_STORAGE_KEY = "minmax-map:completed:v1";
@@ -1808,7 +1829,7 @@ const developerAccountWrites = createDeveloperModeAccountWrites({
   }),
   writeProgress: async current => {
     if (state.cloudSyncHydrating || !current()) return;
-    const response = await apiFetch("/progress", { method: "PUT", headers: { "content-type": "application/json" },
+    const response = await apiFetch(progressPath("/progress"), { method: "PUT", headers: { "content-type": "application/json" },
       body: JSON.stringify({ progress: cloudProgressPayload() }) });
     if (!current()) return;
     if (response.status === 401) clearAuthSession();
@@ -2140,7 +2161,7 @@ async function hydrateCloudProgress() {
       els.cloudSyncLink.removeAttribute("href");
       applyDeveloperVisibility();
     }
-    const progressResponse = await apiFetch("/progress");
+    const progressResponse = await apiFetch(progressPath("/progress"));
     if (!progressResponse.ok) throw new Error(`Cloud progress returned ${progressResponse.status}`);
     const remote = await progressResponse.json();
     if (remote.progress) applyCloudProgress(remote.progress, state.localSnapshotPresent);
@@ -2158,7 +2179,7 @@ async function refreshCloudProgress() {
   if (Date.now() - state.cloudRefreshedAt < 15000) return;
   state.cloudRefreshedAt = Date.now();
   try {
-    const response = await apiFetch("/progress");
+    const response = await apiFetch(progressPath("/progress"));
     if (!response.ok) return;
     const remote = await response.json();
     if (!remote.progress) return;
@@ -3119,15 +3140,52 @@ function renderDesktopSettings(container) {
       const response = await apiFetch("/leaderboard/characters");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const { characters } = await response.json();
-      characterList.replaceChildren(...characters.map((character) => listItem(
-        `${character.name || "Unnamed"} - UID ${character.gameUid} (${character.verified ? "proven in the game menu" : "not proven yet: open the game menu with the app running"})`,
-        "Unlink",
-        async () => {
-          if (!window.confirm(`Unlink ${character.name || character.gameUid} from your account?`)) return;
-          await apiFetch(`/leaderboard/characters/${character.gameUid}`, { method: "DELETE" });
+      const useFor = (uid) => {
+        // whose map, Aniilog and Item-log progress this browser shows (the companion app always uses the game's own)
+        try {
+          if (uid) window.localStorage.setItem("aniilogs:active-character", uid);
+          else window.localStorage.removeItem("aniilogs:active-character");
+        } catch {
+          return;
+        }
+        window.location.reload();
+      };
+      characterList.replaceChildren(...characters.map((character) => {
+        const item = listItem(
+          `${character.name || "Unnamed"} - UID ${character.gameUid} (${character.verified ? "proven in the game menu" : "not proven yet: open the game menu with the app running"})`,
+          "Unlink",
+          async () => {
+            if (!window.confirm(`Unlink ${character.name || character.gameUid} from your account?`)) return;
+            await apiFetch(`/leaderboard/characters/${character.gameUid}`, { method: "DELETE" });
+            void loadCharacters();
+          },
+        );
+        const active = character.gameUid === ACTIVE_CHARACTER;
+        const pick = document.createElement("button");
+        pick.type = "button";
+        pick.textContent = active ? "Checklists shown" : "Show its checklists";
+        pick.disabled = active || ACTIVE_CHARACTER_FROM_APP;
+        pick.title = ACTIVE_CHARACTER_FROM_APP ? "Inside the companion app, the character you're playing is used." : "";
+        pick.addEventListener("click", () => useFor(character.gameUid));
+        item.insertBefore(pick, item.lastElementChild);
+        const main = document.createElement("button");
+        main.type = "button";
+        main.textContent = character.main ? "Main" : "Make main";
+        main.disabled = Boolean(character.main);
+        main.title = "Your profile's collection progress and name follow your main character.";
+        main.addEventListener("click", async () => {
+          const response = await apiFetch("/profile/main", { method: "PUT", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ gameUid: character.gameUid }) });
+          characterStatus.textContent = response.ok ? `${character.name || character.gameUid} is now your main character.` : "Could not change your main character.";
           void loadCharacters();
-        },
-      )));
+        });
+        item.insertBefore(main, pick);
+        return item;
+      }));
+      if (characters.length && ACTIVE_CHARACTER && !ACTIVE_CHARACTER_FROM_APP) {
+        const back = listItem("Your account's own progress (from before characters had their own)", "Show it", () => useFor(""));
+        characterList.append(back);
+      }
       characterStatus.textContent = characters.length ? "" : "No characters linked yet.";
     } catch {
       characterStatus.textContent = "Characters could not be loaded.";

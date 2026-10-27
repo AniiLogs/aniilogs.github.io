@@ -122,3 +122,39 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-mark { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 12%, transparent); font-size: 0.72em; font-weight: 700; letter-spacing: 0.03em; opacity: 0.75; cursor: help; }
 .lb-lookalike { background: color-mix(in srgb, var(--coral) 22%, transparent); color: var(--coral); opacity: 1; }
 .lb-player [title] { cursor: help; }
+
+/* the game-server picker above the boards */
+.lb-server { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0 0.2rem; color: var(--ink-soft); font-size: 0.9rem; }
+
+/* the run's screenshot: a camera next to the name, and the viewer */
+.lb-proof { display: inline-grid; width: 1.4rem; height: 1.4rem; place-items: center; margin-left: 4px; padding: 0; border: 0;
+  background: none; color: var(--ink-soft); vertical-align: middle; cursor: pointer; }
+.lb-proof:hover { color: var(--teal); }
+.lb-proof:focus-visible { color: var(--teal); outline: 2px solid var(--teal); outline-offset: 1px; border-radius: 4px; }
+.lb-proof svg { width: 0.95rem; height: 0.95rem; }
+.lb-proof-dialog { width: min(1280px, calc(100vw - 2rem)); padding: 0; border: 1px solid var(--line); border-radius: 14px;
+  background: rgb(var(--panel-rgb)); color: var(--ink); box-shadow: var(--shadow); }
+.lb-proof-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.lb-proof-dialog form { position: absolute; top: 6px; right: 6px; margin: 0; }
+.lb-proof-close { width: 2rem; height: 2rem; border: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 1.3rem; line-height: 1; cursor: pointer; }
+.lb-proof-body { display: grid; min-height: 120px; place-items: center; }
+.lb-proof-image { display: block; width: 100%; height: auto; border-radius: 14px; }
+
+/* hover preview: the screenshot centred, as large as the window allows (never larger than its own 1280x720) */
+.lb-proof-preview { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 2vmin; pointer-events: none; }
+.lb-proof-preview[hidden] { display: none; }
+.lb-proof-preview img { max-width: min(640px, 70vw); max-height: 60vh; width: auto; height: auto; border-radius: 12px;
+  border: 1px solid var(--line); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55); }
+.lb-proof-preview .lb-empty { padding: 0.8rem 1.1rem; border-radius: 10px; background: rgb(var(--panel-rgb)); }
+.lb-proof-dialog { width: auto; max-width: min(1280px, 96vw); }
+.lb-proof-image { max-height: 90vh; width: auto; max-width: 100%; }
+
+.lb-proof-tabs { display: flex; gap: 6px; padding: 8px 52px 8px 10px; }
+.lb-proof-tabs button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.lb-proof-tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* boss boards: rank by score, fastest clear or a Battle Data stat */
+.lb-rank-by { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; color: var(--ink-soft); font-size: 0.85rem; }
+.lb-rank-by[hidden] { display: none; }
+.lb-rank-by button { padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.lb-rank-by button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }

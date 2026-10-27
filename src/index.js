@@ -885,16 +885,42 @@ function withCompletion(progress, completion) {
   return next;
 }
 
-async function storedProgressRow(env, discordId) {
+// Where progress is kept: the account's own copy (a Discord id, as before) or one game character's copy
+// ({ uid, discordId }, see progressScope), so characters on different servers keep their own checklists.
+const progressTable = (scope) => (typeof scope === "string"
+  ? { table: "progress_snapshots", key: "discord_id", id: scope, owner: scope }
+  : { table: "character_progress", key: "game_uid", id: scope.uid, owner: scope.discordId });
+
+async function storedProgressRow(env, scope) {
+  const { table, key, id } = progressTable(scope);
   return env.DB.prepare(
-    "SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
-  ).bind(discordId).first();
+    `SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM ${table} WHERE ${key} = ?`,
+  ).bind(id).first();
+}
+
+// ?uid=<game UID>: that character's progress. It must be one of the account's linked characters; the first time, its
+// copy starts as the account's progress, so nothing tracked before is lost. No uid: the account's progress.
+async function progressScope(request, env, account) {
+  const uid = new URL(request.url).searchParams.get("uid");
+  if (!uid) return { scope: account.discordId };
+  if (!/^\d{1,24}$/u.test(uid)) return { error: json({ error: "uid must be a game UID." }, 400) };
+  const owned = await env.DB.prepare("SELECT 1 AS ok FROM game_characters WHERE game_uid = ? AND discord_id = ?")
+    .bind(uid, account.discordId).first();
+  if (!owned) return { error: json({ error: "That character isn't linked to this account." }, 404) };
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO character_progress (game_uid, discord_id, revision, data_json, created_at, updated_at)
+     SELECT ?, ?, 1, COALESCE((SELECT data_json FROM progress_snapshots WHERE discord_id = ?),
+       '{"schemaVersion":1,"tracking":[],"completed":[],"preferences":{}}'), ?, ?`,
+  ).bind(uid, account.discordId, account.discordId, now, now).run();
+  return { scope: { uid, discordId: account.discordId } };
 }
 
 // Read-modify-write of one account's snapshot, retried when another write lands in between.
-async function updateProgress(env, discordId, change) {
+async function updateProgress(env, scope, change) {
+  const { table, key, id, owner } = progressTable(scope);
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const row = await storedProgressRow(env, discordId);
+    const row = await storedProgressRow(env, scope);
     let previous = null;
     if (row) {
       try {
@@ -909,14 +935,19 @@ async function updateProgress(env, discordId, change) {
     const now = Math.floor(Date.now() / 1000);
     const result = row
       ? await env.DB.prepare(
-        "UPDATE progress_snapshots SET revision = revision + 1, data_json = ?, updated_at = ? WHERE discord_id = ? AND revision = ?",
-      ).bind(encoded, now, discordId, Number(row.revision)).run()
-      : await env.DB.prepare(
-        `INSERT INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at)
-         VALUES (?, 1, ?, ?, ?) ON CONFLICT(discord_id) DO NOTHING`,
-      ).bind(discordId, encoded, now, now).run();
+        `UPDATE ${table} SET revision = revision + 1, data_json = ?, updated_at = ? WHERE ${key} = ? AND revision = ?`,
+      ).bind(encoded, now, id, Number(row.revision)).run()
+      : table === "progress_snapshots"
+        ? await env.DB.prepare(
+          `INSERT INTO progress_snapshots (discord_id, revision, data_json, created_at, updated_at)
+           VALUES (?, 1, ?, ?, ?) ON CONFLICT(discord_id) DO NOTHING`,
+        ).bind(id, encoded, now, now).run()
+        : await env.DB.prepare(
+          `INSERT INTO character_progress (game_uid, discord_id, revision, data_json, created_at, updated_at)
+           VALUES (?, ?, 1, ?, ?, ?) ON CONFLICT(game_uid) DO NOTHING`,
+        ).bind(id, owner, encoded, now, now).run();
     if (Number(result?.meta?.changes) === 1) {
-      const saved = await storedProgressRow(env, discordId);
+      const saved = await storedProgressRow(env, scope);
       return { progress: next, revision: Number(saved.revision), updatedAt: Number(saved.updatedAt) };
     }
   }
@@ -926,9 +957,9 @@ async function updateProgress(env, discordId, change) {
 async function getProgress(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
-  const row = await env.DB.prepare(
-    "SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
-  ).bind(account.discordId).first();
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
+  const row = await storedProgressRow(env, scope);
   if (!row) return json({ revision: 0, progress: null, updatedAt: null });
   try {
     return json({ revision: Number(row.revision), progress: JSON.parse(row.dataJson), updatedAt: Number(row.updatedAt) });
@@ -949,9 +980,11 @@ async function putProgress(request, env) {
   }
   const progress = progressPayload(body.progress);
   if (!progress) return json({ error: "Progress payload has an invalid shape." }, 400);
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
   // Only the explicit owner mode endpoint may change this server-owned flag; an old tab's stale value is ignored.
   delete progress.preferences.developerMode;
-  const saved = await updateProgress(env, account.discordId, (previous) => {
+  const saved = await updateProgress(env, scope, (previous) => {
     const next = withCompletion(progress, mergeCompletion(previous, progress));
     const developerMode = previous?.preferences?.developerMode;
     if (typeof developerMode === "boolean") next.preferences = { ...next.preferences, developerMode };
@@ -965,7 +998,9 @@ async function putProgress(request, env) {
 async function getCompletion(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
-  const row = await storedProgressRow(env, account.discordId);
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
+  const row = await storedProgressRow(env, scope);
   let progress = null;
   try {
     progress = row ? progressPayload(JSON.parse(row.dataJson)) : null;
@@ -997,9 +1032,11 @@ async function patchCompletion(request, env) {
   if (!set || !clear || !(set.length + clear.length)) {
     return json({ error: "Send set and/or clear as lists of completion ids." }, 400);
   }
+  const { scope, error } = await progressScope(request, env, account);
+  if (error) return error;
   const now = Date.now();
   const changes = Object.fromEntries([...clear.map((id) => [id, [0, now]]), ...set.map((id) => [id, [1, now]])]);
-  const saved = await updateProgress(env, account.discordId, (previous) => withCompletion(
+  const saved = await updateProgress(env, scope, (previous) => withCompletion(
     previous || { schemaVersion: 1, tracking: [], completed: [], preferences: {} },
     mergeCompletion(previous, { completed: [], completedChanges: changes }),
   ));
@@ -1228,10 +1265,51 @@ async function boardStandings(env, discordId, kind) {
   }));
 }
 
+// The account's main character: the one it picked (profiles.main_game_uid, while still linked to it), else the most
+// recently seen character proven in the game menu, else the most recently seen one. Null without characters.
+async function mainCharacter(env, discordId) {
+  return env.DB.prepare(
+    `SELECT gc.game_uid AS gameUid, gc.character_name AS name, gc.verified_at IS NOT NULL AS verified,
+       gc.game_uid = p.main_game_uid AS picked
+     FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id
+     WHERE gc.discord_id = ?
+     ORDER BY gc.game_uid = p.main_game_uid DESC, gc.verified_at IS NOT NULL DESC, gc.last_seen_at DESC LIMIT 1`,
+  ).bind(discordId).first();
+}
+
+// The collection progress a profile shows: its main character's checklists (kept per UID), else the account's.
+async function profileProgressRow(env, discordId, main) {
+  return (main && await storedProgressRow(env, { uid: main.gameUid, discordId })) || storedProgressRow(env, discordId);
+}
+
+// PUT /api/profile/main {gameUid}: pick the main character (one of the account's), or null for automatic.
+async function setMainCharacter(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 256);
+  } catch (error) {
+    return json({ error: error.message }, 400);
+  }
+  const gameUid = body.gameUid === null ? null : boundedText(body.gameUid, 24, /^\d+$/u);
+  if (gameUid === undefined) return json({ error: "gameUid must be a game UID or null." }, 400);
+  if (gameUid && !await env.DB.prepare("SELECT 1 AS ok FROM game_characters WHERE game_uid = ? AND discord_id = ?")
+    .bind(gameUid, account.discordId).first()) return json({ error: "That character isn't linked to this account." }, 404);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at, main_game_uid)
+     VALUES (?, NULL, NULL, 0, ?, ?, ?)
+     ON CONFLICT(discord_id) DO UPDATE SET main_game_uid = excluded.main_game_uid, updated_at = excluded.updated_at`,
+  ).bind(account.discordId, now, now, gameUid).run();
+  return json({ ok: true, main: await mainCharacter(env, account.discordId) });
+}
+
 async function ownProfileOverview(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
-  const [profile, characters, progressRow] = await Promise.all([
+  const [profile, characters, main] = await Promise.all([
     env.DB.prepare(
       "SELECT display_name AS displayName, bio, is_public AS isPublic FROM profiles WHERE discord_id = ?",
     ).bind(account.discordId).first(),
@@ -1239,11 +1317,12 @@ async function ownProfileOverview(request, env) {
       `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt
        FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
     ).bind(account.discordId).all(),
-    storedProgressRow(env, account.discordId),
+    mainCharacter(env, account.discordId),
   ]);
+  const ownProgress = await profileProgressRow(env, account.discordId, main);
   let completed = [];
   try {
-    completed = progressRow ? progressPayload(JSON.parse(progressRow.dataJson))?.completed || [] : [];
+    completed = ownProgress ? progressPayload(JSON.parse(ownProgress.dataJson))?.completed || [] : [];
   } catch {
     completed = [];
   }
@@ -1263,9 +1342,10 @@ async function ownProfileOverview(request, env) {
       isPublic: Number(profile?.isPublic || 0) === 1,
     },
     characters: characters.results || [],
+    main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     leaderboards,
     collection: collectionSummary(completed, await releaseChecklist(env)),
-    progressUpdatedAt: progressRow ? Number(progressRow.updatedAt) : null,
+    progressUpdatedAt: ownProgress ? Number(ownProgress.updatedAt) : null,
   });
 }
 
@@ -1276,11 +1356,12 @@ async function publicProfile(request, env, publicId) {
     "SELECT discord_id AS discordId, bio FROM profiles WHERE public_id = ? AND is_public = 1",
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
-  const [characters, progressRow] = await Promise.all([
+  const [characters, main] = await Promise.all([
     env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC")
       .bind(profile.discordId).all(),
-    storedProgressRow(env, profile.discordId),
+    mainCharacter(env, profile.discordId),
   ]);
+  const progressRow = await profileProgressRow(env, profile.discordId, main);
   let completed = [];
   try {
     completed = progressRow ? progressPayload(JSON.parse(progressRow.dataJson))?.completed || [] : [];
@@ -1295,7 +1376,8 @@ async function publicProfile(request, env, publicId) {
     leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
   }
   return json({
-    profile: { displayName: characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    profile: { displayName: main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    main: main?.name ? { name: main.name } : null,
     characters: (characters.results || []).map((row) => ({ name: row.name })),
     leaderboards,
     collection: collectionSummary(completed, await releaseChecklist(env)),
@@ -1319,9 +1401,12 @@ async function deleteOwnAccount(request, env) {
   const discordId = account.discordId;
   if (env.EVIDENCE) {
     const { results } = await env.DB.prepare(
-      "SELECT evidence_key AS evidenceKey FROM leaderboard_submissions WHERE discord_id = ? AND evidence_key IS NOT NULL",
+      `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions
+       WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL)`,
     ).bind(discordId).all();
-    for (const row of results || []) await env.EVIDENCE.delete(row.evidenceKey);
+    for (const row of results || []) {
+      for (const key of [row.evidenceKey, row.battleKey]) if (key) await env.EVIDENCE.delete(key);
+    }
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM auth_handoffs WHERE discord_id = ?").bind(discordId),
@@ -1361,7 +1446,9 @@ const INTERLINK_CYCLES = Object.freeze([
 
 const LEADERBOARD_TOKEN_PREFIX = "alb_";
 const MAX_SUBMISSION_BYTES = 64 * 1024;
-const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+// A run's proof: the app sends a 1280x720 JPEG (real screens ~60-180 KB). The largest a 1280x720 JPEG can be, even at
+// quality 100 and pure noise, is ~1.3 MB: anything over this limit isn't a 720p proof and is refused.
+const MAX_EVIDENCE_BYTES = 1536 * 1024;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -1573,6 +1660,7 @@ export function leaderboardSubmission(value) {
     meterDamage: boundedInteger(value.meterDamage, 0, 1e15),
     partySize: boundedInteger(value.partySize, 1, 4),
     clientVersion: boundedText(value.clientVersion, 40),
+    server: boundedText(value.server, 40),
     playedAt: boundedInteger(value.playedAt, 1.5e9, 4e9),
   };
   const bad = Object.entries(record).find(([, field]) => field === undefined);
@@ -1635,7 +1723,7 @@ async function readSubmissionRequest(request) {
     return { body: await readJsonBody(request, MAX_SUBMISSION_BYTES), evidence: null };
   }
   const declared = Number(request.headers.get("content-length") || 0);
-  if (declared > MAX_SUBMISSION_BYTES + MAX_EVIDENCE_BYTES + 4096) throw new RangeError("Request body is too large.");
+  if (declared > MAX_SUBMISSION_BYTES + 2 * MAX_EVIDENCE_BYTES + 8192) throw new RangeError("Request body is too large.");
   const form = await request.formData();
   const text = String(form.get("submission") || "");
   if (encoder.encode(text).byteLength > MAX_SUBMISSION_BYTES) throw new RangeError("Submission is too large.");
@@ -1645,11 +1733,16 @@ async function readSubmissionRequest(request) {
   } catch {
     throw new TypeError("Submission must be valid JSON.");
   }
-  const file = form.get("evidence");
-  if (!file || typeof file === "string") return { body, evidence: null };
-  if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Evidence must be a JPEG, PNG or WebP image.");
-  if (file.size > MAX_EVIDENCE_BYTES) throw new RangeError("Evidence image is too large.");
-  return { body, evidence: file };
+  // the result screen ("evidence") and, for a best run, its Battle Data screen ("battle")
+  const picture = (name) => {
+    const file = form.get(name);
+    if (!file || typeof file === "string") return null;
+    if (!EVIDENCE_TYPES[file.type]) throw new TypeError("Evidence must be a JPEG, PNG or WebP image.");
+    if (file.size > MAX_EVIDENCE_BYTES) throw new RangeError("Evidence image is too large.");
+    return file;
+  };
+  const evidence = picture("evidence");
+  return { body, evidence, battle: evidence ? picture("battle") : null };
 }
 
 // Two app users in one Interlink run both send it: same week, boss, score, stars and time, played and sent within five
@@ -1663,7 +1756,7 @@ async function corroborateRun(env, submissionId) {
   const me = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
        clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson,
-       json_extract(extra_json, '$.instanceId') AS instanceId
+       json_extract(extra_json, '$.instanceId') AS instanceId, server
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   if (!me || me.kind !== "interlink_run" || me.score == null || !me.gameUid) return;
@@ -1673,9 +1766,10 @@ async function corroborateRun(env, submissionId) {
      WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
        AND cycle IS ? AND boss_id IS ? AND score = ? AND stars IS ? AND clear_time_s IS ?
        AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
-       AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)`,
+       AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)
+       AND (? IS NULL OR server IS NULL OR server = ?)`,
   ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.score, me.stars, me.clearTimeS, me.at, CORROBORATE_WINDOW_S,
-    me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId).all();
+    me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
   // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
   const ownName = async (row, players) => players.find((player) => player?.self)?.name
     || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
@@ -1715,6 +1809,16 @@ async function submitLeaderboardRecord(request, env) {
   }
   const { record, error } = leaderboardSubmission(parsed.body);
   if (error) return json({ error }, 400);
+  // An Interlink run must be on one of its week's three bosses, and takes that boss's name from the week's list
+  // (a misread name on the screen never reaches the boards).
+  if ((record.kind === "interlink_run" || record.kind === "interlink_best") && record.cycle != null) {
+    const week = interlinkCycle(await interlinkCycles(env), record.cycle);
+    if (week) {
+      const boss = week.bosses.find((b) => String(b.id) === String(record.bossId));
+      if (!boss) return json({ error: "That boss isn't one of this week's Interlink bosses." }, 400);
+      record.bossName = boss.name;
+    }
+  }
   if (record.gameUid) {
     const owner = await env.DB.prepare(
       "SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1",
@@ -1726,11 +1830,16 @@ async function submitLeaderboardRecord(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey FROM leaderboard_submissions
+    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
   const submissionId = existing?.submissionId || randomToken(12);
   let evidenceKey = existing?.evidenceKey || null;
+  let battleKey = existing?.battleKey || null;
+  if (parsed.battle && env.EVIDENCE) {
+    battleKey = `evidence/${account.discordId}/${submissionId}-battle.${EVIDENCE_TYPES[parsed.battle.type]}`;
+    await env.EVIDENCE.put(battleKey, parsed.battle.stream(), { httpMetadata: { contentType: parsed.battle.type } });
+  }
   if (parsed.evidence && env.EVIDENCE) {
     evidenceKey = `evidence/${account.discordId}/${submissionId}.${EVIDENCE_TYPES[parsed.evidence.type]}`;
     await env.EVIDENCE.put(evidenceKey, parsed.evidence.stream(), {
@@ -1741,8 +1850,9 @@ async function submitLeaderboardRecord(request, env) {
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
       score, rank_tier, rank_subtier, rank_name, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
-      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server,
+      battle_evidence_key
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
@@ -1752,13 +1862,14 @@ async function submitLeaderboardRecord(request, env) {
       meter_damage = excluded.meter_damage, party_size = excluded.party_size,
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
-      played_at = excluded.played_at, updated_at = excluded.updated_at`,
+      played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server,
+      battle_evidence_key = excluded.battle_evidence_key`,
   ).bind(
     submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
     record.bossId, record.bossName, record.bossLevel, record.score, record.rankTier, record.rankSubtier, record.rankName, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
-    record.playedAt, now, now,
+    record.playedAt, now, now, record.server, battleKey,
   ).run();
   await corroborateRun(env, submissionId);
   return json({
@@ -1766,6 +1877,7 @@ async function submitLeaderboardRecord(request, env) {
     submissionId,
     updated: Boolean(existing),
     evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
+    battleEvidenceStored: Boolean(parsed.battle && env.EVIDENCE),
   }, existing ? 200 : 201);
 }
 
@@ -1778,7 +1890,8 @@ async function listCharacters(request, env) {
        verified_at IS NOT NULL AS verified
      FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
   ).bind(account.discordId).all();
-  return json({ characters: results || [] });
+  const main = await mainCharacter(env, account.discordId);
+  return json({ characters: (results || []).map((row) => ({ ...row, main: row.gameUid === main?.gameUid })) });
 }
 
 // Claims a character for the signed-in account. The desktop meter calls this with the UID it reads from the game's
@@ -2017,7 +2130,7 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
     binds.push(mode);
   }
   if (!includeHidden) where.push("s.status = 'visible'");
-  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"]];
+  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"]];
   for (const [name, column] of exact) {
     const value = String(params.get(name) || "").trim();
     if (value && value.length <= 40) {
@@ -2071,7 +2184,10 @@ function parseJsonColumn(value) {
 // menu); a name alone never claims anything - names can be bought, given up and imitated - so without a UID the row
 // stays under the name ("name:<name>") for good. The sender's own slot is marked self by the app and isn't counted twice.
 const CREDITED_RUNS = `(
-  SELECT c.*, c.discord_id AS who, NULL AS teammate, NULL AS teammate_uid FROM leaderboard_submissions c
+  SELECT c.*, c.discord_id AS who, NULL AS teammate, NULL AS teammate_uid,
+    (SELECT json_extract(me.value, '$.avgDps') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_dps, (SELECT json_extract(me.value, '$.breakValue') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_break,
+    (SELECT json_extract(me.value, '$.damageTaken') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_taken, (SELECT json_extract(me.value, '$.heal') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_heal
+  FROM leaderboard_submissions c
   UNION ALL
   SELECT * FROM (
     SELECT c.*, COALESCE(
@@ -2082,7 +2198,9 @@ const CREDITED_RUNS = `(
       json_extract(pl.value, '$.name') AS teammate,
       (SELECT gc3.game_uid FROM game_characters gc3
        WHERE gc3.game_uid = json_extract(pl.value, '$.uid')
-         AND (gc3.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)) AS teammate_uid
+         AND (gc3.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)) AS teammate_uid,
+      json_extract(pl.value, '$.avgDps') AS p_dps, json_extract(pl.value, '$.breakValue') AS p_break,
+      json_extract(pl.value, '$.damageTaken') AS p_taken, json_extract(pl.value, '$.heal') AS p_heal
     FROM leaderboard_submissions c, json_each(c.players_json) pl
     WHERE c.kind = 'interlink_run' AND json_extract(pl.value, '$.ai') = 0
       AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
@@ -2224,12 +2342,13 @@ function clearedSql(kind) {
 }
 
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
-async function interlinkBests(env, cycles, list) {
+async function interlinkBests(env, cycles, list, server = null) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
        MIN(CASE WHEN ${clearedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
+       MAX(s.p_dps) AS avgDps, MAX(s.p_break) AS breakValue, MAX(s.p_taken) AS damageTaken, MAX(s.p_heal) AS heal,
        CASE WHEN s.who LIKE 'name:%' THEN MAX(s.teammate) ELSE
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
@@ -2240,9 +2359,9 @@ async function interlinkBests(env, cycles, list) {
        MIN(s.created_at) AS firstAt
      FROM ${CREDITED_RUNS} s
      WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.score IS NOT NULL AND ${NAMED_ON_BOARDS}
-       AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})
+       AND s.boss_id IS NOT NULL AND s.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND s.server = ?" : ""}
      GROUP BY s.who, s.cycle, s.boss_id`,
-  ).bind(...cycles).all();
+  ).bind(...cycles, ...(server ? [server] : [])).all();
   // a teammate's name nobody claimed yet: marked when it looks like a claimed one
   const identities = await nameIdentities(env, (results || []).filter((row) => String(row.discordId).startsWith("name:")).map((row) => row.player));
   for (const row of results || []) {
@@ -2296,6 +2415,8 @@ async function interlinkBoards(request, env) {
   const params = new URL(request.url).searchParams;
   const own = (discordId) => Boolean(account && discordId === account.discordId);
   const list = await interlinkCycles(env);
+  const server = String(params.get("server") || "").trim().slice(0, 40) || null;
+  const servers = await gameServers(env, "interlink");
   const weeks = list.map(publicCycle);
   const seasonParam = params.get("season");
   if (seasonParam !== null) {
@@ -2304,7 +2425,7 @@ async function interlinkBoards(request, env) {
     const cycles = list.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
     if (!cycles.length) return json({ error: "Unknown season." }, 404);
     const players = new Map();
-    for (const row of await interlinkBests(env, cycles, list)) {
+    for (const row of await interlinkBests(env, cycles, list, server)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
         total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
@@ -2316,11 +2437,16 @@ async function interlinkBoards(request, env) {
     const standings = ranked([...players.values()], "total").map(({ discordId, weeks: played, firstAt, ...row }) => ({
       ...row, weeks: played.size, own: own(discordId),
     }));
-    return json({ season, weeks: weeks.filter((week) => week.season === season), standings });
+    return json({ season, weeks: weeks.filter((week) => week.season === season), standings, server, servers });
   }
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
-  const rows = await interlinkBests(env, [cycle.id], list);
+  const rows = await interlinkBests(env, [cycle.id], list, server);
+  const proofs = await interlinkProofs(env, [cycle.id], server);
+  for (const row of rows) {
+    row.proofIds = proofs.get(`${row.discordId}|${row.cycle}|${row.bossId}`) || {};
+    row.proofId = row.proofIds.score || null;
+  }
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
@@ -2342,7 +2468,7 @@ async function interlinkBoards(request, env) {
     totals.set(row.discordId, player);
   }
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
-  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week });
+  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers });
 }
 
 async function leaderboardEntries(request, env) {
@@ -2429,11 +2555,13 @@ async function leaderboardEntries(request, env) {
       meterDps: row.meter_dps,
       meterDamage: row.meter_damage,
       partySize: row.party_size,
+      server: row.server || null,
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
       extra: (({ instanceId: _instance, ...extra }) => extra)(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
+      hasBattleEvidence: Boolean(row.battle_evidence_key),
       status: row.status,
       playedAt: row.played_at,
       submittedAt: row.created_at,
@@ -2442,6 +2570,15 @@ async function leaderboardEntries(request, env) {
 }
 
 // Distinct values present in the data, for the page's filter menus.
+// The game servers records came from, most records first (records from older apps have none).
+async function gameServers(env, mode) {
+  const { results } = await env.DB.prepare(
+    `SELECT server AS value, COUNT(*) AS count FROM leaderboard_submissions
+     WHERE mode = ? AND status = 'visible' AND server IS NOT NULL GROUP BY server ORDER BY count DESC`,
+  ).bind(mode).all();
+  return results || [];
+}
+
 async function leaderboardFacets(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
@@ -2465,6 +2602,7 @@ async function leaderboardFacets(request, env) {
   }
   return json({
     mode,
+    servers: await gameServers(env, mode),
     cycles,
     bosses,
     levels,
@@ -2498,34 +2636,74 @@ async function deleteSubmission(request, env, submissionId) {
   if (!account) return json({ error: "Authentication required." }, 401);
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
   if (!row) return json({ error: "Submission not found." }, 404);
   if (row.discordId !== account.discordId && !account.developerModeAvailable) {
     return json({ error: "You can only delete your own submissions." }, 403);
   }
   await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
-  if (row.evidenceKey && env.EVIDENCE) await env.EVIDENCE.delete(row.evidenceKey);
+  for (const key of [row.evidenceKey, row.battleKey]) if (key && env.EVIDENCE) await env.EVIDENCE.delete(key);
   return json({ ok: true });
 }
 
 // Screenshot evidence: visible to the submitter and to developers only.
+// A run's proof screenshot. Anyone may see the proof of an entry shown on the boards (the camera icon next to the
+// name); a hidden entry's only its submitter and developers.
 async function submissionEvidence(request, env, submissionId) {
-  const account = await leaderboardAccount(request, env);
-  if (!account) return json({ error: "Authentication required." }, 401);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, status FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
-  if (!row?.evidenceKey || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
-  if (row.discordId !== account.discordId && !account.developerModeAvailable) {
-    return json({ error: "Evidence is visible to its submitter and developers only." }, 403);
+  const key = new URL(request.url).searchParams.get("shot") === "battle" ? row?.battleKey : row?.evidenceKey;
+  if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
+  const visible = row.status === "visible";
+  if (!visible) {
+    const account = await leaderboardAccount(request, env);
+    if (!account) return json({ error: "Authentication required." }, 401);
+    if (row.discordId !== account.discordId && !account.developerModeAvailable) {
+      return json({ error: "This entry is hidden: its proof is visible to its submitter and developers only." }, 403);
+    }
   }
-  const object = await env.EVIDENCE.get(row.evidenceKey);
+  const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
-  headers.set("cache-control", "private, no-store");
+  headers.set("cache-control", visible ? "public, max-age=86400" : "private, no-store");
   return new Response(object.body, { status: 200, headers });
+}
+
+// The proof to show for each player's row on the Interlink boards: their best run on that boss (that week) that has
+// a screenshot - for a teammate's row, the screenshot of the run they were in.
+// The proof to show for each of a player's bests on an Interlink board (score, fastest clear, and their own Average
+// DPS, BREAK, damage taken and healing): the run that set it, with its screenshots - for a teammate's row, the run
+// they were in. { "<who>|<cycle>|<boss>": { score: id, clear: id, dps: id, ... } }
+const PROOF_METRICS = Object.freeze({
+  score: (r) => [r.stars ?? -1, r.score ?? -1], clear: (r) => (r.cleared === 1 && r.clear != null ? [-r.clear] : null),
+  dps: (r) => (r.dps != null ? [r.dps] : null), break: (r) => (r.brk != null ? [r.brk] : null),
+  taken: (r) => (r.taken != null ? [r.taken] : null), heal: (r) => (r.heal != null ? [r.heal] : null),
+});
+async function interlinkProofs(env, cycles, server) {
+  if (!cycles.length) return new Map();
+  const { results } = await env.DB.prepare(
+    `SELECT s.who, s.cycle, s.boss_id AS bossId, s.submission_id AS id, s.score, s.stars, s.cleared, s.clear_time_s AS clear,
+       s.p_dps AS dps, s.p_break AS brk, s.p_taken AS taken, s.p_heal AS heal
+     FROM ${CREDITED_RUNS} s
+     WHERE s.status = 'visible' AND s.evidence_key IS NOT NULL AND s.kind IN ('interlink_run', 'interlink_best')
+       AND s.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND s.server = ?" : ""}
+     ORDER BY s.created_at ASC`,
+  ).bind(...cycles, ...(server ? [server] : [])).all();
+  const better = (a, b) => { for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
+  const best = new Map();
+  for (const row of results || []) {
+    const key = `${row.who}|${row.cycle}|${row.bossId}`;
+    const slot = best.get(key) || {};
+    for (const [metric, value] of Object.entries(PROOF_METRICS)) {
+      const mine = value(row);
+      if (mine && (!slot[metric] || better(mine, slot[metric].value))) slot[metric] = { value: mine, id: row.id };
+    }
+    best.set(key, slot);
+  }
+  return new Map([...best].map(([key, slot]) => [key, Object.fromEntries(Object.entries(slot).map(([m, v]) => [m, v.id]))]));
 }
 
 async function api(request, env) {
@@ -2567,6 +2745,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "GET") return ownProfile(request, env);
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
+  if (url.pathname === "/api/profile/main" && request.method === "PUT") return setMainCharacter(request, env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);

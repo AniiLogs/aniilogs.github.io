@@ -73,10 +73,11 @@
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"), account: $("[data-account]"),
     weekly: $("[data-weekly]"), weekSelect: $("[data-week-select]"), seasonSelect: $("[data-season-select]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), rankBy: $("[data-rank-by]"),
     weekPick: $("[data-week-pick]"), seasonPick: $("[data-season-pick]"), subTabs: $("[data-sub-tabs]"),
   };
   const state = {
-    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "",
+    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "", server: "", rankBy: "score",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0,
   };
 
@@ -152,6 +153,7 @@
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
     state.week = params.get("week") || ""; state.sub = params.get("board") || "total"; state.season = params.get("season") || "";
+    state.server = params.get("server") || "";
     for (const name of ["cycle", "boss", "level", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
@@ -163,6 +165,7 @@
   }
   function query() {
     const params = new URLSearchParams({ mode: state.mode, kind: state.kind });
+    if (state.server) params.set("server", state.server);              // every board: one game server, or all
     if (board().custom === "week") {
       if (state.week) params.set("week", state.week);
       if (state.sub !== "total") params.set("board", state.sub);
@@ -243,6 +246,12 @@
     if (!response.ok) return;
     const facets = await response.json();
     state.facets = facets;
+    // the game servers this mode has records from (records from older apps have none and show under "All servers")
+    const servers = facets.servers || [];
+    els.serverPick.hidden = !servers.length;
+    els.serverSelect.replaceChildren(el("option", { value: "", text: "All servers" }),
+      ...servers.map((row) => el("option", { value: row.value, text: row.value })));
+    els.serverSelect.value = servers.some((row) => row.value === state.server) ? state.server : "";
     const f = els.filters.elements;
     const seasonMode = state.mode === "eggheist";
     fillSelect(f.cycle, facets.cycles.map((row) => ({ value: row.value, label: seasonMode ? `Season ${row.value}` : `Cycle ${row.value}` })),
@@ -307,7 +316,7 @@
     if (entry.status === "hidden") facts.push("hidden by a moderator");
     if (facts.length) parts.push(el("p", { class: "lb-facts", text: facts.join(" · ") }));
     const actions = [];
-    if (entry.hasEvidence && (entry.own || state.status?.canModerate)) {
+    if (entry.hasEvidence) {
       actions.push(el("button", { type: "button", class: "secondary-button", text: "View screenshot", onclick: (event) => showEvidence(entry, event.currentTarget) }));
     }
     if (state.status?.canModerate) {
@@ -336,6 +345,7 @@
             renderRows(entries);
           },
         }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
+        entry.hasEvidence ? proofButton(entry.submissionId) : null,
         entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
       ];
@@ -361,9 +371,96 @@
     const start = new Date(week.start * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")}${week.id === current ? " (this week)" : ""}`;
   }
+  // What a boss board can rank by: each one is a separate best (the app sends a run when it beats any of them).
+  const BOSS_METRICS = [
+    { id: "score", label: "Score", value: (e) => e.score },
+    { id: "clear", label: "Fastest clear", value: (e) => e.clearTimeS, low: true },
+    { id: "dps", label: "Avg DPS", value: (e) => e.avgDps },
+    { id: "break", label: "BREAK", value: (e) => e.breakValue },
+    { id: "taken", label: "Damage taken", value: (e) => e.damageTaken },
+    { id: "heal", label: "Healing", value: (e) => e.heal },
+  ];
   function playerCell(entry) {
     return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId, {}, entry.uid),
-      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry));
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), proofButton(entry.proofId));
+  }
+  // A picture icon next to a name when the run has its result screenshot, for anyone: hover it to see the screenshot
+  // as large as the window allows, click (or tap) to keep it open.
+  const proofImages = new Map();                       // submission id -> object URL, loaded once per page
+  // shot: "summary" (the result screen) or "battle" (Battle Data)
+  async function proofImage(submissionId, shot = "summary") {
+    const key = `${submissionId}|${shot}`;
+    if (!proofImages.has(key)) {
+      proofImages.set(key, (async () => {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence${shot === "battle" ? "?shot=battle" : ""}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return URL.createObjectURL(await response.blob());
+      })().catch((error) => { proofImages.delete(key); throw error; }));
+    }
+    return proofImages.get(key);
+  }
+  function proofButton(submissionId) {
+    if (!submissionId) return null;
+    const button = el("button", { type: "button", class: "lb-proof", title: "Hover to see this run's screenshot, click to keep it open",
+      "aria-label": "View this run's screenshot", onclick: () => { hideProofPreview(); openProof(submissionId); } });
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
+    // hover (mouse or pen only: a tap goes straight to the click)
+    button.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") showProofPreview(submissionId); });
+    button.addEventListener("pointerleave", hideProofPreview);
+    button.addEventListener("focus", () => showProofPreview(submissionId));
+    button.addEventListener("blur", hideProofPreview);
+    return button;
+  }
+  let previewFor = null;
+  async function showProofPreview(submissionId) {
+    previewFor = submissionId;
+    let preview = document.querySelector(".lb-proof-preview");
+    if (!preview) { preview = el("div", { class: "lb-proof-preview", "aria-hidden": "true" }); document.body.append(preview); }
+    preview.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
+    preview.hidden = false;
+    try {
+      const url = await proofImage(submissionId);
+      if (previewFor === submissionId) preview.replaceChildren(el("img", { src: url, alt: "" }));
+    } catch {
+      if (previewFor === submissionId) preview.replaceChildren(el("p", { class: "lb-empty", text: "This screenshot isn't available." }));
+    }
+  }
+  function hideProofPreview() {
+    previewFor = null;
+    const preview = document.querySelector(".lb-proof-preview");
+    if (preview) preview.hidden = true;
+  }
+  async function openProof(submissionId) {
+    let dialog = document.querySelector("dialog.lb-proof-dialog");
+    if (!dialog) {
+      dialog = el("dialog", { class: "lb-proof-dialog" },
+        el("form", { method: "dialog" }, el("button", { type: "submit", class: "lb-proof-close", "aria-label": "Close", text: "×" })),
+        el("div", { class: "lb-proof-body" }));
+      dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });   // click outside
+      document.body.append(dialog);
+    }
+    const body = dialog.querySelector(".lb-proof-body");
+    dialog.showModal();
+    // the result screen, and the run's Battle Data when it was sent with it
+    const show = async (shot) => {
+      body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
+      try {
+        const url = await proofImage(submissionId, shot);
+        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: shot === "battle" ? "The run's Battle Data" : "The run's result screen" }));
+      } catch {
+        body.replaceChildren(el("p", { class: "lb-empty", text: shot === "battle" ? "This run has no Battle Data screenshot." : "This screenshot isn't available." }));
+      }
+      for (const tab of dialog.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(tab.dataset.proofShot === shot));
+    };
+    let tabs = dialog.querySelector(".lb-proof-tabs");
+    if (!tabs) {
+      tabs = el("div", { class: "lb-proof-tabs", role: "tablist" },
+        el("button", { type: "button", role: "tab", "data-proof-shot": "summary", text: "Summary" }),
+        el("button", { type: "button", role: "tab", "data-proof-shot": "battle", text: "Battle Data" }));
+      dialog.insertBefore(tabs, body);
+    }
+    for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.onclick = () => show(tab.dataset.proofShot);
+    await show("summary");
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   function scoreHeader(text) {
@@ -383,15 +480,16 @@
   }
   async function loadInterlink(requestId) {
     const custom = board().custom;
-    let url = "/leaderboard/interlink";
-    if (custom === "week") url += state.week ? `?cycle=${encodeURIComponent(state.week)}` : "";
-    else if (state.season) url += `?season=${encodeURIComponent(state.season)}`;
-    let response = await apiFetch(url);
+    const ask = new URLSearchParams();
+    if (custom === "week" && state.week) ask.set("cycle", state.week);
+    else if (custom === "season" && state.season) ask.set("season", state.season);
+    if (state.server) ask.set("server", state.server);
+    let response = await apiFetch(`/leaderboard/interlink${ask.size ? `?${ask}` : ""}`);
     if (requestId !== state.requestId) return;
     let data = response.ok ? await response.json() : null;
     if (custom === "season" && data && !state.season) {            // no season picked: the current week's season
       state.season = String(data.cycle?.season ?? "");
-      response = await apiFetch(`/leaderboard/interlink?season=${encodeURIComponent(state.season)}`);
+      response = await apiFetch(`/leaderboard/interlink?season=${encodeURIComponent(state.season)}${state.server ? `&server=${encodeURIComponent(state.server)}` : ""}`);
       if (requestId !== state.requestId) return;
       data = response.ok ? await response.json() : null;
     }
@@ -409,6 +507,7 @@
         onclick: () => { state.sub = sub.id; void loadEntries(); },
       })));
       writeUrl();
+      els.rankBy.hidden = true;
       if (state.sub === "total") {
         table(["#", "Player", "Week score", "Stars", ...data.bosses.map((boss) => boss.name)],
           data.week.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
@@ -419,11 +518,24 @@
         els.summary.textContent = `Week total · each player's best score on each of this week's three bosses, added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
       } else {
         const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
-        table(["#", "Player", "Best score", "Stars", "Fastest clear"],
-          bossBoard.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
-            playerCell(entry), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
-            el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }))),
-          "No scores on this boss this week yet.");
+        // each best is a board of its own: score (stars, then score), fastest clear, and each player's own card
+        const metric = BOSS_METRICS.find((m) => m.id === state.rankBy) || BOSS_METRICS[0];
+        const sorted = metric.id === "score" ? bossBoard.entries : [...bossBoard.entries]
+          .filter((entry) => metric.value(entry) != null)
+          .sort((a, b) => (metric.low ? metric.value(a) - metric.value(b) : metric.value(b) - metric.value(a)));
+        els.rankBy.hidden = false;
+        els.rankBy.replaceChildren(el("span", { text: "Rank by" }), ...BOSS_METRICS.map((m) => el("button", {
+          type: "button", "aria-pressed": String(m.id === metric.id), text: m.label,
+          onclick: () => { state.rankBy = m.id; void loadEntries(); },
+        })));
+        table(["#", "Player", "Best score", "Stars", "Fastest clear", "Avg DPS", "BREAK", "Damage taken", "Healing"],
+          sorted.map((entry, index) => el("tr", { class: entry.own ? "is-own" : null },
+            el("td", { class: "lb-rank", text: String(metric.id === "score" ? entry.rank : index + 1) }),
+            playerCell({ ...entry, proofId: entry.proofIds?.[metric.id] || entry.proofId }), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
+            el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }),
+            el("td", { text: number(entry.avgDps) }), el("td", { text: number(entry.breakValue) }),
+            el("td", { text: number(entry.damageTaken) }), el("td", { text: number(entry.heal) }))),
+          metric.id === "score" ? "No scores on this boss this week yet." : `No ${metric.label.toLowerCase()} on this boss this week yet.`);
         els.summary.textContent = `${bossBoard.name} · each player's best score this week · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
       }
       return;
@@ -535,6 +647,7 @@
   });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.weekSelect.addEventListener("change", () => { state.week = els.weekSelect.value; void loadEntries(); });
+  els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
   els.seasonSelect.addEventListener("change", () => { state.season = els.seasonSelect.value; void loadEntries(); });
   els.prev.addEventListener("click", () => {
     state.offset = Math.max(0, state.offset - PAGE_SIZE);

@@ -15,6 +15,10 @@
     {
       "binding": "CONTENT",
       "bucket_name": "aniilogs-data-prod"
+    },
+    {
+      "binding": "EVIDENCE",
+      "bucket_name": "aniilogs-data-prod"
     }
   ],
   "vars": {
