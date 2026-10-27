@@ -20,12 +20,14 @@
     eggheist: [
       { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars"], fields: ["cycle"] },
       // each match, from the game's end screen; best loot per player unless "every run"
-      { kind: "eggheist_match", label: "Matches", sorts: ["score", "clear_time_s", "defeats"], fields: ["cycle", "difficulty", "cleared"] },
+      { kind: "eggheist_match", label: "Matches", sorts: ["score", "difficulty", "clear_time_s", "defeats", "player", "played_at"], fields: ["cycle", "difficulty", "cleared"] },
+      { kind: "eggheist_pvp", label: "PvP (coming soon)", soon: true },
     ],
   });
   const SORT_LABELS = Object.freeze({
     standing: "Rank", score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
     p_dps: "Avg DPS", p_break: "BREAK", p_taken: "Damage taken", p_heal: "Healing", defeats: "Total Defeats",
+    difficulty: "Difficulty (hardest first)", player: "Player (A–Z)", played_at: "Date (newest first)",
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
@@ -42,7 +44,7 @@
       { label: "Healing", sort: "p_heal", value: (e) => number(e.heal) },
       { label: "Party", value: (e) => number(e.partySize) },
       { label: "Week", value: (e) => e.cycle || "—" },
-      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     interlink_week: [
       { label: "Week", value: (e) => e.cycle || "—" },
@@ -66,19 +68,19 @@
     ],
     eggheist_match: [
       { label: "Loot", sort: "score", value: (e) => number(e.score) },
-      { label: "Difficulty", value: (e) => e.difficulty || "—" },
+      { label: "Difficulty", sort: "difficulty", value: (e) => e.difficulty || "—" },
       { label: "Outcome", value: (e) => (e.cleared === true ? "Escaped" : e.cleared === false ? "Failed" : "—") },
       { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Total Defeats", sort: "defeats", info: "defeats", value: (e) => number(e.defeats) },
       { label: "Season", value: (e) => e.cycle || "—" },
-      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
       { label: "Clear time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Floors", sort: "floors", value: (e) => number(e.floors) },
       { label: "Buffs", value: (e) => number(e.buffs?.length) },
       { label: "Party", value: (e) => number(e.partySize) },
-      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
   });
 
@@ -164,7 +166,7 @@
     const params = new URLSearchParams(window.location.search);
     if (Object.hasOwn(BOARDS, params.get("mode") || "")) state.mode = params.get("mode");
     const kind = params.get("kind");
-    if (BOARDS[state.mode].some((item) => item.kind === kind)) state.kind = kind;
+    if (BOARDS[state.mode].some((item) => item.kind === kind && !item.soon)) state.kind = kind;   // a "coming soon" ladder isn't a board yet
     else state.kind = BOARDS[state.mode][0].kind;
     state.sort = params.get("sort") || "";
     state.order = params.get("order") || "";
@@ -227,21 +229,29 @@
     document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
       tab.setAttribute("aria-selected", String(tab.dataset.modeTab === state.mode));
     });
-    els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
+    const pickBoard = (kind) => {
+      if (state.kind === kind) return;
+      state.kind = kind;
+      state.sort = "";
+      state.order = "";
+      state.offset = 0;
+      state.expanded.clear();
+      renderControls();
+      void loadEntries();
+    };
+    // Egg Heist's boards are ranked ladders, picked from one "Ladders" dropdown (PvP listed, not yet selectable)
+    if (state.mode === "eggheist") {
+      const select = el("select", { "aria-label": "Ladder", onchange: (event) => pickBoard(event.target.value) },
+        ...BOARDS.eggheist.map((item) => el("option", { value: item.kind, text: item.label, disabled: item.soon ? "" : null })));
+      select.value = state.kind;
+      els.boardTabs.replaceChildren(el("label", { class: "lb-ladders" }, el("span", { text: "Ladders" }), select));
+      els.boardTabs.hidden = false;
+    } else els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
       type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), "data-kind": item.kind,
       text: item.kind === "interlink_week_view" && weekTabLabel ? weekTabLabel : item.label,
-      onclick: () => {
-        if (state.kind === item.kind) return;
-        state.kind = item.kind;
-        state.sort = "";
-        state.order = "";
-        state.offset = 0;
-        state.expanded.clear();
-        renderControls();
-        void loadEntries();
-      },
+      onclick: () => pickBoard(item.kind),
     })));
-    els.boardTabs.hidden = BOARDS[state.mode].length < 2;
+    if (state.mode !== "eggheist") els.boardTabs.hidden = BOARDS[state.mode].length < 2;
     const custom = board().custom;
     els.filters.hidden = Boolean(custom);
     els.weekly.hidden = !custom;
@@ -252,7 +262,8 @@
     if (custom) return;
     const sorts = board().sorts;
     if (!sorts.includes(state.sort)) state.sort = sorts[0];
-    els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: SORT_LABELS[key] })));
+    // a board can name a measure its own way (Egg Heist matches call their score "Loot")
+    els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: (state.kind === "eggheist_match" && key === "score" ? "Loot" : SORT_LABELS[key]) })));
     els.sort.value = state.sort;
     const clearedLabel = els.filters.querySelector("[data-cleared-label]");
     if (clearedLabel) clearedLabel.textContent = state.kind === "eggheist_match" ? "Escapes only" : "Kills only";
@@ -286,8 +297,8 @@
   // ---------------------------------------------------------------- table
   function renderHead() {
     const columns = COLUMNS[state.kind];
-    const headers = [el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" })];
-    for (const column of columns) {
+    const headers = [el("th", { scope: "col", text: "#" })];
+    for (const column of [{ label: "Player", sort: "player", playerColumn: true }, ...columns]) {
       const info = column.info ? infoButton(column.info) : null;
       if (!column.sort || !board().sorts.includes(column.sort)) {
         headers.push(info ? el("th", { scope: "col" }, el("span", { class: "lb-th-info" }, el("span", { text: column.label }), info)) : el("th", { scope: "col", text: column.label }));
@@ -311,7 +322,7 @@
   }
   function currentOrder() {
     if (state.order) return state.order;
-    return state.sort === "clear_time_s" ? "asc" : "desc";
+    return state.sort === "clear_time_s" || state.sort === "player" ? "asc" : "desc";
   }
   function detailRow(entry, span) {
     const parts = [];
@@ -636,7 +647,7 @@
     renderRows(result.entries);
     const first = result.total ? result.offset + 1 : 0;
     const last = result.offset + result.entries.length;
-    els.summary.textContent = `${board().label} · ranked by ${SORT_LABELS[result.sort] || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
+    els.summary.textContent = `${board().label} · ranked by ${(state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
     els.page.textContent = result.total ? `${first}–${last} of ${number(result.total)}` : "";
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= result.total;

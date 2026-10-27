@@ -189,3 +189,13 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-rank-by[hidden] { display: none; }
 .lb-rank-by button { padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 .lb-rank-by button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* Egg Heist: the Ladders dropdown in place of board tabs (styled like the other board dropdowns) */
+.lb-ladders { display: inline-grid; gap: 0.25rem; font-size: 0.78rem; font-weight: 700; }
+.lb-ladders select { appearance: none; -webkit-appearance: none; min-width: 13rem; min-height: 2.35rem; border: 1px solid var(--line);
+  border-radius: 12px; background-color: var(--panel-2); color: var(--text); font: inherit; font-size: 0.9rem; font-weight: 650;
+  padding: 0.45rem 2.2rem 0.45rem 0.85rem; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 1.05rem) 52%, calc(100% - 0.72rem) 52%; background-size: 0.34rem 0.34rem, 0.34rem 0.34rem; background-repeat: no-repeat; }
+.lb-ladders select:hover, .lb-ladders select:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22); }
+.lb-ladders select option { background-color: var(--panel); color: var(--text); }

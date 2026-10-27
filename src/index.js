@@ -1564,7 +1564,14 @@ const LEADERBOARD_SORTS = Object.freeze({
   p_taken: "DESC",
   p_heal: "DESC",
   defeats: "DESC",
+  difficulty: "DESC",
+  player: "ASC",
 });
+// Egg Heist difficulties, hardest first
+const DIFFICULTY_RANK_SQL = (prefix) => `CASE ${prefix}difficulty WHEN 'Chaos' THEN 4 WHEN 'Nightmare' THEN 3 WHEN 'Hard' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END`;
+// Sorts that only order the rows: each player's row is still their best by the board's main measure (best loot,
+// best score...), then the list is ordered by name, date or difficulty.
+const DISPLAY_SORTS = new Set(["player", "played_at", "difficulty"]);
 const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_run: "score",
   interlink_week: "score",
@@ -2585,11 +2592,20 @@ async function leaderboardEntries(request, env) {
   const order = params.get("order") === "asc" ? "ASC" : params.get("order") === "desc" ? "DESC" : natural;
   // Clear-time boards only rank finished runs; values the board sorts on must be present.
   // "standing" (Egg Heist season) orders by rank tier, then Emperor stars, then rank points.
-  const orderBy = (prefix) => (sortKey === "standing"
-    ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
-    : `${prefix}${sortKey} ${order}`);
+  const sortBy = (key, direction) => (prefix) => {
+    if (key === "standing") return ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${direction}`).join(", ");
+    if (key === "difficulty") return `${DIFFICULTY_RANK_SQL(prefix)} ${direction}, ${prefix}score DESC`;
+    if (key === "played_at") return `COALESCE(${prefix}played_at, ${prefix}created_at) ${direction}`;
+    if (key === "player") return `LOWER(COALESCE(${prefix}teammate, ${prefix}characterName, ${prefix}anyCharacter, '')) ${direction}`;
+    return `${prefix}${key} ${direction}`;
+  };
+  const mainKey = LEADERBOARD_DEFAULT_SORT[kind] || "score";
+  const orderBy = sortBy(sortKey, order);
+  // which of a player's runs is their row: the sort itself, or for name/date/difficulty the board's main measure
+  const pickBy = DISPLAY_SORTS.has(sortKey) ? sortBy(mainKey, LEADERBOARD_SORTS[mainKey]) : orderBy;
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
-  else where.push(`s.${sortKey} IS NOT NULL`);
+  else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
+  else if (sortKey !== "player" && sortKey !== "played_at") where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
@@ -2605,7 +2621,7 @@ async function leaderboardEntries(request, env) {
       (SELECT game_uid FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
        ORDER BY last_seen_at DESC LIMIT 1) AS anyUid,
       CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
-      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
+      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${pickBy("s.")}, s.created_at ASC) AS playerRank
     FROM ${CREDITED_RUNS} s
     JOIN users u ON u.discord_id = s.discord_id
     LEFT JOIN profiles p ON p.discord_id = s.who

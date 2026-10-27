@@ -934,3 +934,23 @@ test("Egg Heist matches: loot, time, escaped or not, difficulty and Total Defeat
   const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist")).json();
   assert.deepEqual(facets.difficulties.map((d) => d.value), ["Hard", "Normal"]);
 });
+
+test("Matches sort by difficulty (Chaos > Nightmare > Hard > Normal), player name and date; each player's row stays their best loot", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.user);
+  const c = await namedToken(env, SESSIONS.dev2);
+  const t = Math.floor(Date.now() / 1000);
+  const send = (token, id, over) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body: {
+    kind: "eggheist_match", clientRunId: id, cycle: "S1", score: 10000, clearTimeS: 200, cleared: true, difficulty: "Normal", defeats: 1, playedAt: t, ...over } });
+  await send(a, "a1", { score: 40000, difficulty: "Normal", playedAt: t - 300 });
+  await send(a, "a2", { score: 15000, difficulty: "Chaos", playedAt: t - 10 });      // harder but less loot: not DevOne's row
+  await send(b, "b1", { score: 20000, difficulty: "Nightmare", playedAt: t - 200 });
+  await send(c, "c1", { score: 30000, difficulty: "Hard", playedAt: t - 100 });
+  const get = async (q) => (await (await call(env, `/api/leaderboard/entries?kind=eggheist_match&${q}`)).json()).entries.map((e) => [e.player, e.difficulty]);
+  assert.deepEqual(await get("sort=difficulty"), [["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
+  assert.deepEqual(await get("sort=difficulty&best=0"), [["DevOne", "Chaos"], ["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
+  assert.deepEqual(await get("sort=player"), [["DevOne", "Normal"], ["DevTwo", "Hard"], ["UserOne", "Nightmare"]]);
+  assert.deepEqual(await get("sort=player&order=desc"), [["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
+  assert.deepEqual(await get("sort=played_at"), [["DevTwo", "Hard"], ["UserOne", "Nightmare"], ["DevOne", "Normal"]]);
+});
