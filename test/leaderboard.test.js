@@ -860,3 +860,54 @@ test("developer apps can add Interlink weeks from the game data; others can't", 
   const season = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
   assert.ok(season.weeks.some((w) => w.id === "3006"));
 });
+
+test("the desktop app signs in through the player's own browser: one-time code + PKCE secret, never the website's exchange", async () => {
+  const { env } = await setup({ DISCORD_CLIENT_ID: "123", DISCORD_CLIENT_SECRET: "s", SESSION_SECRET: "x".repeat(40), LEADERBOARD_PUBLIC: "true" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => (String(url).includes("/oauth2/token")
+    ? Response.json({ access_token: "discord-access" })
+    : Response.json({ id: IDS.user, username: "user", global_name: "User One" }));
+  try {
+    const verifier = "v".repeat(43);
+    const challenge = await tokenHash(verifier);
+    const start = await worker.fetch(new Request(`https://api.aniilogs.example/api/auth/discord/start?app_port=51234&app_challenge=${challenge}`), env);
+    assert.equal(start.status, 302);
+    const state = new URL(start.headers.get("location")).searchParams.get("state");
+    const cookie = start.headers.get("set-cookie").split(";")[0];
+    assert.equal((await worker.fetch(new Request("https://api.aniilogs.example/api/auth/discord/start?app_port=80&app_challenge=x"), env)).status, 400);
+
+    // Discord sends the browser back; the API hands it to the app on 127.0.0.1, not to the website
+    const back = await worker.fetch(new Request(`https://api.aniilogs.example/api/auth/discord/callback?state=${state}&code=abc`, { headers: { cookie } }), env);
+    const location = new URL(back.headers.get("location"));
+    assert.equal(location.origin, "http://127.0.0.1:51234");
+    const code = location.searchParams.get("code");
+
+    const exchange = (body) => call(env, "/api/auth/app/exchange", { method: "POST", body });
+    assert.equal((await call(env, "/api/auth/exchange", { session: "", method: "POST", body: { handoff: code } })).status, 403);   // no site origin
+    const site = await worker.fetch(new Request("https://api.aniilogs.example/api/auth/exchange", {
+      method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ handoff: code }) }), env);
+    assert.equal(site.status, 401);                                       // the website can't redeem an app code
+    assert.equal((await exchange({ code, verifier: "w".repeat(43) })).status, 401);   // wrong secret
+    const ok = await exchange({ code, verifier, device: "Gaming PC" });
+    assert.equal(ok.status, 200);
+    const { token, account } = await ok.json();
+    assert.match(token, /^alb_/u);
+    assert.equal(account.name, "User One");
+    assert.equal((await exchange({ code, verifier })).status, 401);       // one use only
+    assert.equal(ok.headers.get("access-control-allow-origin"), "*");
+
+    // the token works like a copied desktop token, shows who it is, and signs the app's site view in
+    assert.equal((await (await call(env, "/api/auth/app/account", { token })).json()).account.name, "User One");
+    const { handoff } = await (await call(env, "/api/auth/app/site-handoff", { token, method: "POST" })).json();
+    const session = await worker.fetch(new Request("https://api.aniilogs.example/api/auth/exchange", {
+      method: "POST", headers: { origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ handoff }) }), env);
+    assert.equal(session.status, 200);
+    assert.equal((await call(env, "/api/auth/app/site-handoff", { session: SESSIONS.user, method: "POST" })).status, 401);   // tokens only
+
+    // signing out revokes it
+    assert.equal((await call(env, "/api/auth/app/sign-out", { token, method: "POST" })).status, 200);
+    assert.equal((await call(env, "/api/auth/app/account", { token })).status, 401);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

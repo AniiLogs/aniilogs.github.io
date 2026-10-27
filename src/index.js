@@ -505,9 +505,17 @@ async function startDiscordLogin(request, env) {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
   const state = randomToken();
+  // The desktop app's sign-in: it listens on 127.0.0.1:<app_port> and holds the secret behind app_challenge
+  const appPort = Number.parseInt(url.searchParams.get("app_port") || "", 10);
+  const appChallenge = url.searchParams.get("app_challenge") || "";
+  const app = url.searchParams.has("app_port")
+    ? (appPort >= 1024 && appPort <= 65535 && /^[A-Za-z0-9_-]{43}$/u.test(appChallenge) ? { port: appPort, challenge: appChallenge } : null)
+    : undefined;
+  if (app === null) return json({ error: "Invalid app sign-in request." }, 400);
   const stateCookie = await signedValue({
     state,
     returnTo: safeClientReturnTo(url.searchParams.get("return_to"), request, env),
+    app: app || null,
     expiresAt: now + OAUTH_LIFETIME_SECONDS,
   }, env.SESSION_SECRET);
   const authorize = new URL("https://discord.com/oauth2/authorize");
@@ -560,6 +568,7 @@ async function completeDiscordLogin(request, env) {
   const code = url.searchParams.get("code") || "";
   const stored = await readSignedValue(parseCookies(request.headers.get("cookie"))[OAUTH_COOKIE], env.SESSION_SECRET);
   if (url.searchParams.get("error")) {
+    if (stored?.app?.port) return redirect(`http://127.0.0.1:${stored.app.port}/callback?error=cancelled`, [clearCookie(OAUTH_COOKIE)]);
     return redirect(failureLocation("cancelled", stored?.returnTo), [clearCookie(OAUTH_COOKIE)]);
   }
   const now = Math.floor(Date.now() / 1000);
@@ -602,10 +611,12 @@ async function completeDiscordLogin(request, env) {
 
     const rawHandoff = randomToken(48);
     const handoffHash = await sha256(rawHandoff);
+    const app = stored.app && Number.isInteger(stored.app.port) ? stored.app : null;
     await env.DB.prepare(
-      "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-    ).bind(handoffHash, String(user.id), now, now + AUTH_HANDOFF_LIFETIME_SECONDS).run();
+      "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at, app_challenge) VALUES (?, ?, ?, ?, ?)",
+    ).bind(handoffHash, String(user.id), now, now + AUTH_HANDOFF_LIFETIME_SECONDS, app ? app.challenge : null).run();
     await env.DB.prepare("DELETE FROM auth_handoffs WHERE expires_at <= ?").bind(now).run();
+    if (app) return redirect(`http://127.0.0.1:${app.port}/callback?code=${encodeURIComponent(rawHandoff)}`, [clearCookie(OAUTH_COOKIE)]);
     const destination = new URL(safeClientReturnTo(stored.returnTo, request, env));
     destination.hash = `aniilogs_auth=${encodeURIComponent(rawHandoff)}`;
     return redirect(destination.toString(), [clearCookie(OAUTH_COOKIE)]);
@@ -752,6 +763,14 @@ function corsResponse(request, env, response) {
     headers.set("access-control-max-age", "86400");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
+  if (url.pathname.startsWith("/api/auth/app/")) {
+    const headers = new Headers(response.headers);
+    headers.set("access-control-allow-origin", "*");
+    headers.set("access-control-allow-headers", "authorization, content-type");
+    headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
+    headers.set("access-control-max-age", "600");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
   const origin = request.headers.get("origin") || "";
   if (!origin || origin !== configuredPublicSiteOrigin(env)) return response;
   const headers = new Headers(response.headers);
@@ -776,10 +795,10 @@ async function exchangeAuthHandoff(request, env) {
   const handoffHash = await sha256(rawHandoff);
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, expires_at AS expiresAt FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
+    "SELECT discord_id AS discordId, expires_at AS expiresAt, app_challenge AS appChallenge FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
   ).bind(handoffHash).first();
-  if (!row || Number(row.expiresAt) <= now) {
-    if (row) await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?").bind(handoffHash).run();
+  if (!row || Number(row.expiresAt) <= now || row.appChallenge) {
+    if (row && !row.appChallenge) await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?").bind(handoffHash).run();
     return json({ error: "Sign-in handoff expired or was already used." }, 401);
   }
   const consumed = await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?")
@@ -794,6 +813,74 @@ async function exchangeAuthHandoff(request, env) {
   ).bind(await sha256(rawSession), String(row.discordId), now, now + SESSION_LIFETIME_SECONDS).run();
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
   return json({ token: rawSession, expiresAt: now + SESSION_LIFETIME_SECONDS });
+}
+
+// The desktop app trades its one-time code (plus the secret behind its challenge) for a desktop token: the same kind
+// players used to copy from the website, labelled so they can see and revoke it there.
+async function exchangeAppSignIn(request, env) {
+  let body;
+  try {
+    body = await readJsonBody(request, 4096);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const code = String(body.code || "");
+  const verifier = String(body.verifier || "");
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(code) || !/^[A-Za-z0-9_-]{43,128}$/u.test(verifier)) {
+    return json({ error: "Invalid sign-in code." }, 400);
+  }
+  const handoffHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare(
+    "SELECT discord_id AS discordId, expires_at AS expiresAt, app_challenge AS appChallenge FROM auth_handoffs WHERE handoff_hash = ? LIMIT 1",
+  ).bind(handoffHash).first();
+  const challenge = base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(verifier))));
+  if (!row || !row.appChallenge || Number(row.expiresAt) <= now || row.appChallenge !== challenge) {
+    return json({ error: "Sign-in code expired or was already used. Try signing in again." }, 401);
+  }
+  const consumed = await env.DB.prepare("DELETE FROM auth_handoffs WHERE handoff_hash = ?").bind(handoffHash).run();
+  if (Number(consumed.meta?.changes || 0) !== 1) {
+    return json({ error: "Sign-in code expired or was already used. Try signing in again." }, 401);
+  }
+  const label = `aLogs app (${String(body.device || "this PC").replace(/[^\w .-]/gu, "").slice(0, 40) || "this PC"})`;
+  const raw = `${LEADERBOARD_TOKEN_PREFIX}${randomToken(36)}`;
+  await env.DB.prepare(
+    "INSERT INTO leaderboard_tokens (token_hash, discord_id, label, created_at) VALUES (?, ?, ?, ?)",
+  ).bind(await sha256(raw), String(row.discordId), label, now).run();
+  const user = await env.DB.prepare(
+    "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
+  ).bind(String(row.discordId)).first();
+  return json({ token: raw, account: { name: user?.globalName || user?.username || "Discord account" } });
+}
+
+// Who the app's token belongs to (for "Signed in as ..."), and signing the app out (revokes its token).
+async function appAccount(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account?.viaToken) return json({ authenticated: false }, 401);
+  const user = await env.DB.prepare(
+    "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
+  ).bind(account.discordId).first();
+  return json({ authenticated: true, account: { name: user?.globalName || user?.username || "Discord account" } });
+}
+async function appSignOut(request, env) {
+  const raw = bearerToken(request);
+  if (!raw.startsWith(LEADERBOARD_TOKEN_PREFIX)) return json({ error: "Authentication required." }, 401);
+  await env.DB.prepare("UPDATE leaderboard_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
+    .bind(Math.floor(Date.now() / 1000), await sha256(raw)).run();
+  return json({ ok: true });
+}
+
+// The app's own view of the website signs in with the app's account: a one-time handoff, put in the page's #fragment
+// (never sent to a server), which the page redeems like after a normal sign-in.
+async function appSiteHandoff(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account?.viaToken) return json({ error: "Authentication required." }, 401);
+  const raw = randomToken(48);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO auth_handoffs (handoff_hash, discord_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+  ).bind(await sha256(raw), account.discordId, now, now + AUTH_HANDOFF_LIFETIME_SECONDS).run();
+  return json({ handoff: raw });
 }
 
 async function logout(request, env) {
@@ -2739,6 +2826,10 @@ async function api(request, env) {
   if (url.pathname === "/api/auth/exchange" && request.method === "POST") {
     return exchangeAuthHandoff(request, env);
   }
+  if (url.pathname === "/api/auth/app/exchange" && request.method === "POST") return exchangeAppSignIn(request, env);
+  if (url.pathname === "/api/auth/app/account" && request.method === "GET") return appAccount(request, env);
+  if (url.pathname === "/api/auth/app/sign-out" && request.method === "POST") return appSignOut(request, env);
+  if (url.pathname === "/api/auth/app/site-handoff" && request.method === "POST") return appSiteHandoff(request, env);
   if (url.pathname === "/api/auth/me" && request.method === "GET") {
     const account = await currentAccount(request, env);
     return account ? json({ authenticated: true, account }) : json({ authenticated: false });
