@@ -8603,6 +8603,15 @@ function viewModelAppearanceFor(entry, appearances = viewModelAppearances(entry)
   return appearances.some(([value]) => value === fromArtwork) ? fromArtwork : appearances[0]?.[0] ?? "common";
 }
 
+// The 3D viewer's loading stages, in order, with the percentage each one ends at
+// (from its loading meter; it reports {type: "progress", stage, pct, bytes}).
+const VIEW_MODEL_STAGES = [
+  ["Downloading model data", 70],
+  ["Compiling shaders", 75],
+  ["Preparing the scene", 88],
+  ["Rendering first frames", 100],
+];
+
 function attachViewModel(record, entry, appearances) {
   if (!record || !appearances.length) return;
   const formId = String(entry.form_id ?? "");
@@ -8614,38 +8623,40 @@ function attachViewModel(record, entry, appearances) {
   status.className = "catalog-model-status";
   status.setAttribute("role", "status");
   status.hidden = true;
-  host.append(status);
-  // While the viewer loads, its Aniimo's portrait and the viewer's own progress
-  // (forwarded by the embed) stand in front of the still-transparent frame.
+  // The aLogs loader, shown while the model loads (data-state="loading"). Each of the viewer's
+  // loading stages is one section: the HP arc follows its percentage, the break bar the stage.
   const loading = document.createElement("div");
   loading.className = "catalog-model-loading";
-  loading.setAttribute("aria-hidden", "true");
-  const loadingArt = makeIcon("catalog-model-loading-art", entry.icon);
-  loadingArt.alt = "";
-  const loadingLabel = document.createElement("p");
-  loadingLabel.className = "catalog-model-loading-label";
-  loadingLabel.textContent = "Loading 3D model";
-  const loadingBar = document.createElement("div");
-  loadingBar.className = "catalog-model-loading-bar";
-  const loadingFill = document.createElement("i");
-  loadingBar.append(loadingFill);
-  loading.append(loadingArt, loadingLabel, loadingBar);
-  host.append(loading);
+  const loaderArt = document.createElement("div");
+  loaderArt.className = "catalog-model-loader";
+  const loadingText = document.createElement("p");
+  loadingText.className = "catalog-model-loading-text";
+  loadingText.setAttribute("aria-live", "polite");
+  loading.append(loaderArt, loadingText);
+  const loader = window.AlogsLoader?.create(loaderArt, { sections: VIEW_MODEL_STAGES.length });
+  host.append(status, loading);
   record.append(host);
   let frame = null;
   const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
-  const setProgress = (label, pct) => {
-    loadingLabel.textContent = label || "Loading 3D model";
-    loadingFill.style.transform = `scaleX(${Math.max(0, Math.min(100, Number(pct) || 0)) / 100})`;
+  const resetLoading = () => { loader?.loop(); loadingText.textContent = "Loading model"; };
+  const showProgress = (message) => {
+    const pct = Math.min(100, Math.max(0, Number(message.pct) || 0));
+    const index = Math.max(0, VIEW_MODEL_STAGES.findIndex(([label]) => label === message.stage));
+    const start = index ? VIEW_MODEL_STAGES[index - 1][1] : 0;
+    const end = VIEW_MODEL_STAGES[index][1];
+    loader?.set({ done: index, section: (pct - start) / (end - start), total: pct / 100 });
+    const mb = Number(message.bytes) > 0 ? ` · ${(Number(message.bytes) / 1048576).toFixed(1)} MB` : "";
+    loadingText.textContent = `${message.stage || "Loading model"} ${Math.round(pct)}%${mb}`;
   };
   const onMessage = (event) => {
     const message = event.data;
     if (!frame || event.origin !== VIEW_MODEL_ORIGIN || event.source !== frame.contentWindow || message?.source !== "aniilogs-viewer") return;
     if (message.type === "state") {
+      if (message.state === "loading" && host.dataset.state !== "loading") resetLoading();
       host.dataset.state = message.state;
       setStatus(message.state === "failed" ? "This model could not be loaded right now." : "");
     } else if (message.type === "progress") {
-      if (typeof message.stage === "string") setProgress(message.stage.slice(0, 80), message.pct);
+      showProgress(message);
     } else if (message.type === "options") {
       els.catalogPanel.querySelector(".catalog-model-controls")?.updateViewerOptions?.(message);
     }
@@ -8666,8 +8677,8 @@ function attachViewModel(record, entry, appearances) {
     frame.setAttribute("allow", "webgpu");
     frame.setAttribute("referrerpolicy", "no-referrer");
     frame.src = url.href;
+    resetLoading();
     host.dataset.state = "loading";
-    setProgress("", 0);
     window.addEventListener("message", onMessage);
     host.prepend(frame);
     if (!("gpu" in navigator)) {
