@@ -8638,13 +8638,19 @@ function attachViewModel(record, entry, appearances) {
   record.append(host);
   let frame = null;
   const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
-  const resetLoading = () => { loader?.loop(); loadingText.textContent = "Loading model"; };
+  let lastProgress = null;
+  const resetLoading = () => { lastProgress = null; loader?.loop(); loadingText.textContent = "Loading model"; };
   const showProgress = (message) => {
     const pct = Math.min(100, Math.max(0, Number(message.pct) || 0));
     const index = Math.max(0, VIEW_MODEL_STAGES.findIndex(([label]) => label === message.stage));
     const start = index ? VIEW_MODEL_STAGES[index - 1][1] : 0;
     const end = VIEW_MODEL_STAGES[index][1];
-    loader?.set({ done: index, section: (pct - start) / (end - start), total: pct / 100 });
+    // The viewer's percentage also creeps on a timer, so while downloading only new bytes
+    // count as movement; a stalled download leaves the loader still.
+    const active = !lastProgress || message.stage !== lastProgress.stage
+      || (index === 0 ? Number(message.bytes) !== lastProgress.bytes : pct !== lastProgress.pct);
+    lastProgress = { stage: message.stage, bytes: Number(message.bytes), pct };
+    loader?.set({ done: index, section: (pct - start) / (end - start), total: pct / 100, active });
     const mb = Number(message.bytes) > 0 ? ` · ${(Number(message.bytes) / 1048576).toFixed(1)} MB` : "";
     loadingText.textContent = `${message.stage || "Loading model"} ${Math.round(pct)}%${mb}`;
   };
