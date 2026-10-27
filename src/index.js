@@ -1438,6 +1438,29 @@ async function ownProfileOverview(request, env) {
 
 // A profile its owner made public: name, about, characters, board standing and collection progress. No Discord
 // identity (id, username, avatar). Private or unknown ids are a plain 404.
+// Finds public profiles by a character name (part of it) or a game UID (all of it, or its start). Only profiles their
+// owners made public, and only what a public profile shows anyway: character names and UIDs, never Discord names.
+async function searchProfiles(request, env) {
+  const q = String(new URL(request.url).searchParams.get("q") || "").trim();
+  if (q.length < 2 || q.length > 40) return json({ results: [] });
+  const byUid = /^\d{4,24}$/u.test(q);
+  const like = `%${q.toLowerCase().replace(/[\\%_]/gu, (c) => `\\${c}`)}%`;
+  const { results } = await env.DB.prepare(
+    `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid
+     FROM game_characters gc JOIN profiles p ON p.discord_id = gc.discord_id
+     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND gc.character_name IS NOT NULL
+       AND ${byUid ? "gc.game_uid LIKE ?" : "LOWER(gc.character_name) LIKE ? ESCAPE '\\'"}
+     ORDER BY gc.last_seen_at DESC LIMIT 30`,
+  ).bind(byUid ? `${q}%` : like).all();
+  const seen = new Map();
+  for (const row of results || []) {
+    const entry = seen.get(row.publicId) || { publicId: row.publicId, characters: [] };
+    entry.characters.push({ name: row.name, gameUid: row.gameUid });
+    seen.set(row.publicId, entry);
+  }
+  return json({ results: [...seen.values()].slice(0, 10) });
+}
+
 async function publicProfile(request, env, publicId) {
   const profile = await env.DB.prepare(
     "SELECT discord_id AS discordId, bio FROM profiles WHERE public_id = ? AND is_public = 1",
@@ -2871,6 +2894,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile" && request.method === "PATCH") return updateOwnProfile(request, env);
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
   if (url.pathname === "/api/profile/main" && request.method === "PUT") return setMainCharacter(request, env);
+  if (url.pathname === "/api/profiles/search" && request.method === "GET") return searchProfiles(request, env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);

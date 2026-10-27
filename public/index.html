@@ -6,11 +6,11 @@
     <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo Pathfinders.">
     <meta name="theme-color" content="#f5eecb">
     <title>AniiLogs — Your Aniimo adventure journal</title>
-    <link rel="stylesheet" href="/styles.css?v=0.10.0-profile-overview">
+    <link rel="stylesheet" href="/styles.css?v=0.11.0-profile-page">
     <script src="/explorer/app-config.js?v=20261024-build3535596-team-conditions-r75" defer></script>
     <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
     <script src="/explorer/localization.js?v=0.6.1-header-language" data-auto-start="true" defer></script>
-    <script src="/app.js?v=0.7.0-profile-overview" defer></script>
+    <script src="/app.js?v=0.8.0-profile-page" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -26,7 +26,7 @@
         <a href="/explorer/?view=team">Team Builder</a>
         <a href="/leaderboard/">Leaderboards</a>
         <a href="/companion/">Companion App</a>
-        <a href="#profiles">Profiles</a>
+        <a href="/?view=profile">Profiles</a>
       </nav>
       <div class="account-actions">
         <label class="theme-picker-label">
@@ -65,7 +65,7 @@
             <span class="account-menu-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div class="account-menu-popover">
-            <a href="#my-profile" data-profile-link hidden>My Profile</a>
+            <a href="/?view=profile" data-profile-link hidden>My Profile</a>
             <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
             <a href="/explorer/?settings=1">Settings</a>
             <button type="button" data-logout hidden>Log out</button>
@@ -178,6 +178,16 @@
       </section>
 
       <section id="my-profile" class="profile-overview" aria-labelledby="my-profile-title" data-profile-overview hidden>
+        <div class="profile-search" data-profile-search hidden>
+          <label class="profile-search-field">
+            <span class="sr-only">Find a player</span>
+            <input type="search" placeholder="Find a player by name or UID" autocomplete="off" spellcheck="false" maxlength="40"
+              role="combobox" aria-expanded="false" aria-controls="profile-search-results" data-profile-search-input>
+          </label>
+          <ul class="profile-search-results" id="profile-search-results" role="listbox" hidden data-profile-search-results></ul>
+          <a class="profile-search-back" href="/?view=profile" hidden data-profile-back>Back to my profile</a>
+        </div>
+        <p class="profile-signin" data-profile-signin hidden>Sign in with Discord to see your profile. You can still look up anyone whose profile is public.</p>
         <header class="profile-overview-header">
           <img class="profile-avatar" alt="" width="64" height="64" data-overview-avatar hidden>
           <div>
@@ -188,6 +198,9 @@
           </div>
         </header>
         <p class="profile-overview-status" role="status" aria-live="polite" data-overview-status></p>
+        <details class="profile-edit" data-profile-edit hidden>
+          <summary>Edit profile</summary>
+        </details>
         <div class="profile-overview-grid">
           <article class="profile-panel" data-overview-panel="interlink">
             <h3>Holo-Battle Interlink</h3>
@@ -204,10 +217,6 @@
           <article class="profile-panel" data-overview-panel="collection">
             <h3>Collection</h3>
             <div data-overview-body></div>
-          </article>
-          <article class="profile-panel profile-panel-soon">
-            <h3>Badges &amp; fashion</h3>
-            <p>Your in-game badges, fashion score and outfit will appear here once the AniiLogs desktop app can read them from the game.</p>
           </article>
         </div>
       </section>

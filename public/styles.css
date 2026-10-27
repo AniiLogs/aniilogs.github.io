@@ -501,3 +501,26 @@ footer a { font-weight: 800; text-decoration: none; }
 html[data-embed="app"] .site-header .brand, html[data-embed="app"] .site-header nav,
 html[data-embed="app"] .app-topbar-brand, html[data-embed="app"] .app-topbar nav,
 html[data-embed="app"] body > footer { display: none !important; }
+
+/* The profile page (/?view=profile): only the profile, with a player search at the top */
+body.profile-page main > section:not(#my-profile) { display: none; }
+body.profile-page #my-profile { margin-top: 1.5rem; }
+.profile-search { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; margin-bottom: 1.25rem; }
+.profile-search-field { flex: 1 1 18rem; max-width: 34rem; }
+.profile-search-field input { width: 100%; min-height: 2.6rem; padding: 0.55rem 1rem; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.06)); color: var(--text, inherit); font: inherit; }
+.profile-search-field input:focus-visible { outline: none; border-color: var(--accent, var(--mint)); box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 98, 217, 179), 0.22); }
+.profile-search-results { position: absolute; top: calc(100% + 0.35rem); left: 0; z-index: 30; width: min(34rem, 100%); margin: 0; padding: 0.35rem;
+  list-style: none; border: 1px solid var(--line); border-radius: 14px; background: var(--panel, #121d21); box-shadow: var(--shadow); max-height: 22rem; overflow-y: auto; }
+.profile-search-results[hidden] { display: none; }
+.profile-search-results a { display: grid; gap: 0.1rem; padding: 0.55rem 0.75rem; border-radius: 10px; color: inherit; text-decoration: none; }
+.profile-search-results a:hover, .profile-search-results a:focus-visible { outline: none; background: rgba(var(--accent-rgb, 98, 217, 179), 0.14); }
+.profile-search-results small { color: var(--muted, var(--ink-soft)); font-size: 0.78rem; }
+.profile-search-empty { padding: 0.6rem 0.75rem; color: var(--muted, var(--ink-soft)); font-size: 0.85rem; }
+.profile-search-back { font-size: 0.88rem; }
+.profile-search-back[hidden], .profile-signin[hidden], .profile-edit[hidden] { display: none; }
+.profile-signin { margin: 0 0 1rem; color: var(--muted, var(--ink-soft)); }
+.profile-edit { margin: 0 0 1.25rem; }
+.profile-edit > summary { cursor: pointer; font-weight: 700; color: var(--accent, var(--mint)); }
+.profile-edit > form { margin-top: 0.75rem; max-width: 34rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

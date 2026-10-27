@@ -12,10 +12,13 @@ const profileBio = document.querySelector("[data-profile-bio]");
 const profileSaveButton = document.querySelector("[data-profile-save]");
 const profileStatus = document.querySelector("[data-profile-status]");
 const profileOverview = document.querySelector("[data-profile-overview]");
+const PROFILE_VIEW = new URLSearchParams(window.location.search).get("view") === "profile"
+  || /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "");
 const profilePublic = document.querySelector("[data-profile-public]");
 const profilePublicRow = document.querySelector("[data-profile-public-row]");
 const profilePublicLink = document.querySelector("[data-profile-public-link]");
-// /?profile=<id> shows someone's public profile (read-only) in the profile section.
+// /?view=profile is the profile page: your own profile (or a sign-in prompt), with a search for anyone else's.
+// /?profile=<id> shows someone's public profile (read-only) in the same view.
 const PUBLIC_PROFILE_ID = /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
   ? new URLSearchParams(window.location.search).get("profile")
   : "";
@@ -100,7 +103,14 @@ function showSignedOut(message = "Sign in to sync progress. Profiles are private
   profileEditor.hidden = true;
   profileEditor.reset();
   profileStatus.textContent = "";
-  profileOverview.hidden = !PUBLIC_PROFILE_ID;
+  profileOverview.hidden = !PUBLIC_PROFILE_ID && !PROFILE_VIEW;
+  if (PROFILE_VIEW) {
+    document.querySelector("[data-profile-signin]").hidden = Boolean(PUBLIC_PROFILE_ID);
+    if (!PUBLIC_PROFILE_ID) {
+      profileOverview.querySelector(".profile-overview-header").hidden = true;
+      profileOverview.querySelector(".profile-overview-grid").hidden = true;
+    }
+  }
   status.textContent = message;
 }
 
@@ -118,6 +128,11 @@ function showSignedIn(account) {
   status.textContent = `Signed in as ${name}. Your profile is private by default.`;
   profilePublicRow.hidden = false;
   void loadPrivateProfile(name);
+  if (PROFILE_VIEW) {
+    document.querySelector("[data-profile-signin]").hidden = true;
+    document.querySelector("[data-profile-back]").hidden = !PUBLIC_PROFILE_ID;   // on someone else's profile
+    document.querySelector("[data-profile-edit]").hidden = Boolean(PUBLIC_PROFILE_ID);
+  }
   if (!PUBLIC_PROFILE_ID) void loadProfileOverview();
 }
 
@@ -127,7 +142,7 @@ function showVisibility(profile) {
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
   if (profile.isPublic && profile.publicId) {
     const link = element("a", "", `${window.location.origin}/?profile=${profile.publicId}`);
-    link.href = `/?profile=${profile.publicId}#my-profile`;
+    link.href = `/?profile=${profile.publicId}`;
     profilePublicLink.replaceChildren("Your profile link: ", link);
   }
 }
@@ -377,7 +392,7 @@ async function loadProfileOverview(publicId = "") {
     renderCollection(overview.collection, Boolean(publicId));
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
     // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
-    if (window.location.hash === "#my-profile") profileOverview.scrollIntoView({ behavior: "instant" });
+    if (!PROFILE_VIEW && window.location.hash === "#my-profile") profileOverview.scrollIntoView({ behavior: "instant" });
   } catch {
     overviewStatus.textContent = publicId ? "This profile could not be loaded right now." : "Your records could not be loaded right now.";
   }
@@ -488,6 +503,71 @@ if (authResult) {
   };
   status.textContent = messages[authResult] || "Discord sign-in was not completed.";
   history.replaceState({}, "", window.location.pathname);
+}
+
+// ---------------------------------------------------------------- the profile page
+// Only the profile shows (no home page above it), with a player search at the top: names or UIDs of public profiles.
+function profileHref(params) {
+  const next = new URLSearchParams(window.location.search);    // keeps ?embed=app, theme and uid in the app
+  for (const key of ["profile", "view", "auth"]) next.delete(key);
+  for (const [key, value] of Object.entries(params)) next.set(key, value);
+  return `/?${next}`;
+}
+if (PROFILE_VIEW) {
+  document.body.classList.add("profile-page");
+  profileOverview.hidden = false;
+  document.querySelector("[data-profile-search]").hidden = false;
+  const back = document.querySelector("[data-profile-back]");
+  back.href = profileHref({ view: "profile" });
+  // your profile editor (name, about, public switch) sits under "Edit profile" on your own profile
+  document.querySelector("[data-profile-edit]").append(profileEditor);
+  const input = document.querySelector("[data-profile-search-input]");
+  const list = document.querySelector("[data-profile-search-results]");
+  let timer = 0; let asked = "";
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); };
+  const show = (items) => {
+    list.replaceChildren(...items);
+    list.hidden = !items.length;
+    input.setAttribute("aria-expanded", String(!list.hidden));
+  };
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { close(); return; }
+    timer = setTimeout(async () => {
+      asked = q;
+      try {
+        const response = await apiFetch(`/profiles/search?q=${encodeURIComponent(q)}`);
+        const { results = [] } = response.ok ? await response.json() : {};
+        if (asked !== q) return;
+        if (!results.length) { show([element("li", "profile-search-empty", "No public profile matches that name or UID.")]); return; }
+        show(results.map((result) => {
+          const item = element("li");
+          const link = element("a");
+          link.href = profileHref({ profile: result.publicId });
+          link.setAttribute("role", "option");
+          const [first, ...others] = result.characters;
+          link.append(element("strong", "", first.name), element("small", "", `UID ${first.gameUid}`));
+          if (others.length) link.append(element("small", "", `also ${others.map((c) => c.name).join(", ")}`));
+          item.append(link);
+          return item;
+        }));
+      } catch {
+        show([element("li", "profile-search-empty", "Search isn't available right now.")]);
+      }
+    }, 250);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+    if (event.key === "ArrowDown") { event.preventDefault(); list.querySelector("a")?.focus(); }
+  });
+  list.addEventListener("keydown", (event) => {
+    const links = [...list.querySelectorAll("a")]; const i = links.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" && i < links.length - 1) { event.preventDefault(); links[i + 1].focus(); }
+    if (event.key === "ArrowUp") { event.preventDefault(); (i > 0 ? links[i - 1] : input).focus(); }
+    if (event.key === "Escape") { close(); input.focus(); }
+  });
+  document.addEventListener("click", (event) => { if (!event.target.closest("[data-profile-search]")) close(); });
 }
 
 if (!API_URL) {

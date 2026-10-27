@@ -130,7 +130,7 @@
   function profileName(name, profileId, props = {}, uid = null) {
     const title = [uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""].filter(Boolean).join(" · ") || null;
     if (!profileId) return el("span", { ...props, title, text: name });
-    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}#my-profile`, title, text: name });
+    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}`, title, text: name });
   }
   // Marks after a name: a teammate's row nobody claimed yet, and a name that looks like a claimed one.
   function nameMarks(entry) {

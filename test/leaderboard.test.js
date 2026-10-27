@@ -954,3 +954,21 @@ test("Matches sort by difficulty (Chaos > Nightmare > Hard > Normal), player nam
   assert.deepEqual(await get("sort=player&order=desc"), [["UserOne", "Nightmare"], ["DevTwo", "Hard"], ["DevOne", "Normal"]]);
   assert.deepEqual(await get("sort=played_at"), [["DevTwo", "Hard"], ["UserOne", "Nightmare"], ["DevOne", "Normal"]]);
 });
+
+test("profile search finds public profiles by character name or UID, and never private ones", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await namedToken(env, SESSIONS.dev);    // DevOne, UID 301000000001
+  await namedToken(env, SESSIONS.user);   // UserOne, UID 301000000003
+  const save = (session, body) => call(env, "/api/profile", { session, method: "PATCH", body });
+  const dev = await (await save(SESSIONS.dev, { displayName: "Secret Discord Name", isPublic: true })).json();
+  await save(SESSIONS.user, { displayName: "Private Person", isPublic: false });
+  const find = async (q) => (await (await call(env, `/api/profiles/search?q=${encodeURIComponent(q)}`)).json()).results;
+
+  assert.deepEqual(await find("devo"), [{ publicId: dev.profile.publicId, characters: [{ name: "DevOne", gameUid: "301000000001" }] }]);
+  assert.deepEqual((await find("3010000000")).map((r) => r.characters[0].name), ["DevOne"]);   // UID start; UserOne is private
+  assert.deepEqual(await find("UserOne"), []);                    // private profile: not findable
+  assert.deepEqual(await find("Secret"), []);                     // display / Discord names are never searched
+  assert.deepEqual(await find("%"), []);                          // wildcards are plain text
+  assert.deepEqual(await find("_"), []);
+  assert.deepEqual(await find("d"), []);                          // too short
+});
