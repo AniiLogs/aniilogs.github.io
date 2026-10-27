@@ -16,14 +16,16 @@
     sim: [
       { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
     ],
-    // Skeleton: the meter doesn't read Egg Heist results yet; entries can only come in through the API for now.
+    // From the desktop meter: the Rank Info screen (season standing) and each match's end screen (Matches)
     eggheist: [
       { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars"], fields: ["cycle"] },
+      // each match, from the game's end screen; best loot per player unless "every run"
+      { kind: "eggheist_match", label: "Matches", sorts: ["score", "clear_time_s", "defeats"], fields: ["cycle", "difficulty", "cleared"] },
     ],
   });
   const SORT_LABELS = Object.freeze({
     standing: "Rank", score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
-    p_dps: "Avg DPS", p_break: "BREAK", p_taken: "Damage taken", p_heal: "Healing",
+    p_dps: "Avg DPS", p_break: "BREAK", p_taken: "Damage taken", p_heal: "Healing", defeats: "Total Defeats",
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
@@ -61,6 +63,15 @@
       { label: "Emperor stars", sort: "stars", value: (e) => (e.seasonRank?.tier === 7 || e.stars ? number(e.stars) : "—") },
       { label: "Season", value: (e) => e.cycle || "—" },
       { label: "Updated", value: (e) => date(e.playedAt || e.submittedAt) },
+    ],
+    eggheist_match: [
+      { label: "Loot", sort: "score", value: (e) => number(e.score) },
+      { label: "Difficulty", value: (e) => e.difficulty || "—" },
+      { label: "Outcome", value: (e) => (e.cleared === true ? "Escaped" : e.cleared === false ? "Failed" : "—") },
+      { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
+      { label: "Total Defeats", sort: "defeats", info: "defeats", value: (e) => number(e.defeats) },
+      { label: "Season", value: (e) => e.cycle || "—" },
+      { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
       { label: "Clear time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
@@ -243,6 +254,8 @@
     if (!sorts.includes(state.sort)) state.sort = sorts[0];
     els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: SORT_LABELS[key] })));
     els.sort.value = state.sort;
+    const clearedLabel = els.filters.querySelector("[data-cleared-label]");
+    if (clearedLabel) clearedLabel.textContent = state.kind === "eggheist_match" ? "Escapes only" : "Kills only";
     for (const label of els.filters.querySelectorAll("[data-field]")) {
       label.hidden = !board().fields.includes(label.dataset.field);
     }
@@ -265,6 +278,7 @@
       seasonMode ? "All seasons" : "All weeks");
     fillSelect(f.boss, facets.bosses.map((row) => ({ value: row.id, label: row.name || row.id })), "All bosses");
     fillSelect(f.level, facets.levels.map((row) => ({ value: row.value, label: `Lv ${row.value}` })), "Any");
+    if (f.difficulty) fillSelect(f.difficulty, (facets.difficulties || []).map((row) => ({ value: row.value, label: row.value })), "Any difficulty");
     fillSelect(f.party, facets.partySizes.map((row) => ({ value: row.value, label: row.value === 1 ? "Solo" : `${row.value} players` })), "Any size");
     fillSelect(f.buff, (facets.buffs || []).map((row) => ({ value: row.name, label: `${row.name} (${row.count})` })), "Any buff");
   }
@@ -274,8 +288,9 @@
     const columns = COLUMNS[state.kind];
     const headers = [el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" })];
     for (const column of columns) {
+      const info = column.info ? infoButton(column.info) : null;
       if (!column.sort || !board().sorts.includes(column.sort)) {
-        headers.push(el("th", { scope: "col", text: column.label }));
+        headers.push(info ? el("th", { scope: "col" }, el("span", { class: "lb-th-info" }, el("span", { text: column.label }), info)) : el("th", { scope: "col", text: column.label }));
         continue;
       }
       const active = state.sort === column.sort;
@@ -290,7 +305,7 @@
             renderControls();
             void loadEntries();
           },
-        })));
+        }), info));
     }
     els.head.replaceChildren(el("tr", {}, headers));
   }
@@ -481,6 +496,27 @@
     await show("summary");
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
+  // Explanations behind the (i) next to a column name, in a popover (one shared element per explanation)
+  const INFO = Object.freeze({
+    defeats: {
+      title: "What Total Defeats counts",
+      points: [
+        "Opponents you beat in battles during the match: the guard and elite Aniimo you actually fight.",
+        "Not the regular monsters you sneak past or hit out in the open, and not times you were knocked out.",
+        "It's the game's own number from the end screen (the Chinese original says \u201ctotal defeated\u201d).",
+      ],
+    },
+  });
+  function infoButton(key) {
+    const id = `lbInfo-${key}`;
+    if (!document.getElementById(id)) {
+      const info = INFO[key];
+      document.body.append(el("div", { id, class: "lb-info-pop", popover: "auto" },
+        el("strong", { text: info.title }), el("ul", {}, ...info.points.map((text) => el("li", { text })))));
+    }
+    return el("button", { type: "button", class: "lb-info", popovertarget: id, "aria-label": INFO[key].title, text: "i",
+      onclick: (event) => event.stopPropagation() });
+  }
   function scoreHeader(text) {
     const tip = el("div", { id: "lbScoreInfo", class: "lb-info-pop", popover: "auto" },
       el("strong", { text: "How Challenge Score works" }),

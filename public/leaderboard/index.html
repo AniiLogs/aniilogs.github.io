@@ -94,6 +94,9 @@
           <label data-field="level">Level
             <select name="level"><option value="">Any</option></select>
           </label>
+          <label data-field="difficulty">Difficulty
+            <select name="difficulty"><option value="">Any difficulty</option></select>
+          </label>
           <label data-field="party">Party
             <select name="party"><option value="">Any size</option></select>
           </label>
@@ -103,12 +106,12 @@
           <label class="lb-filter-wide">Player
             <input type="search" name="player" maxlength="40" placeholder="Name or teammate">
           </label>
-          <label class="lb-check" data-field="cleared"><input type="checkbox" name="cleared" value="1"> Kills only</label>
+          <label class="lb-check" data-field="cleared"><input type="checkbox" name="cleared" value="1"> <span data-cleared-label>Kills only</span></label>
           <label class="lb-check"><input type="checkbox" name="best" value="0"> Every run (not just each player's best)</label>
           <label class="lb-check" data-mod-only hidden><input type="checkbox" name="hidden" value="1"> Show hidden</label>
         </form>
 
-        <p class="lb-facts" data-mode-note hidden>Egg Heist is a skeleton: players rank by season tier, then Egg Emperor stars, then rank points. The desktop meter doesn't read the Rank Info screen yet.</p>
+        <p class="lb-facts" data-mode-note hidden>Egg Heist: season standings rank by rank, then Egg Emperor stars, then rank points (from the game's Rank Info screen). Matches come from each match's end screen.</p>
         <p class="lb-summary" data-summary role="status" aria-live="polite"></p>
         <div class="lb-table-wrap">
           <table class="lb-table">

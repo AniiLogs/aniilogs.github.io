@@ -1543,6 +1543,7 @@ const LEADERBOARD_KINDS = Object.freeze({
   interlink_best: "interlink",
   sim_run: "sim",
   eggheist_season: "eggheist",
+  eggheist_match: "eggheist",
 });
 const LEADERBOARD_MODES = Object.freeze(["interlink", "sim", "eggheist"]);
 // Sortable columns and their natural direction (lower clear time is better).
@@ -1562,6 +1563,7 @@ const LEADERBOARD_SORTS = Object.freeze({
   p_break: "DESC",
   p_taken: "DESC",
   p_heal: "DESC",
+  defeats: "DESC",
 });
 const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_run: "score",
@@ -1569,6 +1571,7 @@ const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_best: "score",
   sim_run: "clear_time_s",
   eggheist_season: "standing",
+  eggheist_match: "score",
 });
 
 export function leaderboardPublic(env) {
@@ -1753,6 +1756,9 @@ export function leaderboardSubmission(value) {
     clientVersion: boundedText(value.clientVersion, 40),
     server: boundedText(value.server, 40),
     playedAt: boundedInteger(value.playedAt, 1.5e9, 4e9),
+    // Egg Heist matches: the difficulty shown on the end screen, and Total Defeats
+    difficulty: boundedText(value.difficulty, 20, /^[A-Za-z ]+$/u),
+    defeats: boundedInteger(value.defeats, 0, 1000),
   };
   const bad = Object.entries(record).find(([, field]) => field === undefined);
   if (bad) return { error: `Field ${bad[0]} is invalid.` };
@@ -1942,8 +1948,8 @@ async function submitLeaderboardRecord(request, env) {
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
       score, rank_tier, rank_subtier, rank_name, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
       players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server,
-      battle_evidence_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      battle_evidence_key, difficulty, defeats
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
@@ -1954,13 +1960,13 @@ async function submitLeaderboardRecord(request, env) {
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
       played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server,
-      battle_evidence_key = excluded.battle_evidence_key`,
+      battle_evidence_key = excluded.battle_evidence_key, difficulty = excluded.difficulty, defeats = excluded.defeats`,
   ).bind(
     submissionId, account.discordId, record.mode, record.kind, record.clientRunId, record.gameUid, record.cycle,
     record.bossId, record.bossName, record.bossLevel, record.score, record.rankTier, record.rankSubtier, record.rankName, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
-    record.playedAt, now, now, record.server, battleKey,
+    record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats,
   ).run();
   await corroborateRun(env, submissionId);
   return json({
@@ -2221,7 +2227,7 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
     binds.push(mode);
   }
   if (!includeHidden) where.push("s.status = 'visible'");
-  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"]];
+  const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"], ["difficulty", "s.difficulty"]];
   for (const [name, column] of exact) {
     const value = String(params.get(name) || "").trim();
     if (value && value.length <= 40) {
@@ -2650,6 +2656,8 @@ async function leaderboardEntries(request, env) {
       meterDps: row.meter_dps,
       meterDamage: row.meter_damage,
       partySize: row.party_size,
+      difficulty: row.difficulty || null,
+      defeats: row.defeats ?? null,
       server: row.server || null,
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
@@ -2681,6 +2689,7 @@ async function leaderboardFacets(request, env) {
   const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "interlink";
   const all = async (sql) => (await env.DB.prepare(sql).bind(mode).all()).results || [];
   const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible'";
+  const difficulties = await all(`SELECT difficulty AS value, COUNT(*) AS count ${visible} AND difficulty IS NOT NULL GROUP BY difficulty ORDER BY difficulty`);
   const [cycles, bosses, levels, parties, kinds, buffRows] = await Promise.all([
     all(`SELECT cycle AS value, COUNT(*) AS count ${visible} AND cycle IS NOT NULL GROUP BY cycle ORDER BY cycle DESC`),
     all(`SELECT boss_id AS id, MAX(boss_name) AS name, COUNT(*) AS count ${visible} AND boss_id IS NOT NULL GROUP BY boss_id ORDER BY name`),
@@ -2702,6 +2711,7 @@ async function leaderboardFacets(request, env) {
     bosses,
     levels,
     partySizes: parties,
+    difficulties,
     kinds,
     buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     sorts: Object.keys(LEADERBOARD_SORTS),

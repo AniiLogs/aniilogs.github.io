@@ -911,3 +911,26 @@ test("the desktop app signs in through the player's own browser: one-time code +
     globalThis.fetch = realFetch;
   }
 });
+
+test("Egg Heist matches: loot, time, escaped or not, difficulty and Total Defeats, best loot per player", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.user);
+  const match = (id, over) => ({ kind: "eggheist_match", clientRunId: id, cycle: "S1", score: 20000, clearTimeS: 224, cleared: true,
+    difficulty: "Normal", defeats: 1, playedAt: Math.floor(Date.now() / 1000), ...over });
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const first = await send(a, match("m1", { score: 23733 }));
+  assert.equal(first.status, 201, await first.clone().text());
+  assert.equal((await send(a, match("m2", { score: 31000, difficulty: "Hard", defeats: 4, clearTimeS: 300 }))).status, 201);
+  assert.equal((await send(b, match("m3", { score: 9000, cleared: false, defeats: 0 }))).status, 201);
+  assert.equal((await send(a, match("bad", { difficulty: "<b>" }))).status, 400);
+
+  const get = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=eggheist_match&${query}`)).json()).entries;
+  assert.deepEqual((await get("")).map((e) => [e.player, e.score, e.difficulty, e.defeats, e.cleared]),
+    [["DevOne", 31000, "Hard", 4, true], ["UserOne", 9000, "Normal", 0, false]]);   // best loot per player
+  assert.deepEqual((await get("difficulty=Normal")).map((e) => [e.player, e.score]), [["DevOne", 23733], ["UserOne", 9000]]);
+  assert.deepEqual((await get("sort=defeats&best=0")).map((e) => e.defeats), [4, 1, 0]);
+  assert.deepEqual((await get("cleared=1&best=0")).map((e) => e.score), [31000, 23733]);   // escapes only
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist")).json();
+  assert.deepEqual(facets.difficulties.map((d) => d.value), ["Hard", "Normal"]);
+});
