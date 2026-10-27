@@ -11,7 +11,7 @@
     interlink: [
       { kind: "interlink_week_view", label: "This week", custom: "week", sorts: [], fields: [] },
       { kind: "interlink_season_view", label: "Season", custom: "season", sorts: [], fields: [] },
-      { kind: "interlink_run", label: "All runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
+      { kind: "interlink_run", label: "All runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "p_dps", "p_break", "p_taken", "p_heal", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
     ],
     sim: [
       { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
@@ -23,6 +23,7 @@
   });
   const SORT_LABELS = Object.freeze({
     standing: "Rank", score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
+    p_dps: "Avg DPS", p_break: "BREAK", p_taken: "Damage taken", p_heal: "Healing",
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
@@ -32,6 +33,11 @@
       { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
       { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) + (e.cleared === false ? " (timed out)" : "") },
       { label: "Team DPS", sort: "team_dps", value: (e) => number(e.teamDps) },
+      // the player's own Battle Data card for that run
+      { label: "Avg DPS", sort: "p_dps", value: (e) => number(e.avgDps) },
+      { label: "BREAK", sort: "p_break", value: (e) => number(e.breakValue) },
+      { label: "Damage taken", sort: "p_taken", value: (e) => number(e.damageTaken) },
+      { label: "Healing", sort: "p_heal", value: (e) => number(e.heal) },
       { label: "Party", value: (e) => number(e.partySize) },
       { label: "Week", value: (e) => e.cycle || "—" },
       { label: "Played", value: (e) => date(e.playedAt || e.submittedAt) },

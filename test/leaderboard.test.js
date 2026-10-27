@@ -532,6 +532,12 @@ test("boss boards carry each player's own Battle Data bests, with the run behind
   assert.deepEqual(me.proofIds, { score: high, clear: fast, dps: fast, break: high, taken: fast, heal: fast });
   const kaela = rows.find((e) => e.player === "Kaela");
   assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 1200, high, fast]);
+
+  // "All runs" ranks by those stats too: each player's own card, their best run for it
+  const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}`)).json()).entries;
+  assert.deepEqual((await all("p_dps")).map((e) => [e.player, e.avgDps]), [["DevOne", 19000], ["Kaela", 16000]]);
+  assert.deepEqual((await all("p_heal")).map((e) => [e.player, e.heal]), [["Kaela", 1200], ["DevOne", 50]]);
+  assert.deepEqual((await all("p_break")).map((e) => [e.player, e.breakValue, e.submissionId]), [["DevOne", 280000, high]]);
 });
 
 test("Egg Heist season standings rank by tier, then Emperor stars, then rank points", async () => {

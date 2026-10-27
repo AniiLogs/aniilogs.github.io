@@ -1471,6 +1471,10 @@ const LEADERBOARD_SORTS = Object.freeze({
   party_size: "ASC",
   boss_level: "DESC",
   played_at: "DESC",
+  p_dps: "DESC",
+  p_break: "DESC",
+  p_taken: "DESC",
+  p_heal: "DESC",
 });
 const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_run: "score",
@@ -2552,6 +2556,10 @@ async function leaderboardEntries(request, env) {
       cleared: row.cleared == null ? null : Boolean(row.cleared),
       floors: row.floors,
       teamDps: row.team_dps,
+      avgDps: row.p_dps ?? null,
+      breakValue: row.p_break ?? null,
+      damageTaken: row.p_taken ?? null,
+      heal: row.p_heal ?? null,
       meterDps: row.meter_dps,
       meterDamage: row.meter_damage,
       partySize: row.party_size,
