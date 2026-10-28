@@ -997,3 +997,31 @@ test("profile search finds public profiles by character name or UID, and never p
   assert.deepEqual(await find("_"), []);
   assert.deepEqual(await find("d"), []);                          // too short
 });
+
+test("the profiles sitemap lists public profiles until their owner turns search listing off", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await namedToken(env, SESSIONS.dev);
+  await namedToken(env, SESSIONS.user);
+  const save = (session, body) => call(env, "/api/profile", { session, method: "PATCH", body });
+  const dev = await (await save(SESSIONS.dev, { displayName: "Dev", isPublic: true })).json();
+  await save(SESSIONS.user, { displayName: "Private Person", isPublic: false });
+  const sitemap = async () => {
+    const response = await call(env, "/api/sitemap/profiles.xml");
+    assert.match(response.headers.get("content-type"), /application\/xml/u);
+    return response.text();
+  };
+
+  assert.equal(dev.profile.listedInSearch, true);                 // on by default
+  const listed = await sitemap();
+  assert.equal((listed.match(/<url>/gu) || []).length, 1);         // the private profile isn't in it
+  assert.ok(listed.includes(`/?profile=${dev.profile.publicId}</loc>`));
+  assert.ok(!/30100000000|discord/iu.test(listed));               // never a UID or Discord id
+  assert.equal((await (await call(env, `/api/profiles/${dev.profile.publicId}`)).json()).profile.listedInSearch, true);
+
+  const off = await (await save(SESSIONS.dev, { displayName: "Dev", listedInSearch: false })).json();
+  assert.equal(off.profile.listedInSearch, false);
+  assert.equal(off.profile.isPublic, true);                       // still public, just not listed
+  assert.equal(((await sitemap()).match(/<url>/gu) || []).length, 0);
+  assert.equal((await (await call(env, `/api/profiles/${dev.profile.publicId}`)).json()).profile.listedInSearch, false);
+  assert.equal((await save(SESSIONS.dev, { displayName: "Dev", listedInSearch: "no" })).status, 400);
+});

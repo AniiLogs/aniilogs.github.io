@@ -1211,10 +1211,10 @@ async function ownProfile(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
   const row = await env.DB.prepare(
-    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
+    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, listed_in_search AS listedInSearch, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
   ).bind(account.discordId).first();
   const isPublic = Number(row?.isPublic || 0) === 1;
-  return json({ profile: { ...row, isPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null } });
+  return json({ profile: { ...row, isPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1241,24 +1241,28 @@ async function updateOwnProfile(request, env) {
   if (body.showPresence !== undefined && typeof body.showPresence !== "boolean") {
     return json({ error: "showPresence must be true or false." }, 400);
   }
+  if (body.listedInSearch !== undefined && typeof body.listedInSearch !== "boolean") {
+    return json({ error: "listedInSearch must be true or false." }, 400);
+  }
   // Private by default: a profile only becomes public when its owner sends isPublic: true, and editing the name or
   // bio never changes its visibility. A public profile gets a random id for its link (never the Discord id).
   // Being found by the display name is a separate opt-in (off by default), and only matters while the profile is public.
   const current = await env.DB.prepare(
-    "SELECT is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence FROM profiles WHERE discord_id = ?",
+    "SELECT is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, listed_in_search AS listedInSearch FROM profiles WHERE discord_id = ?",
   ).bind(account.discordId).first();
   const isPublic = typeof body.isPublic === "boolean" ? body.isPublic : Number(current?.isPublic || 0) === 1;
   const findableByName = typeof body.findableByName === "boolean" ? body.findableByName : Number(current?.findableByName || 0) === 1;
   const showPresence = typeof body.showPresence === "boolean" ? body.showPresence : Number(current?.showPresence ?? 1) === 1;
+  const listedInSearch = typeof body.listedInSearch === "boolean" ? body.listedInSearch : Number(current?.listedInSearch ?? 1) === 1;
   const publicId = current?.publicId || (isPublic ? shareId() + shareId().slice(0, 4) : null);
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
-    "UPDATE profiles SET display_name = ?, bio = ?, is_public = ?, public_id = ?, findable_by_name = ?, show_presence = ?, updated_at = ? WHERE discord_id = ?",
-  ).bind(displayName, bio || null, isPublic ? 1 : 0, publicId, findableByName ? 1 : 0, showPresence ? 1 : 0, now, account.discordId).run();
+    "UPDATE profiles SET display_name = ?, bio = ?, is_public = ?, public_id = ?, findable_by_name = ?, show_presence = ?, listed_in_search = ?, updated_at = ? WHERE discord_id = ?",
+  ).bind(displayName, bio || null, isPublic ? 1 : 0, publicId, findableByName ? 1 : 0, showPresence ? 1 : 0, listedInSearch ? 1 : 0, now, account.discordId).run();
   if (!showPresence) {     // turned off: what was kept goes too
     await env.DB.prepare("UPDATE game_characters SET presence_state = NULL, presence_at = NULL WHERE discord_id = ?").bind(account.discordId).run();
   }
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, findableByName, showPresence, publicId: isPublic ? publicId : null, updatedAt: now } });
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1518,9 +1522,27 @@ async function searchProfiles(request, env) {
   return json({ results: [...seen.values()].slice(0, 10) });
 }
 
+// Search engines: the site's robots.txt names this sitemap, listing the public profiles whose owners leave
+// "List my profile in search engines" on. Only the random public id is in it, never a Discord id or UID.
+async function profilesSitemap(env) {
+  const origin = configuredPublicSiteOrigin(env) || "https://aniilogs.github.io";
+  const rows = await env.DB.prepare(
+    `SELECT public_id AS publicId, updated_at AS updatedAt FROM profiles
+     WHERE is_public = 1 AND public_id IS NOT NULL AND listed_in_search = 1 ORDER BY updated_at DESC LIMIT 5000`,
+  ).all();
+  const urls = (rows.results || []).filter((row) => /^[A-Za-z0-9]{8,24}$/u.test(String(row.publicId))).map((row) => {
+    const lastmod = Number(row.updatedAt) > 0 ? `<lastmod>${new Date(Number(row.updatedAt) * 1000).toISOString().slice(0, 10)}</lastmod>` : "";
+    return `<url><loc>${origin}/?profile=${row.publicId}</loc>${lastmod}</url>`;
+  });
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`;
+  return new Response(body, {
+    headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=3600" },
+  });
+}
+
 async function publicProfile(request, env, publicId) {
   const profile = await env.DB.prepare(
-    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName FROM profiles WHERE public_id = ? AND is_public = 1",
+    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch FROM profiles WHERE public_id = ? AND is_public = 1",
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
   const [characters, main] = await Promise.all([
@@ -1546,7 +1568,7 @@ async function publicProfile(request, env, publicId) {
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
-    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
     main: main?.name ? { name: main.name } : null,
     characters: (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })),
     presence: await profilePresence(env, profile.discordId),
@@ -3495,6 +3517,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
   if (url.pathname === "/api/profile/main" && request.method === "PUT") return setMainCharacter(request, env);
   if (url.pathname === "/api/profiles/search" && request.method === "GET") return searchProfiles(request, env);
+  if (url.pathname === "/api/sitemap/profiles.xml" && request.method === "GET") return profilesSitemap(env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);

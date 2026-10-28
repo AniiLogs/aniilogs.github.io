@@ -21,6 +21,8 @@ const profileFindable = document.querySelector("[data-profile-findable]");
 const profileFindableRow = document.querySelector("[data-profile-findable-row]");
 const profileShowPresence = document.querySelector("[data-profile-presence]");
 const profilePresenceRow = document.querySelector("[data-profile-presence-row]");
+const profileSearchRow = document.querySelector("[data-profile-search-row]");
+const profileListedInSearch = document.querySelector("[data-profile-search]");
 // /?view=profile is the profile page: your own profile (or a sign-in prompt), with a search for anyone else's.
 // /?profile=<id> shows someone's public profile (read-only) in the same view.
 const PUBLIC_PROFILE_ID = /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
@@ -133,6 +135,7 @@ function showSignedIn(account) {
   profilePublicRow.hidden = false;
   profileFindableRow.hidden = false;
   profilePresenceRow.hidden = false;
+  profileSearchRow.hidden = false;
   void loadPrivateProfile(name);
   if (PROFILE_VIEW) {
     document.querySelector("[data-profile-signin]").hidden = true;
@@ -142,12 +145,17 @@ function showSignedIn(account) {
   if (!PUBLIC_PROFILE_ID) void loadProfileOverview();
 }
 
-profilePublic.addEventListener("change", () => { profileFindable.disabled = !profilePublic.checked; });
+profilePublic.addEventListener("change", () => {
+  profileFindable.disabled = !profilePublic.checked;
+  profileListedInSearch.disabled = !profilePublic.checked;
+});
 
 function showVisibility(profile) {
   profilePublic.checked = Boolean(profile.isPublic);
   profileFindable.checked = Boolean(profile.findableByName);
   profileFindable.disabled = !profile.isPublic;
+  profileListedInSearch.checked = profile.listedInSearch !== false;
+  profileListedInSearch.disabled = !profile.isPublic;
   profileShowPresence.checked = profile.showPresence !== false;
   profileStatus.textContent = profile.isPublic ? "Public · anyone with the link can see it" : "Private · visible only to you";
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
@@ -517,6 +525,22 @@ function renderCollection(collection, publicView = false) {
   );
 }
 
+function setHeadTag(selector, create, attribute, value) {
+  let tag = document.head.querySelector(selector);
+  if (!value) { tag?.remove(); return; }
+  if (!tag) { tag = document.createElement(create.tag); Object.assign(tag, create.props); document.head.append(tag); }
+  tag.setAttribute(attribute, value);
+}
+
+function describeForSearch({ title = "", description = "", canonical = "", noindex = false }) {
+  if (title) document.title = title;
+  if (description) setHeadTag('meta[name="description"]', { tag: "meta", props: { name: "description" } }, "content", description);
+  setHeadTag('link[rel="canonical"]', { tag: "link", props: { rel: "canonical" } }, "href", canonical);
+  setHeadTag('meta[name="robots"]', { tag: "meta", props: { name: "robots" } }, "content", noindex ? "noindex" : "");
+}
+
+if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) describeForSearch({ title: "AniiLogs — Player profiles", noindex: true });
+
 async function loadProfileOverview(publicId = "") {
   const overviewStatus = profileOverview.querySelector("[data-overview-status]");
   profileOverview.hidden = false;
@@ -527,6 +551,7 @@ async function loadProfileOverview(publicId = "") {
       for (const panel of profileOverview.querySelectorAll("[data-overview-panel]")) panel.hidden = true;
       profileOverview.querySelector("[data-overview-name]").textContent = "Profile not found";
       overviewStatus.textContent = "This profile is private or doesn't exist.";
+      describeForSearch({ title: "AniiLogs — Profile not found", noindex: true });
       return;
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -538,6 +563,15 @@ async function loadProfileOverview(publicId = "") {
     profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
       : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
     profileOverview.querySelector("[data-overview-bio]").textContent = overview.profile?.bio || "";
+    if (publicId) {
+      const who = overview.profile?.displayName || "Pathfinder";
+      describeForSearch({
+        title: `${who} — Aniimo player profile · AniiLogs`,
+        description: `${who}'s Aniimo profile on AniiLogs: Holo-Battle Interlink, Holo-Battle Sim and Egg Heist leaderboard standing, characters and records.`,
+        canonical: `https://aniilogs.github.io/?profile=${encodeURIComponent(publicId)}`,
+        noindex: overview.profile?.listedInSearch === false,
+      });
+    }
     // Online (green) while they're in Aniimo with aLogs running, AFK (amber) after 20 minutes away from the game,
     // Offline (red) when the game or aLogs isn't running
     const presence = profileOverview.querySelector("[data-overview-presence]");
@@ -590,7 +624,7 @@ profileEditor.addEventListener("submit", async (event) => {
   profileSaveButton.disabled = true;
   profileStatus.textContent = "Saving…";
   // Visibility is only sent when the public switch is offered (developer preview); otherwise it stays as it is.
-  const visibility = profilePublicRow.hidden ? {} : { isPublic: profilePublic.checked, findableByName: profileFindable.checked, showPresence: profileShowPresence.checked };
+  const visibility = profilePublicRow.hidden ? {} : { isPublic: profilePublic.checked, findableByName: profileFindable.checked, showPresence: profileShowPresence.checked, listedInSearch: profileListedInSearch.checked };
   try {
     const response = await apiFetch("/profile", {
       method: "PATCH",

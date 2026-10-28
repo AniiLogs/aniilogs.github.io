@@ -17,7 +17,7 @@ await mkdir(outputRoot, { recursive: true });
 await writeFile(resolve(outputRoot, "_worker.js"), source, "utf8");
 await writeFile(
   resolve(outputRoot, "index.html"),
-  "<!doctype html><meta charset=utf-8><title>AniiLogs API</title><p>AniiLogs account API</p>\n",
+  "<!doctype html><meta charset=utf-8><meta name=robots content=noindex><title>AniiLogs API</title><p>AniiLogs account API</p>\n",
   "utf8",
 );
 console.log(JSON.stringify({ status: "built", output: outputRoot, workerBytes: Buffer.byteLength(source) }));

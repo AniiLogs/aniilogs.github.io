@@ -3,17 +3,28 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="AniiLogs — an interactive map, item journal, and community profile for Aniimo Pathfinders.">
+    <meta name="description" content="AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records.">
     <meta name="theme-color" content="#f5eecb">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-    <title>AniiLogs — Your Aniimo adventure journal</title>
+    <title>AniiLogs — Competitive Aniimo leaderboards and ad-free DPS meter</title>
+    <meta property="og:site_name" content="AniiLogs">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="AniiLogs — Competitive Aniimo leaderboards and ad-free DPS meter">
+    <meta property="og:description" content="AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records.">
+    <meta property="og:url" content="https://aniilogs.github.io/">
+    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
+    <meta name="twitter:card" content="summary_large_image">
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
     <link rel="stylesheet" href="/styles.css?v=0.13.2-presence">
     <script src="/explorer/app-config.js?v=20261024-build3535596-team-conditions-r75" defer></script>
     <script src="/theme-shell.js?v=0.3.0-account-theme" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber" data-auto-start="true" defer></script>
-    <script src="/app.js?v=0.10.3-lumin-amber" defer></script>
+    <script src="/app.js?v=0.10.4-search" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -174,6 +185,12 @@
                 <input type="checkbox" name="findableByName" data-profile-findable>
                 <span>Let players find me by my display name
                   <small>Your public profile shows your display name, and the player search matches it. Off: only your character names and UIDs.</small>
+                </span>
+              </label>
+              <label class="profile-public-toggle" data-profile-search-row hidden>
+                <input type="checkbox" name="listedInSearch" data-profile-search>
+                <span>List my profile in search engines
+                  <small>Google and other search engines may show your public profile. Off: they're asked to leave it out.</small>
                 </span>
               </label>
               <label class="profile-public-toggle" data-profile-presence-row hidden>
