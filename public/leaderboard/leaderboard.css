@@ -1,5 +1,7 @@
 /* Leaderboards page. Colors come from the shared theme variables set by theme-shell.js. */
-.lb-main { display: grid; gap: 1.4rem; padding: 2rem 0 3rem; }
+/* one column that never grows past the screen: a wide table scrolls inside its panel instead of widening the page */
+.lb-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.4rem; padding: 2rem 0 3rem; }
+.lb-main > * { min-width: 0; }
 .lb-heading h1 { margin: 0.5rem 0 0.6rem; font-size: clamp(2.2rem, 4.5vw, 3.4rem); }
 .lb-intro { max-width: 640px; margin: 0; color: var(--ink-soft); line-height: 1.6; }
 
@@ -199,3 +201,26 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   background-position: calc(100% - 1.05rem) 52%, calc(100% - 0.72rem) 52%; background-size: 0.34rem 0.34rem, 0.34rem 0.34rem; background-repeat: no-repeat; }
 .lb-ladders select:hover, .lb-ladders select:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22); }
 .lb-ladders select option { background-color: var(--panel); color: var(--text); }
+
+/* Phones: slimmer panel, full-width pickers and search, a tighter table that scrolls sideways inside the panel */
+@media (max-width: 640px) {
+  .lb-main { gap: 1rem; padding: 1.2rem 0 2rem; }
+  .lb-gate, .lb-board { padding: 1rem 0.85rem; border-radius: 16px; }
+  .lb-tabs { gap: 0.4rem; }
+  .lb-tabs button { padding: 0.45rem 0.8rem; font-size: 0.85rem; }
+  .lb-filters, .lb-weekly { gap: 0.6rem; }
+  .lb-filters label, .lb-weekly label { flex: 1 1 100%; }
+  .lb-filters label.lb-check { flex: 0 1 auto; }
+  .lb-filters select, .lb-weekly select, .lb-server select, .lb-ladders select, .lb-filters input[type="search"], .lb-filter-wide input[type="search"] {
+    width: 100%; min-width: 0;
+  }
+  /* Server and Ladders stack like the other pickers: label above, full width */
+  .lb-server, .lb-ladders { display: grid; width: 100%; gap: 0.3rem; margin: 0 0 0.7rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
+  .lb-server[hidden], .lb-ladders[hidden] { display: none; }
+  .lb-table-wrap { margin: 0 -0.85rem; padding: 0 0.85rem; }
+  .lb-table { font-size: 0.8rem; }
+  .lb-table th, .lb-table td { padding: 0.45rem 0.4rem; }
+  .lb-table th { font-size: 0.66rem; }
+  .lb-rank { width: 1.8rem; }
+  .lb-pager { gap: 0.5rem; }
+}

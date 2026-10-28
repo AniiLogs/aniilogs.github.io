@@ -996,8 +996,8 @@ function markerTypeLabel(type) {
   if (type === "teleport_outpost") return "Outpost";
   if (type === "teleport_nurture") return "Nurture";
   if (type === "teleport_vein_abundance") return "Vein Abundance";
-  if (type === "lumin_amber") return "Lumen Ember";
-  if (type === "lumin_marking") return "Lumen Marking";
+  if (type === "lumin_amber") return "Lumin Amber";
+  if (type === "lumin_marking") return "Lumin Marking";
   if (type === "quest_lumen_seed") return "Boss Clear";
   if (type === "lumin_event") return "Event Ember";
   if (type === "underground_entrance") return "Underground Entrance";
@@ -11228,12 +11228,12 @@ function spawnChildDisplayParts(spawn, siblings = [], siblingIndex = 0) {
     return {
       name: suffix || localizedTitle,
       sequence,
-      typeLabel: suffix ? window.AniipediaI18n.translate("Lumen Marking") : "",
+      typeLabel: suffix ? window.AniipediaI18n.translate("Lumin Marking") : "",
     };
   }
   if (spawn.marker_type === "lumin_amber") {
     return {
-      name: window.AniipediaI18n.translate("Lumen Ember"),
+      name: window.AniipediaI18n.translate("Lumin Amber"),
       sequence,
       typeLabel: "",
     };
@@ -12693,7 +12693,7 @@ function updateMapMeta() {
     `${headerCatalogCount("aniimo", counts.aniimo || 0)} Aniimo forms`,
     `${headerCatalogCount("eggs", counts.eggs ?? counts.elite_eggs ?? 0)} eggs`,
     `${counts.teleports || 0} teleports`,
-    `${headerCatalogCount("lumens", counts.ambers || 0)} Lumens`,
+    `${headerCatalogCount("lumens", counts.ambers || 0)} Lumin Amber`,
     `${counts.misc || 0} misc`,
   ];
   if (state.loadingMapId === map.id) parts.push("Loading markers");

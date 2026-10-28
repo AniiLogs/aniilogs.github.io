@@ -500,8 +500,8 @@ function renderCollection(collection, publicView = false) {
   ];
   if (aniilog.specialTotal) aniilogRows.push(progressRow("Special records", aniilog.special || 0, aniilog.specialTotal));
   const lumenRow = lumens.collected != null
-    ? progressRow("Lumens collected", lumens.collected, lumens.total)
-    : progressRow("Lumen sources collected", lumens.sources || 0, lumens.sourceTotal);
+    ? progressRow("Lumin Amber collected", lumens.collected, lumens.total)
+    : progressRow("Lumin Amber spots collected", lumens.sources || 0, lumens.sourceTotal);
   const note = element("p", "", publicView ? "Counted from the AniiLogs map checklist and desktop app. " : "Counted from your map checklist and the desktop app. ");
   const mapLink = element("a", "profile-position", "Open the map");
   mapLink.href = "/explorer/";
@@ -509,7 +509,7 @@ function renderCollection(collection, publicView = false) {
   overviewBody("collection").replaceChildren(
     element("h4", "", "Aniilog"),
     rowList(aniilogRows),
-    element("h4", "", "Lumens"),
+    element("h4", "", "Lumin Amber"),
     rowList([lumenRow]),
     element("h4", "", "Map"),
     rowList([progressRow("Pins collected", pins.collected || 0, null)]),

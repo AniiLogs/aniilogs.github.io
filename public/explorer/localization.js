@@ -152,10 +152,10 @@
     ["Vein Abundance Sites", "丰饶矿脉点", "豊穣の脈地点", "풍요의 맥 지점"],
     ["Lumin Collection", "琥珀能量收集", "アンバーエナジー集め", "앰버 에너지 수집"],
     ["Runaway Amber", "逃脱的琥珀", "逃げたアンバー", "탈출한 앰버"],
-    ["Lumen Marking", "辉耀印记", "キラメキマーク", "광휘 인장"],
-    ["Lumen Markings", "辉耀印记", "キラメキマーク", "광휘 인장"],
-    ["Lumen Ember", "辉耀琥珀", "キラメキアンバー", "광휘 앰버"],
-    ["Lumen Embers", "辉耀琥珀", "キラメキアンバー", "광휘 앰버"],
+    ["Lumin Marking", "辉耀印记", "キラメキマーク", "광휘 인장"],
+    ["Lumin Markings", "辉耀印记", "キラメキマーク", "광휘 인장"],
+    ["Lumin Amber", "辉耀琥珀", "キラメキアンバー", "광휘 앰버"],
+    ["Lumin Ambers", "辉耀琥珀", "キラメキアンバー", "광휘 앰버"],
     ["Ember", "余烬", "残り火", "불씨"],
     ["Sanctum: All in Sight", "地宫·一目了然", "ダンジョン・一目瞭然", "지하 궁전·명확한 시야"],
     ["Sanctum: Chasing Stormwinds", "地宫·逐电追风", "ダンジョン・疾風迅雷", "지하 궁전·번개와 바람의 질주"],
@@ -286,7 +286,7 @@
     ["Elite Eggs", "卓越伊莫蛋", "エクセレントアニモのタマゴ", "탁월 애니모 알"],
     ["Alpha Eggs", "头目伊莫蛋", "アルファアニモのタマゴ", "엘리트 애니모 알"],
     ["Teleports", "传送点", "テレポート", "순간이동"],
-    ["Lumens", "流明", "ルーメン", "루멘"],
+    ["Lumin Amber", "辉耀琥珀", "キラメキアンバー", "광휘 앰버"],
     ["Misc", "其他", "その他", "기타"],
     ["Shell Chest", "贝壳宝箱", "貝殻の宝箱", "조개껍데기 보물 상자"],
     ["Overworld Reward", "野外奖励", "フィールド報酬", "필드 보상"],
@@ -766,9 +766,9 @@
     }
     if (/\d+ markers.*\d+ items/.test(text)) {
       const countTerms = {
-        "zh-CN": [["markers", "个标记"], ["items", "件道具"], ["eggs", "个蛋"], ["teleports", "个传送点"], ["Lumens", "个流明"], ["misc", "个其他"]],
-        ja: [["markers", "マーカー"], ["items", "アイテム"], ["eggs", "個のタマゴ"], ["teleports", "テレポート"], ["Lumens", "ルーメン"], ["misc", "その他"]],
-        ko: [["markers", "개 마커"], ["items", "개 아이템"], ["eggs", "개 알"], ["teleports", "개 순간이동"], ["Lumens", "개 루멘"], ["misc", "개 기타"]],
+        "zh-CN": [["markers", "个标记"], ["items", "件道具"], ["eggs", "个蛋"], ["teleports", "个传送点"], ["Lumin Amber", "个辉耀琥珀"], ["misc", "个其他"]],
+        ja: [["markers", "マーカー"], ["items", "アイテム"], ["eggs", "個のタマゴ"], ["teleports", "テレポート"], ["Lumin Amber", "キラメキアンバー"], ["misc", "その他"]],
+        ko: [["markers", "개 마커"], ["items", "개 아이템"], ["eggs", "개 알"], ["teleports", "개 순간이동"], ["Lumin Amber", "개 광휘 앰버"], ["misc", "개 기타"]],
       };
       const translatedCounts = (countTerms[activeLocale] || []).reduce(
         (result, [english, localized]) => result.replace(new RegExp(`(\\d+) ${english}`, "g"), `$1${localized}`),

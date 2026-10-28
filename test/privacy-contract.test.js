@@ -74,5 +74,7 @@ test("account deletion is confirmed, comprehensive, and exposed through CORS", (
   assert.match(source, /DELETE FROM sessions WHERE discord_id = \?/u);
   assert.match(source, /DELETE FROM users WHERE discord_id = \?/u);
   assert.match(source, /GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE/u);
-  assert.match(privacy, /permanently removes your account identity, profile, cloud progress, sessions, pending sign-in handoffs, and active map shares/u);
+  assert.match(source, /DELETE FROM game_characters WHERE discord_id = \?/u);
+  assert.match(source, /DELETE FROM profile_photos WHERE discord_id = \?/u);
+  assert.match(privacy, /permanently removes your account identity, profile and its settings, cloud progress, sessions, pending sign-in handoffs, active map shares, leaderboard entries and their screenshots, linked characters with their level, status and collection numbers, and your uploaded photos/u);
 });

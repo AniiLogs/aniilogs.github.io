@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="AniiLogs Companion: a free Windows app with a boss DPS meter, automatic result and Battle Data records, leaderboard submissions and Sanctum Helper for Aniimo.">
+    <meta name="description" content="aLogs, Aniiloger's Companion App: a free Windows app for Aniimo with a boss DPS meter, automatic result and Battle Data records, leaderboard submissions, your AniiLogs profile kept up to date, and Sanctum Helper.">
     <meta name="theme-color" content="#f5eecb">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-    <title>AniiLogs — Companion App</title>
+    <title>aLogs — Companion App</title>
     <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
-    <link rel="stylesheet" href="/companion/companion.css?v=0.1.0">
+    <link rel="stylesheet" href="/companion/companion.css?v=0.2.0-alogs">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
     <script src="/theme-shell.js?v=0.3.0-account-theme" defer></script>
     <script src="/companion/companion.js?v=1" defer></script>
@@ -48,15 +48,16 @@
       <section class="cp-hero">
         <div>
           <p class="eyebrow"><span aria-hidden="true">✦</span> For Windows</p>
-          <h1>AniiLogs <span>Companion</span></h1>
-          <p class="cp-intro">A free desktop app that sits next to Aniimo: a boss DPS meter in the game's own style, your
-            fight results and Battle Data kept automatically, and your records on the AniiLogs leaderboards if you want them there.</p>
+          <h1>a<span>Logs</span></h1>
+          <p class="cp-intro">Aniiloger's Companion App: a free desktop app that runs next to Aniimo. A boss DPS meter in the
+            game's own style, your fight results and Battle Data saved for you, and, if you want, your records on the AniiLogs
+            leaderboards and your AniiLogs profile kept up to date as you play.</p>
           <div class="cp-download">
             <a class="cp-button" href="https://github.com/AniiLogs/aniilogs.github.io/releases/latest/download/AniiLogs-Companion-Setup.exe">
               <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V4a1 1 0 0 1 1-1ZM5 19h14a1 1 0 1 1 0 2H5a1 1 0 1 1 0-2Z"/></svg>
               Download for Windows
             </a>
-            <small>Windows 10 or 11 · <span data-download-size>about 50 MB</span> · <a href="https://github.com/AniiLogs/aniilogs.github.io/releases">all versions</a></small>
+            <small>Windows 10 or 11 · <span data-download-size>about 50 MB</span> · <a href="https://github.com/AniiLogs/aniilogs.github.io/releases">all versions</a> · it updates itself after that</small>
           </div>
         </div>
       </section>
@@ -65,7 +66,8 @@
         <article class="cp-card">
           <h2>Boss DPS meter</h2>
           <p>Team DPS, the last five seconds and team damage while you fight, with the boss's HP left right on its bar.
-            It also tracks the BREAK gauge: break points left, how fast your team drains it, and how many breaks you landed.</p>
+            It also tracks the BREAK gauge: break points left, how fast your team drains it, and how many breaks you landed.
+            Out in the world, the boss's kill sound marks the exact end of the fight.</p>
         </article>
         <article class="cp-card">
           <h2>Results kept for you</h2>
@@ -74,13 +76,25 @@
         </article>
         <article class="cp-card">
           <h2>Leaderboards</h2>
-          <p>Opt in and your Interlink scores, stars and clear times go to the <a href="/leaderboard/">AniiLogs leaderboards</a>
-            under your in-game name: each week's bosses, the week total and the season. AI teammates are marked.</p>
+          <p>Opt in and your records go to the <a href="/leaderboard/">AniiLogs leaderboards</a> under your in-game name:
+            Holo-Battle Interlink scores and stars (each week's bosses, the week total and the season), Holo-Battle Sim
+            clear times, and your Egg Heist season rank and matches. AI teammates are marked.</p>
+        </article>
+        <article class="cp-card">
+          <h2>Your AniiLogs profile</h2>
+          <p>Your character's name, level, gender and server; your Collection Progress from the game's Profile screen; your
+            Egg Heist rank with its badge; in-game photos you choose to upload; and Online or AFK while you play. Your
+            <a href="/?view=profile">profile</a> is private until you make it public.</p>
         </article>
         <article class="cp-card">
           <h2>Sanctum Helper included</h2>
           <p>The Egg Heist companion by sargeeva: the whole Lost Sanctum layout on your map, egg nests, key rooms and where you
             are. Its options have their own page in the app.</p>
+        </article>
+        <article class="cp-card">
+          <h2>Keeps itself up to date</h2>
+          <p>aLogs checks for new versions and installs them when you choose. Something wrong? <strong>Report a problem</strong>
+            on its Dashboard sends your logs (and screenshots, if you add some) to the developers.</p>
         </article>
       </section>
 
@@ -89,22 +103,32 @@
         <ol>
           <li><strong>Run the installer.</strong> Windows may say "Windows protected your PC" because the app isn't code-signed
             yet: choose <em>More info</em>, then <em>Run anyway</em>. It installs for your Windows user only.</li>
+          <li><strong>Follow the setup guide.</strong> When aLogs first opens, a few short steps sign you in with Discord (your
+            browser opens; approve it there) and let you choose what goes to the leaderboards. You can skip it and sign in
+            later with <em>Sign in to sync</em> in the sidebar.</li>
           <li><strong>Play Aniimo in Borderless or Windowed mode.</strong> The meter appears with a boss's HP bar and hides again
             after the fight.</li>
-          <li><strong>Optional: connect your account.</strong> Sign in on AniiLogs, open Settings › Desktop app, create a token
-            and paste it into the app under DPS Meter › Leaderboards &amp; account.</li>
+          <li><strong>Link your character.</strong> Open the game menu (Esc) or your Profile (Esc › Profile) once while aLogs is
+            running: it reads your name with your UID, which proves the character is yours. Opening your Profile also sends
+            its Collection Progress. Renamed? Use <em>Link character</em> on the Dashboard.</li>
+          <li><strong>Optional: photos.</strong> Set the game's Settings › Storage to Local (or Local and cloud), then pick
+            photos on the app's Photos page to put on your profile.</li>
         </ol>
+        <p class="cp-small">Signed in, your theme and "Show my online status" are kept with your AniiLogs account: change them
+          in the app or on the site and both follow.</p>
       </section>
 
       <section class="cp-fair">
         <h2>Fair play</h2>
-        <p>The app only looks at screen pixels, using Windows' own window capture (no yellow capture border), and reads the
-          game's own text log. It never reads or changes the game's memory, never injects anything and never modifies the
-          game's files. It reads the game's HUD font and weekly boss schedule from your own game install.</p>
-        <p class="cp-small">An unofficial, independent community project, not affiliated with Aniimo or its developers. The
-          installer also includes HidHide by Nefarius (MIT License) for the optional controller hold on the result screen; it
-          asks for administrator approval to install. See the <a href="/privacy.html">privacy policy</a> for what the
-          leaderboards store.</p>
+        <p>The app looks at screen pixels, using Windows' own window capture (no yellow capture border), and reads the game's
+          own text log. During a boss fight it listens to Aniimo's audio only (nothing else on your PC) for the kill sound, and
+          records nothing. It never reads or changes the game's memory, never injects anything and never modifies the game's
+          files. From your own game install it reads the HUD font, the weekly boss schedule and your saved photos, and from
+          the game's settings the server you play on.</p>
+        <p class="cp-small">An unofficial, independent community project, not affiliated with Aniimo or its developers. For the
+          optional controller hold on the result screen, Results › Controller › Set up installs the small HidHide driver by
+          Nefarius (MIT License) and asks for administrator approval once; uninstalling aLogs removes it. See the
+          <a href="/privacy.html">privacy policy</a> for what AniiLogs stores.</p>
       </section>
     </main>
 
