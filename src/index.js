@@ -773,7 +773,8 @@ function corsResponse(request, env, response) {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
   // developers read and clear log reports from the aLogs app too (bearer token only, never a cookie)
-  if (url.pathname === "/api/admin/log-reports" || url.pathname.startsWith("/api/admin/log-reports/")) {
+  if (url.pathname === "/api/admin/log-reports" || url.pathname.startsWith("/api/admin/log-reports/")
+    || url.pathname === "/api/profile/photos" || url.pathname.startsWith("/api/profile/photos/") || url.pathname.startsWith("/api/photos/")) {
     const headers = new Headers(response.headers);
     headers.set("access-control-allow-origin", "*");
     headers.set("access-control-allow-headers", "authorization, content-type");
@@ -1354,12 +1355,24 @@ async function boardStandings(env, discordId, kind) {
     boss: row.boss_id == null ? null : { id: row.boss_id, name: row.boss_name, level: row.boss_level },
     score: row.score,
     seasonRank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
+    seasonProgress: kind === "eggheist_season" ? seasonProgress(row.extra_json) : null,
     stars: row.stars,
     clearTimeS: row.clear_time_s,
     floors: row.floors,
     partySize: row.party_size,
     playedAt: row.played_at,
   }));
+}
+
+// An Egg Heist season entry's progress for the profile, from what the app read in the game (its `extra`): where the
+// next rank starts (Rank Info "1319/2370"), the last match's gain and the bar after it ("1337/1350 +18"). Only these
+// fields, and only whole numbers, ever leave the server.
+function seasonProgress(extraJson) {
+  const extra = parseJsonColumn(extraJson) || {};
+  const whole = (value) => (Number.isInteger(value) && value >= 0 && value < 1e9 ? value : null);
+  const bar = Array.isArray(extra.bar) && extra.bar.length === 2 && extra.bar.every((v) => whole(v) != null) ? extra.bar : null;
+  const progress = { nextRankAt: whole(extra.nextRankAt), lastGain: whole(extra.lastGain), bar, barAt: bar && Number.isInteger(extra.barAt) && extra.barAt > 0 && extra.barAt < 1e10 ? extra.barAt : null };
+  return Object.values(progress).some((v) => v != null) ? progress : null;
 }
 
 // The account's main character: the one it picked (profiles.main_game_uid, while still linked to it), else the most
@@ -1441,6 +1454,8 @@ async function ownProfileOverview(request, env) {
     characters: characters.results || [],
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     leaderboards,
+    photos: await profilePhotos(env, account.discordId, true),
+    gameStats: await characterStats(env, main),
     collection: collectionSummary(completed, await releaseChecklist(env)),
     progressUpdatedAt: ownProgress ? Number(ownProgress.updatedAt) : null,
   });
@@ -1500,8 +1515,143 @@ async function publicProfile(request, env, publicId) {
     main: main?.name ? { name: main.name } : null,
     characters: (characters.results || []).map((row) => ({ name: row.name })),
     leaderboards,
+    photos: await profilePhotos(env, profile.discordId, false),
+    gameStats: await characterStats(env, main),
     collection: collectionSummary(completed, await releaseChecklist(env)),
   });
+}
+
+// Profile photos: pictures players took in Aniimo, uploaded from the aLogs app (WebP, kept privately in R2 under
+// photos/). They show wherever the profile shows - to the owner, and to everyone once the profile is public - with what
+// the game recorded: when, which character, the Aniimo in it and where. Public views never carry the UID.
+const PHOTO_MAX_BYTES = 4 * 1024 * 1024;
+const PHOTOS_PER_ACCOUNT = 500;
+
+function cleanPhotoMeta(raw) {
+  const meta = raw && typeof raw === "object" ? raw : {};
+  const gamePhotoId = String(meta.gamePhotoId || "");
+  if (!/^[A-Za-z0-9_-]{8,64}$/u.test(gamePhotoId)) return { error: "The photo's game id is missing." };
+  const int = (value, low, high) => (Number.isInteger(value) && value >= low && value <= high ? value : null);
+  const num = (value) => (typeof value === "number" && Number.isFinite(value) && Math.abs(value) < 1e7 ? value : null);
+  const gameUid = /^\d{6,20}$/u.test(String(meta.gameUid || "")) ? String(meta.gameUid) : null;
+  const aniimo = Array.isArray(meta.aniimo) ? [...new Set(meta.aniimo.filter((id) => int(id, 1, 1e9) != null))].slice(0, 20) : [];
+  return {
+    gamePhotoId, gameUid,
+    takenAt: int(meta.takenAt, 1e9, 1e10),
+    sceneId: int(meta.sceneId, 0, 1e7),
+    pos: meta.pos && typeof meta.pos === "object" ? { x: num(meta.pos.x), y: num(meta.pos.y), z: num(meta.pos.z) } : { x: null, y: null, z: null },
+    aniimo,
+    width: int(meta.width, 1, 10000),
+    height: int(meta.height, 1, 10000),
+  };
+}
+
+async function uploadProfilePhoto(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Sign in to upload photos." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  if (!env.EVIDENCE) return json({ error: "Photo uploads are unavailable." }, 503);
+  if (Number(request.headers.get("content-length") || 0) > PHOTO_MAX_BYTES + 16384) return json({ error: "The photo is too large." }, 413);
+  let form;
+  try {
+    form = await request.formData();
+  } catch {
+    return json({ error: "Could not read the upload." }, 400);
+  }
+  const photo = form.get("photo");
+  if (!photo || typeof photo === "string" || !photo.size) return json({ error: "The photo is missing." }, 400);
+  if (photo.size > PHOTO_MAX_BYTES) return json({ error: "The photo is too large." }, 413);
+  const head = new Uint8Array(await photo.slice(0, 12).arrayBuffer());
+  const text = (a, b) => String.fromCharCode(...head.slice(a, b));
+  if (text(0, 4) !== "RIFF" || text(8, 12) !== "WEBP") return json({ error: "Photos are uploaded as WebP." }, 400);
+  let meta;
+  try {
+    meta = cleanPhotoMeta(JSON.parse(String(form.get("meta") || "{}")));
+  } catch {
+    return json({ error: "The photo's details are invalid." }, 400);
+  }
+  if (meta.error) return json({ error: meta.error }, 400);
+  if (meta.gameUid) {
+    const owner = await env.DB.prepare("SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1").bind(meta.gameUid).first();
+    if (owner && owner.discordId !== account.discordId) return json({ error: "This character is linked to another account." }, 409);
+  }
+  const existing = await env.DB.prepare(
+    "SELECT photo_id AS id FROM profile_photos WHERE discord_id = ? AND game_photo_id = ?",
+  ).bind(account.discordId, meta.gamePhotoId).first();
+  if (existing) return json({ ok: true, id: existing.id, duplicate: true });
+  const { count } = await env.DB.prepare("SELECT COUNT(*) AS count FROM profile_photos WHERE discord_id = ?").bind(account.discordId).first();
+  if (Number(count) >= PHOTOS_PER_ACCOUNT) return json({ error: `A profile holds up to ${PHOTOS_PER_ACCOUNT} photos: delete some first.` }, 409);
+
+  const id = randomToken(12);
+  const key = `photos/${account.discordId}/${id}.webp`;
+  await env.EVIDENCE.put(key, photo.stream(), { httpMetadata: { contentType: "image/webp" } });
+  await env.DB.prepare(
+    `INSERT INTO profile_photos (photo_id, discord_id, game_photo_id, game_uid, taken_at, scene_id, pos_x, pos_y, pos_z,
+       aniimo_json, width, height, size_bytes, photo_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, account.discordId, meta.gamePhotoId, meta.gameUid, meta.takenAt, meta.sceneId, meta.pos.x, meta.pos.y, meta.pos.z,
+    JSON.stringify(meta.aniimo), meta.width, meta.height, photo.size, key, Math.floor(Date.now() / 1000)).run();
+  return json({ ok: true, id }, 201);
+}
+
+// An account's photos, newest first. `owner` adds what only the owner sees (the UID and the game's photo id).
+async function profilePhotos(env, discordId, owner) {
+  const { results } = await env.DB.prepare(
+    `SELECT p.photo_id AS id, p.game_photo_id AS gamePhotoId, p.game_uid AS gameUid, p.taken_at AS takenAt, p.scene_id AS sceneId,
+       p.pos_x AS x, p.pos_y AS y, p.pos_z AS z, p.aniimo_json AS aniimo, p.width, p.height, gc.character_name AS character
+     FROM profile_photos p LEFT JOIN game_characters gc ON gc.game_uid = p.game_uid AND gc.discord_id = p.discord_id
+     WHERE p.discord_id = ? ORDER BY COALESCE(p.taken_at, p.created_at) DESC LIMIT ?`,
+  ).bind(discordId, PHOTOS_PER_ACCOUNT).all();
+  return (results || []).map((row) => ({
+    id: row.id,
+    url: `/api/photos/${row.id}`,
+    takenAt: row.takenAt,
+    character: row.character || null,
+    sceneId: row.sceneId,
+    pos: row.x == null ? null : { x: row.x, y: row.y, z: row.z },
+    aniimo: parseJsonColumn(row.aniimo) || [],
+    width: row.width,
+    height: row.height,
+    ...(owner ? { gameUid: row.gameUid, gamePhotoId: row.gamePhotoId } : {}),
+  }));
+}
+
+async function listOwnPhotos(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  return json({ photos: await profilePhotos(env, account.discordId, true) });
+}
+
+async function deleteProfilePhoto(request, env, photoId) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const row = await env.DB.prepare("SELECT discord_id AS discordId, photo_key AS photoKey FROM profile_photos WHERE photo_id = ?").bind(photoId).first();
+  if (!row) return json({ error: "Photo not found." }, 404);
+  if (row.discordId !== account.discordId && !account.developerModeAvailable) return json({ error: "You can only delete your own photos." }, 403);
+  await env.EVIDENCE?.delete(row.photoKey);
+  await env.DB.prepare("DELETE FROM profile_photos WHERE photo_id = ?").bind(photoId).run();
+  return json({ ok: true });
+}
+
+// The picture itself: for anyone while its profile is public, else for its owner (and developers) only.
+async function profilePhotoImage(request, env, photoId) {
+  const row = await env.DB.prepare(
+    `SELECT p.discord_id AS discordId, p.photo_key AS photoKey, COALESCE(pr.is_public, 0) AS isPublic
+     FROM profile_photos p LEFT JOIN profiles pr ON pr.discord_id = p.discord_id WHERE p.photo_id = ?`,
+  ).bind(photoId).first();
+  if (!row || !env.EVIDENCE) return json({ error: "Photo not found." }, 404);
+  const visible = Number(row.isPublic) === 1;
+  if (!visible) {
+    const account = await leaderboardAccount(request, env);
+    if (!account || (account.discordId !== row.discordId && !account.developerModeAvailable)) return json({ error: "Photo not found." }, 404);
+  }
+  const object = await env.EVIDENCE.get(row.photoKey);
+  if (!object) return json({ error: "Photo not found." }, 404);
+  const headers = securityHeaders(new Headers());
+  headers.set("content-type", "image/webp");
+  headers.set("cache-control", visible ? "public, max-age=3600" : "private, no-store");
+  return new Response(object.body, { status: 200, headers });
 }
 
 async function deleteOwnAccount(request, env) {
@@ -1527,12 +1677,17 @@ async function deleteOwnAccount(request, env) {
     for (const row of results || []) {
       for (const key of [row.evidenceKey, row.battleKey]) if (key) await env.EVIDENCE.delete(key);
     }
+    const photos = await env.DB.prepare("SELECT photo_key AS photoKey FROM profile_photos WHERE discord_id = ?").bind(discordId).all();
+    for (const row of photos.results || []) {
+      await env.EVIDENCE.delete(row.photoKey);
+    }
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM auth_handoffs WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM leaderboard_tokens WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM leaderboard_submissions WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM game_characters WHERE discord_id = ?").bind(discordId),
+    env.DB.prepare("DELETE FROM profile_photos WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM map_shares WHERE creator_discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM progress_snapshots WHERE discord_id = ?").bind(discordId),
     env.DB.prepare("DELETE FROM profiles WHERE discord_id = ?").bind(discordId),
@@ -2122,6 +2277,61 @@ async function linkCharacter(request, env) {
   const taken = Boolean(existing && existing.discordId !== account.discordId);
   return json({ ok: true, gameUid, name, verified: proven || Boolean(existing?.verifiedAt && !taken), linked: !existing || taken },
     existing && !taken ? 200 : 201);
+}
+
+// The game's Profile screen numbers for a character (Collection Progress), sent by the meter when the player opens
+// their own Profile. Only for a character this account proved from the game, and only whole numbers in range.
+const CHARACTER_STATS = Object.freeze(["aniimoPoint", "sparklingAniimo", "stylePoints", "prismanaAniimo"]);
+const CHARACTER_STAT_MAX = 10_000_000;
+
+export function cleanCharacterStats(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = {};
+  for (const key of CHARACTER_STATS) {
+    const value = raw[key];
+    if (value === undefined || value === null) continue;
+    if (!Number.isInteger(value) || value < 0 || value > CHARACTER_STAT_MAX) return null;
+    out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+async function saveCharacterStats(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
+  if (!account.viaToken) return json({ error: "Profile numbers are sent by the desktop app from the game's Profile screen." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 1024);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
+  const stats = cleanCharacterStats(body.stats);
+  if (!gameUid) return json({ error: "A numeric game UID is required." }, 400);
+  if (!stats) return json({ error: "Stats must be whole numbers: aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo." }, 400);
+  const owned = await env.DB.prepare(
+    "SELECT verified_at AS verifiedAt FROM game_characters WHERE game_uid = ? AND discord_id = ?",
+  ).bind(gameUid, account.discordId).first();
+  if (!owned?.verifiedAt) return json({ error: "Prove this character from the game first (open the game menu or your Profile)." }, 409);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("UPDATE game_characters SET stats_json = ?, stats_at = ? WHERE game_uid = ? AND discord_id = ?")
+    .bind(JSON.stringify(stats), now, gameUid, account.discordId).run();
+  return json({ ok: true, gameUid, stats });
+}
+
+// The main character's Profile screen numbers, for a profile: {aniimoPoint, ..., seenAt} or null.
+async function characterStats(env, main) {
+  if (!main?.gameUid) return null;
+  const row = await env.DB.prepare("SELECT stats_json AS statsJson, stats_at AS statsAt FROM game_characters WHERE game_uid = ?")
+    .bind(main.gameUid).first();
+  if (!row?.statsJson) return null;
+  try {
+    const stats = cleanCharacterStats(JSON.parse(row.statsJson));
+    return stats ? { ...stats, seenAt: Number(row.statsAt) || null } : null;
+  } catch {
+    return null;
+  }
 }
 
 // "That character is mine": a player whose proof was refused because another account proved the UID first sends their
@@ -3093,6 +3303,7 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/characters" && request.method === "GET") return listCharacters(request, env);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "POST") return linkCharacter(request, env);
   if (url.pathname === "/api/leaderboard/characters/disputes" && request.method === "POST") return disputeCharacter(request, env);
+  if (url.pathname === "/api/leaderboard/characters/stats" && request.method === "POST") return saveCharacterStats(request, env);
   if (url.pathname === "/api/admin/character-disputes" && request.method === "GET") return listCharacterDisputes(request, env);
   const disputeMatch = url.pathname.match(/^\/api\/admin\/character-disputes\/(\d{1,12})(\/proof)?$/u);
   if (disputeMatch && disputeMatch[2] && request.method === "GET") return characterProofImage(request, env, "dispute", disputeMatch[1]);
@@ -3103,6 +3314,12 @@ async function api(request, env) {
   if (characterMatch && request.method === "DELETE") return unlinkCharacter(request, env, characterMatch[1]);
   const characterAdminMatch = url.pathname.match(/^\/api\/admin\/characters\/(\d{1,24})$/u);
   if (characterAdminMatch && request.method === "PUT") return reassignCharacter(request, env, characterAdminMatch[1]);
+  if (url.pathname === "/api/profile/photos" && request.method === "POST") return uploadProfilePhoto(request, env);
+  if (url.pathname === "/api/profile/photos" && request.method === "GET") return listOwnPhotos(request, env);
+  const ownPhotoMatch = url.pathname.match(/^\/api\/profile\/photos\/([A-Za-z0-9_-]{8,40})$/u);
+  if (ownPhotoMatch && request.method === "DELETE") return deleteProfilePhoto(request, env, ownPhotoMatch[1]);
+  const photoMatch = url.pathname.match(/^\/api\/photos\/([A-Za-z0-9_-]{8,40})$/u);
+  if (photoMatch && (request.method === "GET" || request.method === "HEAD")) return profilePhotoImage(request, env, photoMatch[1]);
   if (url.pathname === "/api/logs/reports" && request.method === "POST") return submitLogReport(request, env);
   if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);

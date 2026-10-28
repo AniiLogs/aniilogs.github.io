@@ -291,22 +291,174 @@ function renderSim(boards) {
   else body.replaceChildren(standingList("Fastest clear", rows));
 }
 
+// The game's badge for an Egg Heist rank (1 Rookie Egg Hunter ... 7 Egg Emperor), from the reviewed content release.
+function eggRankIcon(tier) {
+  const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+  if (!base || !Number.isInteger(tier) || tier < 1 || tier > 7) return null;
+  const icon = element("img", "profile-rank-icon");
+  icon.src = `${base}/assets/eggheist/rank-${tier}-small.png`;
+  icon.alt = "";
+  icon.loading = "lazy";
+  icon.addEventListener("error", () => icon.remove());       // no picture yet: the rank name is still there
+  return icon;
+}
+
+// The game's Profile screen numbers (Collection Progress), read by the aLogs meter from the player's own Profile, with
+// the game's icons for them from the reviewed content release.
+const GAME_STATS = [
+  ["aniimoPoint", "Aniimo Point", "aniimo-point"],
+  ["sparklingAniimo", "Sparkling Aniimo", "sparkling-aniimo"],
+  ["stylePoints", "Style Points", "style-points"],
+  ["prismanaAniimo", "Prismana Aniimo", "prismana-aniimo"],
+];
+
+function renderGameStats(stats) {
+  const list = profileOverview.querySelector("[data-overview-stats]");
+  const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+  const items = GAME_STATS.filter(([key]) => Number.isInteger(stats?.[key])).map(([key, label, file]) => {
+    const item = element("li", "profile-game-stat");
+    if (base) {
+      const icon = element("img", "profile-game-stat-icon");
+      icon.src = `${base}/assets/profile/${file}.png`;
+      icon.alt = "";
+      icon.loading = "lazy";
+      icon.addEventListener("error", () => icon.remove());   // no picture yet: the label is still there
+      item.append(icon);
+    }
+    item.append(element("span", "profile-game-stat-label", label), element("strong", "", numberFormat.format(stats[key])));
+    return item;
+  });
+  list.replaceChildren(...items);
+  list.hidden = !items.length;
+  if (items.length && stats.seenAt) list.title = `From the game's Profile screen, ${new Date(stats.seenAt * 1000).toLocaleDateString()}`;
+}
+
 function renderEggHeist(boards) {
   const body = overviewBody("eggheist");
   const rows = (boards.eggheist_season || []).map((entry) => {
     const rank = entry.seasonRank?.name || (entry.seasonRank ? `Tier ${entry.seasonRank.tier}` : "Unranked");
-    return standingRow(
+    const emperor = entry.seasonRank?.tier === 7;
+    const progress = entry.seasonProgress || {};
+    const row = standingRow(
       entry.cycle ? `${entry.cycle} · ${rank}` : rank,
       entry,
       "eggheist_season",
       [
-        entry.score != null ? `${numberFormat.format(entry.score)} rank points` : "",
-        entry.stars != null && entry.seasonRank?.tier === 7 ? `${numberFormat.format(entry.stars)} ★` : "",
+        // below Egg Emperor: Rank Points toward the next rank (Rank Info's "1337/2370"); at Egg Emperor: the eggs
+        entry.score != null && !emperor
+          ? `${numberFormat.format(entry.score)}${progress.nextRankAt ? ` / ${numberFormat.format(progress.nextRankAt)}` : ""} rank points`
+          : "",
+        emperor && entry.stars != null ? `${numberFormat.format(entry.stars)} eggs` : "",
+        !emperor && progress.lastGain != null ? `+${numberFormat.format(progress.lastGain)} last match` : "",
       ],
     );
+    const icon = eggRankIcon(entry.seasonRank?.tier);
+    if (icon) {
+      const label = row.firstElementChild;
+      label.classList.add("profile-rank");
+      label.prepend(icon);
+    }
+    if (!emperor && entry.score != null && progress.nextRankAt) {
+      const meter = element("span", "profile-meter");
+      const fill = element("i");
+      fill.style.width = `${Math.min(100, Math.round((entry.score / progress.nextRankAt) * 100))}%`;
+      meter.setAttribute("aria-hidden", "true");
+      meter.append(fill);
+      row.append(meter);
+    }
+    return row;
   });
   if (!rows.length) body.replaceChildren(element("p", "", "No Egg Heist season rank yet."));
   else body.replaceChildren(standingList("Season standing", rows));
+}
+
+// Photos the player took in Aniimo, uploaded from the aLogs app. Each shows what the game recorded with it: when, the
+// character, the Aniimo in it (linked to their Aniilog entries) and where (the map it's on).
+const contentData = new Map();
+function loadContentData(file) {
+  const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+  if (!base) return Promise.resolve(null);
+  if (!contentData.has(file)) {
+    contentData.set(file, fetch(`${base}/data/${file}`).then((response) => (response.ok ? response.json() : null)).catch(() => null));
+  }
+  return contentData.get(file);
+}
+
+async function photoLookups() {
+  const [aniilog, maps] = await Promise.all([loadContentData("aniilog_data.json"), loadContentData("map_site_data.json")]);
+  const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+  const aniimo = new Map();
+  for (const entry of Array.isArray(aniilog?.entries) ? aniilog.entries : []) {
+    if (entry.form_id && entry.name) aniimo.set(String(entry.form_id), { name: entry.name, icon: entry.icon ? `${base}/${entry.icon}` : "" });
+  }
+  // scene -> the map it's on: the overworld's scene names the main map; other places are "map-<scene>-layer-1-level-1-..."
+  const places = new Map();
+  const list = maps?.maps || [];
+  if (maps?.scene_id != null && list[0]) places.set(String(maps.scene_id), { id: list[0].id, label: list[0].label });
+  for (const map of list) {
+    const match = /^map-(\d+)-layer-1-level-1-/u.exec(map.id || "");
+    if (match && !places.has(match[1])) places.set(match[1], { id: map.id, label: map.label });
+  }
+  return { aniimo, places };
+}
+
+async function photoImage(photo, publicView) {
+  const url = `${API_URL.replace(/\/api$/u, "")}${photo.url}`;
+  if (publicView) return url;
+  // your own profile while it's private: the picture needs your sign-in, which an <img> can't send
+  const response = await apiFetch(photo.url.replace(/^\/api/u, ""));
+  return response.ok ? URL.createObjectURL(await response.blob()) : "";
+}
+
+function renderPhotos(photos, publicView = false) {
+  const panel = profileOverview.querySelector('[data-overview-panel="photos"]');
+  const body = overviewBody("photos");
+  panel.hidden = !photos?.length;
+  if (!photos?.length) { body.replaceChildren(); return; }
+  const grid = element("div", "profile-photo-grid");
+  const captions = [];
+  for (const photo of photos) {
+    const figure = element("figure", "profile-photo");
+    const link = element("a");
+    link.target = "_blank"; link.rel = "noopener";
+    const img = element("img");
+    img.alt = ""; img.loading = "lazy";
+    link.append(img);
+    void photoImage(photo, publicView).then((src) => { if (src) { img.src = src; link.href = src; } else figure.remove(); });
+    const caption = element("figcaption");
+    const when = photo.takenAt ? new Date(photo.takenAt * 1000).toLocaleDateString([], { dateStyle: "medium" }) : "";
+    caption.append(element("span", "profile-photo-when", [when, photo.character].filter(Boolean).join(" · ")));
+    figure.append(link, caption);
+    grid.append(figure);
+    captions.push([photo, caption]);
+  }
+  body.replaceChildren(grid);
+  // the Aniimo and the place come from the site's data: added when it arrives, so the photos never wait for it
+  void photoLookups().then(({ aniimo, places }) => {
+    for (const [photo, caption] of captions) {
+      const tags = element("span", "profile-photo-tags");
+      for (const id of photo.aniimo || []) {
+        const known = aniimo.get(String(id));
+        if (!known) continue;
+        const chip = element("a", "profile-photo-aniimo");
+        chip.href = `/explorer/?view=aniilog&aniimo=${encodeURIComponent(id)}`;
+        if (known.icon) {
+          const icon = element("img");
+          icon.src = known.icon; icon.alt = ""; icon.loading = "lazy";
+          chip.append(icon);
+        }
+        chip.append(known.name);
+        tags.append(chip);
+      }
+      const place = places.get(String(photo.sceneId));
+      if (place) {
+        const where = element("a", "profile-photo-place", `📍 ${String(place.label).replace(/\s+[^\w\s]\s+.*$/u, "")}`);
+        where.href = `/explorer/?map=${encodeURIComponent(place.id)}`;
+        tags.append(where);
+      }
+      if (tags.childElementCount) caption.append(tags);
+    }
+  });
 }
 
 function progressRow(label, done, total) {
@@ -389,7 +541,9 @@ async function loadProfileOverview(publicId = "") {
       renderSim(overview.leaderboards);
       renderEggHeist(overview.leaderboards);
     }
+    renderGameStats(overview.gameStats);
     renderCollection(overview.collection, Boolean(publicId));
+    renderPhotos(overview.photos, Boolean(publicId));
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
     // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
     if (!PROFILE_VIEW && window.location.hash === "#my-profile") profileOverview.scrollIntoView({ behavior: "instant" });

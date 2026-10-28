@@ -679,7 +679,8 @@ test("the profile overview gathers the owner's characters, board positions and c
   await submit(dev2Token, run("w1", { kind: "interlink_week", score: 70000 }));
   await submit(devToken, { kind: "sim_run", clientRunId: "s1", clearTimeS: 1800, cleared: true, floors: 16 });
   await submit(dev2Token, { kind: "sim_run", clientRunId: "s2", clearTimeS: 2400, cleared: true, floors: 16 });
-  await submit(devToken, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475 });
+  await submit(devToken, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475,
+    extra: { nextRankAt: 2370, lastGain: 18, bar: [1337, 1350], barAt: 1793167625, secret: "not for the profile" } });
   await submit(dev2Token, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 3100, stars: 500 });
   await call(env, "/api/progress/completed", {
     token: devToken,
@@ -702,6 +703,8 @@ test("the profile overview gathers the owner's characters, board positions and c
   assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 2]]);
   assert.deepEqual(heists.map((row) => [row.cycle, row.seasonRank.name, row.stars, row.score, row.position, row.players]),
     [["S1", "Egg Emperor", 475, 2900, 2, 2]]);
+  // the profile's season progress: just these fields, nothing else from the app's extra
+  assert.deepEqual(heists[0].seasonProgress, { nextRankAt: 2370, lastGain: 18, bar: [1337, 1350], barAt: 1793167625 });
 
   assert.deepEqual(overview.collection, {
     aniilog: { standard: 2, sparkling: 1, forms: 2, special: 0, specialTotal: 1 },

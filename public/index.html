@@ -198,6 +198,7 @@
             <h2 id="my-profile-title" data-overview-name>My profile</h2>
             <p class="profile-overview-bio" data-overview-bio></p>
             <p class="profile-overview-characters" data-overview-characters></p>
+            <ul class="profile-game-stats" data-overview-stats aria-label="In-game collection" hidden></ul>
           </div>
         </header>
         <p class="profile-overview-status" role="status" aria-live="polite" data-overview-status></p>
@@ -219,6 +220,10 @@
           </article>
           <article class="profile-panel" data-overview-panel="collection">
             <h3>Collection</h3>
+            <div data-overview-body></div>
+          </article>
+          <article class="profile-panel profile-photos" data-overview-panel="photos" hidden>
+            <h3>Photos</h3>
             <div data-overview-body></div>
           </article>
         </div>
