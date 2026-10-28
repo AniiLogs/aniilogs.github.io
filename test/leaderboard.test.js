@@ -564,10 +564,20 @@ test("Egg Heist season standings rank by tier, then Emperor stars, then rank poi
   // One standing per player per season; Emperors above a lower tier with more points.
   assert.deepEqual(all.entries.map((entry) => [entry.player, entry.cycle, entry.seasonRank.tier]),
     [["DevOne", "S1", 7], ["DevTwo", "S1", 7], ["DevTwo", "S0", 4]]);
+  // by rank points: Egg Emperors (maxed) first, by their stars, even one without points; then the others by points
+  assert.equal(await submit(devToken, standing("eh-S0", "S0", 7, 1, "Egg Emperor", null, 600)), 201);
   const byPoints = await get("kind=eggheist_season&sort=score");
-  assert.deepEqual(byPoints.entries.map((entry) => entry.score), [3100, 2900, 2400]);
+  assert.deepEqual(byPoints.entries.map((entry) => [entry.player, entry.cycle, entry.score]),
+    [["DevOne", "S0", null], ["DevOne", "S1", 2900], ["DevTwo", "S1", 3100], ["DevTwo", "S0", 2400]]);
+  const lowestFirst = await get("kind=eggheist_season&sort=score&order=asc");
+  assert.deepEqual(lowestFirst.entries.map((entry) => entry.score), [2400, 3100, 2900, null]);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist", { session: SESSIONS.dev })).json();
   assert.deepEqual(facets.cycles.map((row) => row.value), ["S1", "S0"]);
+
+  // a standing has a season; ones early builds sent without it stay off the ladder (they'd be a second row)
+  assert.equal(await submit(devToken, standing("eggheist-2026", null, 7, 1, "Egg Emperor", 2900, 475)), 400);
+  await env.DB.prepare("UPDATE leaderboard_submissions SET cycle = NULL WHERE kind = 'eggheist_season' AND cycle = 'S0'").run();
+  assert.deepEqual((await get("kind=eggheist_season")).entries.map((entry) => [entry.player, entry.cycle]), [["DevOne", "S1"], ["DevTwo", "S1"]]);
 });
 
 test("completion flags merge by newest change, so stale copies cannot undo the desktop app", async () => {
@@ -677,6 +687,7 @@ test("the profile overview gathers the owner's characters, board positions and c
   await submit(dev2Token, run("b1", { score: 25000 }));
   await submit(devToken, run("t1", { score: 9000, boss: { id: "80000100", name: "Omega Tucking", level: 60 } }));
   await submit(dev2Token, run("w1", { kind: "interlink_week", score: 70000 }));
+  await submit(devToken, { kind: "interlink_run", clientRunId: "r-noboss", score: 22000 });   // boss not recognised
   await submit(devToken, { kind: "sim_run", clientRunId: "s1", clearTimeS: 1800, cleared: true, floors: 16 });
   await submit(dev2Token, { kind: "sim_run", clientRunId: "s2", clearTimeS: 2400, cleared: true, floors: 16 });
   await submit(devToken, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475,
@@ -970,7 +981,18 @@ test("profile search finds public profiles by character name or UID, and never p
   assert.deepEqual(await find("devo"), [{ publicId: dev.profile.publicId, characters: [{ name: "DevOne", gameUid: "301000000001" }] }]);
   assert.deepEqual((await find("3010000000")).map((r) => r.characters[0].name), ["DevOne"]);   // UID start; UserOne is private
   assert.deepEqual(await find("UserOne"), []);                    // private profile: not findable
-  assert.deepEqual(await find("Secret"), []);                     // display / Discord names are never searched
+  assert.deepEqual(await find("Secret"), []);                     // display names only when their owner opts in
+  const opted = await (await save(SESSIONS.dev, { displayName: "Secret Discord Name", isPublic: true, findableByName: true })).json();
+  assert.equal(opted.profile.findableByName, true);
+  assert.deepEqual(await find("secret disc"), [{ publicId: dev.profile.publicId, displayName: "Secret Discord Name",
+    characters: [{ name: "DevOne", gameUid: "301000000001" }] }]);
+  assert.equal((await (await call(env, `/api/profiles/${dev.profile.publicId}`)).json()).profile.displayName, "Secret Discord Name");
+  await save(SESSIONS.user, { displayName: "Private Person", isPublic: false, findableByName: true });
+  assert.deepEqual(await find("Private"), []);                    // opted in but private: still not findable
+  await save(SESSIONS.dev, { displayName: "Secret Discord Name", isPublic: true, findableByName: false });
+  assert.deepEqual(await find("Secret"), []);
+  assert.equal((await (await call(env, `/api/profiles/${dev.profile.publicId}`)).json()).profile.displayName, "DevOne");
+  assert.equal((await save(SESSIONS.dev, { displayName: "X", findableByName: "yes" })).status, 400);
   assert.deepEqual(await find("%"), []);                          // wildcards are plain text
   assert.deepEqual(await find("_"), []);
   assert.deepEqual(await find("d"), []);                          // too short

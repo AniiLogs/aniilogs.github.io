@@ -1210,10 +1210,10 @@ async function ownProfile(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
   const row = await env.DB.prepare(
-    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
+    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
   ).bind(account.discordId).first();
   const isPublic = Number(row?.isPublic || 0) === 1;
-  return json({ profile: { ...row, isPublic, publicId: isPublic ? row?.publicId || null : null } });
+  return json({ profile: { ...row, isPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1234,17 +1234,30 @@ async function updateOwnProfile(request, env) {
   if (body.isPublic !== undefined && typeof body.isPublic !== "boolean") {
     return json({ error: "isPublic must be true or false." }, 400);
   }
+  if (body.findableByName !== undefined && typeof body.findableByName !== "boolean") {
+    return json({ error: "findableByName must be true or false." }, 400);
+  }
+  if (body.showPresence !== undefined && typeof body.showPresence !== "boolean") {
+    return json({ error: "showPresence must be true or false." }, 400);
+  }
   // Private by default: a profile only becomes public when its owner sends isPublic: true, and editing the name or
   // bio never changes its visibility. A public profile gets a random id for its link (never the Discord id).
-  const current = await env.DB.prepare("SELECT is_public AS isPublic, public_id AS publicId FROM profiles WHERE discord_id = ?")
-    .bind(account.discordId).first();
+  // Being found by the display name is a separate opt-in (off by default), and only matters while the profile is public.
+  const current = await env.DB.prepare(
+    "SELECT is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence FROM profiles WHERE discord_id = ?",
+  ).bind(account.discordId).first();
   const isPublic = typeof body.isPublic === "boolean" ? body.isPublic : Number(current?.isPublic || 0) === 1;
+  const findableByName = typeof body.findableByName === "boolean" ? body.findableByName : Number(current?.findableByName || 0) === 1;
+  const showPresence = typeof body.showPresence === "boolean" ? body.showPresence : Number(current?.showPresence ?? 1) === 1;
   const publicId = current?.publicId || (isPublic ? shareId() + shareId().slice(0, 4) : null);
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
-    "UPDATE profiles SET display_name = ?, bio = ?, is_public = ?, public_id = ?, updated_at = ? WHERE discord_id = ?",
-  ).bind(displayName, bio || null, isPublic ? 1 : 0, publicId, now, account.discordId).run();
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, publicId: isPublic ? publicId : null, updatedAt: now } });
+    "UPDATE profiles SET display_name = ?, bio = ?, is_public = ?, public_id = ?, findable_by_name = ?, show_presence = ?, updated_at = ? WHERE discord_id = ?",
+  ).bind(displayName, bio || null, isPublic ? 1 : 0, publicId, findableByName ? 1 : 0, showPresence ? 1 : 0, now, account.discordId).run();
+  if (!showPresence) {     // turned off: what was kept goes too
+    await env.DB.prepare("UPDATE game_characters SET presence_state = NULL, presence_at = NULL WHERE discord_id = ?").bind(account.discordId).run();
+  }
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, findableByName, showPresence, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1329,6 +1342,9 @@ async function boardStandings(env, discordId, kind) {
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind));
+  if (kind === "eggheist_season") where.push("s.cycle IS NOT NULL");
+  // a run whose boss wasn't recognised can't stand on a boss's board (it was a second row beside the real one)
+  if (kind === "interlink_run" || kind === "interlink_best") where.push("s.boss_id IS NOT NULL");
   const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle" : "";
   const partition = group ? `s.discord_id, s.${group}` : "s.discord_id";
   const { results } = await env.DB.prepare(
@@ -1424,7 +1440,8 @@ async function ownProfileOverview(request, env) {
       "SELECT display_name AS displayName, bio, is_public AS isPublic FROM profiles WHERE discord_id = ?",
     ).bind(account.discordId).first(),
     env.DB.prepare(
-      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt
+      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt, json_extract(stats_json, '$.level') AS level,
+         json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server
        FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
     ).bind(account.discordId).all(),
     mainCharacter(env, account.discordId),
@@ -1451,8 +1468,9 @@ async function ownProfileOverview(request, env) {
       avatarUrl: account.avatarUrl,
       isPublic: Number(profile?.isPublic || 0) === 1,
     },
-    characters: characters.results || [],
+    characters: (characters.results || []).map(({ level, gender, server, ...row }) => ({ ...row, ...characterDetails({ level, gender, server }) })),
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
+    presence: await profilePresence(env, account.discordId),
     leaderboards,
     photos: await profilePhotos(env, account.discordId, true),
     gameStats: await characterStats(env, main),
@@ -1463,8 +1481,8 @@ async function ownProfileOverview(request, env) {
 
 // A profile its owner made public: name, about, characters, board standing and collection progress. No Discord
 // identity (id, username, avatar). Private or unknown ids are a plain 404.
-// Finds public profiles by a character name (part of it) or a game UID (all of it, or its start). Only profiles their
-// owners made public, and only what a public profile shows anyway: character names and UIDs, never Discord names.
+// Finds public profiles by a character name (part of it) or a game UID (all of it, or its start), and by the display
+// name of owners who opted in to that. Only profiles their owners made public, and only what a public profile shows.
 async function searchProfiles(request, env) {
   const q = String(new URL(request.url).searchParams.get("q") || "").trim();
   if (q.length < 2 || q.length > 40) return json({ results: [] });
@@ -1477,10 +1495,23 @@ async function searchProfiles(request, env) {
        AND ${byUid ? "gc.game_uid LIKE ?" : "LOWER(gc.character_name) LIKE ? ESCAPE '\\'"}
      ORDER BY gc.last_seen_at DESC LIMIT 30`,
   ).bind(byUid ? `${q}%` : like).all();
+  const named = byUid ? { results: [] } : await env.DB.prepare(
+    `SELECT p.public_id AS publicId, p.display_name AS displayName,
+       (SELECT json_group_array(json_object('name', gc.character_name, 'gameUid', gc.game_uid)) FROM game_characters gc
+        WHERE gc.discord_id = p.discord_id AND gc.character_name IS NOT NULL) AS charactersJson
+     FROM profiles p
+     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ? ESCAPE '\\'
+     ORDER BY p.updated_at DESC LIMIT 10`,
+  ).bind(like).all();
   const seen = new Map();
+  for (const row of named.results || []) {
+    let characters = [];
+    try { characters = JSON.parse(row.charactersJson || "[]"); } catch { characters = []; }
+    seen.set(row.publicId, { publicId: row.publicId, displayName: row.displayName, characters });
+  }
   for (const row of results || []) {
     const entry = seen.get(row.publicId) || { publicId: row.publicId, characters: [] };
-    entry.characters.push({ name: row.name, gameUid: row.gameUid });
+    if (!entry.displayName) entry.characters.push({ name: row.name, gameUid: row.gameUid });
     seen.set(row.publicId, entry);
   }
   return json({ results: [...seen.values()].slice(0, 10) });
@@ -1488,11 +1519,13 @@ async function searchProfiles(request, env) {
 
 async function publicProfile(request, env, publicId) {
   const profile = await env.DB.prepare(
-    "SELECT discord_id AS discordId, bio FROM profiles WHERE public_id = ? AND is_public = 1",
+    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName FROM profiles WHERE public_id = ? AND is_public = 1",
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
   const [characters, main] = await Promise.all([
-    env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC")
+    env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level,
+      json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server FROM game_characters
+      WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC`)
       .bind(profile.discordId).all(),
     mainCharacter(env, profile.discordId),
   ]);
@@ -1511,9 +1544,11 @@ async function publicProfile(request, env, publicId) {
     leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
   }
   return json({
-    profile: { displayName: main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
+    // the display name only when its owner lets players find them by it; otherwise their main character's name
+    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true },
     main: main?.name ? { name: main.name } : null,
-    characters: (characters.results || []).map((row) => ({ name: row.name })),
+    characters: (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })),
+    presence: await profilePresence(env, profile.discordId),
     leaderboards,
     photos: await profilePhotos(env, profile.discordId, false),
     gameStats: await characterStats(env, main),
@@ -1996,6 +2031,9 @@ export function leaderboardSubmission(value) {
     cleanBuffs.push(clean);
   }
 
+  // a season standing belongs to a season: without one it would sit on the ladder as a second row for the player
+  if (record.kind === "eggheist_season" && !record.cycle) return { error: "An Egg Heist standing needs its season (cycle)." };
+
   let extraJson = null;
   if (value.extra !== undefined && value.extra !== null) {
     if (typeof value.extra !== "object" || Array.isArray(value.extra)) return { error: "extra must be an object." };
@@ -2280,17 +2318,32 @@ async function linkCharacter(request, env) {
 }
 
 // The game's Profile screen numbers for a character (Collection Progress), sent by the meter when the player opens
-// their own Profile. Only for a character this account proved from the game, and only whole numbers in range.
-const CHARACTER_STATS = Object.freeze(["aniimoPoint", "sparklingAniimo", "stylePoints", "prismanaAniimo"]);
+// their own Profile, and the character's level (from the EXP card the game shows when you gain EXP), gender (the mark
+// after the name on the Profile screen) and server (as the game's settings name it, e.g. "Aniimo-Americas"). Only for
+// a character this account proved from the game, and only whole numbers in range. Each send updates what it has.
+const CHARACTER_STATS = Object.freeze(["aniimoPoint", "sparklingAniimo", "stylePoints", "prismanaAniimo", "level"]);
 const CHARACTER_STAT_MAX = 10_000_000;
+const CHARACTER_LEVEL_MAX = 200;
+
+const CHARACTER_GENDERS = Object.freeze(["female", "male"]);
 
 export function cleanCharacterStats(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const out = {};
+  if (raw.gender !== undefined && raw.gender !== null) {
+    if (!CHARACTER_GENDERS.includes(raw.gender)) return null;
+    out.gender = raw.gender;
+  }
+  if (raw.server !== undefined && raw.server !== null) {
+    const server = boundedText(raw.server, 40, /^[\p{L}\p{N} ._-]+$/u);
+    if (!server) return null;
+    out.server = server;
+  }
   for (const key of CHARACTER_STATS) {
     const value = raw[key];
     if (value === undefined || value === null) continue;
     if (!Number.isInteger(value) || value < 0 || value > CHARACTER_STAT_MAX) return null;
+    if (key === "level" && (value < 1 || value > CHARACTER_LEVEL_MAX)) return null;
     out[key] = value;
   }
   return Object.keys(out).length ? out : null;
@@ -2309,15 +2362,71 @@ async function saveCharacterStats(request, env) {
   const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
   const stats = cleanCharacterStats(body.stats);
   if (!gameUid) return json({ error: "A numeric game UID is required." }, 400);
-  if (!stats) return json({ error: "Stats must be whole numbers: aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo." }, 400);
+  if (!stats) return json({ error: "Stats must be whole numbers (aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo, level), gender female or male, server a name." }, 400);
   const owned = await env.DB.prepare(
-    "SELECT verified_at AS verifiedAt FROM game_characters WHERE game_uid = ? AND discord_id = ?",
+    "SELECT verified_at AS verifiedAt, stats_json AS statsJson FROM game_characters WHERE game_uid = ? AND discord_id = ?",
   ).bind(gameUid, account.discordId).first();
   if (!owned?.verifiedAt) return json({ error: "Prove this character from the game first (open the game menu or your Profile)." }, 409);
+  let saved = null;
+  try { saved = owned.statsJson ? cleanCharacterStats(JSON.parse(owned.statsJson)) : null; } catch { saved = null; }
+  const merged = { ...saved, ...stats };        // the level and the Profile screen's numbers arrive separately
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare("UPDATE game_characters SET stats_json = ?, stats_at = ? WHERE game_uid = ? AND discord_id = ?")
-    .bind(JSON.stringify(stats), now, gameUid, account.discordId).run();
-  return json({ ok: true, gameUid, stats });
+    .bind(JSON.stringify(merged), now, gameUid, account.discordId).run();
+  return json({ ok: true, gameUid, stats: merged });
+}
+
+// Online / AFK, sent by the aLogs app while the game runs: every 2 minutes and on each change, "offline" when the game
+// closes. Only for a character this account proved, and only counted for PRESENCE_FRESH_S, so a PC that drops off
+// shows offline on its own.
+const PRESENCE_STATES = Object.freeze(["online", "afk", "offline"]);
+const PRESENCE_FRESH_S = 300;
+
+async function saveCharacterPresence(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account || !leaderboardAllowed(account, env)) return gatedResponse(account);
+  if (!account.viaToken) return json({ error: "Online status is sent by the desktop app." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 512);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
+  if (!gameUid || !PRESENCE_STATES.includes(body.state)) return json({ error: "Send gameUid and state: online, afk or offline." }, 400);
+  const owned = await env.DB.prepare(
+    `SELECT gc.verified_at AS verifiedAt, COALESCE(p.show_presence, 1) AS shown
+     FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id WHERE gc.game_uid = ? AND gc.discord_id = ?`,
+  ).bind(gameUid, account.discordId).first();
+  if (!owned?.verifiedAt) return json({ error: "Prove this character from the game first (open the game menu or your Profile)." }, 409);
+  if (Number(owned.shown) !== 1) return json({ ok: true, state: body.state, shown: false });   // turned off: not kept
+  await env.DB.prepare("UPDATE game_characters SET presence_state = ?, presence_at = ? WHERE game_uid = ? AND discord_id = ?")
+    .bind(body.state, Math.floor(Date.now() / 1000), gameUid, account.discordId).run();
+  return json({ ok: true, state: body.state, shown: true });
+}
+
+// The profile's presence: "online" if any of its characters is, else "afk", else "offline" (the game or aLogs isn't
+// running: either way nothing was heard for 5 minutes); null for a profile with no character yet, or whose owner turned
+// it off (Edit profile > Show my online status).
+async function profilePresence(env, discordId) {
+  const row = await env.DB.prepare(
+    `SELECT (SELECT COALESCE(show_presence, 1) FROM profiles WHERE discord_id = ?1) AS shown,
+            (SELECT presence_state FROM game_characters
+             WHERE discord_id = ?1 AND presence_at > ?2 AND presence_state IN ('online', 'afk')
+             ORDER BY presence_state = 'online' DESC LIMIT 1) AS state,
+            (SELECT COUNT(*) FROM game_characters WHERE discord_id = ?1) AS characters`,
+  ).bind(discordId, Math.floor(Date.now() / 1000) - PRESENCE_FRESH_S).first();
+  if (row && row.shown !== null && Number(row.shown) !== 1) return null;
+  return row?.state || (Number(row?.characters) ? "offline" : null);
+}
+
+// A character's level, gender and server as the profile lists them (only what's known).
+function characterDetails(row) {
+  return {
+    ...(Number.isInteger(row.level) ? { level: row.level } : {}),
+    ...(CHARACTER_GENDERS.includes(row.gender) ? { gender: row.gender } : {}),
+    ...(typeof row.server === "string" && row.server ? { server: row.server } : {}),
+  };
 }
 
 // The main character's Profile screen numbers, for a profile: {aniimoPoint, ..., seenAt} or null.
@@ -2471,6 +2580,7 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
   if (LEADERBOARD_KINDS[kind]) {
     where.push("s.kind = ?");
     binds.push(kind);
+    if (kind === "eggheist_season") where.push("s.cycle IS NOT NULL");   // early builds sent standings without the season
   } else {
     const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "interlink";
     where.push("s.mode = ?");
@@ -2837,6 +2947,11 @@ async function leaderboardEntries(request, env) {
   // "standing" (Egg Heist season) orders by rank tier, then Emperor stars, then rank points.
   const sortBy = (key, direction) => (prefix) => {
     if (key === "standing") return ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${direction}`).join(", ");
+    // Egg Heist rank points: Egg Emperors have maxed them (MAX), so they come first, ordered by their stars
+    if (key === "score" && kind === "eggheist_season") {
+      return [`(COALESCE(${prefix}rank_tier, 0) = 7)`, `COALESCE(${prefix}stars, 0)`, `COALESCE(${prefix}score, 0)`]
+        .map((column) => `${column} ${direction}`).join(", ");
+    }
     if (key === "difficulty") return `${DIFFICULTY_RANK_SQL(prefix)} ${direction}, ${prefix}score DESC`;
     if (key === "played_at") return `COALESCE(${prefix}played_at, ${prefix}created_at) ${direction}`;
     if (key === "player") return `LOWER(COALESCE(${prefix}teammate, ${prefix}characterName, ${prefix}anyCharacter, '')) ${direction}`;
@@ -2846,7 +2961,7 @@ async function leaderboardEntries(request, env) {
   const orderBy = sortBy(sortKey, order);
   // which of a player's runs is their row: the sort itself, or for name/date/difficulty the board's main measure
   const pickBy = DISPLAY_SORTS.has(sortKey) ? sortBy(mainKey, LEADERBOARD_SORTS[mainKey]) : orderBy;
-  if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
+  if (sortKey === "standing" || (sortKey === "score" && kind === "eggheist_season")) where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
   else if (sortKey !== "player" && sortKey !== "played_at") where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind));
@@ -3071,9 +3186,20 @@ async function interlinkProofs(env, cycles, server) {
 }
 
 // Log reports from the aLogs app's "Send logs" button: the meter's logs as a zip, the game UID that sent it, an optional
-// note and the app version. No account needed, so it's rate limited per UID and per address (a salted hash, kept only
-// to count), capped in size and in how many are kept, and anything older than 30 days goes on the next report.
+// note, the app version and up to 5 screenshots the player chose (PNG, JPEG or WebP). No account needed, so it's rate
+// limited per UID and per address (a salted hash, kept only to count), capped in size and in how many are kept, and
+// anything older than 30 days goes on the next report.
 const LOG_REPORT_MAX_BYTES = 8 * 1024 * 1024;
+const LOG_REPORT_SHOTS = Object.freeze({ count: 5, bytes: 4 * 1024 * 1024 });
+
+// A screenshot's type from its first bytes (never from what the sender says): PNG, JPEG or WebP, else null.
+function screenshotType(head) {
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return { type: "image/png", ext: "png" };
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return { type: "image/jpeg", ext: "jpg" };
+  const text = String.fromCharCode(...head.slice(0, 4)) + String.fromCharCode(...head.slice(8, 12));
+  if (text === "RIFFWEBP") return { type: "image/webp", ext: "webp" };
+  return null;
+}
 const LOG_REPORT_KEEP_S = 30 * 86400;
 const LOG_REPORT_LIMITS = Object.freeze({ perUidHour: 5, perIpHour: 10, kept: 1000 });
 
@@ -3082,7 +3208,7 @@ async function submitLogReport(request, env) {
   if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("multipart/form-data")) {
     return json({ error: "Send the logs as multipart/form-data." }, 400);
   }
-  if (Number(request.headers.get("content-length") || 0) > LOG_REPORT_MAX_BYTES + 16384) {
+  if (Number(request.headers.get("content-length") || 0) > LOG_REPORT_MAX_BYTES + LOG_REPORT_SHOTS.count * LOG_REPORT_SHOTS.bytes + 16384) {
     return json({ error: "The logs are too large." }, 413);
   }
   let form;
@@ -3100,6 +3226,15 @@ async function submitLogReport(request, env) {
   if (head[0] !== 0x50 || head[1] !== 0x4b || head[2] !== 0x03 || head[3] !== 0x04) return json({ error: "The logs must be a zip." }, 400);
   const note = String(form.get("note") || "").trim().slice(0, 2000) || null;
   const appVersion = String(form.get("app_version") || "").trim().slice(0, 40) || null;
+  const shotFiles = form.getAll("screenshot").filter((file) => file && typeof file !== "string" && file.size);
+  if (shotFiles.length > LOG_REPORT_SHOTS.count) return json({ error: `At most ${LOG_REPORT_SHOTS.count} screenshots.` }, 400);
+  const shots = [];
+  for (const file of shotFiles) {
+    if (file.size > LOG_REPORT_SHOTS.bytes) return json({ error: "A screenshot is too large (4 MB at most)." }, 413);
+    const kind = screenshotType(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
+    if (!kind) return json({ error: "Screenshots must be PNG, JPEG or WebP pictures." }, 400);
+    shots.push({ file, ...kind });
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
@@ -3121,25 +3256,42 @@ async function submitLogReport(request, env) {
     httpMetadata: { contentType: "application/zip" },
     customMetadata: { uid: gameUid },
   });
+  const stored = [];
+  for (const [index, shot] of shots.entries()) {
+    const key = `logs/${reportId}-shot-${index + 1}.${shot.ext}`;
+    await env.EVIDENCE.put(key, shot.file.stream(), { httpMetadata: { contentType: shot.type }, customMetadata: { uid: gameUid } });
+    stored.push({ key, type: shot.type, size: shot.file.size });
+  }
   await env.DB.prepare(
-    `INSERT INTO log_reports (report_id, game_uid, note, app_version, size_bytes, log_key, ip_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(reportId, gameUid, note, appVersion, logs.size, logKey, ipHash, now).run();
+    `INSERT INTO log_reports (report_id, game_uid, note, app_version, size_bytes, log_key, ip_hash, created_at, screenshots_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(reportId, gameUid, note, appVersion, logs.size, logKey, ipHash, now, stored.length ? JSON.stringify(stored) : null).run();
   await expireLogReports(env, now);
-  return json({ ok: true, reportId, createdAt: now }, 201);
+  return json({ ok: true, reportId, createdAt: now, screenshots: stored.length }, 201);
 }
 
-// A cleared report loses its logs (the zip) but keeps its row and notes, so what was reported and done stays readable.
+function reportScreenshots(row) {
+  try {
+    const list = JSON.parse(row?.shotsJson || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+// A cleared report loses its logs (the zip and screenshots) but keeps its row and notes, so what was reported and done
+// stays readable.
 async function clearLogReportRows(env, rows, now) {
   for (const row of rows) {
     await env.EVIDENCE.delete(row.logKey);
+    for (const shot of reportScreenshots(row)) await env.EVIDENCE.delete(shot.key);
     await env.DB.prepare("UPDATE log_reports SET cleared_at = ? WHERE report_id = ?").bind(now, row.id).run();
   }
 }
 
 async function expireLogReports(env, now) {
   const { results } = await env.DB.prepare(
-    "SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE cleared_at IS NULL AND created_at < ? LIMIT 50",
+    "SELECT report_id AS id, log_key AS logKey, screenshots_json AS shotsJson FROM log_reports WHERE cleared_at IS NULL AND created_at < ? LIMIT 50",
   ).bind(now - LOG_REPORT_KEEP_S).all();
   await clearLogReportRows(env, results || [], now);
 }
@@ -3152,16 +3304,17 @@ async function logReportDeveloper(request, env) {
   return account?.developerModeAvailable ? account : null;
 }
 
-// Newest first, without the address hash; ?all=1 includes cleared ones. Each with its notes, oldest first.
+// Newest first, without the address hash; ?all=1 includes cleared ones. Each with its notes, oldest first, and how many
+// screenshots came with it (GET .../<id>/screenshots/<n>, from 1).
 async function listLogReports(request, env) {
   if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
   const all = new URL(request.url).searchParams.get("all") === "1";
   const { results } = await env.DB.prepare(
     `SELECT report_id AS id, game_uid AS gameUid, note, app_version AS appVersion, size_bytes AS sizeBytes,
-       created_at AS createdAt, cleared_at AS clearedAt
+       created_at AS createdAt, cleared_at AS clearedAt, screenshots_json AS shotsJson
      FROM log_reports ${all ? "" : "WHERE cleared_at IS NULL"} ORDER BY created_at DESC LIMIT 500`,
   ).all();
-  const reports = results || [];
+  const reports = (results || []).map(({ shotsJson, ...report }) => ({ ...report, screenshots: report.clearedAt ? 0 : reportScreenshots({ shotsJson }).length }));
   if (reports.length) {
     const { results: notes } = await env.DB.prepare(
       `SELECT n.report_id AS reportId, n.note, n.created_at AS createdAt, COALESCE(u.discord_global_name, u.discord_username, n.discord_id) AS author
@@ -3186,6 +3339,21 @@ async function logReportZip(request, env, reportId) {
   const headers = securityHeaders(new Headers());
   headers.set("content-type", "application/zip");
   headers.set("content-disposition", `attachment; filename="aLogs-logs-${row.gameUid}-${row.createdAt}.zip"`);
+  headers.set("cache-control", "private, no-store");
+  return new Response(object.body, { status: 200, headers });
+}
+
+async function logReportScreenshot(request, env, reportId, number) {
+  if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
+  const row = await env.DB.prepare(
+    "SELECT screenshots_json AS shotsJson, cleared_at AS clearedAt FROM log_reports WHERE report_id = ?",
+  ).bind(reportId).first();
+  if (row?.clearedAt) return json({ error: "This report was cleared: its screenshots are gone, its notes remain." }, 410);
+  const shot = reportScreenshots(row)[number - 1];
+  const object = shot && await env.EVIDENCE.get(shot.key);
+  if (!object) return json({ error: "Screenshot not found." }, 404);
+  const headers = securityHeaders(new Headers());
+  headers.set("content-type", shot.type);
   headers.set("cache-control", "private, no-store");
   return new Response(object.body, { status: 200, headers });
 }
@@ -3221,8 +3389,8 @@ async function clearLogReports(request, env, reportId) {
     return json({ error: "Only administrators clear reports: leave a note on it instead." }, 403);
   }
   const { results } = reportId
-    ? await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE report_id = ? AND cleared_at IS NULL").bind(reportId).all()
-    : await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE cleared_at IS NULL").all();
+    ? await env.DB.prepare("SELECT report_id AS id, log_key AS logKey, screenshots_json AS shotsJson FROM log_reports WHERE report_id = ? AND cleared_at IS NULL").bind(reportId).all()
+    : await env.DB.prepare("SELECT report_id AS id, log_key AS logKey, screenshots_json AS shotsJson FROM log_reports WHERE cleared_at IS NULL").all();
   if (reportId && !results?.length) return json({ error: "Report not found." }, 404);
   await clearLogReportRows(env, results || [], Math.floor(Date.now() / 1000));
   return json({ ok: true, cleared: results?.length || 0 });
@@ -3304,6 +3472,7 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/characters" && request.method === "POST") return linkCharacter(request, env);
   if (url.pathname === "/api/leaderboard/characters/disputes" && request.method === "POST") return disputeCharacter(request, env);
   if (url.pathname === "/api/leaderboard/characters/stats" && request.method === "POST") return saveCharacterStats(request, env);
+  if (url.pathname === "/api/leaderboard/characters/presence" && request.method === "POST") return saveCharacterPresence(request, env);
   if (url.pathname === "/api/admin/character-disputes" && request.method === "GET") return listCharacterDisputes(request, env);
   const disputeMatch = url.pathname.match(/^\/api\/admin\/character-disputes\/(\d{1,12})(\/proof)?$/u);
   if (disputeMatch && disputeMatch[2] && request.method === "GET") return characterProofImage(request, env, "dispute", disputeMatch[1]);
@@ -3325,6 +3494,8 @@ async function api(request, env) {
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);
   const logReportNotesMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})\/notes$/u);
   if (logReportNotesMatch && request.method === "POST") return addLogReportNote(request, env, logReportNotesMatch[1]);
+  const logReportShotMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})\/screenshots\/([1-5])$/u);
+  if (logReportShotMatch && request.method === "GET") return logReportScreenshot(request, env, logReportShotMatch[1], Number(logReportShotMatch[2]));
   const logReportMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})$/u);
   if (logReportMatch && request.method === "GET") return logReportZip(request, env, logReportMatch[1]);
   if (logReportMatch && request.method === "DELETE") return clearLogReports(request, env, logReportMatch[1]);

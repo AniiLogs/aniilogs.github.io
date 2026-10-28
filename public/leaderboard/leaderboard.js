@@ -60,7 +60,8 @@
     ],
     eggheist_season: [
       { label: "Rank", sort: "standing", value: (e) => e.seasonRank?.name || (e.seasonRank?.tier ? `Tier ${e.seasonRank.tier}` : "—") },
-      { label: "Rank points", sort: "score", value: (e) => number(e.score) },
+      // Egg Emperor is the top rank: its points are maxed out (it counts stars instead)
+      { label: "Rank points", sort: "score", value: (e) => (e.seasonRank?.tier === 7 ? "MAX" : number(e.score)) },
       // Stars only exist at the top rank (Egg Emperor)
       { label: "Emperor stars", sort: "stars", value: (e) => (e.seasonRank?.tier === 7 || e.stars ? number(e.stars) : "—") },
       { label: "Season", value: (e) => e.cycle || "—" },

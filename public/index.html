@@ -9,11 +9,11 @@
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <title>AniiLogs — Your Aniimo adventure journal</title>
-    <link rel="stylesheet" href="/styles.css?v=0.11.0-profile-page">
+    <link rel="stylesheet" href="/styles.css?v=0.13.2-presence">
     <script src="/explorer/app-config.js?v=20261024-build3535596-team-conditions-r75" defer></script>
     <script src="/theme-shell.js?v=0.2.0-account-menu" defer></script>
     <script src="/explorer/localization.js?v=0.6.1-header-language" data-auto-start="true" defer></script>
-    <script src="/app.js?v=0.8.0-profile-page" defer></script>
+    <script src="/app.js?v=0.10.2-presence" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -167,7 +167,19 @@
               <label class="profile-public-toggle" data-profile-public-row hidden>
                 <input type="checkbox" name="isPublic" data-profile-public>
                 <span>Public profile
-                  <small>Anyone with the link sees your character names, about, leaderboard standing and collection progress. Never your Discord account or display name.</small>
+                  <small>Anyone with the link sees your character names, about, leaderboard standing and collection progress. Never your Discord account, and your display name only if you tick the box below.</small>
+                </span>
+              </label>
+              <label class="profile-public-toggle" data-profile-findable-row hidden>
+                <input type="checkbox" name="findableByName" data-profile-findable>
+                <span>Let players find me by my display name
+                  <small>Your public profile shows your display name, and the player search matches it. Off: only your character names and UIDs.</small>
+                </span>
+              </label>
+              <label class="profile-public-toggle" data-profile-presence-row hidden>
+                <input type="checkbox" name="showPresence" data-profile-presence>
+                <span>Show my online status
+                  <small>Online while Aniimo and the aLogs app are running, AFK after 20 minutes away from the game, Offline otherwise. Off: no status on your profile, and none is kept.</small>
                 </span>
               </label>
               <p class="profile-public-link" data-profile-public-link hidden></p>
@@ -195,10 +207,12 @@
           <img class="profile-avatar" alt="" width="64" height="64" data-overview-avatar hidden>
           <div>
             <p class="eyebrow" data-overview-visibility>Private · only you can see this</p>
-            <h2 id="my-profile-title" data-overview-name>My profile</h2>
+            <div class="profile-name-row">
+              <h2 id="my-profile-title" data-overview-name>My profile</h2>
+              <span class="profile-presence" data-overview-presence hidden></span>
+            </div>
             <p class="profile-overview-bio" data-overview-bio></p>
             <p class="profile-overview-characters" data-overview-characters></p>
-            <ul class="profile-game-stats" data-overview-stats aria-label="In-game collection" hidden></ul>
           </div>
         </header>
         <p class="profile-overview-status" role="status" aria-live="polite" data-overview-status></p>
@@ -220,6 +234,8 @@
           </article>
           <article class="profile-panel" data-overview-panel="collection">
             <h3>Collection</h3>
+            <h4 data-overview-stats-title hidden>In game</h4>
+            <ul class="profile-game-stats" data-overview-stats aria-label="In-game collection" hidden></ul>
             <div data-overview-body></div>
           </article>
           <article class="profile-panel profile-photos" data-overview-panel="photos" hidden>

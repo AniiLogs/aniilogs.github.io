@@ -17,6 +17,10 @@ const PROFILE_VIEW = new URLSearchParams(window.location.search).get("view") ===
 const profilePublic = document.querySelector("[data-profile-public]");
 const profilePublicRow = document.querySelector("[data-profile-public-row]");
 const profilePublicLink = document.querySelector("[data-profile-public-link]");
+const profileFindable = document.querySelector("[data-profile-findable]");
+const profileFindableRow = document.querySelector("[data-profile-findable-row]");
+const profileShowPresence = document.querySelector("[data-profile-presence]");
+const profilePresenceRow = document.querySelector("[data-profile-presence-row]");
 // /?view=profile is the profile page: your own profile (or a sign-in prompt), with a search for anyone else's.
 // /?profile=<id> shows someone's public profile (read-only) in the same view.
 const PUBLIC_PROFILE_ID = /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
@@ -127,6 +131,8 @@ function showSignedIn(account) {
   settingsShortcut.hidden = true;
   status.textContent = `Signed in as ${name}. Your profile is private by default.`;
   profilePublicRow.hidden = false;
+  profileFindableRow.hidden = false;
+  profilePresenceRow.hidden = false;
   void loadPrivateProfile(name);
   if (PROFILE_VIEW) {
     document.querySelector("[data-profile-signin]").hidden = true;
@@ -136,8 +142,13 @@ function showSignedIn(account) {
   if (!PUBLIC_PROFILE_ID) void loadProfileOverview();
 }
 
+profilePublic.addEventListener("change", () => { profileFindable.disabled = !profilePublic.checked; });
+
 function showVisibility(profile) {
   profilePublic.checked = Boolean(profile.isPublic);
+  profileFindable.checked = Boolean(profile.findableByName);
+  profileFindable.disabled = !profile.isPublic;
+  profileShowPresence.checked = profile.showPresence !== false;
   profileStatus.textContent = profile.isPublic ? "Public · anyone with the link can see it" : "Private · visible only to you";
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
   if (profile.isPublic && profile.publicId) {
@@ -314,6 +325,7 @@ const GAME_STATS = [
 
 function renderGameStats(stats) {
   const list = profileOverview.querySelector("[data-overview-stats]");
+  const title = profileOverview.querySelector("[data-overview-stats-title]");
   const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
   const items = GAME_STATS.filter(([key]) => Number.isInteger(stats?.[key])).map(([key, label, file]) => {
     const item = element("li", "profile-game-stat");
@@ -330,6 +342,8 @@ function renderGameStats(stats) {
   });
   list.replaceChildren(...items);
   list.hidden = !items.length;
+  title.hidden = !items.length;
+  title.textContent = "In game";
   if (items.length && stats.seenAt) list.title = `From the game's Profile screen, ${new Date(stats.seenAt * 1000).toLocaleDateString()}`;
 }
 
@@ -524,13 +538,25 @@ async function loadProfileOverview(publicId = "") {
     profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
       : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
     profileOverview.querySelector("[data-overview-bio]").textContent = overview.profile?.bio || "";
+    // Online (green) while they're in Aniimo with aLogs running, AFK (amber) after 20 minutes away from the game,
+    // Offline (red) when the game or aLogs isn't running
+    const presence = profileOverview.querySelector("[data-overview-presence]");
+    const label = { online: "Online", afk: "AFK", offline: "Offline" }[overview.presence];
+    presence.hidden = !label;
+    presence.dataset.state = overview.presence || "";
+    presence.textContent = label || "";
     const mainName = overview.main?.name;
     const characters = (overview.characters || []).map((character) => {
-      const name = character.name || `UID ${character.gameUid}`;
+      // name, gender mark, level and server, as far as the desktop app has seen them
+      const name = [
+        `${character.name || `UID ${character.gameUid}`}${{ female: " ♀", male: " ♂" }[character.gender] || ""}`,
+        Number.isInteger(character.level) ? `Lv ${character.level}` : "",
+        character.server || "",
+      ].filter(Boolean).join(" · ");
       return mainName && character.name === mainName ? `${name} (main)` : name;
     });
     profileOverview.querySelector("[data-overview-characters]").textContent = characters.length
-      ? `Characters: ${characters.join(", ")}${mainName ? ` · collection progress is ${mainName}'s` : ""}`
+      ? `Characters: ${characters.join(", ")}`
       : publicId ? "" : "No game characters linked yet. The desktop app links yours when it sees you in game.";
     // Board standing follows the leaderboard gate; the server sends none while the owner can't read the boards.
     for (const panel of ["interlink", "sim", "eggheist"]) {
@@ -564,7 +590,7 @@ profileEditor.addEventListener("submit", async (event) => {
   profileSaveButton.disabled = true;
   profileStatus.textContent = "Saving…";
   // Visibility is only sent when the public switch is offered (developer preview); otherwise it stays as it is.
-  const visibility = profilePublicRow.hidden ? {} : { isPublic: profilePublic.checked };
+  const visibility = profilePublicRow.hidden ? {} : { isPublic: profilePublic.checked, findableByName: profileFindable.checked, showPresence: profileShowPresence.checked };
   try {
     const response = await apiFetch("/profile", {
       method: "PATCH",
@@ -700,9 +726,15 @@ if (PROFILE_VIEW) {
           const link = element("a");
           link.href = profileHref({ profile: result.publicId });
           link.setAttribute("role", "option");
+          // a display-name match (its owner opted in) shows that name over their characters
           const [first, ...others] = result.characters;
-          link.append(element("strong", "", first.name), element("small", "", `UID ${first.gameUid}`));
-          if (others.length) link.append(element("small", "", `also ${others.map((c) => c.name).join(", ")}`));
+          if (result.displayName) {
+            link.append(element("strong", "", result.displayName));
+            if (result.characters.length) link.append(element("small", "", result.characters.map((c) => c.name).join(", ")));
+          } else {
+            link.append(element("strong", "", first.name), element("small", "", `UID ${first.gameUid}`));
+            if (others.length) link.append(element("small", "", `also ${others.map((c) => c.name).join(", ")}`));
+          }
           item.append(link);
           return item;
         }));

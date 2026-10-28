@@ -46,12 +46,13 @@ async function setup() {
 }
 
 // The app: no cookie, its own origin, the client address as Cloudflare passes it.
-function send(env, { uid = "302000105986", note = "HP number stuck", zip = ZIP, ip = "203.0.113.5" } = {}) {
+function send(env, { uid = "302000105986", note = "HP number stuck", zip = ZIP, ip = "203.0.113.5", shots = [] } = {}) {
   const form = new FormData();
   if (uid !== null) form.set("uid", uid);
   if (note) form.set("note", note);
   form.set("app_version", "0.1.28+rc.15");
   if (zip) form.set("logs", new Blob([zip], { type: "application/zip" }), "logs.zip");
+  for (const shot of shots) form.append("screenshot", new Blob([shot]), "shot");
   const headers = new Headers({ origin: "http://tauri.localhost", "cf-connecting-ip": ip });
   return worker.fetch(new Request("https://api.aniilogs.example/api/logs/reports", { method: "POST", headers, body: form }), env);
 }
@@ -180,4 +181,39 @@ test("reports older than 30 days lose their logs when a new one comes in; their 
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM log_reports WHERE cleared_at IS NULL").get().n, 1);
   assert.ok(sqlite.prepare("SELECT cleared_at FROM log_reports WHERE report_id = ?").get(reportId).cleared_at);
   assert.equal(objects.size, 1);
+});
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+const WEBP = new Uint8Array([...new TextEncoder().encode("RIFF"), 9, 0, 0, 0, ...new TextEncoder().encode("WEBPVP8 "), 1, 2]);
+
+test("players add up to 5 screenshots; developers download them; clearing deletes them", async () => {
+  const { env, objects } = await setup();
+  const sent = await send(env, { shots: [PNG, JPEG, WEBP] });
+  assert.equal(sent.status, 201);
+  const { reportId, screenshots } = await sent.json();
+  assert.equal(screenshots, 3);
+  assert.equal(objects.size, 4);                                   // the zip and three pictures
+  const report = (await (await admin(env, "/api/admin/log-reports")).json()).reports.find((r) => r.id === reportId);
+  assert.equal(report.screenshots, 3);
+  assert.ok(!("shotsJson" in report));
+  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}/screenshots/1`, { session: SESSIONS.user })).status, 403);
+  const first = await admin(env, `/api/admin/log-reports/${reportId}/screenshots/1`);
+  assert.equal(first.headers.get("content-type"), "image/png");
+  assert.deepEqual([...new Uint8Array(await first.arrayBuffer())], [...PNG]);
+  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}/screenshots/3`)).headers.get("content-type"), "image/webp");
+  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}/screenshots/4`)).status, 404);
+  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}`, { method: "DELETE" })).status, 200);
+  assert.equal(objects.size, 0);
+  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}/screenshots/1`)).status, 410);
+});
+
+test("screenshots must be pictures, at most 5, each at most 4 MB; a bad one sends nothing", async () => {
+  const { env, objects } = await setup();
+  assert.equal((await send(env, { shots: [PNG, new TextEncoder().encode("<svg>not a picture</svg>")] })).status, 400);
+  assert.equal((await send(env, { shots: [PNG, PNG, PNG, PNG, PNG, PNG] })).status, 400);
+  const big = new Uint8Array(4 * 1024 * 1024 + 1); big.set(PNG);
+  assert.equal((await send(env, { shots: [big] })).status, 413);
+  assert.equal(objects.size, 0);
+  assert.equal((await send(env)).status, 201);                     // and none at all is fine
 });
