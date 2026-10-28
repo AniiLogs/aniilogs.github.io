@@ -41,7 +41,7 @@ async function setup() {
     async get(key) { const o = objects.get(key); return o ? { body: o.bytes } : null; },
     async delete(key) { objects.delete(key); },
   };
-  const env = { DB, EVIDENCE, PUBLIC_SITE_ORIGIN: ORIGIN, DEVELOPER_DISCORD_IDS: IDS.dev, SESSION_SECRET: "s".repeat(40) };
+  const env = { DB, EVIDENCE, PUBLIC_SITE_ORIGIN: ORIGIN, DEVELOPER_DISCORD_IDS: IDS.dev, ADMIN_DISCORD_IDS: IDS.dev, SESSION_SECRET: "s".repeat(40) };
   return { env, sqlite, objects };
 }
 
@@ -56,9 +56,10 @@ function send(env, { uid = "302000105986", note = "HP number stuck", zip = ZIP, 
   return worker.fetch(new Request("https://api.aniilogs.example/api/logs/reports", { method: "POST", headers, body: form }), env);
 }
 
-function admin(env, path, { session = SESSIONS.dev, method = "GET" } = {}) {
+function admin(env, path, { session = SESSIONS.dev, method = "GET", body } = {}) {
   const headers = new Headers({ authorization: `Bearer ${session}`, origin: ORIGIN });
-  return worker.fetch(new Request(`https://api.aniilogs.example${path}`, { method, headers }), env);
+  if (body) headers.set("content-type", "application/json");
+  return worker.fetch(new Request(`https://api.aniilogs.example${path}`, { method, headers, body: body && JSON.stringify(body) }), env);
 }
 
 test("the app sends a log report: stored privately with the UID, note and time, readable by the app's origin", async () => {
@@ -93,31 +94,90 @@ test("reports are rate limited per UID and per address", async () => {
   assert.equal((await send(env, { uid: "304000000000", ip: "192.0.2.1" })).status, 429);  // 11th from one address
 });
 
-test("developers list, download and clear reports; others can't", async () => {
-  const { env, objects } = await setup();
+test("developers list and download reports; players can't", async () => {
+  const { env } = await setup();
   const { reportId } = await (await send(env)).json();
   await send(env, { uid: "302000000001", ip: "192.0.2.9" });
   assert.equal((await admin(env, "/api/admin/log-reports", { session: SESSIONS.user })).status, 403);
   const list = await (await admin(env, "/api/admin/log-reports")).json();
   assert.equal(list.reports.length, 2);
-  assert.equal(list.reports.find((r) => r.id === reportId).note, "HP number stuck");
-  assert.ok(!("ipHash" in list.reports[0]) && !("ip_hash" in list.reports[0]));
+  const report = list.reports.find((r) => r.id === reportId);
+  assert.equal(report.note, "HP number stuck");
+  assert.deepEqual(report.notes, []);
+  assert.ok(!("ipHash" in report) && !("ip_hash" in report));
   const zip = await admin(env, `/api/admin/log-reports/${reportId}`);
   assert.equal(zip.status, 200);
   assert.equal(zip.headers.get("content-type"), "application/zip");
   assert.deepEqual([...new Uint8Array(await zip.arrayBuffer())], [...ZIP]);
-  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}`, { method: "DELETE", session: SESSIONS.user })).status, 403);
-  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}`, { method: "DELETE" })).status, 200);
-  assert.equal(objects.size, 1);
-  assert.deepEqual(await (await admin(env, "/api/admin/log-reports", { method: "DELETE" })).json(), { ok: true, cleared: 1 });
-  assert.equal(objects.size, 0);
+  assert.equal((await admin(env, `/api/admin/log-reports/${reportId}`, { session: SESSIONS.user })).status, 403);
 });
 
-test("reports older than 30 days are cleared when a new one comes in", async () => {
+test("developers leave notes; only administrators clear, and clearing keeps the report's line and notes", async () => {
+  const { env, sqlite, objects } = await setup();
+  sqlite.prepare("INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at) VALUES (?, ?, ?)").run(IDS.user, IDS.dev, 1);
+  const { reportId } = await (await send(env)).json();
+  const path = `/api/admin/log-reports/${reportId}`;
+  // a developer who isn't an administrator: notes yes, clearing no
+  assert.equal((await admin(env, `${path}/notes`, { session: SESSIONS.user, method: "POST", body: {} })).status, 400);
+  assert.equal((await admin(env, `${path}/notes`, { session: SESSIONS.user, method: "POST",
+    body: { note: "Bar read stalled after BREAK; fixed in PR #12" } })).status, 201);
+  const refused = await admin(env, path, { session: SESSIONS.user, method: "DELETE" });
+  assert.equal(refused.status, 403);
+  assert.match((await refused.json()).error, /leave a note/u);
+  assert.equal(objects.size, 1);
+  const [report] = (await (await admin(env, "/api/admin/log-reports")).json()).reports;
+  assert.equal(report.notes.length, 1);
+  assert.equal(report.notes[0].note, "Bar read stalled after BREAK; fixed in PR #12");
+  assert.equal(report.notes[0].author, "user name");
+  // the administrator clears it: the logs go, the line and notes stay (in ?all=1)
+  assert.equal((await admin(env, path, { method: "DELETE" })).status, 200);
+  assert.equal(objects.size, 0);
+  assert.equal((await (await admin(env, "/api/admin/log-reports")).json()).reports.length, 0);
+  const [kept] = (await (await admin(env, "/api/admin/log-reports?all=1")).json()).reports;
+  assert.ok(kept.clearedAt);
+  assert.equal(kept.notes[0].note, "Bar read stalled after BREAK; fixed in PR #12");
+  assert.equal((await admin(env, path)).status, 410);
+  assert.equal((await admin(env, path, { method: "DELETE" })).status, 404);
+  // a note can't go on a report that doesn't exist
+  assert.equal((await admin(env, "/api/admin/log-reports/nonexistent123/notes", { method: "POST", body: { note: "x" } })).status, 404);
+});
+
+test("developers use their aLogs app sign-in too; players' app sign-ins are refused", async () => {
+  const { env } = await setup();
+  const { reportId } = await (await send(env)).json();
+  const appToken = async (session) => (await (await admin(env, "/api/leaderboard/tokens", { session, method: "POST" })).json()).token;
+  const app = (token, path, method = "GET", body) => worker.fetch(new Request(`https://api.aniilogs.example${path}`, {
+    method, body: body && JSON.stringify(body),
+    headers: { authorization: `Bearer ${token}`, origin: "http://tauri.localhost", ...(body ? { "content-type": "application/json" } : {}) },
+  }), env);
+  const devToken = await appToken(SESSIONS.dev);
+  const userToken = await appToken(SESSIONS.user);
+  assert.match(devToken, /^alb_/u);
+  assert.equal((await app(userToken, "/api/admin/log-reports")).status, 403);
+  const list = await app(devToken, "/api/admin/log-reports");
+  assert.equal(list.status, 200);
+  assert.equal(list.headers.get("access-control-allow-origin"), "*");
+  assert.equal((await list.json()).reports[0].id, reportId);
+  assert.equal((await app(devToken, `/api/admin/log-reports/${reportId}`)).status, 200);
+  assert.equal((await app(userToken, `/api/admin/log-reports/${reportId}/notes`, "POST", { note: "hi" })).status, 403);
+  assert.equal((await app(devToken, `/api/admin/log-reports/${reportId}/notes`, "POST", { note: "looked at it" })).status, 201);
+  assert.equal((await app(devToken, `/api/admin/log-reports/${reportId}`, "DELETE")).status, 200);    // dev is also admin
+});
+
+test("a developer role granted on the site counts, not just the built-in developers", async () => {
+  const { env, sqlite } = await setup();
+  await send(env);
+  assert.equal((await admin(env, "/api/admin/log-reports", { session: SESSIONS.user })).status, 403);
+  sqlite.prepare("INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at) VALUES (?, ?, ?)").run(IDS.user, IDS.dev, 1);
+  assert.equal((await admin(env, "/api/admin/log-reports", { session: SESSIONS.user })).status, 200);
+});
+
+test("reports older than 30 days lose their logs when a new one comes in; their line stays", async () => {
   const { env, sqlite, objects } = await setup();
   const { reportId } = await (await send(env)).json();
   sqlite.prepare("UPDATE log_reports SET created_at = created_at - 31 * 86400 WHERE report_id = ?").run(reportId);
   await send(env, { uid: "302000000001" });
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM log_reports").get().n, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM log_reports WHERE cleared_at IS NULL").get().n, 1);
+  assert.ok(sqlite.prepare("SELECT cleared_at FROM log_reports WHERE report_id = ?").get(reportId).cleared_at);
   assert.equal(objects.size, 1);
 });

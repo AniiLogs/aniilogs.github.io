@@ -772,6 +772,15 @@ function corsResponse(request, env, response) {
     headers.set("access-control-max-age", "600");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
+  // developers read and clear log reports from the aLogs app too (bearer token only, never a cookie)
+  if (url.pathname === "/api/admin/log-reports" || url.pathname.startsWith("/api/admin/log-reports/")) {
+    const headers = new Headers(response.headers);
+    headers.set("access-control-allow-origin", "*");
+    headers.set("access-control-allow-headers", "authorization, content-type");
+    headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+    headers.set("access-control-max-age", "600");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
   const origin = request.headers.get("origin") || "";
   if (!origin || origin !== configuredPublicSiteOrigin(env)) return response;
   const headers = new Headers(response.headers);
@@ -2889,7 +2898,7 @@ async function submitLogReport(request, env) {
     `SELECT
        (SELECT COUNT(*) FROM log_reports WHERE game_uid = ? AND created_at > ?) AS uidHour,
        (SELECT COUNT(*) FROM log_reports WHERE ip_hash = ? AND created_at > ?) AS ipHour,
-       (SELECT COUNT(*) FROM log_reports) AS kept`,
+       (SELECT COUNT(*) FROM log_reports WHERE cleared_at IS NULL) AS kept`,
   ).bind(gameUid, now - 3600, ipHash, now - 3600).first();
   if (Number(counts?.uidHour) >= LOG_REPORT_LIMITS.perUidHour || Number(counts?.ipHour) >= LOG_REPORT_LIMITS.perIpHour) {
     return json({ error: "Too many reports in the last hour. Try again later." }, 429);
@@ -2910,31 +2919,58 @@ async function submitLogReport(request, env) {
   return json({ ok: true, reportId, createdAt: now }, 201);
 }
 
-async function expireLogReports(env, now) {
-  const { results } = await env.DB.prepare(
-    "SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE created_at < ? LIMIT 50",
-  ).bind(now - LOG_REPORT_KEEP_S).all();
-  for (const row of results || []) {
+// A cleared report loses its logs (the zip) but keeps its row and notes, so what was reported and done stays readable.
+async function clearLogReportRows(env, rows, now) {
+  for (const row of rows) {
     await env.EVIDENCE.delete(row.logKey);
-    await env.DB.prepare("DELETE FROM log_reports WHERE report_id = ?").bind(row.id).run();
+    await env.DB.prepare("UPDATE log_reports SET cleared_at = ? WHERE report_id = ?").bind(now, row.id).run();
   }
 }
 
-// Developers: the reports, newest first (no address hash), one report's zip, and clearing one or all of them.
-async function listLogReports(request, env) {
-  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+async function expireLogReports(env, now) {
   const { results } = await env.DB.prepare(
-    `SELECT report_id AS id, game_uid AS gameUid, note, app_version AS appVersion, size_bytes AS sizeBytes, created_at AS createdAt
-     FROM log_reports ORDER BY created_at DESC LIMIT 500`,
+    "SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE cleared_at IS NULL AND created_at < ? LIMIT 50",
+  ).bind(now - LOG_REPORT_KEEP_S).all();
+  await clearLogReportRows(env, results || [], now);
+}
+
+// Developers (any account with the developer role, signed in on the website or in the aLogs app with its desktop
+// token) read reports and leave notes on the ones they work on. Clearing is for administrators: they read the notes and
+// clear a report once its fix is in.
+async function logReportDeveloper(request, env) {
+  const account = await leaderboardAccount(request, env);
+  return account?.developerModeAvailable ? account : null;
+}
+
+// Newest first, without the address hash; ?all=1 includes cleared ones. Each with its notes, oldest first.
+async function listLogReports(request, env) {
+  if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
+  const all = new URL(request.url).searchParams.get("all") === "1";
+  const { results } = await env.DB.prepare(
+    `SELECT report_id AS id, game_uid AS gameUid, note, app_version AS appVersion, size_bytes AS sizeBytes,
+       created_at AS createdAt, cleared_at AS clearedAt
+     FROM log_reports ${all ? "" : "WHERE cleared_at IS NULL"} ORDER BY created_at DESC LIMIT 500`,
   ).all();
-  return json({ reports: results || [] });
+  const reports = results || [];
+  if (reports.length) {
+    const { results: notes } = await env.DB.prepare(
+      `SELECT n.report_id AS reportId, n.note, n.created_at AS createdAt, COALESCE(u.discord_global_name, u.discord_username, n.discord_id) AS author
+       FROM log_report_notes n LEFT JOIN users u ON u.discord_id = n.discord_id
+       WHERE n.report_id IN (${reports.map(() => "?").join(",")}) ORDER BY n.created_at, n.note_id`,
+    ).bind(...reports.map((r) => r.id)).all();
+    for (const report of reports) {
+      report.notes = (notes || []).filter((n) => n.reportId === report.id).map(({ reportId, ...n }) => n);
+    }
+  }
+  return json({ reports });
 }
 
 async function logReportZip(request, env, reportId) {
-  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
   const row = await env.DB.prepare(
-    "SELECT log_key AS logKey, game_uid AS gameUid, created_at AS createdAt FROM log_reports WHERE report_id = ?",
+    "SELECT log_key AS logKey, game_uid AS gameUid, created_at AS createdAt, cleared_at AS clearedAt FROM log_reports WHERE report_id = ?",
   ).bind(reportId).first();
+  if (row?.clearedAt) return json({ error: "This report was cleared: its logs are gone, its notes remain." }, 410);
   const object = row && await env.EVIDENCE.get(row.logKey);
   if (!object) return json({ error: "Report not found." }, 404);
   const headers = securityHeaders(new Headers());
@@ -2944,17 +2980,41 @@ async function logReportZip(request, env, reportId) {
   return new Response(object.body, { status: 200, headers });
 }
 
-async function clearLogReports(request, env, reportId) {
-  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
-  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
-  const { results } = reportId
-    ? await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE report_id = ?").bind(reportId).all()
-    : await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports").all();
-  if (reportId && !results?.length) return json({ error: "Report not found." }, 404);
-  for (const row of results || []) {
-    await env.EVIDENCE.delete(row.logKey);
-    await env.DB.prepare("DELETE FROM log_reports WHERE report_id = ?").bind(row.id).run();
+// A developer's note on a report they worked on: what they found, what they changed, the PR.
+async function addLogReportNote(request, env, reportId) {
+  // a bearer token can't be sent by another site on its own; a website session must come from the site
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await logReportDeveloper(request, env);
+  if (!account) return json({ error: "Developer access required." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 16384);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
   }
+  const note = String(body.note || "").trim().slice(0, 4000);
+  if (!note) return json({ error: "A note is required." }, 400);
+  if (!await env.DB.prepare("SELECT 1 FROM log_reports WHERE report_id = ?").bind(reportId).first()) {
+    return json({ error: "Report not found." }, 404);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("INSERT INTO log_report_notes (report_id, discord_id, note, created_at) VALUES (?, ?, ?, ?)")
+    .bind(reportId, account.discordId, note, now).run();
+  return json({ ok: true, createdAt: now }, 201);
+}
+
+async function clearLogReports(request, env, reportId) {
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await logReportDeveloper(request, env);
+  if (!account) return json({ error: "Developer access required." }, 403);
+  if (!administratorAccountAllowed(account.discordId, env)) {
+    return json({ error: "Only administrators clear reports: leave a note on it instead." }, 403);
+  }
+  const { results } = reportId
+    ? await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE report_id = ? AND cleared_at IS NULL").bind(reportId).all()
+    : await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE cleared_at IS NULL").all();
+  if (reportId && !results?.length) return json({ error: "Report not found." }, 404);
+  await clearLogReportRows(env, results || [], Math.floor(Date.now() / 1000));
   return json({ ok: true, cleared: results?.length || 0 });
 }
 
@@ -3046,6 +3106,8 @@ async function api(request, env) {
   if (url.pathname === "/api/logs/reports" && request.method === "POST") return submitLogReport(request, env);
   if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);
+  const logReportNotesMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})\/notes$/u);
+  if (logReportNotesMatch && request.method === "POST") return addLogReportNote(request, env, logReportNotesMatch[1]);
   const logReportMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})$/u);
   if (logReportMatch && request.method === "GET") return logReportZip(request, env, logReportMatch[1]);
   if (logReportMatch && request.method === "DELETE") return clearLogReports(request, env, logReportMatch[1]);

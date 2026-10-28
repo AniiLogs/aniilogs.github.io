@@ -1,7 +1,8 @@
 // Log reports sent from the aLogs app ("Send logs"), read with the wrangler login on this PC (no website session):
 //   node tools/log-reports.mjs list                  newest first: id, UID, when, size, app version, note
 //   node tools/log-reports.mjs get <id> [folder]     download one report's zip (default: ./log-reports)
-//   node tools/log-reports.mjs clear <id> | all      delete a report (or every report) once its problem is fixed
+//   node tools/log-reports.mjs clear <id> | all      delete a report's logs once it's fixed (its line and notes stay)
+// Developers without Cloudflare access use the aLogs repo's tools/log-reports.mjs (their own sign-in, and notes).
 // Without a wrangler login, a Cloudflare API token (D1 Edit + R2 Storage Edit only) is read from
 // %USERPROFILE%\.aniilogs\cloudflare.env (or ~/.aniilogs/cloudflare.env): one line for CLOUDFLARE_API_TOKEN and one
 // for CLOUDFLARE_ACCOUNT_ID, each as NAME, an equals sign, the value. That file lives outside every repository and is
@@ -28,7 +29,7 @@ const idOk = (id) => /^[A-Za-z0-9_-]{8,40}$/u.test(id || "");
 
 const [action, arg, folder = "log-reports"] = process.argv.slice(2);
 if (action === "list") {
-  for (const r of sql("SELECT report_id AS id, game_uid AS uid, created_at AS at, size_bytes AS size, app_version AS version, note FROM log_reports ORDER BY created_at DESC")) {
+  for (const r of sql("SELECT report_id AS id, game_uid AS uid, created_at AS at, size_bytes AS size, app_version AS version, note FROM log_reports WHERE cleared_at IS NULL ORDER BY created_at DESC")) {
     console.log(`${r.id}  UID ${r.uid}  ${new Date(r.at * 1000).toISOString().replace("T", " ").slice(0, 19)} UTC  ${(r.size / 1024).toFixed(0)} KB  ${r.version || "?"}${r.note ? `\n    ${r.note}` : ""}`);
   }
 } else if (action === "get" && idOk(arg)) {
@@ -39,10 +40,11 @@ if (action === "list") {
   wrangler("r2", "object", "get", `${BUCKET}/${row.key}`, "--remote", "--file", file);
   console.log(file);
 } else if (action === "clear" && (arg === "all" || idOk(arg))) {
-  const rows = sql(`SELECT report_id AS id, log_key AS key FROM log_reports${arg === "all" ? "" : ` WHERE report_id = '${arg}'`}`);
+  const rows = sql(`SELECT report_id AS id, log_key AS key FROM log_reports WHERE cleared_at IS NULL${arg === "all" ? "" : ` AND report_id = '${arg}'`}`);
+  const now = Math.floor(Date.now() / 1000);
   for (const row of rows) {
     wrangler("r2", "object", "delete", `${BUCKET}/${row.key}`, "--remote");
-    sql(`DELETE FROM log_reports WHERE report_id = '${row.id}'`);
+    sql(`UPDATE log_reports SET cleared_at = ${now} WHERE report_id = '${row.id}'`);
   }
   console.log(`cleared ${rows.length}`);
 } else {
