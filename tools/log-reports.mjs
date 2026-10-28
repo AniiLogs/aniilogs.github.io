@@ -3,8 +3,9 @@
 //   node tools/log-reports.mjs get <id> [folder]     download one report's zip (default: ./log-reports)
 //   node tools/log-reports.mjs clear <id> | all      delete a report (or every report) once its problem is fixed
 // Without a wrangler login, a Cloudflare API token (D1 Edit + R2 Storage Edit only) is read from
-// %USERPROFILE%\.aniilogs\cloudflare.env (or ~/.aniilogs/cloudflare.env): CLOUDFLARE_API_TOKEN=... and
-// CLOUDFLARE_ACCOUNT_ID=... lines. That file lives outside every repository and is never printed.
+// %USERPROFILE%\.aniilogs\cloudflare.env (or ~/.aniilogs/cloudflare.env): one line for CLOUDFLARE_API_TOKEN and one
+// for CLOUDFLARE_ACCOUNT_ID, each as NAME, an equals sign, the value. That file lives outside every repository and is
+// never printed.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
