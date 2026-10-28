@@ -2249,7 +2249,9 @@ async function listCharacters(request, env) {
 
 // Claims a character for the signed-in account. The desktop meter calls this with the UID it reads from the game's
 // own log ("meter"); the website can add one by hand ("manual"). A UID linked to another account is refused.
-const MAX_PROOF_BYTES = 512 * 1024;
+// the game menu's strip, or the Profile screen's column (about 0.5-1.5 MB as a PNG at 4K); stored in its D1 row, whose
+// limit is 2 MB (a larger proof comes as a JPEG from the app)
+const MAX_PROOF_BYTES = 1900 * 1000;
 
 // A character link or dispute from the desktop app: JSON {gameUid, name}, or a form with the same fields plus "proof",
 // the strip of the game menu showing the name with the UID under it (and "note" on a dispute).
