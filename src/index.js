@@ -774,7 +774,8 @@ function corsResponse(request, env, response) {
   }
   // developers read and clear log reports from the aLogs app too (bearer token only, never a cookie)
   if (url.pathname === "/api/admin/log-reports" || url.pathname.startsWith("/api/admin/log-reports/")
-    || url.pathname === "/api/profile/photos" || url.pathname.startsWith("/api/profile/photos/") || url.pathname.startsWith("/api/photos/")) {
+    || url.pathname === "/api/profile/photos" || url.pathname.startsWith("/api/profile/photos/") || url.pathname.startsWith("/api/photos/")
+    || url.pathname === "/api/account/preferences") {
     const headers = new Headers(response.headers);
     headers.set("access-control-allow-origin", "*");
     headers.set("access-control-allow-headers", "authorization, content-type");
@@ -2405,6 +2406,59 @@ async function saveCharacterPresence(request, env) {
   return json({ ok: true, state: body.state, shown: true });
 }
 
+// Settings the website and the aLogs app share, kept with the account so changing one changes both: "Show my online
+// status" (also in Edit profile) and the theme (a preset id, or "custom" with its colours). Signed in either way: the
+// site's session or the app's desktop token. GET -> { showPresence, theme }; POST sends any of them. Turning the
+// online status off also drops what was kept.
+const THEME_ID = /^[a-z0-9-]{1,24}$/u;
+const THEME_COLOUR = /^#[0-9a-f]{6}$/iu;
+
+export function cleanTheme(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !THEME_ID.test(String(raw.id || ""))) return null;
+  const theme = { id: raw.id };
+  if (raw.custom !== undefined && raw.custom !== null) {
+    if (typeof raw.custom !== "object" || Array.isArray(raw.custom)) return null;
+    const entries = Object.entries(raw.custom);
+    if (entries.length > 16 || !entries.every(([key, value]) => /^[A-Za-z]{1,24}$/u.test(key) && THEME_COLOUR.test(String(value)))) return null;
+    theme.custom = Object.fromEntries(entries);
+  }
+  return theme;
+}
+
+async function accountPreferences(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (request.method === "POST") {
+    if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+    let body;
+    try {
+      body = await readJsonBody(request, 2048);
+    } catch (error) {
+      return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+    }
+    if (body.showPresence !== undefined && typeof body.showPresence !== "boolean") return json({ error: "showPresence must be true or false." }, 400);
+    const theme = body.theme === undefined ? undefined : cleanTheme(body.theme);
+    if (theme === null) return json({ error: "theme must be { id, custom? } with #rrggbb colours." }, 400);
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof body.showPresence === "boolean") {
+      await env.DB.prepare("UPDATE profiles SET show_presence = ?, updated_at = ? WHERE discord_id = ?")
+        .bind(body.showPresence ? 1 : 0, now, account.discordId).run();
+      if (!body.showPresence) {
+        await env.DB.prepare("UPDATE game_characters SET presence_state = NULL, presence_at = NULL WHERE discord_id = ?").bind(account.discordId).run();
+      }
+    }
+    if (theme) {
+      await env.DB.prepare("UPDATE profiles SET preferences_json = json_set(COALESCE(preferences_json, '{}'), '$.theme', json(?)), updated_at = ? WHERE discord_id = ?")
+        .bind(JSON.stringify(theme), now, account.discordId).run();
+    }
+  }
+  const row = await env.DB.prepare("SELECT show_presence AS showPresence, preferences_json AS prefs FROM profiles WHERE discord_id = ?")
+    .bind(account.discordId).first();
+  let theme = null;
+  try { theme = cleanTheme(JSON.parse(row?.prefs || "{}").theme); } catch { theme = null; }
+  return json({ showPresence: Number(row?.showPresence ?? 1) === 1, theme });
+}
+
 // The profile's presence: "online" if any of its characters is, else "afk", else "offline" (the game or aLogs isn't
 // running: either way nothing was heard for 5 minutes); null for a profile with no character yet, or whose owner turned
 // it off (Edit profile > Show my online status).
@@ -3473,6 +3527,7 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/characters/disputes" && request.method === "POST") return disputeCharacter(request, env);
   if (url.pathname === "/api/leaderboard/characters/stats" && request.method === "POST") return saveCharacterStats(request, env);
   if (url.pathname === "/api/leaderboard/characters/presence" && request.method === "POST") return saveCharacterPresence(request, env);
+  if (url.pathname === "/api/account/preferences" && (request.method === "GET" || request.method === "POST")) return accountPreferences(request, env);
   if (url.pathname === "/api/admin/character-disputes" && request.method === "GET") return listCharacterDisputes(request, env);
   const disputeMatch = url.pathname.match(/^\/api\/admin\/character-disputes\/(\d{1,12})(\/proof)?$/u);
   if (disputeMatch && disputeMatch[2] && request.method === "GET") return characterProofImage(request, env, "dispute", disputeMatch[1]);

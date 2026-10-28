@@ -184,6 +184,7 @@
         const preferences = readPreferences();
         try { window.sessionStorage.removeItem("aniilogs:embed-theme"); } catch { /* picked here: the app's theme no longer applies */ }
         apply(select.value, preferences.customTheme, { persist: true, notify: true });
+        share(select.value, preferences.customTheme);
       });
     });
     const preferences = readPreferences();
@@ -226,15 +227,56 @@
     });
   }
 
+  // Signed in, the theme follows the account, shared with the aLogs app (POST/GET /api/account/preferences): a change
+  // here is sent, and each page takes the account's theme when it opens. Inside the app, the app's own theme applies.
+  function accountApi() {
+    try {
+      const base = String(window.ANIILOGS_CONFIG?.apiUrl || "").replace(/\/+$/u, "");
+      const token = String(window.localStorage.getItem("aniilogs:auth:session:v1") || "");
+      return base && token ? { base, headers: { authorization: `Bearer ${token}` } } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function share(theme, customTheme) {
+    const account = accountApi();
+    if (!account || embedded) return;
+    const id = theme === "custom" || Object.hasOwn(PRESETS, theme) ? theme : "default";
+    const body = { theme: id === "custom" ? { id, custom: normalizeColors(customTheme, PRESETS.default.colors) } : { id } };
+    fetch(`${account.base}/account/preferences`, {
+      method: "POST", headers: { ...account.headers, "content-type": "application/json" }, body: JSON.stringify(body),
+    }).catch(() => { /* offline: shared the next time it changes */ });
+  }
+
+  async function loadAccountTheme() {
+    const account = accountApi();
+    if (!account || embedded) return;
+    try {
+      const response = await fetch(`${account.base}/account/preferences`, { headers: account.headers });
+      if (!response.ok) return;
+      const { theme } = await response.json();
+      const current = readPreferences();
+      if (!theme) { share(String(current.theme || "default"), current.customTheme); return; }   // first time: this one
+      if (theme.id !== "custom" && !Object.hasOwn(PRESETS, theme.id)) return;
+      const custom = theme.id === "custom" ? normalizeColors(theme.custom, PRESETS.default.colors) : current.customTheme;
+      if (theme.id === current.theme && JSON.stringify(normalizeColors(custom)) === JSON.stringify(normalizeColors(current.customTheme))) return;
+      apply(theme.id, custom, { persist: true, notify: true });
+    } catch {
+      // offline: this browser's theme stays
+    }
+  }
+
   function bindShell() {
     bindControls();
     bindAccountMenus();
+    void loadAccountTheme();
   }
 
   const initial = readPreferences();
   const appTheme = embedded && embedTheme && Object.hasOwn(PRESETS, embedTheme) ? embedTheme : null;
   apply(appTheme || String(initial.theme || "default").toLowerCase(), initial.customTheme);
-  window.AniiLogsTheme = Object.freeze({ PRESETS, apply, bindControls, readPreferences, syncControls });
+  window.AniiLogsTheme = Object.freeze({ PRESETS, apply, bindControls, readPreferences, syncControls, share });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindShell, { once: true });
   else bindShell();
 })();

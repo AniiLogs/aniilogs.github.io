@@ -165,3 +165,33 @@ test("Online / AFK from the app shows on the profile for 5 minutes; offline, sta
   sqlite.prepare("DELETE FROM game_characters").run();
   assert.equal(await presence(), null);                              // no character: no status at all
 });
+
+test("the site and the app share Show my online status and the theme, through the account", async () => {
+  const { env, sqlite } = await setup();
+  const token = await appToken(env, SESSIONS.owner);
+  const prefs = async (body) => (await (body
+    ? await app(env, token, "/api/account/preferences", body)
+    : await worker.fetch(new Request("https://api.aniilogs.example/api/account/preferences", {
+      headers: { authorization: `Bearer ${token}`, origin: "http://tauri.localhost" } }), env)).json());
+  assert.deepEqual(await prefs(), { showPresence: true, theme: null });            // defaults
+  sqlite.prepare("UPDATE game_characters SET verified_at = 1, presence_state = 'online', presence_at = ? WHERE game_uid = ?")
+    .run(Math.floor(Date.now() / 1000), "302000105986");
+  assert.equal((await prefs({ showPresence: false })).showPresence, false);        // from the app
+  assert.equal(sqlite.prepare("SELECT presence_state FROM game_characters").get().presence_state, null);
+  assert.equal((await (await site(env, "/api/profile", { session: SESSIONS.owner })).json()).profile.showPresence, false);
+  await site(env, "/api/profile", { session: SESSIONS.owner, method: "PATCH", body: { displayName: "owner name", showPresence: true } });
+  assert.equal((await prefs()).showPresence, true);                                // changed on the site: the app sees it
+  // the theme: set on the site, read by the app; Custom keeps its colours
+  const fromSite = await site(env, "/api/account/preferences", { session: SESSIONS.owner, method: "POST", body: { theme: { id: "pawney" } } });
+  assert.equal(fromSite.status, 200);
+  assert.deepEqual((await prefs()).theme, { id: "pawney" });
+  const custom = { id: "custom", custom: { surface: "#101820", accent: "#FF8800" } };
+  assert.deepEqual((await prefs({ theme: custom })).theme, custom);
+  assert.equal((await prefs()).showPresence, true);                                // the theme left the other alone
+  for (const theme of [{ id: "Bad Id" }, { id: "custom", custom: { surface: "red" } }, "pawney"]) {
+    assert.equal((await app(env, token, "/api/account/preferences", { theme })).status, 400);
+  }
+  assert.equal((await app(env, token, "/api/account/preferences", { showPresence: "no" })).status, 400);
+  const response = await app(env, token, "/api/account/preferences", { theme: { id: "meadow" } });
+  assert.equal(response.headers.get("access-control-allow-origin"), "*");          // the app's own origin may call it
+});

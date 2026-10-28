@@ -2682,6 +2682,7 @@ function renderThemeSettingsCard() {
     state.preferences.customTheme = normalizeThemeColors(draft.customColors);
     persistLocalTracking();
     applyThemePreference();
+    window.AniiLogsTheme?.share?.(state.preferences.theme, state.preferences.customTheme);   // signed in: the account too
     state.settingsThemeDraft = themeDraftFromPreferences();
     renderSettings();
   });
