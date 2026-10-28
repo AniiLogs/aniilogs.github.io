@@ -763,7 +763,8 @@ function corsResponse(request, env, response) {
     headers.set("access-control-max-age", "86400");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
-  if (url.pathname.startsWith("/api/auth/app/")) {
+  // the desktop app (its own origin) signs in and sends log reports from anywhere; both carry no browser cookie
+  if (url.pathname.startsWith("/api/auth/app/") || url.pathname === "/api/logs/reports") {
     const headers = new Headers(response.headers);
     headers.set("access-control-allow-origin", "*");
     headers.set("access-control-allow-headers", "authorization, content-type");
@@ -2850,6 +2851,113 @@ async function interlinkProofs(env, cycles, server) {
   return new Map([...best].map(([key, slot]) => [key, Object.fromEntries(Object.entries(slot).map(([m, v]) => [m, v.id]))]));
 }
 
+// Log reports from the aLogs app's "Send logs" button: the meter's logs as a zip, the game UID that sent it, an optional
+// note and the app version. No account needed, so it's rate limited per UID and per address (a salted hash, kept only
+// to count), capped in size and in how many are kept, and anything older than 30 days goes on the next report.
+const LOG_REPORT_MAX_BYTES = 8 * 1024 * 1024;
+const LOG_REPORT_KEEP_S = 30 * 86400;
+const LOG_REPORT_LIMITS = Object.freeze({ perUidHour: 5, perIpHour: 10, kept: 1000 });
+
+async function submitLogReport(request, env) {
+  if (!env.DB || !env.EVIDENCE) return json({ error: "Log reports are unavailable." }, 503);
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("multipart/form-data")) {
+    return json({ error: "Send the logs as multipart/form-data." }, 400);
+  }
+  if (Number(request.headers.get("content-length") || 0) > LOG_REPORT_MAX_BYTES + 16384) {
+    return json({ error: "The logs are too large." }, 413);
+  }
+  let form;
+  try {
+    form = await request.formData();
+  } catch {
+    return json({ error: "Could not read the report." }, 400);
+  }
+  const gameUid = String(form.get("uid") || "").trim();
+  if (!/^\d{6,20}$/u.test(gameUid)) return json({ error: "A game UID is required." }, 400);
+  const logs = form.get("logs");
+  if (!logs || typeof logs === "string" || !logs.size) return json({ error: "The logs are required." }, 400);
+  if (logs.size > LOG_REPORT_MAX_BYTES) return json({ error: "The logs are too large." }, 413);
+  const head = new Uint8Array(await logs.slice(0, 4).arrayBuffer());
+  if (head[0] !== 0x50 || head[1] !== 0x4b || head[2] !== 0x03 || head[3] !== 0x04) return json({ error: "The logs must be a zip." }, 400);
+  const note = String(form.get("note") || "").trim().slice(0, 2000) || null;
+  const appVersion = String(form.get("app_version") || "").trim().slice(0, 40) || null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const ipHash = await sha256(`${ip}|log-reports|${env.SESSION_SECRET || ""}`);
+  const counts = await env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM log_reports WHERE game_uid = ? AND created_at > ?) AS uidHour,
+       (SELECT COUNT(*) FROM log_reports WHERE ip_hash = ? AND created_at > ?) AS ipHour,
+       (SELECT COUNT(*) FROM log_reports) AS kept`,
+  ).bind(gameUid, now - 3600, ipHash, now - 3600).first();
+  if (Number(counts?.uidHour) >= LOG_REPORT_LIMITS.perUidHour || Number(counts?.ipHour) >= LOG_REPORT_LIMITS.perIpHour) {
+    return json({ error: "Too many reports in the last hour. Try again later." }, 429);
+  }
+  if (Number(counts?.kept) >= LOG_REPORT_LIMITS.kept) return json({ error: "Log reports are full right now. Try again later." }, 503);
+
+  const reportId = randomToken(12);
+  const logKey = `logs/${reportId}.zip`;
+  await env.EVIDENCE.put(logKey, logs.stream(), {
+    httpMetadata: { contentType: "application/zip" },
+    customMetadata: { uid: gameUid },
+  });
+  await env.DB.prepare(
+    `INSERT INTO log_reports (report_id, game_uid, note, app_version, size_bytes, log_key, ip_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(reportId, gameUid, note, appVersion, logs.size, logKey, ipHash, now).run();
+  await expireLogReports(env, now);
+  return json({ ok: true, reportId, createdAt: now }, 201);
+}
+
+async function expireLogReports(env, now) {
+  const { results } = await env.DB.prepare(
+    "SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE created_at < ? LIMIT 50",
+  ).bind(now - LOG_REPORT_KEEP_S).all();
+  for (const row of results || []) {
+    await env.EVIDENCE.delete(row.logKey);
+    await env.DB.prepare("DELETE FROM log_reports WHERE report_id = ?").bind(row.id).run();
+  }
+}
+
+// Developers: the reports, newest first (no address hash), one report's zip, and clearing one or all of them.
+async function listLogReports(request, env) {
+  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  const { results } = await env.DB.prepare(
+    `SELECT report_id AS id, game_uid AS gameUid, note, app_version AS appVersion, size_bytes AS sizeBytes, created_at AS createdAt
+     FROM log_reports ORDER BY created_at DESC LIMIT 500`,
+  ).all();
+  return json({ reports: results || [] });
+}
+
+async function logReportZip(request, env, reportId) {
+  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  const row = await env.DB.prepare(
+    "SELECT log_key AS logKey, game_uid AS gameUid, created_at AS createdAt FROM log_reports WHERE report_id = ?",
+  ).bind(reportId).first();
+  const object = row && await env.EVIDENCE.get(row.logKey);
+  if (!object) return json({ error: "Report not found." }, 404);
+  const headers = securityHeaders(new Headers());
+  headers.set("content-type", "application/zip");
+  headers.set("content-disposition", `attachment; filename="aLogs-logs-${row.gameUid}-${row.createdAt}.zip"`);
+  headers.set("cache-control", "private, no-store");
+  return new Response(object.body, { status: 200, headers });
+}
+
+async function clearLogReports(request, env, reportId) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  if (!await developerAccount(request, env)) return json({ error: "Developer access required." }, 403);
+  const { results } = reportId
+    ? await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports WHERE report_id = ?").bind(reportId).all()
+    : await env.DB.prepare("SELECT report_id AS id, log_key AS logKey FROM log_reports").all();
+  if (reportId && !results?.length) return json({ error: "Report not found." }, 404);
+  for (const row of results || []) {
+    await env.EVIDENCE.delete(row.logKey);
+    await env.DB.prepare("DELETE FROM log_reports WHERE report_id = ?").bind(row.id).run();
+  }
+  return json({ ok: true, cleared: results?.length || 0 });
+}
+
 async function api(request, env) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders() });
@@ -2935,6 +3043,12 @@ async function api(request, env) {
   if (characterMatch && request.method === "DELETE") return unlinkCharacter(request, env, characterMatch[1]);
   const characterAdminMatch = url.pathname.match(/^\/api\/admin\/characters\/(\d{1,24})$/u);
   if (characterAdminMatch && request.method === "PUT") return reassignCharacter(request, env, characterAdminMatch[1]);
+  if (url.pathname === "/api/logs/reports" && request.method === "POST") return submitLogReport(request, env);
+  if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
+  if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);
+  const logReportMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})$/u);
+  if (logReportMatch && request.method === "GET") return logReportZip(request, env, logReportMatch[1]);
+  if (logReportMatch && request.method === "DELETE") return clearLogReports(request, env, logReportMatch[1]);
   if (url.pathname === "/api/v1/shares" && request.method === "POST") return createMapShare(request, env);
   const shareMatch = url.pathname.match(/^\/api\/v1\/shares\/([^/]+)$/u);
   if (shareMatch && request.method === "GET") return getMapShare(shareMatch[1], env);
