@@ -9302,7 +9302,7 @@ function renderChecklistSpecialSection() {
   const title = document.createElement("strong");
   title.textContent = "Special statistics";
   const total = document.createElement("span");
-  total.textContent = "Outside 414 total";
+  total.textContent = `Outside ${formatNumber(checklistProgress(checklistEntriesForCategory("aniimo")).total)} total`;
   heading.append(title, total);
   const detail = document.createElement("p");
   detail.textContent = `Choose either Lunara or Helion: ${selectedStarters} / 1. Skill evolutions seen: ${seenTemporary} / ${temporaryEntries.length}.`;
