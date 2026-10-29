@@ -661,6 +661,7 @@ const state = {
   cloudSyncAuthenticated: false,
   developerModeAvailable: false,
   canGrantRoles: false,
+  canGrantAdministrator: false,
   developerRoleStatus: "",
   developerAccounts: [],
   developerAccountsLoaded: false,
@@ -1750,6 +1751,7 @@ function clearAuthSession() {
   state.cloudSyncAuthenticated = false;
   state.developerModeAvailable = false;
   state.canGrantRoles = false;
+  state.canGrantAdministrator = false;
   state.developerAccounts = [];
   state.developerAccountsLoaded = false;
   state.developerAccountsLoading = false;
@@ -2319,8 +2321,11 @@ async function hydrateCloudProgress() {
       state.developerAccountsOwnerId = String(accountIdentity.discordId || "");
     }
     state.developerModeAvailable = Boolean(accountIdentity.developerModeAvailable);
-    // The owner-only Developer access card follows the server's roles.grant permission, not Developer Mode.
-    state.canGrantRoles = Array.isArray(accountIdentity.permissions) && accountIdentity.permissions.includes("roles.grant");
+    // The role card follows the server's permissions, not Developer Mode: administrators manage the developer
+    // role, and only the owner also manages administrators.
+    const permissions = Array.isArray(accountIdentity.permissions) ? accountIdentity.permissions : [];
+    state.canGrantRoles = permissions.includes("roles.grant.developer");
+    state.canGrantAdministrator = permissions.includes("roles.grant.administrator");
     configureTopbarAccount(accountIdentity);
     applyDeveloperVisibility();
     if (mainViewerResumeRequestV73604.hadRequest) await mainViewerResumeV73604.afterFreshAccount();
@@ -2927,10 +2932,9 @@ async function loadDeveloperAccounts({ force = false } = {}) {
         discordId: String(account.discordId),
         discordUsername: String(account.discordUsername || ""),
         discordGlobalName: String(account.discordGlobalName || ""),
-        developerModeAvailable: Boolean(account.developerModeAvailable),
-        developerAdminAvailable: Boolean(account.developerAdminAvailable),
+        role: DEVELOPER_ROLE_RANK[account.role] === undefined ? "player" : String(account.role),
       }))
-      .sort((left, right) => Number(right.developerAdminAvailable) - Number(left.developerAdminAvailable)
+      .sort((left, right) => DEVELOPER_ROLE_RANK[right.role] - DEVELOPER_ROLE_RANK[left.role]
         || String(left.discordGlobalName || left.discordUsername || left.discordId).localeCompare(
           String(right.discordGlobalName || right.discordUsername || right.discordId),
         ));
@@ -2947,22 +2951,34 @@ async function loadDeveloperAccounts({ force = false } = {}) {
   }
 }
 
-async function updateDeveloperAccess(account, enabled) {
-  if (!state.canGrantRoles || account.developerAdminAvailable || state.developerRoleBusyId) return;
+// Roles, lowest to highest. The server enforces who may change what; this only orders and labels the list.
+const DEVELOPER_ROLE_RANK = Object.freeze({ player: 0, developer: 1, administrator: 2, owner: 3 });
+const DEVELOPER_ROLE_LABELS = Object.freeze({
+  owner: "Owner · protected",
+  administrator: "Administrator · manages developers",
+  developer: "Developer (tester) · Developer Mode",
+  player: "Player",
+});
+
+// role: "developer" or "administrator" to grant, or null to remove the account's role.
+async function updateDeveloperAccess(account, role) {
+  if (!state.canGrantRoles || account.role === "owner" || state.developerRoleBusyId) return;
+  if ((role === "administrator" || account.role === "administrator") && !state.canGrantAdministrator) return;
   const discordId = account.discordId;
+  const name = account.discordGlobalName || account.discordUsername || discordId;
   state.developerRoleBusyId = discordId;
-  state.developerRoleStatus = enabled ? "Granting developer access..." : "Revoking developer access...";
+  state.developerRoleStatus = role ? `Making ${name} ${role === "administrator" ? "an administrator" : "a developer"}...` : `Removing ${name}'s role...`;
   renderSettings();
   try {
     const response = await apiFetch(`/admin/developers/${encodeURIComponent(discordId)}`, {
-      method: enabled ? "PUT" : "DELETE",
+      method: role ? "PUT" : "DELETE",
       headers: { "content-type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(role ? { role } : {}),
     });
     if (!response.ok) throw new Error(`Developer role update returned ${response.status}`);
-    state.developerRoleStatus = enabled
-      ? `Developer access granted to ${account.discordGlobalName || account.discordUsername || discordId}.`
-      : `Developer access revoked from ${account.discordGlobalName || account.discordUsername || discordId}.`;
+    state.developerRoleStatus = role
+      ? `${name} is now ${role === "administrator" ? "an administrator" : "a developer"}.`
+      : `${name} is now a player.`;
     await loadDeveloperAccounts({ force: true });
   } catch (error) {
     console.error("Could not update developer access", error);
@@ -3017,19 +3033,30 @@ function renderDeveloperAccountRows(container) {
     detail.textContent = `${account.discordUsername ? `@${account.discordUsername} · ` : ""}${account.discordId}`;
     const role = document.createElement("span");
     role.className = "developer-account-role";
-    role.textContent = account.developerAdminAvailable
-      ? "Owner/admin · developer access protected"
-      : account.developerModeAvailable ? "Developer access" : "Standard account";
+    role.textContent = DEVELOPER_ROLE_LABELS[account.role] || DEVELOPER_ROLE_LABELS.player;
     identity.append(name, detail, role);
     row.append(identity);
-    if (!account.developerAdminAvailable) {
+    // Administrators manage developers and players; only the owner changes administrators or makes new ones.
+    const actions = [];
+    if (account.role === "player") actions.push(["Make developer", "developer", ""]);
+    if (account.role === "developer") actions.push(["Remove developer", null, "settings-danger"]);
+    if (state.canGrantAdministrator && (account.role === "player" || account.role === "developer")) actions.push(["Make administrator", "administrator", ""]);
+    if (state.canGrantAdministrator && account.role === "administrator") {
+      actions.push(["Make developer", "developer", ""], ["Remove administrator", null, "settings-danger"]);
+    }
+    if (!state.canGrantAdministrator && account.role === "administrator") {
+      const note = document.createElement("small");
+      note.textContent = "Only the owner changes administrators.";
+      identity.append(note);
+    }
+    for (const [label, nextRole, className] of actions) {
       const action = document.createElement("button");
       action.type = "button";
-      action.className = account.developerModeAvailable ? "settings-danger" : "";
-      action.textContent = account.developerModeAvailable ? "Revoke" : "Grant";
-      action.setAttribute("aria-label", `${action.textContent} developer access for ${name.textContent}`);
+      action.className = className;
+      action.textContent = label;
+      action.setAttribute("aria-label", `${label}: ${name.textContent}`);
       action.disabled = Boolean(state.developerRoleBusyId);
-      action.addEventListener("click", () => void updateDeveloperAccess(account, !account.developerModeAvailable));
+      action.addEventListener("click", () => void updateDeveloperAccess(account, nextRole));
       row.append(action);
     }
     container.append(row);
@@ -3100,9 +3127,11 @@ function renderDeveloperSettings(container) {
   const accessCopy = document.createElement("div");
   accessCopy.className = "settings-account";
   const accessTitle = document.createElement("strong");
-  accessTitle.textContent = "Developer access";
+  accessTitle.textContent = "Roles";
   const accessDetail = document.createElement("small");
-  accessDetail.textContent = "Choose a Discord account that has signed in to AniiLogs. Owner/admin access cannot be revoked here.";
+  accessDetail.textContent = state.canGrantAdministrator
+    ? "Choose a Discord account that has signed in to AniiLogs. Developers (testers) get Developer Mode; administrators also manage developers. Owner access can't be changed here."
+    : "Choose a Discord account that has signed in to AniiLogs. You can make players developers (testers) or remove the developer role. Only the owner changes administrators.";
   accessCopy.append(accessTitle, accessDetail);
   const field = document.createElement("label");
   field.className = "developer-account-search";

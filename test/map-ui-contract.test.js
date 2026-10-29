@@ -404,9 +404,10 @@ test("owner can choose signed-in Discord accounts for developer access", () => {
   assert.match(explorer, /payload\.accounts/u);
   assert.match(explorer, /Search signed-in accounts/u);
   assert.match(explorer, /account\.discordGlobalName,\s*account\.discordUsername,\s*account\.discordId/u);
-  assert.match(explorer, /account\.developerAdminAvailable\s*\? "Owner\/admin · developer access protected"/u);
-  assert.match(explorer, /if \(!account\.developerAdminAvailable\) \{/u);
-  assert.match(explorer, /updateDeveloperAccess\(account, !account\.developerModeAvailable\)/u);
+  assert.match(explorer, /owner: "Owner · protected"/u);
+  // Only the owner sees administrator controls; administrators manage developers and players.
+  assert.match(explorer, /if \(state\.canGrantAdministrator && account\.role === "administrator"\)/u);
+  assert.match(explorer, /updateDeveloperAccess\(account, nextRole\)/u);
   assert.doesNotMatch(explorer, /Enter an exact Discord user ID/u);
   assert.match(explorerStyles, /\.developer-account-list\s*\{[^}]*overflow-y: auto;/u);
 });

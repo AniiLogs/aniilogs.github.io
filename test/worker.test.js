@@ -20,11 +20,12 @@ async function tokenHash(token) {
 }
 
 async function authenticatedTestDatabase() {
-  const tokens = { owner: "o".repeat(48), other: "x".repeat(48) };
-  const discordIds = { owner: "111111111111111111", other: "222222222222222222" };
+  const tokens = { owner: "o".repeat(48), other: "x".repeat(48), admin: "a".repeat(48) };
+  const discordIds = { owner: "111111111111111111", other: "222222222222222222", admin: "555555555555555555" };
   const sessions = new Map([
     [await tokenHash(tokens.owner), discordIds.owner],
     [await tokenHash(tokens.other), discordIds.other],
+    [await tokenHash(tokens.admin), discordIds.admin],
   ]);
   const profiles = new Map([
     [discordIds.owner, { displayName: "Owner", bio: null, isPublic: 1, updatedAt: 1 }],
@@ -35,9 +36,11 @@ async function authenticatedTestDatabase() {
   const handoffs = new Set([discordIds.owner, discordIds.other]);
   const previewHandoffs = new Map();
   const developers = new Set();
+  const developerRoles = new Map();
   const accounts = new Map([
     [discordIds.owner, { discordId: discordIds.owner, discordUsername: "owner", discordGlobalName: "Owner", discordAvatarHash: null }],
     [discordIds.other, { discordId: discordIds.other, discordUsername: "other", discordGlobalName: "Other", discordAvatarHash: null }],
+    [discordIds.admin, { discordId: discordIds.admin, discordUsername: "admin", discordGlobalName: "Admin", discordAvatarHash: null }],
   ]);
   const DB = {
     prepare(sql) {
@@ -61,7 +64,7 @@ async function authenticatedTestDatabase() {
                 return row ? { revision: row.revision, updatedAt: row.updatedAt } : null;
               }
               if (sql.startsWith("SELECT display_name")) return profiles.get(values[0]) || null;
-              if (sql.includes("FROM developer_roles")) return developers.has(values[0]) ? { discordId: values[0] } : null;
+              if (sql.includes("FROM developer_roles")) return developers.has(values[0]) ? { discordId: values[0], role: developerRoles.get(values[0]) || "developer" } : null;
               if (sql.includes("FROM auth_handoffs") && sql.includes("WHERE handoff_hash = ?")) {
                 return previewHandoffs.get(values[0]) || null;
               }
@@ -79,6 +82,7 @@ async function authenticatedTestDatabase() {
               }
               if (sql.startsWith("INSERT INTO developer_roles")) {
                 developers.add(values[0]);
+                if (sql.includes("role,")) developerRoles.set(values[0], values[1]);
                 return { meta: { changes: 1 } };
               }
               if (sql.startsWith("INSERT INTO auth_handoffs")) {
@@ -93,6 +97,7 @@ async function authenticatedTestDatabase() {
               }
               if (sql === "DELETE FROM developer_roles WHERE discord_id = ?") {
                 const changed = developers.delete(values[0]);
+                developerRoles.delete(values[0]);
                 return { meta: { changes: changed ? 1 : 0 } };
               }
               if (sql.startsWith("UPDATE profiles SET")) {
@@ -165,6 +170,7 @@ async function authenticatedTestDatabase() {
               discordUsername: account.discordUsername,
               discordGlobalName: account.discordGlobalName,
               grantedDeveloperId: developers.has(account.discordId) ? account.discordId : null,
+              grantedRole: developers.has(account.discordId) ? developerRoles.get(account.discordId) || "developer" : null,
             })) };
           }
           throw new Error(`Unexpected all: ${sql}`);
@@ -175,7 +181,7 @@ async function authenticatedTestDatabase() {
       return Promise.all(statements.map((statement) => statement.run()));
     },
   };
-  return { DB, tokens, discordIds, accounts, sessions, profiles, progress, shares, handoffs, previewHandoffs, developers };
+  return { DB, tokens, discordIds, accounts, sessions, profiles, progress, shares, handoffs, previewHandoffs, developers, developerRoles };
 }
 
 function apiRequest(path, token, options = {}) {
@@ -294,28 +300,64 @@ test("only private administrators can grant and revoke developer access", async 
   assert.equal(state.developers.has(state.discordIds.other), false);
 });
 
-test("testers with Developer Mode cannot see, list, grant or revoke roles: only roles.grant can", async () => {
+test("roles: testers cannot manage roles, administrators grant only the developer role, only the owner grants administrator", async () => {
   const state = await authenticatedTestDatabase();
   const env = { DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io", ADMIN_DISCORD_IDS: state.discordIds.owner };
-  // "other" is a tester: a granted developer role with Developer Mode available.
-  state.developers.add(state.discordIds.other);
-  const tester = await (await worker.fetch(apiRequest("/api/auth/me", state.tokens.other), env)).json();
-  assert.equal(tester.account.developerModeAvailable, true);
-  assert.deepEqual(tester.account.permissions, []);
-  const owner = await (await worker.fetch(apiRequest("/api/auth/me", state.tokens.owner), env)).json();
-  assert.deepEqual(owner.account.permissions, ["roles.grant"]);
-
+  const me = async (token) => (await (await worker.fetch(apiRequest("/api/auth/me", token), env)).json()).account;
+  const call = (token, path, method, body = {}) => worker.fetch(apiRequest(path, token, method === "GET" ? {} : { method, body: JSON.stringify(body) }), env);
   const third = "444444444444444444";
-  for (const [path, method] of [["/api/admin/developers", "GET"], [`/api/admin/developers/${third}`, "PUT"], [`/api/admin/developers/${third}`, "DELETE"], [`/api/admin/developers/${state.discordIds.other}`, "DELETE"]]) {
-    const response = await worker.fetch(apiRequest(path, state.tokens.other, method === "GET" ? {} : { method, body: "{}" }), env);
+
+  // A player has no access at all.
+  assert.equal((await me(state.tokens.other)).role, "player");
+  assert.equal((await call(state.tokens.other, "/api/admin/developers", "GET")).status, 403);
+
+  // The owner grants the administrator role (only the owner can).
+  assert.deepEqual((await me(state.tokens.owner)).permissions, ["roles.grant.developer", "roles.grant.administrator"]);
+  assert.equal((await call(state.tokens.owner, `/api/admin/developers/${state.discordIds.admin}`, "PUT", { role: "administrator" })).status, 200);
+  const admin = await me(state.tokens.admin);
+  assert.equal(admin.role, "administrator");
+  assert.equal(admin.developerModeAvailable, true);
+  assert.deepEqual(admin.permissions, ["roles.grant.developer"]);
+
+  // An administrator grants and revokes the developer role...
+  assert.equal((await call(state.tokens.admin, `/api/admin/developers/${state.discordIds.other}`, "PUT")).status, 200);
+  const tester = await me(state.tokens.other);
+  assert.equal(tester.role, "developer");
+  assert.equal(tester.developerModeAvailable, true);
+  assert.deepEqual(tester.permissions, []);
+  assert.equal((await call(state.tokens.admin, "/api/admin/developers", "GET")).status, 200);
+  // ...but can't grant administrator, demote or remove an administrator (itself included), or touch the owner.
+  for (const [path, method, body] of [
+    [`/api/admin/developers/${third}`, "PUT", { role: "administrator" }],
+    [`/api/admin/developers/${state.discordIds.other}`, "PUT", { role: "administrator" }],
+    [`/api/admin/developers/${state.discordIds.admin}`, "PUT", { role: "developer" }],
+    [`/api/admin/developers/${state.discordIds.admin}`, "DELETE"],
+    [`/api/admin/developers/${state.discordIds.owner}`, "DELETE"],
+  ]) assert.equal((await call(state.tokens.admin, path, method, body)).status, 403, `${method} ${path} ${JSON.stringify(body)}`);
+  assert.equal(state.developerRoles.get(state.discordIds.other), "developer");
+  assert.equal(state.developerRoles.get(state.discordIds.admin), "administrator");
+  assert.equal(state.developers.has(third), false);
+
+  // A tester with Developer Mode can't see, list, grant or revoke anything.
+  for (const [path, method, body] of [
+    ["/api/admin/developers", "GET"], [`/api/admin/developers/${third}`, "PUT"],
+    [`/api/admin/developers/${third}`, "PUT", { role: "administrator" }], [`/api/admin/developers/${state.discordIds.other}`, "DELETE"],
+  ]) {
+    const response = await call(state.tokens.other, path, method, body);
     assert.equal(response.status, 403, `${method} ${path}`);
-    assert.equal((await response.json()).error, "Owner access required.");
+    assert.equal((await response.json()).error, "Role management access required.");
   }
   assert.equal(state.developers.has(third), false);
-  assert.equal(state.developers.has(state.discordIds.other), true);
+
+  // Unknown roles are refused; the administrator revokes the tester; the owner removes the administrator.
+  assert.equal((await call(state.tokens.owner, `/api/admin/developers/${third}`, "PUT", { role: "owner" })).status, 400);
+  assert.equal((await call(state.tokens.admin, `/api/admin/developers/${state.discordIds.other}`, "DELETE")).status, 200);
+  assert.equal((await me(state.tokens.other)).role, "player");
+  assert.equal((await call(state.tokens.owner, `/api/admin/developers/${state.discordIds.admin}`, "DELETE")).status, 200);
+  assert.equal((await me(state.tokens.admin)).role, "player");
 });
 
-test("only the owner administrator can list bounded Discord logins for developer grants", async () => {
+test("role managers list bounded Discord logins with each account's role", async () => {
   const state = await authenticatedTestDatabase();
   const env = {
     DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io",
@@ -328,22 +370,30 @@ test("only the owner administrator can list bounded Discord logins for developer
   state.developers.add(state.discordIds.other);
   const developer = await worker.fetch(apiRequest("/api/admin/developers", state.tokens.other), env);
   assert.equal(developer.status, 403);
-  const owner = await worker.fetch(apiRequest("/api/admin/developers", state.tokens.owner), env);
-  assert.equal(owner.status, 200);
-  const payload = await owner.json();
-  assert.equal(payload.truncated, false);
-  assert.deepEqual(payload.accounts, [
-    {
-      discordId: state.discordIds.owner, discordUsername: "owner", discordGlobalName: "Owner",
-      developerModeAvailable: true, developerAdminAvailable: true,
-    },
-    {
-      discordId: state.discordIds.other, discordUsername: "other", discordGlobalName: "Other",
-      developerModeAvailable: true, developerAdminAvailable: false,
-    },
-  ]);
-  assert.equal("sessionHash" in payload.accounts[0], false);
-  assert.equal("bio" in payload.accounts[0], false);
+  state.developers.add(state.discordIds.admin);
+  state.developerRoles.set(state.discordIds.admin, "administrator");
+  for (const token of [state.tokens.owner, state.tokens.admin]) {
+    const response = await worker.fetch(apiRequest("/api/admin/developers", token), env);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.truncated, false);
+    assert.deepEqual(payload.accounts, [
+      {
+        discordId: state.discordIds.owner, discordUsername: "owner", discordGlobalName: "Owner",
+        developerModeAvailable: true, developerAdminAvailable: true, role: "owner",
+      },
+      {
+        discordId: state.discordIds.other, discordUsername: "other", discordGlobalName: "Other",
+        developerModeAvailable: true, developerAdminAvailable: false, role: "developer",
+      },
+      {
+        discordId: state.discordIds.admin, discordUsername: "admin", discordGlobalName: "Admin",
+        developerModeAvailable: true, developerAdminAvailable: false, role: "administrator",
+      },
+    ]);
+    assert.equal("sessionHash" in payload.accounts[0], false);
+    assert.equal("bio" in payload.accounts[0], false);
+  }
 });
 
 test("developer preview ticket requires Discord developer role and service bridge secret", async () => {

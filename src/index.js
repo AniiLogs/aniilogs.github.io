@@ -644,16 +644,42 @@ export function administratorAccountAllowed(discordId, env) {
   return allowedIds.includes(String(discordId || ""));
 }
 
-// Management permissions, checked by name so a future administrator role can be granted some of them.
-// Today only the owner (ADMIN_DISCORD_IDS) holds them; testers (developer role + Developer Mode) hold none.
-const OWNER_PERMISSIONS = Object.freeze(["roles.grant"]);
+// Roles, lowest to highest: player, developer (a tester: Developer Mode), administrator, owner. The owner is the
+// ADMIN_DISCORD_IDS secret; developer and administrator are rows in developer_roles. Every private role gets the
+// same Developer Mode access; managing roles is checked by permission name.
+const ROLE_PERMISSIONS = Object.freeze({
+  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator"]),
+  administrator: Object.freeze(["roles.grant.developer"]),
+  developer: Object.freeze([]),
+  player: Object.freeze([]),
+});
+const GRANTABLE_ROLES = new Set(["developer", "administrator"]);
 
-export function accountPermissions(discordId, env) {
-  return administratorAccountAllowed(discordId, env) ? [...OWNER_PERMISSIONS] : [];
+export function ownerAccountAllowed(discordId, env) {
+  return administratorAccountAllowed(discordId, env);
+}
+
+// storedRole: the developer_roles row's role ("developer" or "administrator"), or null without a row.
+export function accountRole(discordId, env, storedRole) {
+  if (ownerAccountAllowed(discordId, env)) return "owner";
+  if (storedRole === "administrator") return "administrator";
+  if (storedRole === "developer" || developerAccountAllowed(discordId, env)) return "developer";
+  return "player";
+}
+
+export function accountPermissions(role) {
+  return [...(ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.player)];
 }
 
 export function can(account, permission) {
   return Array.isArray(account?.permissions) && account.permissions.includes(permission);
+}
+
+async function storedDeveloperRole(discordId, env) {
+  const row = await env.DB.prepare(
+    "SELECT discord_id AS discordId, role FROM developer_roles WHERE discord_id = ? LIMIT 1",
+  ).bind(String(discordId)).first();
+  return row ? (row.role === "administrator" ? "administrator" : "developer") : null;
 }
 
 async function currentAccount(request, env) {
@@ -680,17 +706,15 @@ async function currentAccount(request, env) {
     LIMIT 1`,
   ).bind(sessionHash, now).first();
   if (!row) return null;
-  const administrator = administratorAccountAllowed(row.discordId, env);
-  let developer = developerAccountAllowed(row.discordId, env);
-  if (!developer) {
+  let stored = null;
+  if (!ownerAccountAllowed(row.discordId, env)) {
     try {
-      developer = Boolean(await env.DB.prepare(
-        "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
-      ).bind(String(row.discordId)).first());
+      stored = await storedDeveloperRole(row.discordId, env);
     } catch (error) {
       console.error("Could not read developer role", error);
     }
   }
+  const role = accountRole(row.discordId, env, stored);
   return {
     discordId: String(row.discordId),
     username: String(row.discordUsername),
@@ -699,41 +723,52 @@ async function currentAccount(request, env) {
     displayName: row.displayName ? String(row.displayName) : null,
     profilePublic: Number(row.isPublic) === 1,
     sessionExpiresAt: Number(row.expiresAt),
-    developerModeAvailable: developer,
-    developerAdminAvailable: administrator,
-    permissions: accountPermissions(row.discordId, env),
+    developerModeAvailable: role !== "player",
+    developerAdminAvailable: role === "owner",
+    role,
+    permissions: accountPermissions(role),
   };
 }
 
+// PUT grants `role` ("developer" unless the body asks for "administrator"); DELETE removes the row. Administrators
+// manage developers only: granting, changing or removing an administrator needs the owner's permission.
 async function updateDeveloperRole(request, env, discordId, enabled) {
   if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await currentAccount(request, env);
-  if (!can(account, "roles.grant")) return json({ error: "Owner access required." }, 403);
+  if (!can(account, "roles.grant.developer")) return json({ error: "Role management access required." }, 403);
   if (!/^\d{15,22}$/u.test(discordId)) return json({ error: "A valid Discord user ID is required." }, 400);
-  if (administratorAccountAllowed(discordId, env)) {
+  if (ownerAccountAllowed(discordId, env)) {
     return json({ error: "Owner access is configured separately and cannot be changed here." }, 403);
+  }
+  const body = enabled ? await readJsonBody(request, 256) : null;
+  const role = enabled ? (body?.role ?? "developer") : null;
+  if (enabled && !GRANTABLE_ROLES.has(role)) return json({ error: "Role must be developer or administrator." }, 400);
+  const current = await storedDeveloperRole(discordId, env);
+  if ((role === "administrator" || current === "administrator") && !can(account, "roles.grant.administrator")) {
+    return json({ error: "Only the owner can grant, change or remove the administrator role." }, 403);
   }
   const now = Math.floor(Date.now() / 1000);
   if (enabled) {
     await env.DB.prepare(
-      `INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(discord_id) DO UPDATE SET granted_by_discord_id = excluded.granted_by_discord_id`,
-    ).bind(discordId, account.discordId, now).run();
+      `INSERT INTO developer_roles (discord_id, role, granted_by_discord_id, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(discord_id) DO UPDATE SET role = excluded.role, granted_by_discord_id = excluded.granted_by_discord_id`,
+    ).bind(discordId, role, account.discordId, now).run();
   } else {
     await env.DB.prepare("DELETE FROM developer_roles WHERE discord_id = ?").bind(discordId).run();
   }
-  return json({ ok: true, discordId, developer: enabled });
+  return json({ ok: true, discordId, developer: enabled, role: enabled ? role : "player" });
 }
 
 async function listDeveloperAccounts(request, env) {
   const account = await currentAccount(request, env);
-  if (!can(account, "roles.grant")) return json({ error: "Owner access required." }, 403);
+  if (!can(account, "roles.grant.developer")) return json({ error: "Role management access required." }, 403);
   const result = await env.DB.prepare(
     `SELECT users.discord_id AS discordId,
             users.discord_username AS discordUsername,
             users.discord_global_name AS discordGlobalName,
-            developer_roles.discord_id AS grantedDeveloperId
+            developer_roles.discord_id AS grantedDeveloperId,
+            developer_roles.role AS grantedRole
        FROM users
        LEFT JOIN developer_roles ON developer_roles.discord_id = users.discord_id
       ORDER BY users.updated_at DESC, users.discord_id ASC
@@ -743,14 +778,15 @@ async function listDeveloperAccounts(request, env) {
   return json({
     accounts: rows.slice(0, 200).map((row) => {
       const discordId = String(row.discordId);
-      const developerAdminAvailable = administratorAccountAllowed(discordId, env);
+      const stored = row.grantedDeveloperId ? (row.grantedRole === "administrator" ? "administrator" : "developer") : null;
+      const role = accountRole(discordId, env, stored);
       return {
         discordId,
         discordUsername: String(row.discordUsername),
         discordGlobalName: row.discordGlobalName ? String(row.discordGlobalName) : null,
-        developerModeAvailable: Boolean(row.grantedDeveloperId)
-          || developerAccountAllowed(discordId, env),
-        developerAdminAvailable,
+        developerModeAvailable: role !== "player",
+        developerAdminAvailable: role === "owner",
+        role,
       };
     }),
     truncated: rows.length > 200,
