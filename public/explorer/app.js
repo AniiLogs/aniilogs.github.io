@@ -660,7 +660,7 @@ const state = {
   localSnapshotPresent: false,
   cloudSyncAuthenticated: false,
   developerModeAvailable: false,
-  developerAdminAvailable: false,
+  canGrantRoles: false,
   developerRoleStatus: "",
   developerAccounts: [],
   developerAccountsLoaded: false,
@@ -1749,7 +1749,7 @@ function clearAuthSession() {
   }
   state.cloudSyncAuthenticated = false;
   state.developerModeAvailable = false;
-  state.developerAdminAvailable = false;
+  state.canGrantRoles = false;
   state.developerAccounts = [];
   state.developerAccountsLoaded = false;
   state.developerAccountsLoading = false;
@@ -2319,7 +2319,8 @@ async function hydrateCloudProgress() {
       state.developerAccountsOwnerId = String(accountIdentity.discordId || "");
     }
     state.developerModeAvailable = Boolean(accountIdentity.developerModeAvailable);
-    state.developerAdminAvailable = Boolean(accountIdentity.developerAdminAvailable);
+    // The owner-only Developer access card follows the server's roles.grant permission, not Developer Mode.
+    state.canGrantRoles = Array.isArray(accountIdentity.permissions) && accountIdentity.permissions.includes("roles.grant");
     configureTopbarAccount(accountIdentity);
     applyDeveloperVisibility();
     if (mainViewerResumeRequestV73604.hadRequest) await mainViewerResumeV73604.afterFreshAccount();
@@ -2909,7 +2910,7 @@ function appendSettingsStorageError(container) {
 }
 
 async function loadDeveloperAccounts({ force = false } = {}) {
-  if (!state.developerAdminAvailable || state.developerAccountsLoading || (state.developerAccountsLoaded && !force)) return;
+  if (!state.canGrantRoles || state.developerAccountsLoading || (state.developerAccountsLoaded && !force)) return;
   state.developerAccountsLoading = true;
   state.developerAccountsError = "";
   const requestId = ++state.developerAccountsRequestId;
@@ -2919,7 +2920,7 @@ async function loadDeveloperAccounts({ force = false } = {}) {
     if (!response.ok) throw new Error(`Developer account list returned ${response.status}`);
     const payload = await response.json();
     if (!Array.isArray(payload.accounts)) throw new Error("Developer account list is invalid");
-    if (requestId !== state.developerAccountsRequestId || !state.developerAdminAvailable) return;
+    if (requestId !== state.developerAccountsRequestId || !state.canGrantRoles) return;
     state.developerAccounts = payload.accounts
       .filter((account) => /^\d{15,22}$/u.test(String(account?.discordId || "")))
       .map((account) => ({
@@ -2935,11 +2936,11 @@ async function loadDeveloperAccounts({ force = false } = {}) {
         ));
     state.developerAccountsTruncated = Boolean(payload.truncated);
   } catch (error) {
-    if (requestId !== state.developerAccountsRequestId || !state.developerAdminAvailable) return;
+    if (requestId !== state.developerAccountsRequestId || !state.canGrantRoles) return;
     console.error("Could not load developer accounts", error);
     state.developerAccountsError = "Could not load signed-in Discord accounts. Try refreshing the list.";
   } finally {
-    if (requestId !== state.developerAccountsRequestId || !state.developerAdminAvailable) return;
+    if (requestId !== state.developerAccountsRequestId || !state.canGrantRoles) return;
     state.developerAccountsLoaded = true;
     state.developerAccountsLoading = false;
     renderSettings();
@@ -2947,7 +2948,7 @@ async function loadDeveloperAccounts({ force = false } = {}) {
 }
 
 async function updateDeveloperAccess(account, enabled) {
-  if (!state.developerAdminAvailable || account.developerAdminAvailable || state.developerRoleBusyId) return;
+  if (!state.canGrantRoles || account.developerAdminAvailable || state.developerRoleBusyId) return;
   const discordId = account.discordId;
   state.developerRoleBusyId = discordId;
   state.developerRoleStatus = enabled ? "Granting developer access..." : "Revoking developer access...";
@@ -3093,7 +3094,7 @@ function renderDeveloperSettings(container) {
   visibilityCard.append(previewButton);
   container.append(visibilityCard);
 
-  if (!state.developerAdminAvailable) return;
+  if (!state.canGrantRoles) return;
   const accessCard = document.createElement("section");
   accessCard.className = "settings-card settings-display-card";
   const accessCopy = document.createElement("div");

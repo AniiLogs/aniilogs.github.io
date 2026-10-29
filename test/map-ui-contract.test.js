@@ -382,7 +382,7 @@ test("developer diagnostics and role controls are server-entitlement gated", () 
   assert.match(explorerHtml, /id="topbarDeveloperButton"[^>]*hidden/u);
   assert.match(explorer, /state\.developerModeAvailable && state\.preferences\.developerMode/u);
   assert.match(explorer, /if \(state\.developerModeAvailable\) options\.push/u);
-  assert.match(explorer, /if \(!state\.developerAdminAvailable\) return/u);
+  assert.match(explorer, /if \(!state\.canGrantRoles\) return/u);
   assert.match(explorer, /\/admin\/developers\//u);
 });
 
@@ -398,7 +398,7 @@ test("in-progress model QA opens only through active developer mode and a one-us
 });
 
 test("owner can choose signed-in Discord accounts for developer access", () => {
-  assert.match(explorer, /if \(!state\.developerAdminAvailable\) return;\s*const accessCard/u);
+  assert.match(explorer, /if \(!state\.canGrantRoles\) return;\s*const accessCard/u);
   assert.doesNotMatch(explorer, /fastViewerCard|Fast desktop viewer/u);
   assert.match(explorer, /apiFetch\("\/admin\/developers"\)/u);
   assert.match(explorer, /payload\.accounts/u);

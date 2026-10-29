@@ -294,6 +294,27 @@ test("only private administrators can grant and revoke developer access", async 
   assert.equal(state.developers.has(state.discordIds.other), false);
 });
 
+test("testers with Developer Mode cannot see, list, grant or revoke roles: only roles.grant can", async () => {
+  const state = await authenticatedTestDatabase();
+  const env = { DB: state.DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io", ADMIN_DISCORD_IDS: state.discordIds.owner };
+  // "other" is a tester: a granted developer role with Developer Mode available.
+  state.developers.add(state.discordIds.other);
+  const tester = await (await worker.fetch(apiRequest("/api/auth/me", state.tokens.other), env)).json();
+  assert.equal(tester.account.developerModeAvailable, true);
+  assert.deepEqual(tester.account.permissions, []);
+  const owner = await (await worker.fetch(apiRequest("/api/auth/me", state.tokens.owner), env)).json();
+  assert.deepEqual(owner.account.permissions, ["roles.grant"]);
+
+  const third = "444444444444444444";
+  for (const [path, method] of [["/api/admin/developers", "GET"], [`/api/admin/developers/${third}`, "PUT"], [`/api/admin/developers/${third}`, "DELETE"], [`/api/admin/developers/${state.discordIds.other}`, "DELETE"]]) {
+    const response = await worker.fetch(apiRequest(path, state.tokens.other, method === "GET" ? {} : { method, body: "{}" }), env);
+    assert.equal(response.status, 403, `${method} ${path}`);
+    assert.equal((await response.json()).error, "Owner access required.");
+  }
+  assert.equal(state.developers.has(third), false);
+  assert.equal(state.developers.has(state.discordIds.other), true);
+});
+
 test("only the owner administrator can list bounded Discord logins for developer grants", async () => {
   const state = await authenticatedTestDatabase();
   const env = {

@@ -644,6 +644,18 @@ export function administratorAccountAllowed(discordId, env) {
   return allowedIds.includes(String(discordId || ""));
 }
 
+// Management permissions, checked by name so a future administrator role can be granted some of them.
+// Today only the owner (ADMIN_DISCORD_IDS) holds them; testers (developer role + Developer Mode) hold none.
+const OWNER_PERMISSIONS = Object.freeze(["roles.grant"]);
+
+export function accountPermissions(discordId, env) {
+  return administratorAccountAllowed(discordId, env) ? [...OWNER_PERMISSIONS] : [];
+}
+
+export function can(account, permission) {
+  return Array.isArray(account?.permissions) && account.permissions.includes(permission);
+}
+
 async function currentAccount(request, env) {
   if (!env.DB) return null;
   const authorization = request.headers.get("authorization") || "";
@@ -689,13 +701,14 @@ async function currentAccount(request, env) {
     sessionExpiresAt: Number(row.expiresAt),
     developerModeAvailable: developer,
     developerAdminAvailable: administrator,
+    permissions: accountPermissions(row.discordId, env),
   };
 }
 
 async function updateDeveloperRole(request, env, discordId, enabled) {
   if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await currentAccount(request, env);
-  if (!account?.developerAdminAvailable) return json({ error: "Developer administrator access required." }, 403);
+  if (!can(account, "roles.grant")) return json({ error: "Owner access required." }, 403);
   if (!/^\d{15,22}$/u.test(discordId)) return json({ error: "A valid Discord user ID is required." }, 400);
   if (administratorAccountAllowed(discordId, env)) {
     return json({ error: "Owner access is configured separately and cannot be changed here." }, 403);
@@ -715,7 +728,7 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
 
 async function listDeveloperAccounts(request, env) {
   const account = await currentAccount(request, env);
-  if (!account?.developerAdminAvailable) return json({ error: "Developer administrator access required." }, 403);
+  if (!can(account, "roles.grant")) return json({ error: "Owner access required." }, 403);
   const result = await env.DB.prepare(
     `SELECT users.discord_id AS discordId,
             users.discord_username AS discordUsername,
