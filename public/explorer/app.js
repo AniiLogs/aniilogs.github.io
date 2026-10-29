@@ -8909,6 +8909,7 @@ function checklistEntryMatches(entry) {
     entry?.aniilog_number,
     entry?.source_label,
     entry?.map_label,
+    entry?.research_country?.name,
     entry?.area_name,
     entry?.coordinate_key,
     entry?.classification,
