@@ -14,7 +14,8 @@
       { kind: "interlink_ladder", label: "Season Ladder", custom: "season", sorts: [], fields: [] },
     ],
     sim: [
-      { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
+      // one board per trial and difficulty, read from the Victory screen ("Battle time 00:08:22 Training of Water - Hard")
+      { kind: "sim_run", label: "Trials", sorts: ["clear_time_s"], fields: ["trial", "difficulty", "party", "buff"] },
     ],
     // From the desktop meter: the Rank Info screen (season standing) and each match's end screen (Matches)
     eggheist: [
@@ -50,8 +51,9 @@
       { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
-      { label: "Clear time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
-      { label: "Floors", sort: "floors", value: (e) => number(e.floors) },
+      { label: "Battle time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
+      { label: "Trial", value: (e) => e.trial || "—" },
+      { label: "Difficulty", value: (e) => e.difficulty || "—" },
       { label: "Buffs", value: (e) => number(e.buffs?.length) },
       { label: "Party", value: (e) => number(e.partySize) },
       { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
@@ -146,7 +148,7 @@
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
     state.season = params.get("season") || ""; state.split = params.get("split") || ""; state.rank = params.get("rank") === "stars" ? "stars" : "score";
     state.server = params.get("server") || "";
-    for (const name of ["cycle", "boss", "level", "party", "buff", "player"]) {
+    for (const name of ["cycle", "boss", "level", "difficulty", "trial", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
       if (field && field.tagName === "INPUT") field.value = params.get(name) || "";
@@ -176,7 +178,7 @@
     if (state.sort) params.set("sort", state.sort);
     if (state.order) params.set("order", state.order);
     const fields = board().fields;
-    for (const name of ["cycle", "boss", "level", "party", "buff"]) {
+    for (const name of ["cycle", "boss", "level", "difficulty", "trial", "party", "buff"]) {
       const value = els.filters.elements[name]?.value;
       if (value && fields.includes(name)) params.set(name, value);
     }
@@ -270,6 +272,29 @@
     if (f.difficulty) fillSelect(f.difficulty, (facets.difficulties || []).map((row) => ({ value: row.value, label: row.value })), "Any difficulty");
     fillSelect(f.party, facets.partySizes.map((row) => ({ value: row.value, label: row.value === 1 ? "Solo" : `${row.value} players` })), "Any size");
     fillSelect(f.buff, (facets.buffs || []).map((row) => ({ value: row.name, label: `${row.name} (${row.count})` })), "Any buff");
+    fillSelect(f.trial, [...new Set((facets.trials || []).map((row) => row.trial))].map((name) => ({ value: name, label: name })), "All trials");
+    fillSimPickers();
+  }
+  // Holo-Battle Sim ranks each trial and difficulty on its own, so once any trial has runs both pickers name one
+  // (the hardest difficulty that trial has runs on, unless one was picked). Difficulties go easiest to hardest.
+  const SIM_DIFFICULTIES = ["Easy", "Normal", "Hard", "Challenge"];
+  function difficultyOrder(a, b) {
+    return ((SIM_DIFFICULTIES.indexOf(a) + 1 || 99) - (SIM_DIFFICULTIES.indexOf(b) + 1 || 99)) || a.localeCompare(b);
+  }
+  function fillSimPickers() {
+    const f = els.filters.elements;
+    const trials = state.facets?.trials || [];
+    if (state.mode !== "sim" || !trials.length) return;
+    const names = [...new Set(trials.map((row) => row.trial))].sort();
+    const trial = f.trial.dataset.pending ?? f.trial.value;
+    f.trial.replaceChildren(...names.map((name) => el("option", { value: name, text: name })));
+    f.trial.value = names.includes(trial) ? trial : names[0];
+    delete f.trial.dataset.pending;
+    const levels = trials.filter((row) => row.trial === f.trial.value && row.difficulty).map((row) => row.difficulty).sort(difficultyOrder);
+    const level = f.difficulty.dataset.pending ?? f.difficulty.value;
+    f.difficulty.replaceChildren(...levels.map((name) => el("option", { value: name, text: name })));
+    f.difficulty.value = levels.includes(level) ? level : levels.at(-1) ?? "";
+    delete f.difficulty.dataset.pending;
   }
 
   // ---------------------------------------------------------------- table
@@ -770,7 +795,11 @@
     renderRows(result.entries);
     const first = result.total ? result.offset + 1 : 0;
     const last = result.offset + result.entries.length;
-    els.summary.textContent = `${board().label} · ranked by ${(state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
+    const simBoard = state.kind === "sim_run" && els.filters.elements.trial.value
+      ? `${els.filters.elements.trial.value}${els.filters.elements.difficulty.value ? ` - ${els.filters.elements.difficulty.value}` : ""}` : "";
+    els.summary.textContent = simBoard
+      ? `${simBoard} · fastest Victory first · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`
+      : `${board().label} · ranked by ${(state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
     els.page.textContent = result.total ? `${first}–${last} of ${number(result.total)}` : "";
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= result.total;
@@ -833,6 +862,7 @@
   let searchTimer = 0;
   els.filters.addEventListener("input", (event) => {
     if (event.target === els.sort) return;
+    if (event.target === els.filters.elements.trial) fillSimPickers();   // that trial's own difficulties
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => {
       state.offset = 0;
