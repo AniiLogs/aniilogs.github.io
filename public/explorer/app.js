@@ -3637,7 +3637,8 @@ function ensureAniilogData() {
       }
       for (const entry of payload.entries) {
         const mediaEntry = mediaByForm.get(String(entry.form_id || ""));
-        if (!mediaEntry?.video) throw new Error(`Aniilog media is missing form ${entry.form_id}`);
+        // A form whose showcase video is not made yet has a media row with no video.
+        if (!mediaEntry) throw new Error(`Aniilog media is missing form ${entry.form_id}`);
         entry.video = mediaEntry.video;
         entry.video_layout = mediaEntry.video_layout;
         entry.model = mediaEntry.model || "";
@@ -3988,9 +3989,13 @@ function aniilogSortValue(entry, sort) {
   return sort?.sourceLabel ? aniilogStatValue(entry, sort.sourceLabel) : null;
 }
 
+// Each region's Aniilog numbers start at 1, so entries are grouped by region first: Breezy Plains
+// (with the legendary starters), then Whisperwake Isles, then the Collection.
+const ANIILOG_SURFACE_RANK = { whisperwake: 1, collection: 2 };
+
 function compareAniilogEntries(left, right) {
-  const surfaceDifference = (left?.surface_id === "collection" ? 1 : 0)
-    - (right?.surface_id === "collection" ? 1 : 0);
+  const surfaceDifference = (ANIILOG_SURFACE_RANK[left?.surface_id] ?? 0)
+    - (ANIILOG_SURFACE_RANK[right?.surface_id] ?? 0);
   if (surfaceDifference !== 0) return surfaceDifference;
   const numberDifference = Number(left?.research_number) - Number(right?.research_number);
   if (numberDifference !== 0) return numberDifference;
@@ -8314,7 +8319,10 @@ function renderCatalogPreview(options = {}) {
     const specialSummary = Number(totals.starter_special_forms) > 0
       ? ` · ${formatNumber(totals.starter_special_families)} Legendary starter families / ${formatNumber(totals.starter_special_forms)} forms`
       : "";
-    subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
+    const whisperwakeSummary = Number(totals.whisperwake_forms) > 0
+      ? ` · ${formatNumber(totals.whisperwake_species)} Whisperwake Isles species / ${formatNumber(totals.whisperwake_forms)} forms`
+      : "";
+    subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms${whisperwakeSummary} · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
   } else if (view === "aniilog") {
     subtitle.textContent = "Current-build Aniimo records";
   } else if (view === "itemlog" && allEntries.length) {
