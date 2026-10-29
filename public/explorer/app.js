@@ -789,6 +789,8 @@ const els = {
   selectAllButton: document.querySelector("#selectAllButton"),
   selectNoneButton: document.querySelector("#selectNoneButton"),
   showCollectedInput: document.querySelector("#showCollectedInput"),
+  showAreaBordersInput: document.querySelector("#showAreaBordersInput"),
+  mapAreaBorderLayer: document.querySelector("#mapAreaBorderLayer"),
   sharePinsButton: document.querySelector("#sharePinsButton"),
   sharePinsStatus: document.querySelector("#sharePinsStatus"),
   sharePinsNotice: document.querySelector("#sharePinsNotice"),
@@ -1169,6 +1171,55 @@ function compareLayerItems(a, b, layerId) {
     if (groupCompare !== 0) return groupCompare;
   }
   return compareItems(a, b);
+}
+
+// Area borders: large-area outlines published in each map shard ("areas", normalized map coordinates), drawn as an
+// SVG layer inside the map world so they pan and zoom with the map. Per-device setting, like a remembered filter.
+const AREA_BORDERS_STORAGE_KEY = "aniilogs:explorer:area-borders:v1";
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function areaBordersEnabled() {
+  try {
+    return window.localStorage.getItem(AREA_BORDERS_STORAGE_KEY) === "1";
+  } catch {
+    return Boolean(els.showAreaBordersInput?.checked);
+  }
+}
+
+function renderAreaBorders() {
+  const layer = els.mapAreaBorderLayer;
+  if (!layer) return;
+  const map = currentMap();
+  const areas = state.mapAreas || [];
+  const show = Boolean(els.showAreaBordersInput?.checked) && areas.length > 0 && map?.width && map?.height;
+  layer.toggleAttribute("hidden", !show); // SVG elements have no .hidden property
+  if (!show) {
+    layer.replaceChildren();
+    return;
+  }
+  layer.setAttribute("viewBox", `0 0 ${map.width} ${map.height}`);
+  const shapes = areas.map((area) => {
+    const group = document.createElementNS(SVG_NS, "g");
+    const outline = document.createElementNS(SVG_NS, "polygon");
+    outline.setAttribute("class", "map-area-border");
+    outline.setAttribute("points", (area.points || []).map(([x, y]) => `${x * map.width},${y * map.height}`).join(" "));
+    const [lx, ly] = area.label_at || [0, 0];
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("class", "map-area-label");
+    label.setAttribute("x", String(lx * map.width));
+    label.setAttribute("y", String(ly * map.height));
+    const name = document.createElementNS(SVG_NS, "tspan");
+    name.textContent = area.name || "";
+    const level = document.createElementNS(SVG_NS, "tspan");
+    level.setAttribute("class", "map-area-level");
+    level.setAttribute("x", String(lx * map.width));
+    level.setAttribute("dy", "1.25em");
+    level.textContent = area.level_label || "";
+    label.append(name, level);
+    group.append(outline, label);
+    return group;
+  });
+  layer.replaceChildren(...shapes);
 }
 
 function currentMap() {
@@ -11791,6 +11842,7 @@ function syncMapSectionPositions() {
 function applyTransform() {
   stabilizeViewport();
   els.mapWorld.style.transform = `matrix(${state.scale}, 0, 0, ${state.scale}, ${state.panX}, ${state.panY})`;
+  els.mapWorld.style.setProperty("--map-inverse-scale", String(1 / (state.scale || 1)));
   scheduleMapTileDetail();
   if (state.canvasMode) {
     scheduleCanvasRender();
@@ -14051,6 +14103,7 @@ function mapDatasetWithDeveloperOverlay(mapId, dataset, overlay) {
   const records = (overlay?.records || []).filter((record) => record.map_id === mapId);
   if (!records.length) return dataset;
   return {
+    ...dataset,
     items: applyDeveloperOverlay(dataset?.items || [], records.filter((record) => record.target === "items")),
     spawns: applyDeveloperOverlay(dataset?.spawns || [], records.filter((record) => record.target === "spawns")),
   };
@@ -14075,6 +14128,8 @@ function useMapDatasetNow(mapId, dataset) {
     items: dataset?.items || [],
     spawns: dataset?.spawns || [],
   });
+  state.mapAreas = Array.isArray(dataset?.areas) ? dataset.areas : [];
+  renderAreaBorders();
   // Section and underground controls can now resolve marker artwork from the
   // loaded map shard. Re-render them after the async dataset replaces the
   // bootstrap-only shell.
@@ -14293,6 +14348,8 @@ function switchMap(mapId, preserveSharedPins = false) {
     items: dataset?.items || [],
     spawns: dataset?.spawns || [],
   });
+  state.mapAreas = Array.isArray(dataset?.areas) ? dataset.areas : [];
+  renderAreaBorders();
   if (dataset) applyPendingSharedPinSelection();
   updateMapTabs();
   const url = new URL(window.location.href);
@@ -14429,6 +14486,15 @@ function bindEvents() {
     if (document.hidden) return;
     updateTrackingCountdowns();
     void refreshCloudProgress();
+  });
+  els.showAreaBordersInput.checked = areaBordersEnabled();
+  els.showAreaBordersInput.addEventListener("change", () => {
+    try {
+      window.localStorage.setItem(AREA_BORDERS_STORAGE_KEY, els.showAreaBordersInput.checked ? "1" : "0");
+    } catch {
+      // Private windows: the toggle still works for this page view.
+    }
+    renderAreaBorders();
   });
   els.showCollectedInput.checked = Boolean(state.preferences.showCollected);
   els.showCollectedInput.addEventListener("change", () => {
@@ -14926,7 +14992,7 @@ async function init() {
     els.mapTabs.replaceChildren(field);
     els.filterCount.textContent = "Unavailable";
     els.itemList.innerHTML = '<div class="content-unavailable-sidebar">Map markers and filters will return with the reviewed snapshot.</div>';
-    [els.searchInput, els.selectAllButton, els.selectNoneButton, els.showCollectedInput, els.sharePinsButton,
+    [els.searchInput, els.selectAllButton, els.selectNoneButton, els.showCollectedInput, els.showAreaBordersInput, els.sharePinsButton,
       els.mapWorkspaceTab, els.trackingWorkspaceTab].forEach((control) => {
       control.disabled = true;
     });
