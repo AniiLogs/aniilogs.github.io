@@ -627,6 +627,8 @@ const state = {
     tier: "all",
   },
   aniilogFiltersOpen: false,
+  aniilogArea: "all",
+  aniilogSeason: "all",
   aniilogShowcaseMode: REQUESTED_ANIIMO_ARTWORK && REQUESTED_WORKSPACE_VIEW === "aniilog",
   aniilogModelMode: false,
   aniilogModelAppearance: {},
@@ -4141,7 +4143,7 @@ function normalizeItemlogFilterForEntries(entries) {
 function catalogEntriesForView(view = state.sidebarView) {
   let entries = allCatalogEntriesForView(view);
   if (view === "aniilog") {
-    entries = entries.filter(aniilogEntryMatchesFilters);
+    entries = entries.filter(aniilogEntryMatchesArea).filter(aniilogEntryMatchesFilters);
   } else if (isCatalogView(view)) {
     const category = state.catalogCategory[view] || "all";
     entries = view === "itemlog"
@@ -4200,10 +4202,44 @@ function aniilogSortValue(entry, sort) {
 // (with the legendary starters), then Whisperwake Isles, then the Collection.
 const ANIILOG_SURFACE_RANK = { whisperwake: 1, collection: 2, unreleased: 3, unverified: 4 };
 
+// Each research area keeps its own Aniilog (Emberpup is Breezy Plains #001, Reefish is Whisperwake Isles
+// #001); Seasonal Keepsakes are numbered per season (S1, S2, …). The legendary starters are in Breezy Plains.
+const ANIILOG_AREA_LABELS = Object.freeze({ idyll: "Breezy Plains", special: "Breezy Plains", whisperwake: "Whisperwake Isles" });
+
+function aniilogArea(entry) {
+  if (entry?.surface_id === "collection") {
+    const season = Number(/^S(\d+)$/u.exec(String(entry.aniilog_number || ""))?.[1]) || null;
+    return { id: "seasonal", label: "Seasonal Keepsakes", season };
+  }
+  const label = ANIILOG_AREA_LABELS[entry?.surface_id]
+    || DEVELOPER_AVAILABILITY[entry?.availability]
+    || entry?.surface_label
+    || "Other";
+  return { id: label.toLowerCase().replace(/[^a-z0-9]+/gu, "-"), label, season: null };
+}
+
+function aniilogEntryMatchesArea(entry) {
+  const selected = state.aniilogArea || "all";
+  if (selected === "all") return true;
+  const area = aniilogArea(entry);
+  if (area.id !== selected) return false;
+  return selected !== "seasonal" || state.aniilogSeason === "all" || String(area.season) === state.aniilogSeason;
+}
+
+// With every area listed, a number needs its area: Breezy Plains #001 and Whisperwake Isles #001 differ.
+function aniilogNumberLabel(entry, withArea = (state.aniilogArea || "all") === "all") {
+  const number = entry?.aniilog_number || DEVELOPER_AVAILABILITY[entry?.availability] || "Special";
+  if (!withArea || !entry?.aniilog_number) return number;
+  const area = aniilogArea(entry);
+  return area.id === "seasonal" ? `Seasonal Keepsakes ${number}` : `${area.label} ${number}`;
+}
+
 function compareAniilogEntries(left, right) {
   const surfaceDifference = (ANIILOG_SURFACE_RANK[left?.surface_id] ?? 0)
     - (ANIILOG_SURFACE_RANK[right?.surface_id] ?? 0);
   if (surfaceDifference !== 0) return surfaceDifference;
+  const seasonDifference = (aniilogArea(left).season ?? 0) - (aniilogArea(right).season ?? 0);
+  if (seasonDifference !== 0) return seasonDifference;
   const numberDifference = Number(left?.research_number) - Number(right?.research_number);
   if (numberDifference !== 0) return numberDifference;
   const formDifference = Number(left?.form_id) - Number(right?.form_id);
@@ -4259,6 +4295,7 @@ function catalogEntrySearchText(entry) {
     entry?.name,
     entry?.aniilog_number,
     entry?.surface_label,
+    entry?.research_id ? aniilogArea(entry).label : "",
     entry?.form_label,
     entry?.classification,
     entry?.role,
@@ -4818,7 +4855,7 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
     const sort = aniilogSortOption();
     const statValue = aniilogSortValue(entry, sort);
     meta.textContent = [
-      `${entry.aniilog_number || DEVELOPER_AVAILABILITY[entry.availability] || "Special"} - ${entry.form_label || "Basic Form"}`,
+      `${aniilogNumberLabel(entry)} - ${entry.form_label || "Basic Form"}`,
       statValue === null ? "" : `${sort.label.replace(" (high to low)", "")} ${formatNumber(statValue, 0)}`,
     ].filter(Boolean).join(" - ");
   } else {
@@ -4907,6 +4944,68 @@ function renderCatalogSearch(view, existingLabel = null) {
   });
   label.append(input);
   return label;
+}
+
+// Area picker: every area, one research area, or Seasonal Keepsakes with a season picker under it.
+function renderAniilogAreaControl(allEntries) {
+  const areas = new Map();
+  // Areas in Aniilog order: Breezy Plains, Whisperwake Isles, …, then Seasonal Keepsakes.
+  for (const entry of [...allEntries].sort(compareAniilogEntries)) {
+    if (isDeveloperOverlayEntry(entry)) continue;
+    const area = aniilogArea(entry);
+    const row = areas.get(area.id) || { label: area.label, count: 0, seasons: new Map() };
+    row.count += 1;
+    if (area.season) row.seasons.set(area.season, (row.seasons.get(area.season) || 0) + 1);
+    areas.set(area.id, row);
+  }
+  if (state.aniilogArea !== "all" && !areas.has(state.aniilogArea)) state.aniilogArea = "all";
+  const seasons = areas.get("seasonal")?.seasons || new Map();
+  if (state.aniilogSeason !== "all" && !seasons.has(Number(state.aniilogSeason))) state.aniilogSeason = "all";
+  const refresh = () => {
+    state.catalogIndexScroll.aniilog = 0;
+    const visibleEntries = catalogEntriesForView("aniilog");
+    if (!visibleEntries.some((entry) => entry.id === state.catalogSelection.aniilog)) {
+      state.catalogSelection.aniilog = visibleEntries[0]?.id || "";
+    }
+    renderCatalogPreview();
+  };
+  const picker = (text, ariaLabel, options, value, onChange) => {
+    const label = document.createElement("label");
+    label.className = "catalog-sort-label";
+    label.textContent = text;
+    const select = document.createElement("select");
+    select.className = "catalog-sort-select";
+    select.setAttribute("aria-label", ariaLabel);
+    for (const [optionValue, optionText] of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = optionText;
+      option.selected = optionValue === value;
+      select.append(option);
+    }
+    select.addEventListener("change", () => onChange(select.value));
+    label.append(select);
+    return label;
+  };
+  const fragment = document.createDocumentFragment();
+  fragment.append(picker("Area", "Aniilog area", [
+    ["all", `All areas (${formatNumber(countedEntries(allEntries))})`],
+    ...[...areas].map(([id, row]) => [id, `${row.label} (${formatNumber(row.count)})`]),
+  ], state.aniilogArea, (value) => {
+    state.aniilogArea = value;
+    state.aniilogSeason = "all";
+    refresh();
+  }));
+  if (state.aniilogArea === "seasonal" && seasons.size) {
+    fragment.append(picker("Season", "Seasonal Keepsakes season", [
+      ["all", `All seasons (${formatNumber(areas.get("seasonal").count)})`],
+      ...[...seasons].sort(([a], [b]) => a - b).map(([season, count]) => [String(season), `Season ${season} (${formatNumber(count)})`]),
+    ], state.aniilogSeason, (value) => {
+      state.aniilogSeason = value;
+      refresh();
+    }));
+  }
+  return fragment;
 }
 
 function renderAniilogSortControl() {
@@ -6974,7 +7073,7 @@ function renderAniilogCatalogRecord(entry) {
   stickyIndicator.setAttribute("aria-hidden", "true");
   const number = document.createElement("p");
   number.className = "catalog-eyebrow";
-  number.textContent = `${entry.aniilog_number || DEVELOPER_AVAILABILITY[entry.availability] || "Special"} - ${entry.form_label || "Basic Form"}`;
+  number.textContent = `${aniilogNumberLabel(entry, true)} - ${entry.form_label || "Basic Form"}`;
   const name = document.createElement("h2");
   name.textContent = entry.name;
   const availabilityBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
@@ -8453,7 +8552,7 @@ function renderCatalogSidebar(view, title, allEntries, entries, selectedId, stat
   if (allowControls) {
     const categoryToolbar = renderCatalogCategoryToolbar(view);
     if (categoryToolbar) fragment.append(categoryToolbar);
-    if (view === "aniilog") fragment.append(renderAniilogSortControl());
+    if (view === "aniilog") fragment.append(renderAniilogAreaControl(allEntries), renderAniilogSortControl());
     fragment.append(renderCatalogSearch(view, existingSearchLabel));
   }
 
@@ -8463,7 +8562,7 @@ function renderCatalogSidebar(view, title, allEntries, entries, selectedId, stat
     );
     const shouldGroupAniilog = view === "aniilog"
       && !hasAniilogSearch
-      && entries.length === allEntries.length;
+      && entries.length === allEntries.filter(aniilogEntryMatchesArea).length;
     index = shouldGroupAniilog
       ? renderAniilogGroupedIndex(entries, selectedId)
       : renderCatalogIndex(entries, selectedId, view, title);
@@ -8563,7 +8662,7 @@ function renderCatalogPreview(options = {}) {
     const whisperwakeSummary = Number(totals.whisperwake_forms) > 0
       ? ` · ${formatNumber(totals.whisperwake_species)} Whisperwake Isles species / ${formatNumber(totals.whisperwake_forms)} forms`
       : "";
-    subtitle.textContent = `${formatNumber(totals.idyll_species)} Idyll species / ${formatNumber(totals.idyll_forms)} forms${whisperwakeSummary} · ${formatNumber(totals.collection_species)} Collection species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
+    subtitle.textContent = `${formatNumber(totals.idyll_species)} Breezy Plains species / ${formatNumber(totals.idyll_forms)} forms${whisperwakeSummary} · ${formatNumber(totals.collection_species)} Seasonal Keepsakes species / ${formatNumber(totals.collection_forms)} forms${specialSummary} · ${formatNumber(totals.entries)} visible forms total`;
   } else if (view === "aniilog") {
     subtitle.textContent = "Current-build Aniimo records";
   } else if (view === "itemlog" && allEntries.length) {
