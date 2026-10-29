@@ -1381,18 +1381,19 @@
       [`Takes ${WEAK}×`, attackersAt(type, WEAK), "resist"],
     ])));
     if (types.length > 1) {
-      // Facts per element only: the game tables do not say how two defending elements combine.
+      // Combat code (CombatActionTool, getElementAgainstValue) multiplies the defending elements' values.
+      const times = (value) => `${Number(value.toFixed(2))}×`;
       const onAll = (multiplier) => elementIds().filter((attacker) => types.every((type) => element(attacker).against[type] === multiplier));
       const mixed = elementIds().filter((attacker) => {
         const values = types.map((type) => element(attacker).against[type]);
         return values.includes(STRONG) && values.includes(WEAK);
       });
       section.append(matchupBlock("Across both elements", [
-        [`${STRONG}× on both`, onAll(STRONG), "weak"],
-        [`${WEAK}× on both`, onAll(WEAK), "resist"],
-        [`${STRONG}× on one, ${WEAK}× on the other`, mixed, "mixed"],
+        [`Takes ${times(STRONG * STRONG)} (${STRONG}× on both)`, onAll(STRONG), "weak"],
+        [`Takes ${times(WEAK * WEAK)} (${WEAK}× on both)`, onAll(WEAK), "resist"],
+        [`Takes ${times(STRONG * WEAK)} (${STRONG}× on one, ${WEAK}× on the other)`, mixed, "mixed"],
       ]));
-      section.append(el("p", "team-data-note", "The game's tables give one multiplier per element pair. How two defending elements combine is decided in battle and isn't in the data, so each element is listed on its own."));
+      section.append(el("p", "team-data-note", "In battle the game multiplies the values for each defending element, so 1.6 × 1.6 = 2.56. The attacker's element-advantage stats and an elemental shield on the target (its element replaces the target's) can change the result."));
     }
     types.forEach((type) => section.append(matchupBlock(`${element(type).name} attacking`, [
       [`Deals ${STRONG}×`, defendersAt(type, STRONG), "strong"],
