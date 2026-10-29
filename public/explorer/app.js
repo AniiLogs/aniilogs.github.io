@@ -281,6 +281,13 @@ const API_URL = String(
 const SHARE_API_URL = API_URL;
 const CLOUD_SYNC_ENABLED = Boolean(API_URL);
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
+// Developer Mode overlays (see loadDeveloperOverlay). Declared here because start-up calls
+// applyDeveloperVisibility() before the helpers further down are reached.
+const DEVELOPER_OVERLAY_SCHEMA = "aniilogs.dev-overlay.v1";
+const DEVELOPER_AVAILABILITY = Object.freeze({ unreleased: "Unreleased", unverified: "Unverified" });
+const developerOverlays = new Map();
+const developerAssetUrls = new Map();
+let developerOverlayAccess = false;
 const INITIAL_URL_PARAMS = new URLSearchParams(window.location.search);
 let mainViewerResumeRequestV73604 = parseMainViewerResumeV73604(window.location.href);
 if (mainViewerResumeRequestV73604.hadRequest) {
@@ -1754,6 +1761,89 @@ async function apiFetch(path, options = {}) {
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
+// Developer Mode overlays: unreleased / unverified records that never ship in public files. The API serves
+// them from /api/dev-content/<module>/... only to a developer account with server-acknowledged Developer
+// Mode. With Developer Mode off nothing is fetched and every module renders its public data unchanged.
+
+function developerContentAllowed() {
+  return developerModeEnabled() && state.cloudSyncAuthenticated && Boolean(authSessionToken());
+}
+
+function validDeveloperOverlay(data, module) {
+  return data?.schema === DEVELOPER_OVERLAY_SCHEMA && data.module === module && Array.isArray(data.records)
+    && data.records.every((record) => record && typeof record === "object"
+      && Object.hasOwn(DEVELOPER_AVAILABILITY, record.availability)
+      && (record.op === "append" || record.op === "patch") && typeof record.target === "string");
+}
+
+// Resolves to the module's overlay ({schema, module, source_build, records}) or null.
+function loadDeveloperOverlay(module, file = "overlay.json") {
+  if (!developerContentAllowed()) return Promise.resolve(null);
+  const key = `${module}/${file}`;
+  if (!developerOverlays.has(key)) {
+    developerOverlays.set(key, apiFetch(`/dev-content/${key}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => (validDeveloperOverlay(data, module) ? data : null))
+      .catch(() => null));
+  }
+  return developerOverlays.get(key);
+}
+
+// <img>/<video> cannot send the session header, so dev-only assets are fetched here and shown via blob: URLs.
+function developerAssetUrl(path) {
+  if (!developerContentAllowed() || !/^[a-z0-9-]+\/assets\/[\w.-]+\.(?:png|webp|jpe?g|mp4)$/u.test(path)) {
+    return Promise.resolve(null);
+  }
+  if (!developerAssetUrls.has(path)) {
+    developerAssetUrls.set(path, apiFetch(`/dev-content/${path}`)
+      .then((response) => (response.ok ? response.blob() : null))
+      .then((blob) => (blob ? URL.createObjectURL(blob) : null))
+      .catch(() => null));
+  }
+  return developerAssetUrls.get(path);
+}
+
+function resetDeveloperOverlays() {
+  developerOverlays.clear();
+  for (const pending of developerAssetUrls.values()) {
+    void pending.then((url) => url && URL.revokeObjectURL(url));
+  }
+  developerAssetUrls.clear();
+}
+
+// Applies overlay records to a collection: "append" adds whole entries; "patch" finds one entry by every
+// key in `match` and appends to its array fields (e.g. detail_rows). Added data carries its availability.
+function applyDeveloperOverlay(collection, records) {
+  const out = [...collection];
+  for (const record of records) {
+    const tag = { availability: record.availability, availability_note: record.availability_note || "" };
+    if (record.op === "append" && record.value && typeof record.value === "object") {
+      out.push({ ...record.value, ...tag });
+    } else if (record.op === "patch" && record.match && record.append) {
+      const index = out.findIndex((entry) => Object.entries(record.match).every(([k, v]) => entry?.[k] === v));
+      if (index < 0) continue;
+      const entry = { ...out[index] };
+      for (const [field, values] of Object.entries(record.append)) {
+        if (!Array.isArray(values)) continue;
+        entry[field] = [...(Array.isArray(entry[field]) ? entry[field] : []),
+          ...values.map((value) => (value && typeof value === "object" ? { ...value, ...tag } : value))];
+      }
+      out[index] = entry;
+    }
+  }
+  return out;
+}
+
+function developerAvailabilityBadge(availability, note = "") {
+  const label = DEVELOPER_AVAILABILITY[availability];
+  if (!label) return null;
+  const badge = document.createElement("span");
+  badge.className = `availability-badge is-${availability}`;
+  badge.textContent = label;
+  if (note) badge.title = note;
+  return badge;
+}
+
 // Serialize same-account progress writes with a fresh, same-value Dev Mode ACK.
 // This is client sequencing only; the API and private gateway remain authorities.
 function createDeveloperModeAccountWrites({ getContext, requestMode, writeProgress }) {
@@ -2014,6 +2104,15 @@ function applyDeveloperVisibility() {
   const enabled = developerModeEnabled();
   if (els.mapMeta) els.mapMeta.hidden = !enabled;
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
+  // Developer overlays follow Developer Mode and the signed-in account: drop them (and reload the active map
+  // from its public data) whenever that access changes.
+  const access = developerContentAllowed();
+  if (access === developerOverlayAccess) return;
+  developerOverlayAccess = access;
+  resetDeveloperOverlays();
+  if (state.activeMapId && state.mapDataCache?.has(state.activeMapId)) {
+    useMapDataset(state.activeMapId, state.mapDataCache.get(state.activeMapId));
+  }
 }
 
 async function logoutCloudAccount() {
@@ -2122,6 +2221,8 @@ function applyCloudProgress(progress, mergeLocal) {
     mapSelectionFloatingPosition: normalizeSelectionFloatingPosition(preferredPreferences.mapSelectionFloatingPosition),
     customTheme: normalizeThemeColors(preferredPreferences.customTheme),
   };
+  // A synced Developer Mode (e.g. first sign-in on this device) must load or drop developer overlays too.
+  applyDeveloperVisibility();
 }
 
 async function hydrateCloudProgress() {
@@ -12212,7 +12313,9 @@ function spawnDetailRows(spawn) {
   if (!Array.isArray(spawn?.detail_rows)) return [];
   return spawn.detail_rows
     .filter((row) => typeof row?.label === "string" && typeof row?.value === "string")
-    .map((row) => [row.label, row.value]);
+    // Developer-overlay rows say what they are: "Tier 3 (Unverified)".
+    .map((row) => [DEVELOPER_AVAILABILITY[row.availability] ? `${row.label} (${DEVELOPER_AVAILABILITY[row.availability]})` : row.label,
+      row.value]);
 }
 
 // Compact title-row coordinates shown when the selection panel is minimized.
@@ -12371,6 +12474,8 @@ function renderSelectionDetail(detail, spawn, item) {
     small.append(underground);
   }
   titleText.append(strong, small);
+  const availabilityBadge = developerAvailabilityBadge(spawn.availability, spawn.availability_note);
+  if (availabilityBadge) titleText.append(availabilityBadge);
 
   const minimizedCoordinates = selectionMinimizedCoordinates([
     ["X", formatCoordinate(spawn.x), true],
@@ -12528,7 +12633,29 @@ function datasetForMap(mapId) {
   };
 }
 
+// The map overlay (dev/map/overlay.json) holds records for every map; each record names its map_id.
+function mapDatasetWithDeveloperOverlay(mapId, dataset, overlay) {
+  const records = (overlay?.records || []).filter((record) => record.map_id === mapId);
+  if (!records.length) return dataset;
+  return {
+    items: applyDeveloperOverlay(dataset?.items || [], records.filter((record) => record.target === "items")),
+    spawns: applyDeveloperOverlay(dataset?.spawns || [], records.filter((record) => record.target === "spawns")),
+  };
+}
+
 function useMapDataset(mapId, dataset) {
+  if (!state.bootstrap || state.activeMapId !== mapId) return;
+  if (developerContentAllowed()) {
+    void loadDeveloperOverlay("map").then((overlay) => {
+      if (!overlay || !developerContentAllowed() || state.activeMapId !== mapId) return;
+      const merged = mapDatasetWithDeveloperOverlay(mapId, dataset, overlay);
+      if (merged !== dataset) useMapDatasetNow(mapId, merged);
+    });
+  }
+  useMapDatasetNow(mapId, dataset);
+}
+
+function useMapDatasetNow(mapId, dataset) {
   if (!state.bootstrap || state.activeMapId !== mapId) return;
   state.data = prepareData({
     ...state.bootstrap,
