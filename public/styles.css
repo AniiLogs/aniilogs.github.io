@@ -286,6 +286,20 @@ h1 span { color: var(--coral); white-space: nowrap; }
 .leaf-two { right: 0; top: 255px; transform: rotate(110deg) scale(0.7); background: var(--gold); }
 
 .journey-section { padding: 2rem 0 7rem; }
+/* Home page "What's new": one collapsible note per site update, newest first. */
+.patch-notes { padding: 0 0 6rem; }
+.patch-notes .section-heading { margin-bottom: 1.5rem; }
+.patch-note { max-width: 860px; margin: 0 auto; padding: clamp(1.1rem, 2.5vw, 1.8rem) clamp(1.2rem, 3vw, 2.2rem); border: 1px solid var(--line); border-radius: 26px; background: var(--cream); box-shadow: var(--shadow); }
+.patch-note > summary { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.35rem 1rem; cursor: pointer; list-style: none; }
+.patch-note > summary::-webkit-details-marker { display: none; }
+.patch-note-title::before { content: "▸"; display: inline-block; margin-right: 0.45rem; color: var(--mint-dark); transition: transform 160ms ease; }
+.patch-note[open] .patch-note-title::before { transform: rotate(90deg); }
+.patch-note-title { flex: 1 1 18rem; color: var(--ink); font-size: clamp(1.05rem, 2.2vw, 1.3rem); font-weight: 800; }
+.patch-note-date { color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.patch-note ul { display: grid; gap: 0.6rem; margin: 1.1rem 0 0; padding-left: 1.2rem; color: var(--ink-soft); line-height: 1.55; }
+.patch-note li::marker { color: var(--mint-dark); }
+.patch-note strong { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .patch-note-title::before { transition: none; } }
 .section-heading { max-width: 760px; margin: 0 auto 2.5rem; text-align: center; }
 .section-heading h2 { margin: 0.55rem 0 0.9rem; color: var(--ink); font-size: clamp(2.15rem, 4vw, 3.6rem); font-weight: 760; line-height: 1.02; letter-spacing: -0.04em; }
 .section-heading > p:last-child { color: var(--ink-soft); line-height: 1.6; }
