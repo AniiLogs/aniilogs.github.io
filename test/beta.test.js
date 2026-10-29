@@ -93,9 +93,15 @@ test("the app account says who is a beta tester and what they may manage", async
   const tester = await account("tester");
   assert.equal(tester.beta, true);
   assert.deepEqual(tester.permissions, []);
-  // the administrator has the role but Developer Mode is off; the player has no role
-  assert.equal((await account("admin")).beta, false);
+  // the administrator has the role, so Developer Mode being off doesn't matter; the player has no role
+  assert.equal((await account("admin")).beta, true);
   assert.equal((await account("player")).beta, false);
+  // the same two inside account, where installed aLogs (RC43/RC44) reads them
+  assert.equal(owner.account.beta, true);
+  assert.deepEqual(owner.account.permissions, owner.permissions);
+  assert.equal(tester.account.beta, true);
+  assert.deepEqual(tester.account.permissions, []);
+  assert.equal((await account("player")).account.beta, false);
 });
 
 test("the owner seeds and rewords the shared list; testers read it without retired tests or results", async () => {
@@ -172,12 +178,41 @@ test("bug reports carry up to 3 screenshots per bug, named bug-<bug>-<n>", async
   assert.equal(viaSite.status, 401);
 });
 
-test("Developer Mode off means no beta access even with a private role", async () => {
+test("the Beta Menu is for the tester role and above, with or without Developer Mode", async () => {
   const { env, tokens } = await setup({ devMode: [] });
   for (const who of ["owner", "tester", "admin"]) {
-    assert.equal((await app(env, tokens[who], "/api/beta/tests")).status, 403, who);
-    assert.equal((await app(env, tokens[who], "/api/logs/beta", { method: "POST", form: betaForm({ tests: [{ id: "x", tested: true, working: true }] }) })).status, 403, who);
+    assert.equal((await app(env, tokens[who], "/api/beta/tests")).status, 200, who);
+    assert.equal((await app(env, tokens[who], "/api/logs/beta", { method: "POST", form: betaForm({ tests: [{ id: "x", tested: true, working: true }] }) })).status, 201, who);
   }
+  assert.equal((await app(env, tokens.player, "/api/beta/tests")).status, 403);
+  assert.equal((await app(env, tokens.player, "/api/logs/beta", { method: "POST", form: betaForm({ tests: [{ id: "x", tested: true, working: true }] }) })).status, 403);
+});
+
+test("the tester role: granted by the owner or an administrator, the Beta Menu only", async () => {
+  const { env, tokens } = await setup();
+  const site = (session, path, { method = "GET", body } = {}) => worker.fetch(new Request(`https://api.aniilogs.example${path}`, {
+    method, headers: { authorization: `Bearer ${session}`, origin: ORIGIN, "content-type": "application/json" }, body: body && JSON.stringify(body),
+  }), env);
+  const grant = (by, role) => site(SESSIONS[by], `/api/admin/developers/${IDS.player}`, role ? { method: "PUT", body: { role } } : { method: "DELETE" });
+  assert.equal((await grant("tester", "tester")).status, 403);                  // a developer can't grant roles
+  assert.equal((await grant("admin", "tester")).status, 200);
+  const me = (await (await site(SESSIONS.player, "/api/auth/me")).json()).account;
+  assert.equal(me.role, "tester");
+  assert.equal(me.developerModeAvailable, false);                                // no Developer Mode ...
+  assert.deepEqual(me.permissions, []);
+  const account = await (await app(env, tokens.player, "/api/auth/app/account")).json();
+  assert.equal(account.account.beta, true);                                      // ... but the Beta Menu
+  assert.equal((await app(env, tokens.player, "/api/beta/tests")).status, 200);
+  assert.equal((await site(SESSIONS.player, "/api/admin/log-reports")).status, 403);  // and no log reports
+  assert.equal((await site(SESSIONS.player, "/api/leaderboard/status")).status, 200);
+  const listed = (await (await site(SESSIONS.owner, "/api/admin/developers")).json()).accounts.find((row) => row.discordId === IDS.player);
+  assert.deepEqual([listed.role, listed.developerModeAvailable], ["tester", false]);
+  assert.equal((await grant("owner", "developer")).status, 200);                 // promoted
+  assert.equal((await (await site(SESSIONS.player, "/api/auth/me")).json()).account.developerModeAvailable, true);
+  assert.equal((await grant("admin", "tester")).status, 200);                    // and back
+  assert.equal((await grant("admin", null)).status, 200);                        // removed
+  assert.equal((await app(env, tokens.player, "/api/beta/tests")).status, 403);
+  assert.equal((await grant("admin", "owner")).status, 400);
 });
 
 test("publishing is upsert-only: the RC43 bundle's first 12 tests leave the other 14 seeded ones as they are", async () => {

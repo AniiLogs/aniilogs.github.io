@@ -201,11 +201,7 @@ async function redeemDeveloperPreviewTicket(request, env) {
   if (Number(consumed?.meta?.changes) !== 1) return json({ error: "Preview handoff already used." }, 403);
   const discordId = String(row.discordId);
   let developer = developerAccountAllowed(discordId, env);
-  if (!developer) {
-    developer = Boolean(await env.DB.prepare(
-      "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
-    ).bind(discordId).first());
-  }
+  if (!developer) developer = DEVELOPER_MODE_ROLES.has(await storedDeveloperRole(discordId, env) || "player");   // not a tester
   if (!developer) return json({ error: "Developer access revoked." }, 403);
   return json({ ok: true, discordId, maxSessionSeconds: DEV_PREVIEW_COOKIE_SECONDS });
 }
@@ -644,26 +640,32 @@ export function administratorAccountAllowed(discordId, env) {
   return allowedIds.includes(String(discordId || ""));
 }
 
-// Roles, lowest to highest: player, developer (a tester: Developer Mode), administrator, owner. The owner is the
-// ADMIN_DISCORD_IDS secret; developer and administrator are rows in developer_roles. Every private role gets the
-// same Developer Mode access; managing roles is checked by permission name.
+// Roles, lowest to highest: player, tester (the aLogs Beta Menu only), developer (Developer Mode), administrator,
+// owner. The owner is the ADMIN_DISCORD_IDS secret; tester, developer and administrator are rows in developer_roles.
+// Developer and above get the same Developer Mode access; a tester gets none of it. Managing roles is checked by
+// permission name: whoever grants developers grants testers too.
 const ROLE_PERMISSIONS = Object.freeze({
   owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage"]),
   administrator: Object.freeze(["roles.grant.developer", "logs.read"]),
   developer: Object.freeze([]),
+  tester: Object.freeze([]),
   player: Object.freeze([]),
 });
-const GRANTABLE_ROLES = new Set(["developer", "administrator"]);
+const GRANTABLE_ROLES = new Set(["tester", "developer", "administrator"]);
+const STORED_ROLES = new Set(["tester", "developer", "administrator"]);
+const DEVELOPER_MODE_ROLES = new Set(["developer", "administrator", "owner"]);
+const BETA_ROLES = new Set(["tester", "developer", "administrator", "owner"]);
 
 export function ownerAccountAllowed(discordId, env) {
   return administratorAccountAllowed(discordId, env);
 }
 
-// storedRole: the developer_roles row's role ("developer" or "administrator"), or null without a row.
+// storedRole: the developer_roles row's role ("tester", "developer" or "administrator"), or null without a row.
 export function accountRole(discordId, env, storedRole) {
   if (ownerAccountAllowed(discordId, env)) return "owner";
   if (storedRole === "administrator") return "administrator";
   if (storedRole === "developer" || developerAccountAllowed(discordId, env)) return "developer";
+  if (storedRole === "tester") return "tester";
   return "player";
 }
 
@@ -692,7 +694,7 @@ async function storedDeveloperRole(discordId, env) {
       "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
     ).bind(String(discordId)).first();
   }
-  return row ? (row.role === "administrator" ? "administrator" : "developer") : null;
+  return row ? (STORED_ROLES.has(row.role) ? row.role : "developer") : null;
 }
 
 async function accountRoleFields(discordId, env) {
@@ -705,7 +707,7 @@ async function accountRoleFields(discordId, env) {
     }
   }
   const role = accountRole(discordId, env, stored);
-  return { developerModeAvailable: role !== "player", role, permissions: accountPermissions(role) };
+  return { developerModeAvailable: DEVELOPER_MODE_ROLES.has(role), role, permissions: accountPermissions(role) };
 }
 
 async function currentAccount(request, env) {
@@ -741,14 +743,14 @@ async function currentAccount(request, env) {
     displayName: row.displayName ? String(row.displayName) : null,
     profilePublic: Number(row.isPublic) === 1,
     sessionExpiresAt: Number(row.expiresAt),
-    developerModeAvailable: role !== "player",
+    developerModeAvailable: DEVELOPER_MODE_ROLES.has(role),
     developerAdminAvailable: role === "owner",
     role,
     permissions,
   };
 }
 
-// PUT grants `role` ("developer" unless the body asks for "administrator"); DELETE removes the row. Administrators
+// PUT grants `role` ("developer" unless the body asks for "tester" or "administrator"); DELETE removes the row. Administrators
 // manage developers only: granting, changing or removing an administrator needs the owner's permission.
 async function updateDeveloperRole(request, env, discordId, enabled) {
   if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
@@ -760,7 +762,7 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
   }
   const body = enabled ? await readJsonBody(request, 256) : null;
   const role = enabled ? (body?.role ?? "developer") : null;
-  if (enabled && !GRANTABLE_ROLES.has(role)) return json({ error: "Role must be developer or administrator." }, 400);
+  if (enabled && !GRANTABLE_ROLES.has(role)) return json({ error: "Role must be tester, developer or administrator." }, 400);
   const current = await storedDeveloperRole(discordId, env);
   if ((role === "administrator" || current === "administrator") && !can(account, "roles.grant.administrator")) {
     return json({ error: "Only the owner can grant, change or remove the administrator role." }, 403);
@@ -775,7 +777,7 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
       ).bind(discordId, role, account.discordId, now).run();
     } catch (error) {
       if (!missingRoleColumn(error)) throw error;
-      if (role === "administrator") return json({ error: "The administrator role needs database migration 0026 first." }, 503);
+      if (role !== "developer") return json({ error: `The ${role} role needs database migration 0026 first.` }, 503);
       await env.DB.prepare(
         `INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at)
          VALUES (?, ?, ?)
@@ -812,13 +814,13 @@ async function listDeveloperAccounts(request, env) {
   return json({
     accounts: rows.slice(0, 200).map((row) => {
       const discordId = String(row.discordId);
-      const stored = row.grantedDeveloperId ? (row.grantedRole === "administrator" ? "administrator" : "developer") : null;
+      const stored = row.grantedDeveloperId ? (STORED_ROLES.has(row.grantedRole) ? row.grantedRole : "developer") : null;
       const role = accountRole(discordId, env, stored);
       return {
         discordId,
         discordUsername: String(row.discordUsername),
         discordGlobalName: row.discordGlobalName ? String(row.discordGlobalName) : null,
-        developerModeAvailable: role !== "player",
+        developerModeAvailable: DEVELOPER_MODE_ROLES.has(role),
         developerAdminAvailable: role === "owner",
         role,
       };
@@ -958,11 +960,14 @@ async function appAccount(request, env) {
   const user = await env.DB.prepare(
     "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
   ).bind(account.discordId).first();
+  const beta = await betaTester(account);
+  const permissions = account.permissions || [];
+  // beta and permissions sit inside account too: aLogs 0.1.28 RC43/RC44 read account.beta and account.permissions
   return json({
     authenticated: true,
-    account: { name: user?.globalName || user?.username || "Discord account" },
-    beta: await betaTester(account, env),
-    permissions: account.permissions || [],
+    account: { name: user?.globalName || user?.username || "Discord account", beta, permissions },
+    beta,
+    permissions,
   });
 }
 async function appSignOut(request, env) {
@@ -3624,7 +3629,7 @@ async function expireLogReports(env, now) {
 
 // Administrators and the owner (logs.read; signed in on the website or in the aLogs app with its desktop token) read
 // reports and leave notes on the ones they work on. Clearing is for the owner (logs.clear): they read the notes and
-// clear a report once its fix is in. Testers (the developer role) send reports but don't read them.
+// clear a report once its fix is in. Testers and developers send reports but don't read them.
 const LOG_REPORT_DENIED = "Access denied.";
 async function logReportReader(request, env) {
   const account = await leaderboardAccount(request, env);
@@ -3737,29 +3742,21 @@ async function clearLogReports(request, env, reportId) {
   return json({ ok: true, cleared: results?.length || 0 });
 }
 
-// The aLogs Beta Menu: testers (any private role) with Developer Mode on (as the server acknowledged it) get a shared
+// The aLogs Beta Menu: the tester role and above (Developer Mode on or off) get a shared
 // list of things to test in the current build, mark each Working or Not working, and send the results or bug reports
 // with their logs. The owner (beta.manage) adds and rewords tests, retires them, and sees everyone's results.
 const BETA_TEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const BETA_REPORT_SHOTS = Object.freeze({ perBug: 3, total: 30, bytes: 4 * 1024 * 1024 });
 
-async function serverDeveloperMode(discordId, env) {
-  const row = await env.DB.prepare("SELECT data_json AS dataJson FROM progress_snapshots WHERE discord_id = ?").bind(discordId).first();
-  try {
-    return progressPayload(JSON.parse(row?.dataJson || "null"))?.preferences?.developerMode === true;
-  } catch {
-    return false;
-  }
+// The Beta Menu: every account at tester or above, whether or not Developer Mode is on.
+async function betaTester(account) {
+  return BETA_ROLES.has(account?.role);
 }
 
-async function betaTester(account, env) {
-  return Boolean(account?.developerModeAvailable) && await serverDeveloperMode(account.discordId, env);
-}
-
-// A beta route's account: the app's token or a website session, a private role and Developer Mode on.
+// A beta route's account: the app's token or a website session, with the tester role or above.
 async function betaAccount(request, env) {
   const account = await leaderboardAccount(request, env);
-  return account && await betaTester(account, env) ? account : null;
+  return account && await betaTester(account) ? account : null;
 }
 
 const betaText = (value, max) => String(value ?? "").trim().slice(0, max);
