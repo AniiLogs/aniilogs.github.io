@@ -314,13 +314,21 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /const MAX_ACTIVE_SKILLS = 2;/u);
   assert.match(teamBuilder, /How this skill works/u);
   assert.match(teamBuilder, /function synergyEffects\(\)/u);
-  // Type matchups use the game's own multipliers and never invent a combined dual-element value.
+  // Type matchups use the game's own multipliers; two defending elements multiply, as the combat code does.
   assert.match(teamBuilder, /const STRONG = 1\.6;/u);
   assert.match(teamBuilder, /const WEAK = 0\.625;/u);
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.18.1-duel/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.18.2-team-build/u);
+  assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
+  // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
+  // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.
+  assert.match(teamBuilder, /section\.append\(heading, renderPartners\(\), grid\);/u);
+  assert.match(teamBuilder, /\{ id: "build", label: "Build" \}/u);
+  assert.match(teamBuilder, /window\.AniilogsDuel\?\.grownStat/u);
+  assert.match(teamBuilder, /window\.loadDeveloperOverlay\("team-builder"\)/u);
+  assert.match(explorerStyles, /\.team-panel \{\s*container: team-panel \/ inline-size;/u);
   // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);
   // Ultimates come with the Aniimo rather than being picked.
   assert.match(teamBuilder, /id: "interlink", label: "Interlink"/u);
