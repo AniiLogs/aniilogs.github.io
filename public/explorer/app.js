@@ -1895,9 +1895,14 @@ async function refreshModuleDeveloperEntries() {
   if (state.checklistData) renderChecklist();
 }
 
-// Overlay entries are shown but never counted.
+// Overlay entries (availability "unreleased" / "unverified") are shown but never counted. Item-log's public
+// entries have an availability object of their own ({ status }), which does not make them overlay entries.
+function isDeveloperOverlayEntry(entry) {
+  return typeof entry?.availability === "string" && Object.hasOwn(DEVELOPER_AVAILABILITY, entry.availability);
+}
+
 function countedEntries(entries) {
-  return entries.filter((entry) => !entry?.availability).length;
+  return entries.filter((entry) => !isDeveloperOverlayEntry(entry)).length;
 }
 
 // Serialize same-account progress writes with a fresh, same-value Dev Mode ACK.
@@ -9100,7 +9105,7 @@ function checklistProgress(entries) {
   let completed = 0;
   let total = 0;
   entries.forEach((entry) => {
-    if (entry?.availability) return;
+    if (isDeveloperOverlayEntry(entry)) return;
     (entry?.completion_states || []).forEach((completionState) => {
       const id = String(completionState?.id || "").trim();
       if (!id || seen.has(id)) return;
