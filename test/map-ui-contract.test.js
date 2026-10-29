@@ -329,6 +329,8 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /window\.AniilogsDuel\?\.grownStat/u);
   assert.match(teamBuilder, /window\.loadDeveloperOverlay\("team-builder"\)/u);
   assert.match(explorerStyles, /\.team-panel \{\s*container: team-panel \/ inline-size;/u);
+  // Damage model and Try-Hard Guide data load before the 1v1 and Team Builder scripts that use them.
+  assert.match(explorerHtml, /damage-model\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/damage-guide\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/duel\.js/u);
   // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);
   // Ultimates come with the Aniimo rather than being picked.
   assert.match(teamBuilder, /id: "interlink", label: "Interlink"/u);
