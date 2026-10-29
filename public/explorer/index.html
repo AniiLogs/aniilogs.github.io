@@ -141,6 +141,7 @@
                 </button>
               </div>
               <label class="show-collected-toggle"><input id="showCollectedInput" type="checkbox"> Show collected</label>
+              <label class="show-collected-toggle"><input id="showAreaBordersInput" type="checkbox"> Show area borders</label>
               <span id="sharePinsStatus" class="visually-hidden" role="status" aria-live="polite"></span>
               <p id="sharePinsNotice" class="share-pins-notice" role="status" aria-live="polite" hidden></p>
             </div>
@@ -226,6 +227,7 @@
             <div id="mapWorld" class="map-world">
               <div id="mapTiles" class="map-tiles" aria-hidden="true"></div>
               <img id="mapImage" class="map-image" alt="">
+              <svg id="mapAreaBorderLayer" class="map-area-border-layer" aria-hidden="true" hidden></svg>
               <div id="mapUndergroundLayer" class="map-underground-layer" aria-hidden="true" hidden></div>
               <div id="mapSectionLayer" class="map-section-layer" aria-label="Linked map areas" hidden></div>
             </div>
