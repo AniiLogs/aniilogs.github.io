@@ -5002,6 +5002,10 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   button.addEventListener("click", () => {
     state.catalogSelection[view] = entry.id;
     renderCatalogPreview();
+    // On phones the details sit below the list, so take the reader there (the search shortcut brings them back).
+    if (window.matchMedia(PHONE_CATALOG_QUERY).matches) {
+      window.requestAnimationFrame(() => els.catalogPanel.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }
   });
   return button;
 }
@@ -10944,6 +10948,68 @@ const BOTTOM_TABS = Object.freeze([
   ["team", "Team", "/explorer/?view=team", "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20a6 6 0 0 1 12 0m-2 0a6 6 0 0 1 10-4"],
 ]);
 
+// ---- Back to search on phones, in every section. The search and filters sit above the results and details, so
+// once they have scrolled away a round search button floats above the bottom tabs; it (or tapping the bottom tab you
+// are already on) glides back and puts the cursor in the search box. Team Builder has no search, so it goes back to
+// the team list.
+const PHONE_CATALOG_QUERY = "(max-width: 760px)";
+
+function catalogSearchShortcutTarget() {
+  const view = state.sidebarView;
+  let node = null;
+  if (view === "aniilog" || view === "itemlog") node = els.catalogSidebarContent?.querySelector(".catalog-search");
+  else if (view === "checklist") node = document.getElementById("checklistSearchInput");
+  else if (view === "team") node = document.querySelector("#teamSidebarContent .team-sidebar-heading");
+  else node = document.getElementById("searchInput");
+  return node && node.getClientRects().length ? node : null;
+}
+
+function returnToCatalogSearch() {
+  const input = catalogSearchShortcutTarget();
+  if (!input) return false;
+  (input.closest("label") || input).scrollIntoView({ behavior: "smooth", block: "center" });
+  if (input.matches("input")) window.setTimeout(() => input.focus({ preventScroll: true }), 380);
+  return true;
+}
+
+function updateCatalogSearchShortcut() {
+  const button = document.getElementById("catalogSearchShortcut");
+  if (!button) return;
+  const input = catalogSearchShortcutTarget();
+  let show = false;
+  if (input && window.matchMedia(PHONE_CATALOG_QUERY).matches) {
+    const rect = input.getBoundingClientRect();
+    // The top bar scrolls away on phones, so only count it while it is on screen.
+    const bar = Math.max(0, document.querySelector(".app-topbar")?.getBoundingClientRect().bottom || 0);
+    show = rect.bottom < bar || rect.top > window.innerHeight;
+  }
+  button.hidden = !show;
+}
+
+function initCatalogSearchShortcut() {
+  if (document.getElementById("catalogSearchShortcut")) return;
+  const button = document.createElement("button");
+  button.id = "catalogSearchShortcut";
+  button.type = "button";
+  button.className = "catalog-search-shortcut";
+  button.hidden = true;
+  button.setAttribute("aria-label", "Back to search");
+  button.title = "Back to search";
+  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>';
+  button.addEventListener("click", returnToCatalogSearch);
+  document.body.append(button);
+  let frame = 0;
+  const schedule = () => {
+    if (frame) return;
+    frame = window.requestAnimationFrame(() => {
+      frame = 0;
+      updateCatalogSearchShortcut();
+    });
+  };
+  document.addEventListener("scroll", schedule, { capture: true, passive: true });
+  window.addEventListener("resize", schedule);
+}
+
 function initBottomTabs() {
   if (document.getElementById("bottomTabs")) return;
   const nav = document.createElement("nav");
@@ -10956,7 +11022,14 @@ function initBottomTabs() {
     link.dataset.view = view;
     link.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span></span>`;
     link.querySelector("span").textContent = label;
-    link.addEventListener("click", (event) => openWorkspaceFromNavigation(event, view));
+    link.addEventListener("click", (event) => {
+      // Tapping the tab you are already on goes back to its search, as phone apps do.
+      if ((view === state.sidebarView || (view === "map" && link.getAttribute("aria-current") === "page")) && returnToCatalogSearch()) {
+        event.preventDefault();
+        return;
+      }
+      openWorkspaceFromNavigation(event, view);
+    });
     nav.append(link);
   });
   document.body.append(nav);
@@ -10964,6 +11037,7 @@ function initBottomTabs() {
 }
 
 function syncBottomTabs() {
+  updateCatalogSearchShortcut();
   document.querySelectorAll("#bottomTabs a").forEach((link) => {
     const active = link.dataset.view === state.sidebarView || (link.dataset.view === "map" && !["aniilog", "itemlog", "checklist", "team"].includes(state.sidebarView));
     if (active) link.setAttribute("aria-current", "page");
@@ -13763,6 +13837,10 @@ function focusSpawn(spawn) {
   state.panY = rect.height / 2 - spawn.normalized.y * map.height * state.scale;
   clampPan();
   applyTransform();
+  // On phones the map sits above the lists; bring it back on screen when something below is picked.
+  if (window.matchMedia(PHONE_CATALOG_QUERY).matches && rect.top < 0) {
+    els.mapViewport.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function prepareData(data) {
@@ -14691,6 +14769,7 @@ async function init() {
   loadLocalTracking();
   initRespawnBell();
   initBottomTabs();
+  initCatalogSearchShortcut();
   await hydrateCloudProgress();
   applyThemePreference();
   syncDesktopSelectionPlacement();

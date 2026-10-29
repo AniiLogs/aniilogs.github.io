@@ -12982,3 +12982,68 @@ html[data-embed="app"] #topbarLogoutButton {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+
+@media (max-width: 760px) {
+  /* The Aniimo and item lists leave room to grab the page, and a swipe that reaches the list's end carries on to
+     the page (it used to stop there, which made the details hard to reach). */
+  .catalog-index,
+  .catalog-workspace .catalog-index {
+    max-height: min(34dvh, 300px);
+    overscroll-behavior: auto;
+  }
+
+  /* The artwork is sized to the largest screen height, so the address bar hiding and showing doesn't move it. */
+  .catalog-aniimo-video-backdrop {
+    inset: 0 0 auto 0;
+    height: 100vh;
+    height: 100lvh;
+  }
+}
+
+/* Back to search: a round button that floats above the phone tab bar once the search box has scrolled away. */
+.catalog-search-shortcut {
+  position: fixed;
+  right: 16px;
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgba(var(--accent-rgb), 0.7);
+  border-radius: 50%;
+  background: rgba(var(--panel-rgb), 0.92);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  color: var(--accent);
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  animation: catalog-search-shortcut-in 180ms ease-out;
+}
+
+.catalog-search-shortcut[hidden] {
+  display: none;
+}
+
+.catalog-search-shortcut svg {
+  width: 22px;
+  height: 22px;
+}
+
+@keyframes catalog-search-shortcut-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .catalog-search-shortcut {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Lands the details just under the top bar when a list row takes the reader there. */
+  #catalogPanel {
+    scroll-margin-top: 72px;
+  }
+}
