@@ -2167,6 +2167,8 @@ function applyDeveloperVisibility() {
   developerOverlayAccess = access;
   resetDeveloperOverlays();
   void refreshModuleDeveloperEntries();
+  state.itemlogOverlay = undefined;
+  if (state.sidebarView === "itemlog" && state.itemlogData) renderCatalogPreview();
   if (state.activeMapId && state.mapDataCache?.has(state.activeMapId)) {
     useMapDataset(state.activeMapId, state.mapDataCache.get(state.activeMapId));
   }
@@ -3862,10 +3864,46 @@ const DEVELOPER_ONLY_ITEM_NAME_PATTERNS = Object.freeze([
   /^View All Items$/iu,
 ]);
 
-function isDeveloperOnlyItemlogEntry(entry) {
-  if (entry?.client_visibility?.status === "developer-only") return true;
+// Unreleased, test and placeholder items live in the Developer Mode overlay (dev/itemlog/overlay.json),
+// not in the public file; the name patterns only guard against a test row slipping into public data.
+function isTestNamedItemlogEntry(entry) {
   const name = String(entry?.name || "").trim();
   return DEVELOPER_ONLY_ITEM_NAME_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+let itemlogOverlayMerge = { overlay: null, entries: null, merged: null };
+function itemlogEntriesWithDeveloperOverlay(entries) {
+  if (!developerContentAllowed()) return entries.filter((entry) => !isTestNamedItemlogEntry(entry));
+  const overlay = state.itemlogOverlay;
+  if (!overlay) {
+    if (state.itemlogOverlay === undefined) {
+      state.itemlogOverlay = null;
+      void loadDeveloperOverlay("itemlog").then((loaded) => {
+        if (!loaded || !developerContentAllowed()) return;
+        state.itemlogOverlay = loaded;
+        if (state.sidebarView === "itemlog") renderCatalogPreview();
+      });
+    }
+    return entries;
+  }
+  if (itemlogOverlayMerge.overlay !== overlay || itemlogOverlayMerge.entries !== entries) {
+    itemlogOverlayMerge = { overlay, entries,
+      merged: applyDeveloperOverlay(entries, overlay.records.filter((record) => record.target === "entries")) };
+  }
+  return itemlogOverlayMerge.merged;
+}
+
+// Overlay entries keep their icons in dev/itemlog/assets/ (dev_icon); those load through the session.
+function itemlogIcon(className, entry) {
+  const icon = makeIcon(className, entry.dev_icon ? "" : entry.icon);
+  if (entry.dev_icon) {
+    void developerAssetUrl(entry.dev_icon).then((url) => {
+      if (!url) return;
+      icon.src = url;
+      icon.classList.remove("icon-missing");
+    });
+  }
+  return icon;
 }
 
 function ensureItemlogData() {
@@ -3906,7 +3944,7 @@ function allCatalogEntriesForView(view = state.sidebarView) {
   }
   if (view === "itemlog") {
     const entries = Array.isArray(state.itemlogData?.entries) ? state.itemlogData.entries : [];
-    return developerModeEnabled() ? entries : entries.filter((entry) => !isDeveloperOnlyItemlogEntry(entry));
+    return itemlogEntriesWithDeveloperOverlay(entries);
   }
   return [];
 }
@@ -4754,7 +4792,7 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   button.dataset.catalogEntryId = entry.id;
   if (isVirtual) button.style.transform = `translateY(${virtualIndex * CATALOG_INDEX_ROW_HEIGHT}px)`;
 
-  const icon = makeIcon("catalog-index-icon", entry.icon);
+  const icon = view === "itemlog" ? itemlogIcon("catalog-index-icon", entry) : makeIcon("catalog-index-icon", entry.icon);
   if (view === "aniilog") {
     icon.classList.add("catalog-aniimo-portrait");
     if (String(entry.icon || "").toLowerCase().includes("ui_pethead_")) {
@@ -4784,6 +4822,8 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
     }
   }
   copy.append(name, meta);
+  const availabilityBadge = view === "itemlog" ? developerAvailabilityBadge(entry.availability, entry.availability_note) : null;
+  if (availabilityBadge) name.append(" ", availabilityBadge);
   button.append(icon, copy);
   button.addEventListener("click", () => {
     state.catalogSelection[view] = entry.id;
@@ -7435,7 +7475,8 @@ function renderItemLogVariants(entry) {
 function renderItemLogClientReferences(entry) {
   const sources = Array.isArray(entry.source_references) ? entry.source_references : [];
   const unlocks = Array.isArray(entry.unlock_references) ? entry.unlock_references : [];
-  const showDeveloperRow = developerModeEnabled() && entry.client_visibility?.status === "developer-only";
+  // Developer Mode overlay entries say why they are not public (their availability note).
+  const showDeveloperRow = Boolean(DEVELOPER_AVAILABILITY[entry.availability]);
   // "How to obtain" already answers the question when the client has no direct reference.
   if (!sources.length && !unlocks.length && !showDeveloperRow && itemlogObtainMethods(entry).length) return null;
   const section = createCatalogSection("Client references");
@@ -7451,9 +7492,9 @@ function renderItemLogClientReferences(entry) {
     const row = document.createElement("div");
     row.className = "catalog-requirement-row";
     const label = document.createElement("strong");
-    label.textContent = "Developer-only item";
+    label.textContent = `${DEVELOPER_AVAILABILITY[entry.availability]} item`;
     const detail = document.createElement("p");
-    detail.textContent = entry.client_visibility.evidence || entry.client_visibility.reason;
+    detail.textContent = entry.availability_note || entry.client_visibility?.evidence || "";
     row.append(label, detail);
     list.append(row);
   }
@@ -8089,7 +8130,7 @@ function renderItemLogCatalogRecord(entry) {
   const identity = document.createElement("header");
   identity.className = "catalog-identity";
   identity.dataset.catalogEntryId = entry.id;
-  const icon = makeIcon("catalog-hero-icon", entry.icon);
+  const icon = itemlogIcon("catalog-hero-icon", entry);
   icon.alt = `${entry.name} icon`;
   const copy = document.createElement("div");
   const stickyIndicator = document.createElement("span");
@@ -8104,6 +8145,8 @@ function renderItemLogCatalogRecord(entry) {
   name.textContent = entry.variant_facts && entry.variant_label
     ? `${entry.name} - ${entry.variant_label}`
     : entry.name;
+  const availabilityBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
+  if (availabilityBadge) name.append(" ", availabilityBadge);
   const subtitle = document.createElement("p");
   subtitle.className = "catalog-subtitle";
   subtitle.textContent = entry.inventory || "";

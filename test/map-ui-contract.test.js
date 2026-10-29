@@ -546,8 +546,11 @@ test("internal test items are available only to entitled developer mode", () => 
   assert.match(explorer, /Test Held Item/u);
   assert.match(explorer, /Test Invitation Letter/u);
   assert.match(explorer, /View All Items/u);
-  assert.match(explorer, /return developerModeEnabled\(\) \? entries : entries\.filter/u);
-  assert.match(explorer, /entry\?\.client_visibility\?\.status === "developer-only"/u);
+  // Unreleased / test items come from the Developer Mode overlay, never from the public file.
+  assert.match(explorer, /return itemlogEntriesWithDeveloperOverlay\(entries\);/u);
+  assert.match(explorer, /if \(!developerContentAllowed\(\)\) return entries\.filter\(\(entry\) => !isTestNamedItemlogEntry\(entry\)\);/u);
+  assert.match(explorer, /loadDeveloperOverlay\("itemlog"\)/u);
+  assert.doesNotMatch(explorer, /client_visibility\?\.status === "developer-only"/u);
   assert.match(explorer, /function developerModeEnabled\(\) \{\s*return Boolean\(state\.developerModeAvailable && state\.preferences\.developerMode\);/su);
   assert.match(explorer, /if \(state\.sidebarView === "itemlog"\) renderCatalogPreview\(\);/u);
 });
