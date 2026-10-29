@@ -687,6 +687,8 @@ const state = {
   developerAccountsError: "",
   developerAccountsTruncated: false,
   developerAccountSearch: "",
+  developerRoleFilter: "all",          // the Roles list's chip: all, or one role
+  developerAccountsShown: 25,          // how many rows the Roles list shows before "Show more"
   developerRoleBusyId: "",
   cloudSyncHydrating: false,
   cloudSyncTimer: 0,
@@ -3098,14 +3100,25 @@ async function loadDeveloperAccounts({ force = false } = {}) {
 }
 
 // Roles, lowest to highest. The server enforces who may change what; this only orders and labels the list.
-const DEVELOPER_ROLE_RANK = Object.freeze({ player: 0, developer: 1, administrator: 2, owner: 3 });
+const DEVELOPER_ROLE_RANK = Object.freeze({ player: 0, tester: 1, developer: 2, administrator: 3, owner: 4 });
 const DEVELOPER_ROLE_LABELS = Object.freeze({
-  owner: "Owner · protected",
-  administrator: "Administrator · manages developers",
-  developer: "Developer · Developer Mode",
-  tester: "Tester · Beta Menu",
+  owner: "Owner",
+  administrator: "Administrator",
+  developer: "Developer",
+  tester: "Tester",
   player: "Player",
 });
+// What each role gets, for the role menu and the list's help line.
+const DEVELOPER_ROLE_DETAILS = Object.freeze({
+  player: "No extra access",
+  tester: "Beta Menu only",
+  developer: "Developer Mode and the Beta Menu",
+  administrator: "Developer Mode, the Beta Menu, log reports and managing roles",
+  owner: "Everything; can't be changed here",
+});
+const DEVELOPER_MODE_ROLES = new Set(["developer", "administrator", "owner"]);
+// Chips above the list, highest role first ("all" first).
+const DEVELOPER_ROLE_FILTERS = Object.freeze(["all", "owner", "administrator", "developer", "tester", "player"]);
 
 // role: "tester", "developer" or "administrator" to grant, or null to remove the account's role.
 const ROLE_NAMES = Object.freeze({ tester: "a tester", developer: "a developer", administrator: "an administrator" });
@@ -3137,6 +3150,25 @@ async function updateDeveloperAccess(account, role) {
   }
 }
 
+// The roles an account can be given from this list: administrators only by the owner; the owner never.
+function developerRoleChoices(account) {
+  if (account.role === "owner") return [];
+  if (account.role === "administrator" && !state.canGrantAdministrator) return [];
+  return ["player", "tester", "developer", ...(state.canGrantAdministrator ? ["administrator"] : [])];
+}
+
+function changeDeveloperRole(account, nextRole, select) {
+  if (nextRole === account.role) return;
+  const name = account.discordGlobalName || account.discordUsername || account.discordId;
+  // Taking Developer Mode away (a developer or administrator made a tester or player) is easy to do by mistake.
+  if (DEVELOPER_MODE_ROLES.has(account.role) && !DEVELOPER_MODE_ROLES.has(nextRole)
+    && !window.confirm(`${name} will lose Developer Mode${nextRole === "tester" ? " and keep only the Beta Menu" : ""}. Continue?`)) {
+    select.value = account.role;
+    return;
+  }
+  void updateDeveloperAccess(account, nextRole === "player" ? null : nextRole);
+}
+
 function renderDeveloperAccountRows(container) {
   container.textContent = "";
   if (state.developerAccountsLoading) {
@@ -3158,58 +3190,88 @@ function renderDeveloperAccountRows(container) {
     return;
   }
   const query = state.developerAccountSearch.trim().toLocaleLowerCase();
-  const matches = state.developerAccounts.filter((account) => !query || [
-    account.discordGlobalName,
-    account.discordUsername,
-    account.discordId,
-  ].some((value) => value.toLocaleLowerCase().includes(query)));
+  const matches = state.developerAccounts.filter((account) => (state.developerRoleFilter === "all" || account.role === state.developerRoleFilter)
+    && (!query || [account.discordGlobalName, account.discordUsername, account.discordId].some((value) => value.toLocaleLowerCase().includes(query))));
   if (!matches.length) {
     const empty = document.createElement("p");
     empty.className = "settings-language-note";
-    empty.textContent = query ? "No signed-in accounts match this search." : "No Discord accounts have signed in yet.";
+    empty.textContent = query || state.developerRoleFilter !== "all"
+      ? "No signed-in accounts match." : "No Discord accounts have signed in yet.";
     container.append(empty);
     return;
   }
-  matches.forEach((account) => {
+  for (const account of matches.slice(0, state.developerAccountsShown)) {
     const row = document.createElement("div");
     row.className = "developer-account-row";
+    row.dataset.role = account.role;
     const identity = document.createElement("div");
     identity.className = "developer-account-identity";
     const name = document.createElement("strong");
     name.textContent = account.discordGlobalName || account.discordUsername || `Discord user ${account.discordId}`;
     const detail = document.createElement("small");
     detail.textContent = `${account.discordUsername ? `@${account.discordUsername} · ` : ""}${account.discordId}`;
-    const role = document.createElement("span");
-    role.className = "developer-account-role";
-    role.textContent = DEVELOPER_ROLE_LABELS[account.role] || DEVELOPER_ROLE_LABELS.player;
-    identity.append(name, detail, role);
+    identity.append(name, detail);
     row.append(identity);
-    // Administrators manage testers, developers and players; only the owner changes administrators or makes new ones.
-    const actions = [];
-    if (account.role === "player") actions.push(["Make tester", "tester", ""], ["Make developer", "developer", ""]);
-    if (account.role === "tester") actions.push(["Make developer", "developer", ""], ["Remove tester", null, "settings-danger"]);
-    if (account.role === "developer") actions.push(["Make tester", "tester", ""], ["Remove developer", null, "settings-danger"]);
-    if (state.canGrantAdministrator && ["player", "tester", "developer"].includes(account.role)) actions.push(["Make administrator", "administrator", ""]);
-    if (state.canGrantAdministrator && account.role === "administrator") {
-      actions.push(["Make developer", "developer", ""], ["Remove administrator", null, "settings-danger"]);
-    }
-    if (!state.canGrantAdministrator && account.role === "administrator") {
-      const note = document.createElement("small");
-      note.textContent = "Only the owner changes administrators.";
-      identity.append(note);
-    }
-    for (const [label, nextRole, className] of actions) {
-      const action = document.createElement("button");
-      action.type = "button";
-      action.className = className;
-      action.textContent = label;
-      action.setAttribute("aria-label", `${label}: ${name.textContent}`);
-      action.disabled = Boolean(state.developerRoleBusyId);
-      action.addEventListener("click", () => void updateDeveloperAccess(account, nextRole));
-      row.append(action);
+    const choices = developerRoleChoices(account);
+    if (choices.length) {
+      const select = document.createElement("select");
+      select.className = "developer-account-select";
+      select.setAttribute("aria-label", `Role for ${name.textContent}`);
+      select.disabled = Boolean(state.developerRoleBusyId);
+      for (const role of choices) {
+        const option = document.createElement("option");
+        option.value = role;
+        option.textContent = DEVELOPER_ROLE_LABELS[role];
+        option.title = DEVELOPER_ROLE_DETAILS[role];
+        select.append(option);
+      }
+      select.value = account.role;
+      select.addEventListener("change", () => changeDeveloperRole(account, select.value, select));
+      row.append(select);
+    } else {
+      // no menu (the owner, or an administrator for anyone but the owner): the role as a badge, with why it's fixed
+      const badge = document.createElement("span");
+      badge.className = "developer-account-role";
+      badge.textContent = DEVELOPER_ROLE_LABELS[account.role] || DEVELOPER_ROLE_LABELS.player;
+      badge.title = account.role === "owner" ? "Protected" : "Only the owner changes administrators";
+      row.append(badge);
     }
     container.append(row);
-  });
+  }
+  if (matches.length > state.developerAccountsShown) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "developer-account-more";
+    more.textContent = `Show more (${matches.length - state.developerAccountsShown} more)`;
+    more.addEventListener("click", () => {
+      state.developerAccountsShown += 50;
+      renderDeveloperAccountRows(container);
+    });
+    container.append(more);
+  }
+}
+
+// Role chips with how many accounts have each role; picking one narrows the list.
+function renderDeveloperRoleFilters(container, rows) {
+  container.textContent = "";
+  const counts = { all: state.developerAccounts.length };
+  for (const account of state.developerAccounts) counts[account.role] = (counts[account.role] || 0) + 1;
+  for (const role of DEVELOPER_ROLE_FILTERS) {
+    if (role !== "all" && !counts[role]) continue;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "developer-role-chip";
+    chip.dataset.role = role;
+    chip.setAttribute("aria-pressed", String(state.developerRoleFilter === role));
+    chip.textContent = `${role === "all" ? "All" : `${DEVELOPER_ROLE_LABELS[role]}s`.replace("Owners", "Owner")} ${counts[role] || 0}`;
+    chip.addEventListener("click", () => {
+      state.developerRoleFilter = role;
+      state.developerAccountsShown = 25;
+      renderDeveloperRoleFilters(container, rows);
+      renderDeveloperAccountRows(rows);
+    });
+    container.append(chip);
+  }
 }
 
 function renderDeveloperSettings(container) {
@@ -3279,8 +3341,8 @@ function renderDeveloperSettings(container) {
   accessTitle.textContent = "Roles";
   const accessDetail = document.createElement("small");
   accessDetail.textContent = state.canGrantAdministrator
-    ? "Choose a Discord account that has signed in to AniiLogs. Developers (testers) get Developer Mode; administrators also manage developers. Owner access can't be changed here."
-    : "Choose a Discord account that has signed in to AniiLogs. You can make players developers (testers) or remove the developer role. Only the owner changes administrators.";
+    ? "Every Discord account that has signed in to AniiLogs. Testers get the Beta Menu only; developers get Developer Mode and the Beta Menu; administrators also read log reports and manage roles."
+    : "Every Discord account that has signed in to AniiLogs. Testers get the Beta Menu only; developers get Developer Mode and the Beta Menu. Only the owner changes administrators.";
   accessCopy.append(accessTitle, accessDetail);
   const field = document.createElement("label");
   field.className = "developer-account-search";
@@ -3295,15 +3357,21 @@ function renderDeveloperSettings(container) {
   accountRows.className = "developer-account-list";
   search.addEventListener("input", () => {
     state.developerAccountSearch = search.value;
+    state.developerAccountsShown = 25;
     renderDeveloperAccountRows(accountRows);
   });
   field.append(fieldLabel, search);
-  accessCard.append(accessCopy, field, accountRows);
+  const filters = document.createElement("div");
+  filters.className = "developer-role-filters";
+  filters.setAttribute("role", "group");
+  filters.setAttribute("aria-label", "Show accounts with role");
+  accessCard.append(accessCopy, filters, field, accountRows);
+  renderDeveloperRoleFilters(filters, accountRows);
   renderDeveloperAccountRows(accountRows);
   if (state.developerAccountsTruncated) {
     const truncated = document.createElement("p");
     truncated.className = "settings-language-note";
-    truncated.textContent = "Only the most recent signed-in accounts are shown.";
+    truncated.textContent = "Only the 2,000 most recent signed-in accounts are listed; search finds them by name, username or ID.";
     accessCard.append(truncated);
   }
   if (state.developerRoleStatus) {

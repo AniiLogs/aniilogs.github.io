@@ -801,7 +801,7 @@ async function listDeveloperAccounts(request, env) {
        FROM users
        LEFT JOIN developer_roles ON developer_roles.discord_id = users.discord_id
       ORDER BY users.updated_at DESC, users.discord_id ASC
-      LIMIT 201`,
+      LIMIT 2001`,
   ).all();
   let result;
   try {
@@ -812,7 +812,7 @@ async function listDeveloperAccounts(request, env) {
   }
   const rows = result?.results || [];
   return json({
-    accounts: rows.slice(0, 200).map((row) => {
+    accounts: rows.slice(0, 2000).map((row) => {
       const discordId = String(row.discordId);
       const stored = row.grantedDeveloperId ? (STORED_ROLES.has(row.grantedRole) ? row.grantedRole : "developer") : null;
       const role = accountRole(discordId, env, stored);
@@ -825,7 +825,7 @@ async function listDeveloperAccounts(request, env) {
         role,
       };
     }),
-    truncated: rows.length > 200,
+    truncated: rows.length > 2000,
   });
 }
 

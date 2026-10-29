@@ -3318,47 +3318,109 @@ ul.team-skill-operations .team-skill-operation {
 
 .developer-account-list {
   display: grid;
-  gap: 7px;
-  max-height: min(45vh, 370px);
+  gap: 4px;
+  max-height: min(60vh, 520px);
   overflow-y: auto;
+  padding-right: 2px;
 }
 
+/* One line per account: who, the role badge, and the role menu. */
 .developer-account-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 9.5rem;
   align-items: center;
   gap: 10px;
   border: 1px solid var(--line);
+  border-left: 3px solid var(--role-color, var(--line));
   border-radius: 7px;
   background: var(--panel-2);
-  padding: 9px;
+  padding: 7px 9px;
 }
+
+.developer-account-row[data-role="owner"] { --role-color: #e8b923; }
+.developer-account-row[data-role="administrator"] { --role-color: #c792ff; }
+.developer-account-row[data-role="developer"] { --role-color: var(--accent); }
+.developer-account-row[data-role="tester"] { --role-color: #6fa8ff; }
 
 .developer-account-identity {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 
-.developer-account-identity small,
-.developer-account-role {
+.developer-account-identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.developer-account-identity small {
+  overflow: hidden;
   color: var(--muted);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.developer-account-row button {
+.developer-account-role {
+  justify-self: end;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--role-color, var(--muted)) 18%, transparent);
+  color: color-mix(in srgb, var(--role-color, var(--muted)) 70%, var(--text));
+  font-size: 11px;
+  font-weight: 750;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+.developer-account-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.developer-account-more {
+  justify-self: center;
   width: auto;
-  min-width: 76px;
+  margin-top: 4px;
 }
 
-@media (max-width: 470px) {
-  .developer-account-row {
-    grid-template-columns: 1fr;
-  }
+.developer-role-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 
-  .developer-account-row button {
-    width: 100%;
+.developer-role-filters .developer-role-chip {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  padding: 3px 11px;
+}
+
+.developer-role-filters .developer-role-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+}
+
+/* Narrow (phones, the aLogs app at its smallest): a slimmer role menu beside the name. */
+@media (max-width: 560px) {
+  .developer-account-row {
+    grid-template-columns: minmax(0, 1fr) 7.5rem;
   }
 }
 

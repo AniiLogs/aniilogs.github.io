@@ -320,7 +320,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.20.2-area-borders/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.20.3-role-list/u);
   assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.
@@ -414,10 +414,11 @@ test("owner can choose signed-in Discord accounts for developer access", () => {
   assert.match(explorer, /payload\.accounts/u);
   assert.match(explorer, /Search signed-in accounts/u);
   assert.match(explorer, /account\.discordGlobalName,\s*account\.discordUsername,\s*account\.discordId/u);
-  assert.match(explorer, /owner: "Owner · protected"/u);
-  // Only the owner sees administrator controls; administrators manage developers and players.
-  assert.match(explorer, /if \(state\.canGrantAdministrator && account\.role === "administrator"\)/u);
-  assert.match(explorer, /updateDeveloperAccess\(account, nextRole\)/u);
+  // The owner is protected; only the owner changes administrators; administrators manage testers, developers and players.
+  assert.ok(explorer.includes('if (account.role === "owner") return [];'));
+  assert.ok(explorer.includes('if (account.role === "administrator" && !state.canGrantAdministrator) return [];'));
+  assert.ok(explorer.includes('...(state.canGrantAdministrator ? ["administrator"] : [])'));
+  assert.ok(explorer.includes('updateDeveloperAccess(account, nextRole === "player" ? null : nextRole)'));
   assert.doesNotMatch(explorer, /Enter an exact Discord user ID/u);
   assert.match(explorerStyles, /\.developer-account-list\s*\{[^}]*overflow-y: auto;/u);
 });
@@ -695,4 +696,16 @@ test("the shown game build is separate from the R2 release id", async () => {
   assert.match(explorer, /const GAME_BUILD = String\(SITE_CONFIG\.gameBuild \|\| CONTENT_PACKAGE_VERSION \|\| ""\)\.trim\(\);/u);
   assert.match(explorer, /\? `Game build \$\{GAME_BUILD\}`/u);
   assert.match(explorer, /sourcePackage !== CONTENT_PACKAGE_VERSION/u);
+});
+
+test("the Roles list knows testers, warns before Developer Mode is taken away, and stays searchable as it grows", () => {
+  // a tester is a role of its own in the list (not shown as a player and offered "Make tester" again)
+  assert.match(explorer, /DEVELOPER_ROLE_RANK = Object\.freeze\(\{ player: 0, tester: 1, developer: 2, administrator: 3, owner: 4 \}\)/u);
+  // one role menu per account; demoting a developer or administrator to tester or player asks first
+  assert.match(explorer, /function developerRoleChoices\(account\)/u);
+  assert.match(explorer, /DEVELOPER_MODE_ROLES\.has\(account\.role\) && !DEVELOPER_MODE_ROLES\.has\(nextRole\)\s*&& !window\.confirm\(/u);
+  // role chips with counts, search, and "Show more" instead of one long column
+  assert.match(explorer, /function renderDeveloperRoleFilters\(container, rows\)/u);
+  assert.match(explorer, /Show more \(/u);
+  assert.ok(explorerStyles.includes('.developer-role-filters .developer-role-chip[aria-pressed="true"]'));
 });
