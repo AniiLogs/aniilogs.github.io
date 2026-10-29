@@ -875,6 +875,37 @@ test("developer apps can add Interlink weeks from the game data; others can't", 
   assert.ok(season.weeks.some((w) => w.id === "3006"));
 });
 
+test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight's second boss counts as the middle", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const dev = await desktopToken(env, SESSIONS.dev);
+  const bosses = [{ id: "80000110", name: "Omega Left" }, { id: "80000111", name: "Omega Middle" }, { id: "80000112", name: "Omega Right" }];
+  const cycles = [
+    { id: "4000", season: 2, start: 1793800000, end: 1794399999, bosses, bosses2: null },
+    { id: "4003", season: 2, start: 1795600000, end: 1796199999, bosses, bosses2: { id: "80000119", name: "Omega Second" } },
+    { id: "4004", season: 2, start: 1796200000, end: 1796799999, bosses, bosses2: [null, { id: "80000121", name: "Omega Other" }, null] },
+    { id: "4005", season: 2, start: 1796800000, end: 1797399999, bosses },
+  ];
+  const upload = (body) => call(env, "/api/leaderboard/interlink/cycles", { token: dev, method: "POST", body });
+  assert.equal((await upload({ cycles: [{ ...cycles[1], bosses2: { id: "x", name: "Bad" } }] })).status, 400);
+  assert.equal((await upload({ cycles })).status, 200);
+  const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
+  const boss = (id) => ({ id, name: "Misread", level: 60 });
+  // week 4000: 15 stars and under the clock is no longer a clear; 20 is
+  assert.equal((await send(SESSIONS.dev, run("c1", { cycle: "4000", boss: boss("80000110"), stars: 15, score: 15000, clearTimeS: 120, cleared: true }))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("c2", { cycle: "4000", boss: boss("80000110"), stars: 20, score: 21000, clearTimeS: 150, cleared: true }))).status, 201);
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=4000")).json();
+  assert.deepEqual(week.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[20, 150], [15, null]]);
+  // the second middle boss: from the upload (as one boss or a list), or the game's ids when the week has none
+  for (const [cycle, id] of [["4003", "80000119"], ["4004", "80000121"], ["4005", "80000123"]]) {
+    assert.equal((await send(SESSIONS.dev, run(`m${cycle}`, { cycle, boss: boss(id), score: 18000 }))).status, 201);
+    const board = (await (await call(env, `/api/leaderboard/interlink?cycle=${cycle}`)).json()).bosses;
+    assert.deepEqual(board.map((b) => [b.id, b.entries.length]), [["80000110", 0], ["80000111", 1], ["80000112", 0]]);
+  }
+  // only the middle: another week's second boss is still refused
+  assert.equal((await send(SESSIONS.dev, run("m4000", { cycle: "4000", boss: boss("80000119") }))).status, 400);
+  assert.equal((await send(SESSIONS.dev, run("m4003b", { cycle: "4003", boss: boss("80000121") }))).status, 400);
+});
+
 test("the desktop app signs in through the player's own browser: one-time code + PKCE secret, never the website's exchange", async () => {
   const { env } = await setup({ DISCORD_CLIENT_ID: "123", DISCORD_CLIENT_SECRET: "s", SESSION_SECRET: "x".repeat(40), LEADERBOARD_PUBLIC: "true" });
   const realFetch = globalThis.fetch;

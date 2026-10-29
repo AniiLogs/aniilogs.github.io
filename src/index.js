@@ -2258,6 +2258,9 @@ async function submitLeaderboardRecord(request, env) {
   if ((record.kind === "interlink_run" || record.kind === "interlink_best") && record.cycle != null) {
     const week = interlinkCycle(await interlinkCycles(env), record.cycle);
     if (week) {
+      // From week 4003 the middle fight can have two bosses: a run on the second one counts on the middle board.
+      const middle = interlinkSecondMiddle(week, record.bossId);
+      if (middle) record.bossId = middle.id;
       const boss = week.bosses.find((b) => String(b.id) === String(record.bossId));
       if (!boss) return json({ error: "That boss isn't one of this week's Interlink bosses." }, 400);
       record.bossName = boss.name;
@@ -2922,6 +2925,16 @@ function interlinkCycle(list, id) {
   return list.find((cycle) => cycle.id === String(id)) || null;
 }
 
+// The second boss of a two-boss middle fight (weeks 4003 on): the one the weeks upload sent as `bosses2`, or else one
+// of the game's second middle bosses. Gives the week's middle boss when bossId is that second boss.
+const INTERLINK_SECOND_MIDDLE_IDS = Object.freeze(["80000119", "80000121", "80000123"]);
+function interlinkSecondMiddle(week, bossId) {
+  const middle = week?.bosses?.[1];
+  if (!middle || String(middle.id) === String(bossId)) return null;
+  if (middle.second) return String(middle.second.id) === String(bossId) ? middle : null;
+  return Number(week.id) >= 4003 && INTERLINK_SECOND_MIDDLE_IDS.includes(String(bossId)) ? middle : null;
+}
+
 function currentInterlinkCycle(list, now = Math.floor(Date.now() / 1000)) {
   const started = list.filter((cycle) => cycle.start <= now);
   return started.length ? started[started.length - 1] : list[list.length - 1];
@@ -2940,10 +2953,18 @@ async function uploadInterlinkCycles(request, env) {
     return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
   }
   const cycles = Array.isArray(body?.cycles) ? body.cycles : null;
+  const validBoss = (boss) => /^\d{1,12}$/u.test(String(boss?.id)) && typeof boss.name === "string" && boss.name.length <= 80;
+  // bosses2: the middle fight's second boss (weeks 4003 on), as one boss, a list beside `bosses`, or null.
+  // Gives null for none and undefined when it isn't valid.
+  const secondMiddle = (cycle) => {
+    const raw = Array.isArray(cycle.bosses2) ? cycle.bosses2[1] ?? cycle.bosses2.find(Boolean) ?? null : cycle.bosses2 ?? null;
+    if (raw === null) return null;
+    return validBoss(raw) ? { id: String(raw.id), name: raw.name.trim() || String(raw.id) } : undefined;
+  };
   const valid = (cycle) => cycle && /^\d{1,12}$/u.test(String(cycle.id)) && Number.isSafeInteger(cycle.start)
     && Number.isSafeInteger(cycle.end) && cycle.end > cycle.start && (cycle.season == null || Number.isSafeInteger(cycle.season))
     && Array.isArray(cycle.bosses) && cycle.bosses.length === 3
-    && cycle.bosses.every((boss) => /^\d{1,12}$/u.test(String(boss?.id)) && typeof boss.name === "string" && boss.name.length <= 80);
+    && cycle.bosses.every(validBoss) && secondMiddle(cycle) !== undefined;
   if (!cycles || !cycles.length || cycles.length > 200 || !cycles.every(valid)) {
     return json({ error: "Send cycles: [{ id, season, start, end, bosses: [{ id, name } x 3] }]." }, 400);
   }
@@ -2953,17 +2974,22 @@ async function uploadInterlinkCycles(request, env) {
      ON CONFLICT(id) DO UPDATE SET season = excluded.season, start_at = excluded.start_at, end_at = excluded.end_at,
        bosses_json = excluded.bosses_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
   ).bind(String(cycle.id), cycle.season ?? null, cycle.start, cycle.end,
-    JSON.stringify(cycle.bosses.map((boss) => ({ id: String(boss.id), name: boss.name.trim() || String(boss.id) }))),
+    JSON.stringify(cycle.bosses.map((boss, index) => {
+      const second = index === 1 ? secondMiddle(cycle) : null;
+      return { id: String(boss.id), name: boss.name.trim() || String(boss.id), ...(second ? { second } : {}) };
+    })),
     account.discordId, now)));
   return json({ ok: true, stored: cycles.length });
 }
 
-// An Interlink run is a clear only with the full 15 stars: the game offers ending early from there. A run quit
-// early also finishes under the clock, with fewer stars, and app versions up to 0.1.21 sent those as cleared.
-const INTERLINK_CLEAR_STARS = 15;
+// An Interlink run is a clear only with the full stars for a kill: 15 before week 4000, 20 from week 4000 (the game
+// offers ending early from there). A run quit early also finishes under the clock, with fewer stars, and app
+// versions up to 0.1.21 sent those as cleared.
+const INTERLINK_CLEAR_STARS = Object.freeze({ before: 15, fromCycle: 4000, from: 20 });
 function clearedSql(kind) {
+  const { before, fromCycle, from } = INTERLINK_CLEAR_STARS;
   return kind === "interlink_run"
-    ? `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= ${INTERLINK_CLEAR_STARS})`
+    ? `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE WHEN CAST(s.cycle AS INTEGER) >= ${fromCycle} THEN ${from} ELSE ${before} END)`
     : "COALESCE(s.cleared, 1) = 1";
 }
 
