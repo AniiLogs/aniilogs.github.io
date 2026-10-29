@@ -203,10 +203,11 @@ test("publishing is upsert-only: the RC43 bundle's first 12 tests leave the othe
   assert.equal((await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: odd })).status, 400);
 });
 
-test("migration 0028 seeds the 26 tests of 0.1.28-RC43, the same as the seed file", async () => {
+test("migrations 0028 and 0029 seed the 0.1.28-RC43 tests and then the Try-Hard Guide checks, as in the seed files", async () => {
   const { env, tokens } = await setup({ keepSeed: true });
   const seed = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "scripts", "beta-seed-0.1.28-RC43.json"), "utf8"));
+  const guide = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "scripts", "beta-seed-try-hard-guide.json"), "utf8"));
   const list = await (await app(env, tokens.tester, "/api/beta/tests")).json();
   assert.equal(list.build, "0.1.28-RC43");
-  assert.deepEqual(list.items, seed.items);
+  assert.deepEqual(list.items, [...seed.items, ...guide.items]);
 });
