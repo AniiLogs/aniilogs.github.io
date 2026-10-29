@@ -293,7 +293,8 @@
     const type = attack.group === "Normal" ? "basic" : attack.group === "Ultimate" ? "ultimate" : "skill";
     return model.hit(side(attacker, attackerMods), side(defender, scenario.defenderMods || {}), {
       might: attack.might,
-      breakPower: attack.breakPower,
+      // Formula 3023 multiplies the skill's Might by its BREAK rate (bpRate); the model takes that product.
+      breakPower: attack.might * attack.breakPower,
       element: attack.element,
       category: attack.category === "Magic" ? "Magical" : "Physical",
       type,
