@@ -3634,14 +3634,36 @@ async function listBetaTests(request, env) {
       id: row.id,
       title: row.title,
       how: row.how,
-      ...(row.details ? { details: row.details } : {}),
+      ...(row.details ? { details: storedBetaDetails(row.details) } : {}),
       ...(manager ? { retired: row.retiredAt != null, results: counts.get(row.id) || { working: 0, broken: 0 } } : {}),
     })),
     mine: Object.fromEntries((mine || []).map((row) => [row.id, { working: row.working === 1, at: row.at }])),
   });
 }
 
-// Add new tests and reword existing ones, in the order sent. A retired test stays retired.
+// A test's details are paragraphs: an array of strings (a single string counts as one), at most 4000 characters in all.
+// Stored as a JSON array; returns null for none, or undefined when they're too long or not text.
+function betaDetails(value) {
+  if (value == null || value === "") return null;
+  const list = typeof value === "string" ? [value] : value;
+  if (!Array.isArray(list) || list.length > 20 || list.some((paragraph) => typeof paragraph !== "string")) return undefined;
+  const paragraphs = list.map((paragraph) => paragraph.trim()).filter(Boolean);
+  if (paragraphs.join("\n").length > 4000) return undefined;
+  return paragraphs.length ? JSON.stringify(paragraphs) : null;
+}
+
+function storedBetaDetails(stored) {
+  try {
+    const list = JSON.parse(stored);
+    if (Array.isArray(list)) return list;
+  } catch {
+    // stored before details were paragraphs
+  }
+  return [String(stored)];
+}
+
+// Add new tests and reword existing ones, in the order sent. Publishing is upsert-only: a test missing from the list
+// is left as it is (never retired or deleted), and a retired test stays retired.
 async function upsertBetaTests(request, env) {
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await betaAccount(request, env);
@@ -3657,10 +3679,13 @@ async function upsertBetaTests(request, env) {
   if (!build || !items || items.length > 500) return json({ error: "A build and a list of up to 500 tests are required." }, 400);
   const tests = items.map((item, index) => ({
     id: String(item?.id ?? ""), title: betaText(item?.title, 200), how: betaText(item?.how, 2000),
-    details: betaText(item?.details, 4000) || null, sort: index,
+    details: betaDetails(item?.details), sort: index,
   }));
   if (tests.some((test) => !BETA_TEST_ID.test(test.id) || !test.title || !test.how)) {
     return json({ error: "Every test needs an id (letters, digits, . _ -), a title and how to test it." }, 400);
+  }
+  if (tests.some((test) => test.details === undefined)) {
+    return json({ error: "details must be a list of paragraphs, 4000 characters at most in all." }, 400);
   }
   if (new Set(tests.map((test) => test.id)).size !== tests.length) return json({ error: "Test ids must be unique." }, 400);
   const now = Math.floor(Date.now() / 1000);

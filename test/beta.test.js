@@ -114,7 +114,7 @@ test("the owner seeds and rewords the shared list; testers read it without retir
   const owner = await (await app(env, tokens.owner, "/api/beta/tests")).json();
   assert.deepEqual(Object.fromEntries(owner.items.map((item) => [item.id, item.retired])), { "meter-hp": false, "send-logs": true, photos: false });
   assert.deepEqual(owner.items.find((item) => item.id === "meter-hp").results, { working: 0, broken: 0 });
-  assert.equal(owner.items.find((item) => item.id === "send-logs").details, "Attach one screenshot.");
+  assert.deepEqual(owner.items.find((item) => item.id === "send-logs").details, ["Attach one screenshot."]);
   assert.equal((await app(env, tokens.player, "/api/beta/tests")).status, 403);
 });
 
@@ -176,4 +176,27 @@ test("Developer Mode off means no beta access even with a private role", async (
     assert.equal((await app(env, tokens[who], "/api/beta/tests")).status, 403, who);
     assert.equal((await app(env, tokens[who], "/api/logs/beta", { method: "POST", form: betaForm({ tests: [{ id: "x", tested: true, working: true }] }) })).status, 403, who);
   }
+});
+
+test("publishing is upsert-only: the RC43 bundle's first 12 tests leave the other 14 seeded ones as they are", async () => {
+  const { env, tokens } = await setup();
+  const seed = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "scripts", "beta-seed-0.1.28-RC43.json"), "utf8"));
+  assert.equal(seed.items.length, 26);
+  assert.deepEqual(await (await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: seed })).json(), { added: 26, updated: 0 });
+  const bundle = { build: "0.1.28-RC43", items: seed.items.slice(0, 12) };
+  assert.deepEqual(await (await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: bundle })).json(), { added: 0, updated: 12 });
+  const owner = await (await app(env, tokens.owner, "/api/beta/tests")).json();
+  assert.equal(owner.build, "0.1.28-RC43");
+  assert.equal(owner.items.length, 26);
+  assert.ok(owner.items.every((item) => item.retired === false));
+  const tester = await (await app(env, tokens.tester, "/api/beta/tests")).json();
+  assert.deepEqual(tester.items.map((item) => item.id).sort(), seed.items.map((item) => item.id).sort());
+  const attacked = tester.items.find((item) => item.id === "under-attack-hp-number");
+  assert.deepEqual(attacked.details, seed.items[0].details);
+  assert.equal(tester.items.find((item) => item.id === "alpha-56-60").details, undefined);
+  // details over 4000 characters in all, or not a list of text, are refused
+  const long = { build: "x", items: [{ id: "long", title: "t", how: "h", details: ["a".repeat(2500), "b".repeat(2500)] }] };
+  assert.equal((await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: long })).status, 400);
+  const odd = { build: "x", items: [{ id: "odd", title: "t", how: "h", details: [{ text: "no" }] }] };
+  assert.equal((await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: odd })).status, 400);
 });
