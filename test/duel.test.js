@@ -82,7 +82,9 @@ test("the 1v1 uses the damage model, the team's buffs and debuffs, and shows how
   assert.match(source, /model\.hit\(side\(attacker, attackerMods\), side\(defender, scenario\.defenderMods \|\| \{\}\)/u);
   assert.match(source, /model\.options\(options\.data, formIds\)/u);
   // A teammate's own self buffs don't reach the Aniimo you attack with.
-  assert.match(source, /if \(String\(effect\.form_id\) !== you && !TEAM_WIDE\.has\(effect\.who\)\) continue;/u);
+  assert.match(source, /if \(String\(raw\.form_id\) !== you && !TEAM_WIDE\.has\(raw\.who\)\) continue;/u);
+  // Stat-scaled effects get their amount from the caster's card stats.
+  assert.match(source, /model\.scaledValue\(raw\.scaling, statsFor\(raw\.form_id\)/u);
   assert.match(source, /attackerMods: mods\.you, defenderMods: mods\.foe/u);
   assert.match(source, /attackerMods: mods\.foe, defenderMods: mods\.you/u);
   assert.match(source, /function renderSteps\(row, result\)/u);

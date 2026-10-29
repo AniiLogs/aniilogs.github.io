@@ -676,8 +676,31 @@
     const formIds = [...new Set([...(options.members || []), you].filter(Boolean).map(String))];
     const effects = [];
     const items = new Map();
-    for (const effect of model.options(options.data, formIds)) {
-      if (String(effect.form_id) !== you && !TEAM_WIDE.has(effect.who)) continue;
+    // Effects whose amount scales with the caster's stat (e.g. "+28–49% depending on ATK") get it from that
+    // caster's card stats: your Aniimo at its 1v1 level and potential, a teammate at its Stats-tab settings.
+    const casterStats = new Map();
+    const statsFor = (formId) => {
+      const key = String(formId);
+      if (!casterStats.has(key)) {
+        const cap = options.aniilog.stat_growth?.level_cap || 70;
+        const source = key === you ? settings.you : options.memberStats?.[key] || {};
+        const totals = model.statTotals?.(options.data, options.aniilog, key, { level: source.level ?? cap, potential: source.potential ?? 0 });
+        casterStats.set(key, totals?.total || null);
+      }
+      return casterStats.get(key);
+    };
+    for (const raw of model.options(options.data, formIds)) {
+      if (String(raw.form_id) !== you && !TEAM_WIDE.has(raw.who)) continue;
+      let effect = raw;
+      if (raw.scaling && !(raw.values || []).length && model.scaledValue) {
+        const value = model.scaledValue(raw.scaling, statsFor(raw.form_id), raw.scaling.bases?.length || 1);
+        const range = model.scaledRange?.(raw.scaling);
+        effect = {
+          ...raw,
+          values: Number.isFinite(value) ? [value] : [],
+          scaledNote: range ? `scales with ${raw.scaling.stat}` : "",
+        };
+      }
       if (effect.source?.kind !== "held item") {
         effects.push(effect);
         continue;
@@ -762,7 +785,7 @@
         const entry = (options.aniilog.entries || []).find((row) => String(row.form_id) === String(effect.form_id));
         copy.append(
           el("strong", "", `${effect.label} ${formatEffect(effect, value)}`),
-          el("small", "", [effect.source?.name || effect.name, entry?.name, WHO_LABELS[effect.who] || effect.who, effect.basis === "inferred" ? "not verified: inferred" : effect.basis === "by-name" ? "not verified: matched by name" : effect.basis !== "exact" ? effect.basis : ""].filter(Boolean).join(" · ")),
+          el("small", "", [`${effect.source?.name || effect.name}${effect.source?.kind === "upgrade" ? " (upgraded)" : ""}`, entry?.name, WHO_LABELS[effect.who] || effect.who, effect.scaledNote, effect.basis === "inferred" ? "not verified: inferred" : effect.basis === "by-name" ? "not verified: matched by name" : effect.basis !== "exact" ? effect.basis : ""].filter(Boolean).join(" · ")),
         );
         label.append(check, copy);
         item.append(label);

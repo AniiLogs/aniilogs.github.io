@@ -24,6 +24,7 @@
       title: "What stacks with what",
       basis: "exact",
       paragraphs: [
+        "Many buffs with a range in their text (for example Waltz's 28–49% Crit Damage) grow with the caster's own stat. For most, the game works out base × (0.8 + stat × rate), capped at 1.4 (or 1.2 for some). The low end is at 0 of that stat, the top at the cap, so a higher-ATK caster gives a bigger buff.",
         "Boosts of the same kind add together. Different kinds multiply. Two +15% Damage Amp buffs give +30%, not +32%. A +15% Damage Amp and a +15% Elemental Boost give ×1.15 × 1.15 = +32%.",
         "So spreading your team's boosts over different kinds beats piling up one kind. Each kind is strongest while it is still empty.",
         "Damage Amp, Damage Boost and \"DMG +x%\" are all the same stat in the game, so they share one pot. The target's Damage Reduction comes out of that same pot. The Damage Amp and Final Damage pots each have a floor of ×0.2, so reductions can never cut those below a fifth. The elemental pot has no floor: at 0 or less the hit does nothing.",
@@ -178,6 +179,12 @@
       text: "Counter Boost: +25% only when your element counters the target's overall. It does nothing in a neutral or mixed matchup." },
     { kind: "skill", id: 10600900, basis: "exact",
       text: "Two different effects. The Grass resistance cut goes on the target (Grass Elemental pot). The +15% for your Grass-types (while Glameep has Energy Full) is Damage Amp on your team. Different pots, so they multiply." },
+    { kind: "trait", id: 120101, basis: "exact",
+      text: "The game data gives +2.5% BREAK Efficiency per 1,000 max HP, not the 2% in the text." },
+    { kind: "skill", id: 10900170, basis: "by-name",
+      text: "Truce's 35% is Final Damage reduction, a separate pot from normal Damage Reduction. It multiplies with other reductions instead of adding to them." },
+    { kind: "skill", id: 10400140, basis: "exact",
+      text: "The 28–49% and 16–28% grow with Luminelle's ATK: the low end at 0 ATK, +2.6% / +1.5% per 100 ATK, the top at 800 ATK." },
     { kind: "trait", id: 13611, basis: "by-name",
       text: "Solar Grace raises Final Damage, a separate pot from Damage Amp, so it multiplies on top of your Damage Amp buffs." },
   ]);

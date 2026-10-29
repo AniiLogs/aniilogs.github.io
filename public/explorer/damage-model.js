@@ -286,10 +286,31 @@
     return bar && breakPerHit > 0 ? Math.ceil(bar / breakPerHit) : null;
   }
 
+  // A buff value that scales with the caster's own stat (exact, checked against the game's formulas):
+  // base x min(max, min + stat x per_point), rounded down for some, x factor (e.g. -1 for a debuff).
+  // scaling: { stat, bases: [per level], min, per_point, max, round_down?, factor? }; stats: { HP, ATK, ... }.
+  function scaledValue(scaling, stats, level = 1) {
+    const statValue = Number(stats?.[scaling?.stat]);
+    if (!scaling || !Number.isFinite(statValue)) return null;
+    const bases = scaling.bases || [];
+    const base = Number(bases[Math.min(Math.max(level, 1), bases.length) - 1] ?? bases[0]);
+    const raw = base * Math.min(scaling.max, scaling.min + statValue * scaling.per_point);
+    return (scaling.round_down ? Math.floor(raw) : raw) * Number(scaling.factor ?? 1);
+  }
+  // The range the game text shows: the value at 0 of the stat and at the cap.
+  function scaledRange(scaling) {
+    if (!scaling) return null;
+    const base = Number(scaling.bases?.[0]);
+    const factor = Number(scaling.factor ?? 1);
+    return { from: base * scaling.min * factor, to: base * scaling.max * factor, per_100: base * scaling.per_point * 100 * factor,
+      cap_at: scaling.per_point > 0 ? (scaling.max - scaling.min) / scaling.per_point : null };
+  }
+
   // --- Buffs and debuffs a team can bring -------------------------------------------------------
 
   // Every damage-relevant effect the forms' skills, upgrades, Ultimates, traits and recommended held
-  // items can apply. who: self / ally / enemy / player / active Aniimo (as traced); trait effects are
+  // items can apply. Rows with `scaling` and no `values` get their number from the caster's stat
+  // (scaledValue). who: self / ally / enemy / player / active Aniimo (as traced); trait effects are
   // listed on self because trait logic is not in the tables.
   function options(data, formIds) {
     const rows = [];
@@ -321,7 +342,8 @@
               who: link.on, key: attribute.key, label: attribute.label, bracket: info.bracket,
               basis: link.basis === "by-name" && info.basis === "exact" ? "by-name" : info.basis,
               whole_team: Boolean(link.whole_team),
-              values: attribute.values, stacks: Number(link.stacks || buff.max_layer || 1),
+              values: attribute.values, ...(attribute.scaling ? { scaling: attribute.scaling } : {}),
+              stacks: Number(link.stacks || buff.max_layer || 1),
               duration: link.duration ?? buff.duration ?? null, requires: link.requires || null,
             });
           }
@@ -348,6 +370,6 @@
   }
 
   window.AniilogsDamage = Object.freeze({
-    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, options,
+    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, options,
   });
 })();
