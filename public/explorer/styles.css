@@ -12318,7 +12318,7 @@ html[data-embed="app"] #topbarLogoutButton {
 
 .duel-row {
   display: grid;
-  grid-template-columns: 22px minmax(120px, 1.6fr) 64px 64px repeat(4, minmax(56px, 0.7fr)) minmax(56px, 0.7fr);
+  grid-template-columns: 22px minmax(120px, 1.6fr) 64px 64px repeat(4, minmax(56px, 0.7fr)) repeat(2, minmax(64px, 0.7fr));
   align-items: center;
   gap: 8px;
   border-radius: 8px;

@@ -191,7 +191,8 @@
           elementName: combat.element,
           elementColor: combat.element_color,
           might: Number(combat.might),
-          breakRate: Number.isFinite(Number(combat.break_power)) ? Number(combat.break_power) : 1,
+          breakRate: Number.isFinite(Number(teamSkill?.bp_rate)) ? Number(teamSkill.bp_rate)
+            : Number.isFinite(Number(combat.break_power)) ? Number(combat.break_power) : 1,
           breakPower: Number.isFinite(tpPower) ? tpPower : null,
           cooldown: Math.max(Number(combat.cooldown) || 0, 0),
           epCost: Number(combat.ep_cost) || 0,
@@ -326,6 +327,9 @@
           normal: result.hit,
           crit: result.crit,
           average: result.average,
+          // Toughness: how much of the target's toughness gauge (60 for an Aniimo) one hit drains (exact).
+          toughness: attack.breakPower === null || !window.AniilogsDamage?.toughnessDrain
+            ? NaN : window.AniilogsDamage.toughnessDrain(attack.breakPower, { hitShare: chosenRate(attack) }),
           breakNormal: attack.breakPower === null ? NaN : result.break,
           breakAverage: attack.breakPower === null ? NaN : result.break,
           critChance: result.critChance,
@@ -559,7 +563,7 @@
     table.setAttribute("role", "table");
     const head = el("div", "duel-row is-head");
     head.setAttribute("role", "row");
-    ["", "Attack", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK"].forEach((label) => {
+    ["", "Attack", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Toughness"].forEach((label) => {
       const cell = el("span", "", label);
       cell.setAttribute("role", "columnheader");
       head.append(cell);
@@ -621,10 +625,11 @@
         el("span", "duel-num is-key", percent(hpShare(row.average))),
         el("span", "duel-num", Number.isFinite(toKo(row.average)) ? String(toKo(row.average)) : "–"),
         el("span", "duel-num", whole(row.breakAverage)),
+        el("span", "duel-num", Number.isFinite(row.toughness) ? `${Math.round(row.toughness * 10) / 10}` : "–"),
       ];
       cells.forEach((cell, index) => {
         cell.setAttribute("role", "cell");
-        if (index > 1) cell.dataset.label = ["", "", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK"][index];
+        if (index > 1) cell.dataset.label = ["", "", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Toughness"][index];
       });
       line.append(...cells);
       table.append(line);
@@ -861,7 +866,7 @@
     );
     root.append(results);
     const sources = el("p", "duel-sources");
-    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. Toughness is how much of the target’s 60-point toughness gauge a hit drains; BREAK dmg is formula 3023 from the BREAK stat. Which of the two triggers BREAK is decided on the game’s server, so there’s no hits-to-BREAK figure yet. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
     root.append(sources);
     return root;
   }
