@@ -1851,6 +1851,55 @@ function developerAvailabilityBadge(availability, note = "") {
   return badge;
 }
 
+// Aniilog and checklist overlays: whole extra entries (Unreleased / Unverified) kept apart from the public
+// data, so public totals never change. Their own art comes from dev/<module>/assets/ as blob: URLs.
+const developerEntries = { aniilog: [], checklist: [] };
+
+async function resolveDeveloperAssets(value) {
+  if (typeof value === "string") {
+    return /^[a-z0-9-]+\/assets\//u.test(value) ? (await developerAssetUrl(value)) || "" : value;
+  }
+  if (Array.isArray(value)) return Promise.all(value.map(resolveDeveloperAssets));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(await Promise.all(Object.entries(value)
+      .map(async ([key, item]) => [key, await resolveDeveloperAssets(item)])));
+  }
+  return value;
+}
+
+async function loadModuleDeveloperEntries(module) {
+  const overlay = await loadDeveloperOverlay(module);
+  if (!overlay) return [];
+  const records = overlay.records.filter((record) => record.target === "entries" && record.op === "append");
+  return Promise.all(applyDeveloperOverlay([], records).map(resolveDeveloperAssets));
+}
+
+// Runs whenever Developer Mode access changes: loads the overlays, or drops them so only public data shows.
+async function refreshModuleDeveloperEntries() {
+  if (developerContentAllowed()) {
+    const [aniilog, checklist] = await Promise.all(["aniilog", "checklist"].map(loadModuleDeveloperEntries));
+    if (!developerContentAllowed()) return;
+    developerEntries.aniilog = aniilog.map((entry) => (entry.video && !entry.showcase_variants ? {
+      ...entry,
+      showcase_variants: [{
+        id: "common", rarity_id: "0", label: "Common", video: entry.video, video_layout: entry.video_layout,
+        renderSource: "shipped-petmanual", renderVerified: true,
+      }],
+    } : entry));
+    developerEntries.checklist = checklist;
+  } else {
+    developerEntries.aniilog = [];
+    developerEntries.checklist = [];
+  }
+  if (isCatalogView()) renderCatalogPreview();
+  if (state.checklistData) renderChecklist();
+}
+
+// Overlay entries are shown but never counted.
+function countedEntries(entries) {
+  return entries.filter((entry) => !entry?.availability).length;
+}
+
 // Serialize same-account progress writes with a fresh, same-value Dev Mode ACK.
 // This is client sequencing only; the API and private gateway remain authorities.
 function createDeveloperModeAccountWrites({ getContext, requestMode, writeProgress }) {
@@ -2117,6 +2166,7 @@ function applyDeveloperVisibility() {
   if (access === developerOverlayAccess) return;
   developerOverlayAccess = access;
   resetDeveloperOverlays();
+  void refreshModuleDeveloperEntries();
   if (state.activeMapId && state.mapDataCache?.has(state.activeMapId)) {
     useMapDataset(state.activeMapId, state.mapDataCache.get(state.activeMapId));
   }
@@ -3849,7 +3899,10 @@ function ensureItemlogData() {
 
 function allCatalogEntriesForView(view = state.sidebarView) {
   if (view === "aniilog") {
-    return Array.isArray(state.aniilogData?.entries) ? state.aniilogData.entries : [];
+    const entries = Array.isArray(state.aniilogData?.entries) ? state.aniilogData.entries : [];
+    return entries.length && developerEntries.aniilog.length && developerContentAllowed()
+      ? [...entries, ...developerEntries.aniilog]
+      : entries;
   }
   if (view === "itemlog") {
     const entries = Array.isArray(state.itemlogData?.entries) ? state.itemlogData.entries : [];
@@ -4100,7 +4153,7 @@ function aniilogSortValue(entry, sort) {
 
 // Each region's Aniilog numbers start at 1, so entries are grouped by region first: Breezy Plains
 // (with the legendary starters), then Whisperwake Isles, then the Collection.
-const ANIILOG_SURFACE_RANK = { whisperwake: 1, collection: 2 };
+const ANIILOG_SURFACE_RANK = { whisperwake: 1, collection: 2, unreleased: 3, unverified: 4 };
 
 function compareAniilogEntries(left, right) {
   const surfaceDifference = (ANIILOG_SURFACE_RANK[left?.surface_id] ?? 0)
@@ -4712,12 +4765,14 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   copy.className = "catalog-index-copy";
   const name = document.createElement("strong");
   name.textContent = entry.name;
+  const listBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
+  if (listBadge) name.append(" ", listBadge);
   const meta = document.createElement("small");
   if (view === "aniilog") {
     const sort = aniilogSortOption();
     const statValue = aniilogSortValue(entry, sort);
     meta.textContent = [
-      `${entry.aniilog_number || "Special"} - ${entry.form_label || "Basic Form"}`,
+      `${entry.aniilog_number || DEVELOPER_AVAILABILITY[entry.availability] || "Special"} - ${entry.form_label || "Basic Form"}`,
       statValue === null ? "" : `${sort.label.replace(" (high to low)", "")} ${formatNumber(statValue, 0)}`,
     ].filter(Boolean).join(" - ");
   } else {
@@ -6871,9 +6926,11 @@ function renderAniilogCatalogRecord(entry) {
   stickyIndicator.setAttribute("aria-hidden", "true");
   const number = document.createElement("p");
   number.className = "catalog-eyebrow";
-  number.textContent = `${entry.aniilog_number || "Special"} - ${entry.form_label || "Basic Form"}`;
+  number.textContent = `${entry.aniilog_number || DEVELOPER_AVAILABILITY[entry.availability] || "Special"} - ${entry.form_label || "Basic Form"}`;
   const name = document.createElement("h2");
   name.textContent = entry.name;
+  const availabilityBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
+  if (availabilityBadge) name.append(" ", availabilityBadge);
   const tags = document.createElement("div");
   tags.className = "catalog-tags";
   if (entry.role) {
@@ -8302,7 +8359,7 @@ function renderCatalogSidebar(view, title, allEntries, entries, selectedId, stat
   const count = document.createElement("span");
   count.className = "filter-count";
   count.textContent = allowControls
-    ? `${entries.length} / ${allEntries.length}`
+    ? `${countedEntries(entries)} / ${countedEntries(allEntries)}`
     : (statusMessage.startsWith("Loading") ? "Loading" : "Unavailable");
   const headingActions = document.createElement("div");
   headingActions.className = "catalog-heading-actions";
@@ -8922,7 +8979,8 @@ function scheduleMobileCatalogStickyIdentity() {
 
 function checklistEntriesForCategory(category = state.checklistCategory) {
   if (!Array.isArray(state.checklistData?.entries)) return [];
-  return state.checklistData.entries.filter((entry) => entry?.category === category);
+  const extra = developerContentAllowed() ? developerEntries.checklist : [];
+  return [...state.checklistData.entries, ...extra].filter((entry) => entry?.category === category);
 }
 
 const LUMIN_CHECKLIST_TABS = Object.freeze([
@@ -8984,6 +9042,7 @@ function checklistProgress(entries) {
   let completed = 0;
   let total = 0;
   entries.forEach((entry) => {
+    if (entry?.availability) return;
     (entry?.completion_states || []).forEach((completionState) => {
       const id = String(completionState?.id || "").trim();
       if (!id || seen.has(id)) return;
@@ -9269,6 +9328,8 @@ function renderChecklistRow(entry) {
   const name = document.createElement("strong");
   name.textContent = entry.name || "Unnamed entry";
   name.title = name.textContent;
+  const rowBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
+  if (rowBadge) name.append(" ", rowBadge);
   const meta = document.createElement("small");
   meta.textContent = checklistMetaText(entry);
   meta.title = meta.textContent;
