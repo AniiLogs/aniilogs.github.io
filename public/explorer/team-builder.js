@@ -1520,13 +1520,15 @@
     ["Stat", "Species value", `Level ${level}`].forEach((text) => head.append(el("th", "", text)));
     table.append(el("thead"), el("tbody"));
     table.tHead.append(head);
-    entry.stats.forEach((row) => {
+    // Magic Attack is a leftover table field: the game's six base stats and potentials
+    // (pet_base_prop_attr_names, attribute_group 110) have no Magic Attack.
+    entry.stats.filter((row) => row.label !== "Magic Attack").forEach((row) => {
       const value = grownStat(growth, row.label, Number(row.value), level, potential);
       const line = el("tr");
       line.append(el("th", "", row.label), el("td", "", String(row.value)), el("td", "", value === null ? "–" : value.toLocaleString()));
       table.tBodies[0].append(line);
     });
-    section.append(table, el("p", "team-data-note", "Exact base stats from the game’s own formulas (formula_data.lua 3003 HP, 3004 Attack and Magic Attack, 3007 Defense and Magic Defense, 3008 EP Regen, 3018 Break) and the potential bonus in pet_attr_convert_data. Not included: allocated attribute points, held items, personality traits and other bonuses."));
+    section.append(table, el("p", "team-data-note", "Exact base stats from the game’s own formulas (formula_data.lua 3003 HP, 3004 Attack, 3007 Defense and Magic Defense, 3008 EP Regen, 3018 Break) and the potential bonus in pet_attr_convert_data. Not included: allocated attribute points, held items, personality traits and other bonuses."));
     return section;
   }
 
