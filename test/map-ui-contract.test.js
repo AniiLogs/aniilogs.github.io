@@ -528,7 +528,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20261029-build3846247-aniimo-page-r78"/u);
+  assert.match(explorerConfig, /contentRevision = "20261029-build3846247-team-build-r79"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);

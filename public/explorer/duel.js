@@ -5,7 +5,7 @@
   // (Data/formula_data.lua 3001 HP damage, 3023 BREAK damage; CombatActionTool's crit, element and same-element
   // rules). Stats come from the Aniilog's stat_growth, so they match the Aniimo page. Every number assumes the
   // attack lands: dodges, misses, positioning and buffs are not simulated.
-  // Team Builder mounts it with render({ aniilog, data, members, formLabel, contentUrl, developerMode, rerender }).
+  // Team Builder mounts it with render({ aniilog, data, members, memberStats, formLabel, contentUrl, developerMode, rerender }).
   const STORAGE_KEY = "aniilogs:duel:v1";
   const RULES = Object.freeze({
     critRate: 0.1, // property_data 1001/1002 crit_rate_v (every Aniimo)
@@ -345,6 +345,13 @@
     }
     select.addEventListener("change", change(rerender, (target) => {
       side.formId = target.value;
+      // A team member brings the level and potential from its Stats tab.
+      const member = options.memberStats?.[target.value];
+      if (member) {
+        const cap = options.aniilog.stat_growth?.level_cap || 70;
+        side.level = Math.round(clamp(member.level ?? cap, 1, cap, cap));
+        side.potential = Math.round(clamp(member.potential ?? 0, 0, 30, 0));
+      }
     }));
     return select;
   }

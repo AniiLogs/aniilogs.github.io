@@ -1812,6 +1812,9 @@
       aniilog,
       data,
       members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
+      // The level and potential set on each member’s Stats tab (unset level = the cap).
+      memberStats: Object.fromEntries(model.members.filter((member) => member?.formId)
+        .map((member) => [String(member.formId), { level: member.level, potential: member.potential }])),
       formLabel,
       contentUrl: host.contentUrl,
       developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),
