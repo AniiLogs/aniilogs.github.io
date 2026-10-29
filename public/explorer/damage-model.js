@@ -204,11 +204,12 @@
   }
 
   // One hit of a skill. attacker / defender: { atk, pdef, mdef, breakAtk, breakDef, elements: [id],
-  // critRate, critDamage, modifiers: { attributeKey: value } }; skill: { might, breakPower, breakRate,
-  // element, category: "Physical" | "Magical", type: "basic" | "skill" | "ultimate", hitShare }.
-  // might = ability_param_data.power; breakPower = ability_param_data.tpPower, the skill's own BREAK
-  // power (by-name: "tp" is the BREAK gauge, as in tp_max_v); breakRate = ability_param_data.bpRate,
-  // a separate multiplier most skills don't set (1).
+  // critRate, critDamage (totals, base included), modifiers: { attributeKey: value } }; skill: { might,
+  // breakRate, element, category: "Physical" | "Magical", type: "basic" | "skill" | "ultimate", hitShare }.
+  // might = ability_param_data.power. BREAK damage (formula 3023) also scales with `power`: its separate
+  // bpPower and dmgPercent inputs have no effect (checked by running the formula). breakRate =
+  // ability_param_data.bpRate (1 when unset, 0 = no BREAK). tpPower is only for toughness, see
+  // toughnessDrain.
   // context: { elements (team_builder_data.elements), sameElementBonus, elementKeys, broken, pvp }.
   function hit(attacker, defender, skill, context = {}) {
     const elementKey = context.elementKeys?.[skill.element]?.add?.replace(ELEMENT_KEY, "$1") || null;
@@ -242,8 +243,10 @@
     const multiplier = Math.min(3, Math.max(1, 1 + (attacker.critDamage ?? 0.5) + (atk.crit_damage || 0) - (def.crit_damage || 0)));
     const chance = Math.min(1, rate);
 
-    // BREAK (formula 3023): bad matchups never lower it; efficiency and BREAK damage taken add (by-name).
-    const breakHit = Math.max(0, ((attacker.breakAtk || 0) - (defender.breakDef || 0)) * (share * Number(skill.breakPower || 0) / 10)
+    // BREAK damage (formula 3023, exact): (BREAK - target's BREAK DEF) x hit share x Might / 10 x bpRate
+    // x efficiency pot (min 0.2) x max(1, matchup) x crit x elemental pot. Damage Amp, Final Damage and the
+    // same-element bonus don't touch it. Efficiency and BREAK damage taken share the pot (by-name).
+    const breakHit = Math.max(0, ((attacker.breakAtk || 0) - (defender.breakDef || 0)) * (share * Number(skill.might || 0) / 10)
       * Number(skill.breakRate ?? 1) * Math.max(0.2, 1 + (atk.break || 0) + (def.break || 0)) * Math.max(1, matchup.factor) * elementalDamage);
 
     return {
@@ -253,6 +256,7 @@
       critChance: chance,
       critMultiplier: multiplier,
       break: breakHit,
+      breakCrit: breakHit * multiplier,
       steps,
     };
   }
@@ -261,12 +265,25 @@
   // hitShare x tpPower x level-gap tpDamFixRate x (1 + target's element tp-reduce attribute)
   // x attacker size TpPowerRate / target size TpResistRate (BodyShapeEffectData). Nothing while the
   // target is in BREAK, recovering from it or under super armour. Pets' toughness: tp_max_v (60).
-  // Whether toughness or the BREAK damage gauge (formula 3023) starts BREAK is decided server-side.
+  // Toughness is not the BREAK bar: the BREAK bar shows bp (Utils.getEntityBreakInfo -> curBp / maxBp,
+  // TopLogoCombatComponent), which formula 3023 drains. Toughness rises while casting (inCastWeightValue)
+  // and is blocked by super armour, so it reads as the stagger / interruption gauge (inferred).
   // options: { hitShare = 1, tpReduceAdd = 0, levelRate = 1, sizePowerRate = 1, sizeResistRate = 1 }
   function toughnessDrain(tpPower, options = {}) {
     const value = Number(options.hitShare ?? 1) * Number(tpPower || 0) * Number(options.levelRate ?? 1)
       * (1 + Number(options.tpReduceAdd || 0)) * Number(options.sizePowerRate ?? 1) / Number(options.sizeResistRate || 1);
     return Math.max(0, value);
+  }
+
+  // A pet's BREAK bar at a level (exact: formula 3110 run on property_data's template, staged as
+  // data.pet_break_bar) and how many hits of a given BREAK damage empty it.
+  function breakBar(data, level) {
+    const bars = data?.pet_break_bar?.by_level || [];
+    return bars[Math.min(Math.max(Math.round(Number(level) || 1), 1), bars.length) - 1] ?? null;
+  }
+  function hitsToBreak(data, level, breakPerHit) {
+    const bar = breakBar(data, level);
+    return bar && breakPerHit > 0 ? Math.ceil(bar / breakPerHit) : null;
   }
 
   // --- Buffs and debuffs a team can bring -------------------------------------------------------
@@ -300,7 +317,10 @@
             push({
               form_id: Number(formId), id: `${link.id}:${attribute.key}:${link.on}`, buff_id: Number(link.id), name: buff.name || null,
               source: { kind, id: Number(source.id) || null, name: source.name || null },
-              who: link.on, key: attribute.key, label: attribute.label, bracket: info.bracket, basis: info.basis,
+              // Whole-team buffs (addTeamBuff) are traced by name only, so they can't be surer than that.
+              who: link.on, key: attribute.key, label: attribute.label, bracket: info.bracket,
+              basis: link.basis === "by-name" && info.basis === "exact" ? "by-name" : info.basis,
+              whole_team: Boolean(link.whole_team),
               values: attribute.values, stacks: Number(link.stacks || buff.max_layer || 1),
               duration: link.duration ?? buff.duration ?? null, requires: link.requires || null,
             });
@@ -328,6 +348,6 @@
   }
 
   window.AniilogsDamage = Object.freeze({
-    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, options,
+    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, options,
   });
 })();
