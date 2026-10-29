@@ -1076,7 +1076,7 @@ test("Interlink Per Boss boards: slots, star caps, ladders, paging, one boss, an
   const week = await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=score&limit=10")).json();
   assert.deepEqual(week.bosses.map((x) => [x.slot, x.name, x.starCap]), [["Left", "Alpha Scorchhowl", 20], ["Center", "Alpha Glameep", 40], ["Right", "Alpha Minespine", 20]]);
   assert.deepEqual(week.rules.starCaps, [20, 40, 20]);
-  assert.equal(week.rules.slotsConfirmed, false);
+  assert.equal(week.rules.slotsConfirmed, true);
   assert.equal(week.ladder, "score");
   // ranked by score: the timed-out 36,000 beats the cleared 34,000
   assert.deepEqual(week.bosses[1].entries.map((e) => [e.rank, e.score, e.clearTimeS]), [[1, 36000, null], [2, 34000, 100]]);

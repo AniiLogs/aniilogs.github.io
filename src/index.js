@@ -2905,19 +2905,18 @@ function withProfiles(players, profiles) {
 // The weeks: built in, plus what developer accounts' desktop apps uploaded from the game data (newer patches).
 // Interlink rules that change with game updates, kept in one place so a patch only needs this edited:
 // - slots: what the game calls the three boss positions, in the order a week lists its bosses (cycle.bosses).
-//   slotsConfirmed says whether that order has been checked in the game.
+//   slotsConfirmed says whether that order has been checked in the game (the meter reads it: left, middle, right).
 // - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
 //   early from there); the last entry whose fromCycle is at or below the week's id applies. Weeks before 4000:
-//   15 stars cleared any boss. From 4000 (20 / 40 / 20) the clear line is taken as each boss's full stars until
-//   it's checked in the game.
+//   15 stars cleared any boss. From 4000 (20 / 40 / 20) a kill is 20 stars on every boss.
 // - splitBlock: weeks are grouped into splits (the game resets stars) by their id block: 3000-3005 is one split,
 //   4000 starts the next.
 const INTERLINK_RULES = Object.freeze({
   slots: Object.freeze(["Left", "Center", "Right"]),
-  slotsConfirmed: false,
+  slotsConfirmed: true,
   starCaps: Object.freeze([
     Object.freeze({ fromCycle: 0, caps: Object.freeze([15, 30, 15]), clear: Object.freeze([15, 15, 15]) }),
-    Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 40, 20]) }),
+    Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 20, 20]) }),
   ]),
   splitBlock: 1000,
 });
