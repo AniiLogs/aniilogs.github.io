@@ -178,6 +178,9 @@
         const id = String(skill.skill_id || skill.ultimate_id || "");
         if (!combat || !id || !(Number(combat.might) > 0) || !STAT_KEYS[combat.category]) continue;
         const rates = hitRates(data, entry, id);
+        // BREAK power is the skill's own tpPower (ability_param_data), from the Team Builder data when it has it.
+        const teamSkill = (data?.forms?.[String(entry?.form_id)]?.skills || []).find((row) => String(row.id) === id);
+        const tpPower = Number(teamSkill?.tp_power ?? teamSkill?.break_power);
         rows.push({
           id,
           name: skill.name,
@@ -188,7 +191,8 @@
           elementName: combat.element,
           elementColor: combat.element_color,
           might: Number(combat.might),
-          breakPower: Number(combat.break_power) || 1,
+          breakRate: Number.isFinite(Number(combat.break_power)) ? Number(combat.break_power) : 1,
+          breakPower: Number.isFinite(tpPower) ? tpPower : null,
           cooldown: Math.max(Number(combat.cooldown) || 0, 0),
           epCost: Number(combat.ep_cost) || 0,
           rates,
@@ -223,7 +227,7 @@
   // Formula 3023 for one hit. Aniimo have no BREAK defense of their own (property_data gives pets none).
   function breakDamage(attacker, defender, attack, scenario, crit) {
     const bpAtk = attacker.stats.Break || 0;
-    let damage = bpAtk * (chosenRate(attack) * attack.might / 10) * attack.breakPower;
+    let damage = bpAtk * (chosenRate(attack) * (attack.breakPower ?? attack.might) / 10) * attack.breakRate;
     damage *= Math.max(1, elementFactor(scenario.data, attack.element, defender.elements));
     if (crit) damage *= Math.min(RULES.critCap, 1 + RULES.critDamage);
     return Math.max(damage, 0);
@@ -293,8 +297,9 @@
     const type = attack.group === "Normal" ? "basic" : attack.group === "Ultimate" ? "ultimate" : "skill";
     return model.hit(side(attacker, attackerMods), side(defender, scenario.defenderMods || {}), {
       might: attack.might,
-      // Formula 3023 multiplies the skill's Might by its BREAK rate (bpRate); the model takes that product.
-      breakPower: attack.might * attack.breakPower,
+      // BREAK: the skill's tpPower and its bpRate (damage-model.js 0.1.1); unknown tpPower gives no BREAK figure.
+      breakPower: attack.breakPower ?? 0,
+      breakRate: attack.breakRate,
       element: attack.element,
       category: attack.category === "Magic" ? "Magical" : "Physical",
       type,
@@ -321,8 +326,8 @@
           normal: result.hit,
           crit: result.crit,
           average: result.average,
-          breakNormal: result.break,
-          breakAverage: result.break,
+          breakNormal: attack.breakPower === null ? NaN : result.break,
+          breakAverage: attack.breakPower === null ? NaN : result.break,
           critChance: result.critChance,
           critMultiplier: result.critMultiplier,
           steps: result.steps || [],

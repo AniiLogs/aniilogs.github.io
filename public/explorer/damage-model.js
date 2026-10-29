@@ -204,8 +204,11 @@
   }
 
   // One hit of a skill. attacker / defender: { atk, pdef, mdef, breakAtk, breakDef, elements: [id],
-  // critRate, critDamage, modifiers: { attributeKey: value } }; skill: { might, breakPower, element,
-  // category: "Physical" | "Magical", type: "basic" | "skill" | "ultimate", hitShare };
+  // critRate, critDamage, modifiers: { attributeKey: value } }; skill: { might, breakPower, breakRate,
+  // element, category: "Physical" | "Magical", type: "basic" | "skill" | "ultimate", hitShare }.
+  // might = ability_param_data.power; breakPower = ability_param_data.tpPower, the skill's own BREAK
+  // power (by-name: "tp" is the BREAK gauge, as in tp_max_v); breakRate = ability_param_data.bpRate,
+  // a separate multiplier most skills don't set (1).
   // context: { elements (team_builder_data.elements), sameElementBonus, elementKeys, broken, pvp }.
   function hit(attacker, defender, skill, context = {}) {
     const elementKey = context.elementKeys?.[skill.element]?.add?.replace(ELEMENT_KEY, "$1") || null;
@@ -241,7 +244,7 @@
 
     // BREAK (formula 3023): bad matchups never lower it; efficiency and BREAK damage taken add (by-name).
     const breakHit = Math.max(0, ((attacker.breakAtk || 0) - (defender.breakDef || 0)) * (share * Number(skill.breakPower || 0) / 10)
-      * Math.max(0.2, 1 + (atk.break || 0) + (def.break || 0)) * Math.max(1, matchup.factor) * elementalDamage);
+      * Number(skill.breakRate ?? 1) * Math.max(0.2, 1 + (atk.break || 0) + (def.break || 0)) * Math.max(1, matchup.factor) * elementalDamage);
 
     return {
       hit: damage,

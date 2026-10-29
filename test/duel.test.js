@@ -17,7 +17,7 @@ const duel = loadDuel();
 const data = { elements: { 5: { name: "Fire", against: { 2: 1.6, 3: 1.6, 5: 0.625 } }, 2: { name: "Ice", against: {} }, 3: { name: "Grass", against: {} } } };
 const attacker = { stats: { Attack: 354, Defense: 177, Break: 182 }, elements: ["5"] };
 const scenario = { data, startHp: 100, broken: false, brokenBonus: 0, pvp: false, actionSeconds: 1 };
-const fireKick = { id: "1", category: "Physical", element: "5", might: 72, breakPower: 1, cooldown: 15, epCost: 0, rates: [1, 1.2] };
+const fireKick = { id: "1", category: "Physical", element: "5", might: 72, breakPower: 24, breakRate: 1, cooldown: 15, epCost: 0, rates: [1, 1.2] };
 
 test("HP damage follows formula 3001: max(ATK - DEF, 10% ATK) x Might / 10, elements, same element and crits", () => {
   const defender = { stats: { Defense: 171 }, elements: ["9"] };
@@ -34,9 +34,9 @@ test("HP damage follows formula 3001: max(ATK - DEF, 10% ATK) x Might / 10, elem
   assert.ok(Math.abs(duel.hpDamage(attacker, defender, fireKick, { ...scenario, broken: true, brokenBonus: 0.5 }, false) - plain * 1.5) < 1e-9);
 });
 
-test("BREAK damage follows formula 3023 and never drops below 1x for elements", () => {
+test("BREAK damage follows formula 3023 with the skill's tpPower and never drops below 1x for elements", () => {
   const resist = { stats: {}, elements: ["5"] };
-  assert.ok(Math.abs(duel.breakDamage(attacker, resist, fireKick, scenario, false) - 182 * 7.2) < 1e-9);
+  assert.ok(Math.abs(duel.breakDamage(attacker, resist, fireKick, scenario, false) - 182 * 2.4) < 1e-9);
 });
 
 test("the KO plan uses the strongest attack off cooldown and stops at the KO", () => {
