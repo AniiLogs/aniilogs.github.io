@@ -1841,17 +1841,6 @@ function applyDeveloperOverlay(collection, records) {
   return out;
 }
 
-// Overlay entries (availability "unreleased" / "unverified") are shown but never counted. Item-log's public
-// entries have an availability object of their own ({ status }), which does not make them overlay entries.
-// (Same helpers as the combined preview branch; keep one copy when merging.)
-function isDeveloperOverlayEntry(entry) {
-  return typeof entry?.availability === "string" && Object.hasOwn(DEVELOPER_AVAILABILITY, entry.availability);
-}
-
-function countedEntries(entries) {
-  return entries.filter((entry) => !isDeveloperOverlayEntry(entry)).length;
-}
-
 function developerAvailabilityBadge(availability, note = "") {
   const label = DEVELOPER_AVAILABILITY[availability];
   if (!label) return null;
