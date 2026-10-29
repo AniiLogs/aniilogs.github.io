@@ -3051,18 +3051,20 @@ const DEVELOPER_ROLE_RANK = Object.freeze({ player: 0, developer: 1, administrat
 const DEVELOPER_ROLE_LABELS = Object.freeze({
   owner: "Owner · protected",
   administrator: "Administrator · manages developers",
-  developer: "Developer (tester) · Developer Mode",
+  developer: "Developer · Developer Mode",
+  tester: "Tester · Beta Menu",
   player: "Player",
 });
 
-// role: "developer" or "administrator" to grant, or null to remove the account's role.
+// role: "tester", "developer" or "administrator" to grant, or null to remove the account's role.
+const ROLE_NAMES = Object.freeze({ tester: "a tester", developer: "a developer", administrator: "an administrator" });
 async function updateDeveloperAccess(account, role) {
   if (!state.canGrantRoles || account.role === "owner" || state.developerRoleBusyId) return;
   if ((role === "administrator" || account.role === "administrator") && !state.canGrantAdministrator) return;
   const discordId = account.discordId;
   const name = account.discordGlobalName || account.discordUsername || discordId;
   state.developerRoleBusyId = discordId;
-  state.developerRoleStatus = role ? `Making ${name} ${role === "administrator" ? "an administrator" : "a developer"}...` : `Removing ${name}'s role...`;
+  state.developerRoleStatus = role ? `Making ${name} ${ROLE_NAMES[role]}...` : `Removing ${name}'s role...`;
   renderSettings();
   try {
     const response = await apiFetch(`/admin/developers/${encodeURIComponent(discordId)}`, {
@@ -3072,7 +3074,7 @@ async function updateDeveloperAccess(account, role) {
     });
     if (!response.ok) throw new Error(`Developer role update returned ${response.status}`);
     state.developerRoleStatus = role
-      ? `${name} is now ${role === "administrator" ? "an administrator" : "a developer"}.`
+      ? `${name} is now ${ROLE_NAMES[role]}.`
       : `${name} is now a player.`;
     await loadDeveloperAccounts({ force: true });
   } catch (error) {
@@ -3131,11 +3133,12 @@ function renderDeveloperAccountRows(container) {
     role.textContent = DEVELOPER_ROLE_LABELS[account.role] || DEVELOPER_ROLE_LABELS.player;
     identity.append(name, detail, role);
     row.append(identity);
-    // Administrators manage developers and players; only the owner changes administrators or makes new ones.
+    // Administrators manage testers, developers and players; only the owner changes administrators or makes new ones.
     const actions = [];
-    if (account.role === "player") actions.push(["Make developer", "developer", ""]);
-    if (account.role === "developer") actions.push(["Remove developer", null, "settings-danger"]);
-    if (state.canGrantAdministrator && (account.role === "player" || account.role === "developer")) actions.push(["Make administrator", "administrator", ""]);
+    if (account.role === "player") actions.push(["Make tester", "tester", ""], ["Make developer", "developer", ""]);
+    if (account.role === "tester") actions.push(["Make developer", "developer", ""], ["Remove tester", null, "settings-danger"]);
+    if (account.role === "developer") actions.push(["Make tester", "tester", ""], ["Remove developer", null, "settings-danger"]);
+    if (state.canGrantAdministrator && ["player", "tester", "developer"].includes(account.role)) actions.push(["Make administrator", "administrator", ""]);
     if (state.canGrantAdministrator && account.role === "administrator") {
       actions.push(["Make developer", "developer", ""], ["Remove administrator", null, "settings-danger"]);
     }
