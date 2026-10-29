@@ -329,15 +329,27 @@ const MOBILE_LAYOUT_QUERY = window.matchMedia(
 const DESKTOP_SIDEBAR_QUERY = window.matchMedia("(min-width: 821px) and (pointer: fine)");
 // Reserved for temporarily suppressing incomplete physical reward sources.
 const TEMPORARILY_HIDDEN_ITEM_IDS = new Set();
+// The game’s six Aniimo stats, in the order and with the labels of its stat card. The data still carries an old
+// "Magic Attack" column; the game no longer uses it, so the site leaves it out.
 const ANIILOG_STAT_CONFIG = Object.freeze([
   { sourceLabel: "HP", label: "HP", id: "hp", color: "#ef6a5b" },
-  { sourceLabel: "Attack", label: "Attack", id: "attack", color: "#ffd166" },
-  { sourceLabel: "Magic Attack", label: "Magic Attack", id: "magic-attack", color: "#ec76c5", preference: "showMagicAttack" },
-  { sourceLabel: "Break", label: "Break", id: "break", color: "#b678f4" },
-  { sourceLabel: "Defense", label: "Defense", id: "defense", color: "#44c5d8" },
-  { sourceLabel: "Magic Defense", label: "Magic Defense", id: "magic-defense", color: "#6fa8ff" },
-  { sourceLabel: "EP Regen", label: "Regen", id: "regen", color: "#65d36e" },
+  { sourceLabel: "Attack", label: "ATK", id: "attack", color: "#ffd166" },
+  { sourceLabel: "Defense", label: "P.DEF", id: "defense", color: "#44c5d8" },
+  { sourceLabel: "EP Regen", label: "REGEN", id: "regen", color: "#65d36e" },
+  { sourceLabel: "Magic Defense", label: "M.DEF", id: "magic-defense", color: "#6fa8ff" },
+  { sourceLabel: "Break", label: "BREAK", id: "break", color: "#b678f4" },
 ]);
+
+// An entry’s stats as the game shows them: the six, in order, each with its game label.
+function aniilogGameStats(entry) {
+  const rows = Array.isArray(entry?.stats) ? entry.stats : [];
+  return ANIILOG_STAT_CONFIG
+    .map((config) => {
+      const row = rows.find((stat) => stat.label === config.sourceLabel);
+      return row ? { ...row, label: config.sourceLabel, display: config.label } : null;
+    })
+    .filter(Boolean);
+}
 const CATALOG_ROLE_META = Object.freeze({
   DPS: { slug: "dps", color: "#e76561" },
   REGEN: { slug: "regen", color: "#58b7d9" },
@@ -3716,39 +3728,7 @@ function renderSettings() {
   cloudAccount.append(cloudActions);
   settingsPanel.append(cloudAccount);
 
-  const aniilogDisplay = document.createElement("section");
-  aniilogDisplay.className = "settings-card settings-display-card";
-  const displayCopy = document.createElement("div");
-  displayCopy.className = "settings-account";
-  const displayTitle = document.createElement("strong");
-  displayTitle.textContent = "Aniilog display";
-  const displayDetail = document.createElement("small");
-  displayDetail.textContent = "Choose whether legacy stats appear in Aniilog comparison bars.";
-  displayCopy.append(displayTitle, displayDetail);
-
-  const magicAttackToggle = document.createElement("label");
-  magicAttackToggle.className = "settings-toggle";
-  const magicAttackInput = document.createElement("input");
-  magicAttackInput.type = "checkbox";
-  magicAttackInput.checked = Boolean(state.preferences.showMagicAttack);
-  magicAttackInput.addEventListener("change", () => {
-    state.preferences.showMagicAttack = magicAttackInput.checked;
-    if (!magicAttackInput.checked && state.catalogSort.aniilog === "magic-attack") {
-      state.catalogSort.aniilog = "aniilog-number";
-    }
-    persistLocalTracking();
-    renderSettings();
-    if (state.sidebarView === "aniilog") renderCatalogPreview();
-  });
-  const magicAttackCopy = document.createElement("span");
-  const magicAttackLabel = document.createElement("strong");
-  magicAttackLabel.textContent = "Show Magic Attack";
-  const magicAttackDescription = document.createElement("small");
-  magicAttackDescription.textContent = "Hidden by default because Magic Attack is not currently used.";
-  magicAttackCopy.append(magicAttackLabel, magicAttackDescription);
-  magicAttackToggle.append(magicAttackInput, magicAttackCopy);
-  aniilogDisplay.append(displayCopy, magicAttackToggle);
-  settingsPanel.append(aniilogDisplay);
+  // (Magic Attack is no longer a game stat, so the old "Show Magic Attack" display setting is gone.)
   if (!state.cloudSyncAuthenticated) appendSettingsStorageError(settingsPanel);
 }
 
@@ -7349,8 +7329,13 @@ function renderAfpStats(entry) {
     state.aniilogStatView = next;
     afpRerender();
   }, "Stat view"));
-  const stats = Array.isArray(entry.stats) ? entry.stats : [];
+  const stats = aniilogGameStats(entry);
   const explanations = state.aniilogData?.stat_explanations || {};
+  // These are the species’ base stats; the game’s stat card also adds personality, held items, resonance and
+  // collection bonuses, which the site doesn’t calculate yet.
+  const baseNote = document.createElement("p");
+  baseNote.className = "afp-growth-note afp-base-note";
+  baseNote.textContent = "Base stats, before personality, held items and other bonuses.";
   if (!stats.length) {
     body.append(afpNone("No stats are listed for this form."));
     return section;
@@ -7362,9 +7347,9 @@ function renderAfpStats(entry) {
       row.className = "afp-stat-row";
       const label = document.createElement("span");
       label.className = "afp-stat-label";
-      label.textContent = stat.label;
+      label.textContent = stat.display;
       const explanation = explanations[AFP_STAT_KEYS[stat.label]];
-      if (explanation?.text) label.append(" ", afpInfo(`${explanation.game_label || stat.label}: ${explanation.text}`));
+      if (explanation?.text) label.append(" ", afpInfo(`${stat.display}: ${explanation.text}`));
       const bar = document.createElement("span");
       bar.className = "afp-stat-bar";
       const fill = document.createElement("i");
@@ -7382,7 +7367,7 @@ function renderAfpStats(entry) {
     const totalValue = document.createElement("b");
     totalValue.textContent = formatNumber(aniilogBaseStatTotal(entry), 0);
     total.append(totalLabel, totalValue);
-    body.append(total);
+    body.append(total, baseNote);
     const role = afpRoleExplanation(entry);
     if (role?.text) {
       const line = document.createElement("p");
@@ -7459,14 +7444,14 @@ function renderAfpStats(entry) {
       const row = document.createElement("tr");
       const name = document.createElement("th");
       name.scope = "row";
-      name.textContent = stat.label;
+      name.textContent = stat.display;
       const potentialCell = document.createElement("td");
       const input = document.createElement("input");
       input.type = "number";
       input.min = "0";
       input.max = String(maxPotential);
       input.value = String(points);
-      input.setAttribute("aria-label", `${stat.label} potential level`);
+      input.setAttribute("aria-label", `${stat.display} potential level`);
       input.addEventListener("change", () => {
         settings.potentials[stat.label] = Math.max(0, Math.min(maxPotential, Math.round(Number(input.value) || 0)));
         renderTable();

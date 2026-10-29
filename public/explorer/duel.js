@@ -17,11 +17,16 @@
     breakTime: 6, // property_data 1001 break_time (seconds)
     maxSeconds: 300,
   });
+  // Attack and defence stat per skill category. The game no longer has a Magic Attack stat, so magic skills use ATK;
+  // they are taken to hit M.DEF (the game splits P.DEF and M.DEF, but which one a hit uses is chosen in native code).
   const STAT_KEYS = Object.freeze({
     Physical: ["Attack", "Defense"],
-    Magic: ["Magic Attack", "Magic Defense"],
+    Magic: ["Attack", "Magic Defense"],
   });
-  const SHOWN_STATS = Object.freeze(["HP", "Attack", "Magic Attack", "Defense", "Magic Defense", "Break"]);
+  // The game’s six stats in its stat-card order, with its labels.
+  const SHOWN_STATS = Object.freeze([
+    ["HP", "HP"], ["Attack", "ATK"], ["Defense", "P.DEF"], ["EP Regen", "REGEN"], ["Magic Defense", "M.DEF"], ["Break", "BREAK"],
+  ]);
 
   let settings = loadSettings();
 
@@ -390,10 +395,10 @@
       }
       card.append(chips);
       const stats = el("dl", "duel-stats");
-      for (const label of SHOWN_STATS) {
+      for (const [label, display] of SHOWN_STATS) {
         if (!(label in model.stats)) continue;
         const pair = el("div");
-        pair.append(el("dt", "", label === "Break" ? "BREAK" : label), el("dd", "", whole(model.stats[label])));
+        pair.append(el("dt", "", display), el("dd", "", whole(model.stats[label])));
         stats.append(pair);
       }
       card.append(stats);
@@ -607,7 +612,7 @@
     );
     root.append(results);
     const sources = el("p", "duel-sources");
-    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
     root.append(sources);
     return root;
   }
