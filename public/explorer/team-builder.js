@@ -406,6 +406,7 @@
     const rows = Object.keys(data?.forms || {}).map((formId) => ({
       value: formId,
       label: formLabel(entryForForm(formId), data.forms[formId]),
+      group: entryForForm(formId)?.surface_label || "",
       sort: order.get(formId) ?? Number.MAX_SAFE_INTEGER,
     }));
     rows.sort((left, right) => left.sort - right.sort);
@@ -438,6 +439,8 @@
           return response.json();
         }),
       ]).then(([aniilogPayload, teamPayload]) => {
+        // The explorer's Aniilog loader resolves null when it rejects the Aniilog files.
+        if (!aniilogPayload?.entries) throw new Error("Aniilog data is unavailable, so the Team Builder can't load.");
         if (!teamPayload?.forms || !teamPayload?.buffs) throw new Error("Team Builder data has an invalid format.");
         aniilog = aniilogPayload;
         data = teamPayload;
@@ -707,7 +710,26 @@
     const tagsAfter = (upgrade.tags || []).join(", ");
     if (tagsBefore !== tagsAfter) change("Tags", tagsBefore || "none", tagsAfter || "none");
 
-    // Effects: compare operations and buffs by what they are, who they land on and when.
+    // Effects: compare operations and buffs by what they are, who they land on and when. When the game
+    // links no execution record to the upgrade, there is nothing to compare, so make no effect claims.
+    const effectsKnown = Boolean(upgrade.mechanics && base.mechanics);
+    if (effectsKnown) compareEffects(base, upgrade, change);
+
+    if (changes.childElementCount) section.append(changes);
+    const textChanged = Boolean(upgrade.description) && upgrade.description !== base.description;
+    if (textChanged) {
+      section.append(el("p", "team-upgrade-label", "Upgraded game description"), el("p", "", upgrade.description));
+    }
+    if (!effectsKnown) {
+      section.append(el("p", "team-skill-caveat", "The game data links no effect record to the upgraded version, so only its stats and text are compared."));
+    }
+    section.append(el("p", "team-skill-variant-note", changes.childElementCount || textChanged
+      ? "Everything not listed here is the same as the normal version."
+      : "No differences from the normal version were found in the game data."));
+    return section;
+  }
+
+  function compareEffects(base, upgrade, change) {
     const opKey = (operation) => `${operation.key}|${operation.on}|${requiresKey(operation.requires)}`;
     const opValue = (operation) => [formatValues(operation.key, operation.values), ...(operation.formulas || [])].filter(Boolean).join(" · ") || "runtime value";
     const baseOps = new Map((base.mechanics?.operations || []).map((operation) => [opKey(operation), operation]));
@@ -737,16 +759,6 @@
     baseLinks.forEach((link, key) => {
       if (!upgradeLinks.has(key)) change(linkName(link), linkValue(link), "removed");
     });
-
-    if (changes.childElementCount) section.append(changes);
-    const textChanged = Boolean(upgrade.description) && upgrade.description !== base.description;
-    if (textChanged) {
-      section.append(el("p", "team-upgrade-label", "Upgraded game description"), el("p", "", upgrade.description));
-    }
-    section.append(el("p", "team-skill-variant-note", changes.childElementCount || textChanged
-      ? "Everything not listed here is the same as the normal version."
-      : "No differences from the normal version were found in the game data."));
-    return section;
   }
 
   // --- Team synergy ---------------------------------------------------------------------------
@@ -962,12 +974,24 @@
     );
     identity.append(copy);
     const select = el("select", "team-sidebar-select");
+    // One group per Aniilog region (Breezy Plains, Whisperwake Isles, ...), in Aniilog order.
+    const groups = new Map();
     aniimoOptions().forEach((option) => {
       const item = document.createElement("option");
       item.value = option.value;
       item.textContent = option.label;
       item.selected = option.value === member.formId;
-      select.append(item);
+      if (!option.group) {
+        select.append(item);
+        return;
+      }
+      if (!groups.has(option.group)) {
+        const group = document.createElement("optgroup");
+        group.label = option.group;
+        groups.set(option.group, group);
+        select.append(group);
+      }
+      groups.get(option.group).append(item);
     });
     select.setAttribute("aria-label", slotRole(index));
     select.addEventListener("click", (event) => event.stopPropagation());
