@@ -257,6 +257,18 @@
     };
   }
 
+  // Toughness ("tp") a hit takes off (exact, ActorAttributeModifier.processReduceCurTpRate):
+  // hitShare x tpPower x level-gap tpDamFixRate x (1 + target's element tp-reduce attribute)
+  // x attacker size TpPowerRate / target size TpResistRate (BodyShapeEffectData). Nothing while the
+  // target is in BREAK, recovering from it or under super armour. Pets' toughness: tp_max_v (60).
+  // Whether toughness or the BREAK damage gauge (formula 3023) starts BREAK is decided server-side.
+  // options: { hitShare = 1, tpReduceAdd = 0, levelRate = 1, sizePowerRate = 1, sizeResistRate = 1 }
+  function toughnessDrain(tpPower, options = {}) {
+    const value = Number(options.hitShare ?? 1) * Number(tpPower || 0) * Number(options.levelRate ?? 1)
+      * (1 + Number(options.tpReduceAdd || 0)) * Number(options.sizePowerRate ?? 1) / Number(options.sizeResistRate || 1);
+    return Math.max(0, value);
+  }
+
   // --- Buffs and debuffs a team can bring -------------------------------------------------------
 
   // Every damage-relevant effect the forms' skills, upgrades, Ultimates, traits and recommended held
@@ -316,6 +328,6 @@
   }
 
   window.AniilogsDamage = Object.freeze({
-    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, options,
+    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, options,
   });
 })();

@@ -74,3 +74,8 @@ test("CP is formula 3100: species total, level, potential CP (x2 on recommended 
   // held item level 2: 200 + 2 x 15
   assert.equal(D.combatPower(data, data.forms[1], species, 50, none, { heldItems: [{ itemId: 9, level: 2 }] }), 1068);
 });
+
+test("toughness drain is hit share x the skill's BREAK power x the target's modifiers", () => {
+  assert.equal(D.toughnessDrain(24), 24);
+  assert.equal(D.toughnessDrain(24, { hitShare: 0.5, tpReduceAdd: 0.25, sizeResistRate: 2 }), 7.5);
+});

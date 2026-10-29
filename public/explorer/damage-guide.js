@@ -88,12 +88,13 @@
     {
       id: "break",
       title: "BREAK",
-      basis: "by-name",
+      basis: "exact",
       paragraphs: [
-        "BREAK damage uses BREAK minus the target's BREAK resistance, times the skill's BREAK power divided by 10, with its own crit and element terms.",
-        "A bad matchup never lowers BREAK damage: the element multiplier is at least ×1 for BREAK.",
-        "BREAK Efficiency on you and \"BREAK damage taken\" on the target add together (by name).",
-        "Some effects add damage against a target that is already in BREAK, for example Pawney's Ironclad Armament +30% (inferred).",
+        "Every skill has its own BREAK power, separate from its Might. For example, Fire Bolt has Might 30 and BREAK power 10.",
+        "Each hit lowers the target's toughness by its share of the skill's BREAK power. Elemental toughness bonuses on the target, attacker vs target body size and the level gap scale that amount. Pets start with 60 toughness. Hits do nothing to toughness while the target is in BREAK, recovering from it, or under super armour.",
+        "Your BREAK stat feeds a separate BREAK damage formula: BREAK minus the target's BREAK resistance, times BREAK power ÷ 10, plus its own crit and element terms. A bad element matchup never lowers it.",
+        "Which of the two actually triggers the BREAK state is decided on the game's server, so the site doesn't promise a \"hits to BREAK\" number yet.",
+        "BREAK Efficiency on you and \"BREAK damage taken\" on the target add together (by name). Some effects add damage against a target already in BREAK, for example Pawney's Ironclad Armament +30% (inferred).",
       ],
     },
     {
