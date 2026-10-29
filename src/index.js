@@ -26,7 +26,7 @@ const PUBLIC_RELEASE_DATA = new Set([
 const PRIVATE_RELEASE_SEGMENTS = new Set([
   "qa", "private", "private-extract", "source", "src", "renderer", "shader", "shaders",
   "authored-runtime", "material-textures", "resources", "asset-bundles", "asset-packages",
-  "game-files", "captures", "raw-captures",
+  "game-files", "captures", "raw-captures", "dev",
 ]);
 const TURNTABLE_FRAME_PATH = /^assets\/aniimo-turntables\/([0-9]+)\/(common|sparkling-(?:0[1-9]|1[0-2]))\/frame-([0-9]{3})\.(png|webp)$/u;
 
@@ -3474,6 +3474,45 @@ async function clearLogReports(request, env, reportId) {
   return json({ ok: true, cleared: results?.length || 0 });
 }
 
+// Unreleased / unverified records for Developer Mode only. They live under releases/<release>/dev/ in R2,
+// which the public content relay never serves; this route checks the developer role AND the
+// server-acknowledged Developer Mode (stored progress preferences) on every read, with no caching.
+const DEV_CONTENT_PREFIX = "/api/dev-content/";
+// <module>/<name>.json overlays and <module>/assets/<file> images and videos (fetched by the site as blobs).
+const DEV_CONTENT_PATH = /^[a-z0-9][a-z0-9-]{0,47}\/(?:[a-z0-9][a-z0-9-]{0,95}\.json|assets\/[A-Za-z0-9_-][\w.-]{0,159}\.(?:png|webp|jpe?g|mp4))$/u;
+const DEV_CONTENT_TYPES = { json: "application/json; charset=utf-8", png: "image/png", webp: "image/webp",
+  jpg: "image/jpeg", jpeg: "image/jpeg", mp4: "video/mp4" };
+
+async function getDeveloperContent(request, env) {
+  let relative;
+  try {
+    relative = decodeURIComponent(new URL(request.url).pathname.slice(DEV_CONTENT_PREFIX.length));
+  } catch {
+    return json({ error: "Not found" }, 404);
+  }
+  if (!DEV_CONTENT_PATH.test(relative)) return json({ error: "Not found" }, 404);
+  if (!env.DB || !env.CONTENT) return json({ error: "Developer content is unavailable." }, 503);
+  const account = await currentAccount(request, env);
+  if (!account?.developerModeAvailable) return json({ error: "Developer access required." }, 403);
+  const row = await env.DB.prepare(
+    "SELECT revision, data_json AS dataJson, updated_at AS updatedAt FROM progress_snapshots WHERE discord_id = ?",
+  ).bind(account.discordId).first();
+  let progress = null;
+  try {
+    progress = row ? progressPayload(JSON.parse(row.dataJson)) : null;
+  } catch {
+    progress = null;
+  }
+  if (progress?.preferences?.developerMode !== true) return json({ error: "Developer mode must be enabled." }, 403);
+  const object = await env.CONTENT.get(`releases/${CONTENT_RELEASE}/dev/${relative}`);
+  if (!object) return json({ error: "Not found" }, 404);
+  const headers = securityHeaders();
+  headers.set("content-type", DEV_CONTENT_TYPES[relative.split(".").pop().toLowerCase()]);
+  headers.set("cache-control", "private, no-store");
+  headers.set("vary", "Authorization");
+  return new Response(object.body, { status: 200, headers });
+}
+
 async function api(request, env) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders() });
@@ -3486,6 +3525,9 @@ async function api(request, env) {
   }
   if (url.pathname.startsWith(CONTENT_PATH_PREFIX) && (request.method === "GET" || request.method === "HEAD")) {
     return getReleaseContent(request, env);
+  }
+  if (url.pathname.startsWith(DEV_CONTENT_PREFIX) && request.method === "GET") {
+    return getDeveloperContent(request, env);
   }
   if (url.pathname === "/api/health" && request.method === "GET") {
     return json({ ok: true, discordLoginConfigured: oauthConfigured(env) });

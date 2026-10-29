@@ -10890,3 +10890,25 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 html[data-embed="app"] .site-header .brand, html[data-embed="app"] .site-header nav,
 html[data-embed="app"] .app-topbar-brand, html[data-embed="app"] .app-topbar nav,
 html[data-embed="app"] body > footer { display: none !important; }
+
+/* Developer Mode overlay records (never in public data): unreleased = amber, unverified = grey. */
+.availability-badge {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.availability-badge.is-unreleased {
+  background: #f2a93b;
+  color: #2a1a00;
+}
+
+.availability-badge.is-unverified {
+  background: #8b9099;
+  color: #111317;
+}
