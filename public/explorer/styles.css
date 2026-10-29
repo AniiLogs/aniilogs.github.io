@@ -11736,3 +11736,285 @@ html[data-embed="app"] #topbarLogoutButton {
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* ---- Respawns: the bell in the top bar and its panel (a dropdown on desktop, a bottom sheet on phones). */
+.respawn-bell {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(var(--background-rgb), 0.55);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.respawn-bell svg {
+  width: 18px;
+  height: 18px;
+}
+
+.respawn-bell-count {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+.respawn-panel {
+  position: fixed;
+  top: calc(64px * var(--ui-scale, 1));
+  right: 12px;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100dvh - 90px);
+  border: 1px solid var(--accent-strong);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  overflow: hidden;
+  zoom: var(--ui-scale, 1);
+}
+
+.respawn-panel[hidden] {
+  display: none;
+}
+
+.respawn-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.respawn-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.respawn-panel header small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.respawn-collect-all {
+  margin-left: auto;
+}
+
+.respawn-panel button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.respawn-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.respawn-close {
+  width: 30px;
+  height: 30px;
+  padding: 0 !important;
+}
+
+.respawn-filters {
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.respawn-filters select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2, var(--panel));
+  color: var(--text);
+  font: inherit;
+  padding: 4px 8px;
+}
+
+.respawn-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+.respawn-list h5 {
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.respawn-list h6 {
+  margin: 2px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.respawn-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--background-rgb), 0.45);
+  padding: 6px 8px;
+}
+
+.respawn-row.is-ready {
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.respawn-icon {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.respawn-copy strong {
+  display: block;
+  font-size: 14px;
+}
+
+.respawn-copy small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.respawn-via {
+  border: 1px solid #6c5aa8;
+  border-radius: 999px;
+  color: #b9a4f5;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 0 5px;
+}
+
+.respawn-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.respawn-collect {
+  border-color: var(--accent-strong) !important;
+  background: var(--accent-strong) !important;
+}
+
+.respawn-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 26px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.respawn-empty strong {
+  color: var(--text);
+}
+
+.respawn-empty p {
+  margin: 0;
+}
+
+.respawn-panel > footer {
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+@media (max-width: 760px) {
+  .respawn-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-height: 78dvh;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .respawn-row {
+    min-height: 52px;
+  }
+
+  .respawn-panel button {
+    min-height: 40px;
+    padding-inline: 14px;
+  }
+
+  .respawn-locate {
+    min-width: 44px;
+  }
+}
+
+/* Account menu: role and the character whose progress the site shows. */
+.account-menu-extras {
+  display: grid;
+  gap: 8px;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.account-role-badge {
+  justify-self: start;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 8px;
+  text-transform: uppercase;
+}
+
+.account-role-badge.is-owner { background: var(--accent-2); color: #1b1406; }
+.account-role-badge.is-administrator { background: #b9a4f5; color: #1b1235; }
+.account-role-badge.is-developer { background: #f2a93b; color: #2a1a00; }
+
+.account-menu-characters {
+  display: grid;
+  gap: 2px;
+}
+
+.account-menu-characters small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account-menu-character-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.account-menu-character-list button {
+  justify-content: flex-start;
+  text-align: left;
+}

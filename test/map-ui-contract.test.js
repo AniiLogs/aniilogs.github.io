@@ -290,8 +290,8 @@ test("logs are top-level sections while the Map sidebar contains only map tools"
 });
 
 test("the checklist is its own top-level section with unchanged completion ids", () => {
-  assert.match(landingHtml, /href="\/explorer\/\?view=checklist"[^>]*>Checklist</u);
-  assert.match(explorerHtml, /id="topNavChecklist" href="\/explorer\/\?view=checklist"[^>]*>Checklist</u);
+  assert.match(landingHtml, /href="\/explorer\/\?view=checklist"[^>]*>Checklists</u);
+  assert.match(explorerHtml, /id="topNavChecklist" href="\/explorer\/\?view=checklist"[^>]*>Checklists</u);
   assert.doesNotMatch(explorerHtml, /id="checklistWorkspaceTab"/u);
   assert.match(explorerHtml, /<section id="checklistPanel"[\s\S]*?<div id="checklistList"/u);
   assert.match(explorer, /view === "team" \|\| view === "checklist"/u);

@@ -2139,6 +2139,7 @@ function configureTopbarAccount(account = null) {
   els.topbarDeveloperButton.hidden = !(authenticated && state.developerModeAvailable);
   els.topbarSignInLink.hidden = authenticated;
   els.topbarLogoutButton.hidden = !authenticated;
+  configureAccountMenuExtras(authenticated ? account : null);
   const actions = document.querySelector(".app-topbar-actions");
   const popover = els.topbarAccountMenu.querySelector(".account-menu-popover");
   if (authenticated) popover.insertBefore(els.settingsButton, els.topbarLogoutButton);
@@ -2154,6 +2155,83 @@ function configureTopbarAccount(account = null) {
     els.topbarSignInLink.href = "/#profiles";
     els.topbarSignInLink.setAttribute("aria-disabled", "true");
     els.topbarSignInLink.textContent = "Discord sign-in unavailable";
+  }
+}
+
+// The account menu also says which role the account has, which character's progress (Checklists, Completed,
+// respawns) the site shows, and lets the account pick another of its linked characters. The Roles card in Settings
+// is one click away for administrators and the owner.
+const ACCOUNT_ROLE_LABELS = Object.freeze({ owner: "Owner", administrator: "Administrator", developer: "Tester", player: "" });
+
+function configureAccountMenuExtras(account) {
+  const popover = els.topbarAccountMenu.querySelector(".account-menu-popover");
+  let extras = popover.querySelector(".account-menu-extras");
+  if (!account) {
+    extras?.remove();
+    return;
+  }
+  if (!extras) {
+    extras = document.createElement("div");
+    extras.className = "account-menu-extras";
+    popover.prepend(extras);
+    els.topbarAccountMenu.addEventListener("toggle", () => {
+      if (els.topbarAccountMenu.open) void loadAccountMenuCharacters();
+    });
+  }
+  extras.replaceChildren();
+  const role = ACCOUNT_ROLE_LABELS[account.role] || "";
+  if (role) {
+    const badge = document.createElement("span");
+    badge.className = `account-role-badge is-${account.role}`;
+    badge.textContent = role;
+    extras.append(badge);
+  }
+  const characters = document.createElement("div");
+  characters.className = "account-menu-characters";
+  characters.dataset.accountCharacters = "";
+  const heading = document.createElement("strong");
+  heading.textContent = "Character";
+  const current = document.createElement("small");
+  current.textContent = ACTIVE_CHARACTER
+    ? `Progress for UID ${ACTIVE_CHARACTER}${ACTIVE_CHARACTER_FROM_APP ? " (from the aLogs app)" : ""}`
+    : "Progress for your account";
+  characters.append(heading, current);
+  extras.append(characters);
+  els.topbarDeveloperButton.textContent = state.canGrantRoles ? "Developer · Roles" : "Developer";
+}
+
+async function loadAccountMenuCharacters() {
+  const box = els.topbarAccountMenu.querySelector("[data-account-characters]");
+  if (!box || box.dataset.loaded === "true" || ACTIVE_CHARACTER_FROM_APP) return;
+  box.dataset.loaded = "true";
+  try {
+    const response = await apiFetch("/leaderboard/characters");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { characters } = await response.json();
+    if (!Array.isArray(characters) || characters.length < 2) return;
+    const list = document.createElement("div");
+    list.className = "account-menu-character-list";
+    characters.forEach((character) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      const active = character.gameUid === ACTIVE_CHARACTER || (!ACTIVE_CHARACTER && character.main);
+      button.setAttribute("aria-pressed", String(active));
+      button.textContent = `${active ? "● " : "○ "}${character.name || "Unnamed"} · ${character.gameUid}`;
+      button.disabled = character.gameUid === ACTIVE_CHARACTER;
+      button.addEventListener("click", () => {
+        try {
+          window.localStorage.setItem("aniilogs:active-character", character.gameUid);
+        } catch {
+          return;
+        }
+        window.location.reload();
+      });
+      list.append(button);
+    });
+    box.append(list);
+  } catch (error) {
+    console.error("Could not load linked characters", error);
+    box.dataset.loaded = "";
   }
 }
 
@@ -2494,6 +2572,7 @@ function startTrackingTicker() {
 }
 
 function renderTracking() {
+  window.queueMicrotask(renderRespawnPanel);
   const entries = [...state.tracking.values()].sort(compareTrackingEntries);
   els.trackingCount.textContent = `${entries.length} tracked`;
   els.trackingList.textContent = "";
@@ -10600,7 +10679,7 @@ function updateWorkspaceTabs() {
     els.topbarContext.textContent = {
       map: "Map",
       tracking: "Map · Tracking",
-      checklist: "Checklist",
+      checklist: "Checklists",
       aniilog: "Aniilog",
       itemlog: "Item-log",
       team: "Team",
@@ -14255,8 +14334,274 @@ function appendGameRichText(element, value) {
   stack.at(-1).append(document.createTextNode(source.slice(cursor)));
 }
 
+// ---- Respawns: the bell in the top bar and its panel. "Ready to collect" lists the tracked respawning nodes whose
+// timer has run out (grouped by map and area), "Upcoming" the ones still counting down, and "Not started" tracked
+// nodes whose timer isn't running. Collected restarts a node's timer (the same as Reset in Tracking). The data is the
+// Tracking list, which syncs per character; Interactive Map's Completed and respawn module can feed it later through
+// window.AniilogsRespawns (same shape: { queue() -> {ready, upcoming, idle}, collect(id), subscribe(fn) }).
+
+function respawnQueue() {
+  const provided = window.AniilogsRespawns?.queue?.();
+  if (provided) return provided;
+  const now = Date.now();
+  const ready = [];
+  const upcoming = [];
+  const idle = [];
+  for (const entry of state.tracking.values()) {
+    if (!entry.respawn_seconds) continue;
+    const readyAt = trackingReadyAt(entry);
+    const row = { ...entry, readyAt };
+    if (!readyAt) idle.push(row);
+    else if (readyAt <= now) ready.push(row);
+    else upcoming.push(row);
+  }
+  ready.sort((left, right) => left.readyAt - right.readyAt);
+  upcoming.sort((left, right) => left.readyAt - right.readyAt);
+  idle.sort((left, right) => String(left.display_name).localeCompare(String(right.display_name)));
+  return { ready, upcoming, idle };
+}
+
+function collectRespawn(id) {
+  if (window.AniilogsRespawns?.collect) {
+    window.AniilogsRespawns.collect(id);
+    return;
+  }
+  updateTrackingStarted(id, new Date().toISOString());
+}
+
+// Opens the map on a tracked node: the spawn with the same tracking id, once that map's data is loaded.
+function locateRespawn(entry) {
+  closeRespawnPanel();
+  setSidebarView("map");
+  if (entry.map_id !== state.activeMapId) switchMap(entry.map_id);
+  let tries = 0;
+  const attempt = () => {
+    const spawn = datasetForMap(entry.map_id)?.spawns?.find((candidate) => trackingIdForSpawn(candidate) === entry.id);
+    if (spawn?.normalized) {
+      locateMapPoint({ map_id: entry.map_id, normalized: spawn.normalized, label: entry.display_name, x: entry.x, y: entry.y });
+    } else if ((tries += 1) < 40) {
+      window.setTimeout(attempt, 150);
+    }
+  };
+  attempt();
+}
+
+function respawnRow(entry, kind) {
+  const row = document.createElement("article");
+  row.className = `respawn-row is-${kind}`;
+  const icon = makeIcon("respawn-icon", entry.icon);
+  icon.alt = "";
+  const copy = document.createElement("div");
+  copy.className = "respawn-copy";
+  const name = document.createElement("strong");
+  name.textContent = entry.display_name;
+  if (entry.source === "ocr" || entry.source === "meter") {
+    const via = document.createElement("span");
+    via.className = "respawn-via";
+    via.textContent = entry.source === "meter" ? "via aLogs meter" : "via aLogs";
+    name.append(" ", via);
+  }
+  const detail = document.createElement("small");
+  const now = Date.now();
+  const timing = kind === "ready"
+    ? `ready ${formatCountdown(Math.max(0, now - entry.readyAt) / 1000)} ago`
+    : kind === "upcoming"
+      ? `in ${formatCountdown(Math.max(0, entry.readyAt - now) / 1000)}`
+      : `respawns ${entry.respawn_label || formatRespawnDuration(entry.respawn_seconds)} after collecting`;
+  detail.textContent = [entry.area_name || entry.map_label, timing].filter(Boolean).join(" · ");
+  if (kind === "upcoming") detail.dataset.respawnReadyAt = String(entry.readyAt);
+  copy.append(name, detail);
+  const actions = document.createElement("div");
+  actions.className = "respawn-actions";
+  const locate = document.createElement("button");
+  locate.type = "button";
+  locate.className = "respawn-locate";
+  locate.textContent = "⌖";
+  locate.title = `Locate ${entry.display_name} on the map`;
+  locate.setAttribute("aria-label", locate.title);
+  locate.addEventListener("click", () => locateRespawn(entry));
+  actions.append(locate);
+  if (kind !== "upcoming") {
+    const collect = document.createElement("button");
+    collect.type = "button";
+    collect.className = "respawn-collect";
+    collect.textContent = kind === "ready" ? "Collected" : "Start timer";
+    collect.title = kind === "ready" ? "Mark it collected: its respawn timer starts again" : "Start its respawn timer now";
+    collect.addEventListener("click", () => {
+      collectRespawn(entry.id);
+      renderRespawnPanel();
+    });
+    actions.append(collect);
+  }
+  row.append(icon, copy, actions);
+  return row;
+}
+
+function renderRespawnGroups(list, rows, kind) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const key = row.map_label || row.map_id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+  for (const [map, entries] of groups) {
+    const heading = document.createElement("h6");
+    heading.textContent = map;
+    list.append(heading, ...entries.map((entry) => respawnRow(entry, kind)));
+  }
+}
+
+function renderRespawnPanel() {
+  const panel = document.getElementById("respawnPanel");
+  updateRespawnBell();
+  if (!panel || panel.hidden) return;
+  const { ready, upcoming, idle } = respawnQueue();
+  const mapFilter = state.respawnMapFilter || "all";
+  const keep = (row) => mapFilter === "all" || row.map_id === mapFilter;
+  panel.replaceChildren();
+  const header = document.createElement("header");
+  const title = document.createElement("h3");
+  title.textContent = "Respawns";
+  const who = document.createElement("small");
+  who.textContent = ACTIVE_CHARACTER ? `Character UID ${ACTIVE_CHARACTER}` : (state.cloudSyncAuthenticated ? "Synced with your account" : "Saved in this browser");
+  const all = document.createElement("button");
+  all.type = "button";
+  all.className = "respawn-collect-all";
+  all.textContent = "Mark all collected";
+  all.disabled = !ready.filter(keep).length;
+  all.addEventListener("click", () => {
+    ready.filter(keep).forEach((row) => collectRespawn(row.id));
+    renderRespawnPanel();
+  });
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "respawn-close";
+  close.textContent = "×";
+  close.setAttribute("aria-label", "Close respawns");
+  close.addEventListener("click", closeRespawnPanel);
+  header.append(title, who, all, close);
+  const filters = document.createElement("div");
+  filters.className = "respawn-filters";
+  const maps = [...new Map([...ready, ...upcoming, ...idle].map((row) => [row.map_id, row.map_label || row.map_id]))];
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "Map");
+  [["all", "All maps"], ...maps].forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = value === mapFilter;
+    select.append(option);
+  });
+  select.addEventListener("change", () => {
+    state.respawnMapFilter = select.value;
+    renderRespawnPanel();
+  });
+  filters.append(select);
+  const list = document.createElement("div");
+  list.className = "respawn-list";
+  const sections = [["Ready to collect", ready.filter(keep), "ready"], ["Upcoming", upcoming.filter(keep), "upcoming"], ["Not started", idle.filter(keep), "idle"]];
+  if (sections.every(([, rows]) => !rows.length)) {
+    const empty = document.createElement("div");
+    empty.className = "respawn-empty";
+    const strong = document.createElement("strong");
+    strong.textContent = "Nothing to collect right now.";
+    const help = document.createElement("p");
+    help.textContent = "Track a respawning node on the map (select it, then Track) and it shows up here when it's back.";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = "Open the map";
+    open.addEventListener("click", () => {
+      closeRespawnPanel();
+      setSidebarView("map");
+    });
+    empty.append(strong, help, open);
+    list.append(empty);
+  }
+  sections.forEach(([label, rows, kind]) => {
+    if (!rows.length) return;
+    const heading = document.createElement("h5");
+    heading.textContent = `${label} · ${rows.length}`;
+    list.append(heading);
+    renderRespawnGroups(list, rows, kind);
+  });
+  const footer = document.createElement("footer");
+  footer.textContent = "Timers start when you collect. Respawn times come from the game files; some aren't confirmed in game yet.";
+  panel.append(header, filters, list, footer);
+}
+
+function updateRespawnBell() {
+  const bell = document.getElementById("respawnBellButton");
+  if (!bell) return;
+  const ready = respawnQueue().ready.length;
+  const count = bell.querySelector(".respawn-bell-count");
+  count.textContent = ready > 99 ? "99+" : String(ready);
+  count.hidden = !ready;
+  bell.setAttribute("aria-label", ready ? `Respawns: ${ready} ready to collect` : "Respawns");
+  // Upcoming countdowns tick while the panel is open.
+  document.querySelectorAll("#respawnPanel [data-respawn-ready-at]").forEach((node) => {
+    const remaining = Math.max(0, Number(node.dataset.respawnReadyAt) - Date.now());
+    if (!remaining) {
+      renderRespawnPanel();
+      return;
+    }
+    node.textContent = node.textContent.replace(/in .+$/u, `in ${formatCountdown(remaining / 1000)}`);
+  });
+}
+
+function openRespawnPanel() {
+  const panel = document.getElementById("respawnPanel");
+  const bell = document.getElementById("respawnBellButton");
+  if (!panel || !bell) return;
+  panel.hidden = false;
+  bell.setAttribute("aria-expanded", "true");
+  renderRespawnPanel();
+}
+
+function closeRespawnPanel() {
+  const panel = document.getElementById("respawnPanel");
+  const bell = document.getElementById("respawnBellButton");
+  if (panel) panel.hidden = true;
+  bell?.setAttribute("aria-expanded", "false");
+}
+
+function initRespawnBell() {
+  const actions = document.querySelector(".app-topbar-actions");
+  if (!actions || document.getElementById("respawnBellButton")) return;
+  const bell = document.createElement("button");
+  bell.id = "respawnBellButton";
+  bell.type = "button";
+  bell.className = "respawn-bell";
+  bell.setAttribute("aria-haspopup", "dialog");
+  bell.setAttribute("aria-controls", "respawnPanel");
+  bell.setAttribute("aria-expanded", "false");
+  bell.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="respawn-bell-count" hidden></span>';
+  bell.addEventListener("click", () => {
+    if (document.getElementById("respawnPanel")?.hidden === false) closeRespawnPanel();
+    else openRespawnPanel();
+  });
+  const panel = document.createElement("aside");
+  panel.id = "respawnPanel";
+  panel.className = "respawn-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Respawns");
+  panel.hidden = true;
+  const settings = document.getElementById("settingsButton");
+  actions.insertBefore(bell, settings || actions.firstChild);
+  document.body.append(panel);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !panel.hidden) closeRespawnPanel();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!panel.hidden && !panel.contains(event.target) && !bell.contains(event.target)) closeRespawnPanel();
+  });
+  window.AniilogsRespawns?.subscribe?.(renderRespawnPanel);
+  window.setInterval(updateRespawnBell, TRACKING_TICK_MS);
+  updateRespawnBell();
+}
+
 async function init() {
   loadLocalTracking();
+  initRespawnBell();
   await hydrateCloudProgress();
   applyThemePreference();
   syncDesktopSelectionPlacement();
