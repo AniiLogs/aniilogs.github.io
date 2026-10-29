@@ -113,12 +113,16 @@ test("developers list and download reports; players can't", async () => {
   assert.equal((await admin(env, `/api/admin/log-reports/${reportId}`, { session: SESSIONS.user })).status, 403);
 });
 
-test("developers leave notes; only administrators clear, and clearing keeps the report's line and notes", async () => {
+test("administrators leave notes; testers can't read; only the owner clears, keeping the report's line and notes", async () => {
   const { env, sqlite, objects } = await setup();
   sqlite.prepare("INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at) VALUES (?, ?, ?)").run(IDS.user, IDS.dev, 1);
   const { reportId } = await (await send(env)).json();
   const path = `/api/admin/log-reports/${reportId}`;
-  // a developer who isn't an administrator: notes yes, clearing no
+  // a tester (the developer role) sends reports but can't read them or leave notes
+  assert.equal((await admin(env, "/api/admin/log-reports", { session: SESSIONS.user })).status, 403);
+  assert.equal((await admin(env, `${path}/notes`, { session: SESSIONS.user, method: "POST", body: { note: "x" } })).status, 403);
+  sqlite.prepare("UPDATE developer_roles SET role = 'administrator' WHERE discord_id = ?").run(IDS.user);
+  // an administrator who isn't the owner: notes yes, clearing no
   assert.equal((await admin(env, `${path}/notes`, { session: SESSIONS.user, method: "POST", body: {} })).status, 400);
   assert.equal((await admin(env, `${path}/notes`, { session: SESSIONS.user, method: "POST",
     body: { note: "Bar read stalled after BREAK; fixed in PR #12" } })).status, 201);
@@ -165,11 +169,15 @@ test("developers use their aLogs app sign-in too; players' app sign-ins are refu
   assert.equal((await app(devToken, `/api/admin/log-reports/${reportId}`, "DELETE")).status, 200);    // dev is also admin
 });
 
-test("a developer role granted on the site counts, not just the built-in developers", async () => {
+test("reading reports needs an administrator role granted on the site; the developer role alone isn't enough", async () => {
   const { env, sqlite } = await setup();
   await send(env);
   assert.equal((await admin(env, "/api/admin/log-reports", { session: SESSIONS.user })).status, 403);
   sqlite.prepare("INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at) VALUES (?, ?, ?)").run(IDS.user, IDS.dev, 1);
+  const tester = await admin(env, "/api/admin/log-reports", { session: SESSIONS.user });
+  assert.equal(tester.status, 403);
+  assert.equal((await tester.json()).error, "Access denied.");
+  sqlite.prepare("UPDATE developer_roles SET role = 'administrator' WHERE discord_id = ?").run(IDS.user);
   assert.equal((await admin(env, "/api/admin/log-reports", { session: SESSIONS.user })).status, 200);
 });
 

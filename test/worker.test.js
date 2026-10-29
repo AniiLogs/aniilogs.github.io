@@ -312,12 +312,12 @@ test("roles: testers cannot manage roles, administrators grant only the develope
   assert.equal((await call(state.tokens.other, "/api/admin/developers", "GET")).status, 403);
 
   // The owner grants the administrator role (only the owner can).
-  assert.deepEqual((await me(state.tokens.owner)).permissions, ["roles.grant.developer", "roles.grant.administrator"]);
+  assert.deepEqual((await me(state.tokens.owner)).permissions, ["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage"]);
   assert.equal((await call(state.tokens.owner, `/api/admin/developers/${state.discordIds.admin}`, "PUT", { role: "administrator" })).status, 200);
   const admin = await me(state.tokens.admin);
   assert.equal(admin.role, "administrator");
   assert.equal(admin.developerModeAvailable, true);
-  assert.deepEqual(admin.permissions, ["roles.grant.developer"]);
+  assert.deepEqual(admin.permissions, ["roles.grant.developer", "logs.read"]);
 
   // An administrator grants and revokes the developer role...
   assert.equal((await call(state.tokens.admin, `/api/admin/developers/${state.discordIds.other}`, "PUT")).status, 200);

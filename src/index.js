@@ -648,8 +648,8 @@ export function administratorAccountAllowed(discordId, env) {
 // ADMIN_DISCORD_IDS secret; developer and administrator are rows in developer_roles. Every private role gets the
 // same Developer Mode access; managing roles is checked by permission name.
 const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator"]),
-  administrator: Object.freeze(["roles.grant.developer"]),
+  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage"]),
+  administrator: Object.freeze(["roles.grant.developer", "logs.read"]),
   developer: Object.freeze([]),
   player: Object.freeze([]),
 });
@@ -695,6 +695,19 @@ async function storedDeveloperRole(discordId, env) {
   return row ? (row.role === "administrator" ? "administrator" : "developer") : null;
 }
 
+async function accountRoleFields(discordId, env) {
+  let stored = null;
+  if (!ownerAccountAllowed(discordId, env)) {
+    try {
+      stored = await storedDeveloperRole(discordId, env);
+    } catch (error) {
+      console.error("Could not read developer role", error);
+    }
+  }
+  const role = accountRole(discordId, env, stored);
+  return { developerModeAvailable: role !== "player", role, permissions: accountPermissions(role) };
+}
+
 async function currentAccount(request, env) {
   if (!env.DB) return null;
   const authorization = request.headers.get("authorization") || "";
@@ -719,15 +732,7 @@ async function currentAccount(request, env) {
     LIMIT 1`,
   ).bind(sessionHash, now).first();
   if (!row) return null;
-  let stored = null;
-  if (!ownerAccountAllowed(row.discordId, env)) {
-    try {
-      stored = await storedDeveloperRole(row.discordId, env);
-    } catch (error) {
-      console.error("Could not read developer role", error);
-    }
-  }
-  const role = accountRole(row.discordId, env, stored);
+  const { role, permissions } = await accountRoleFields(row.discordId, env);
   return {
     discordId: String(row.discordId),
     username: String(row.discordUsername),
@@ -739,7 +744,7 @@ async function currentAccount(request, env) {
     developerModeAvailable: role !== "player",
     developerAdminAvailable: role === "owner",
     role,
-    permissions: accountPermissions(role),
+    permissions,
   };
 }
 
@@ -844,7 +849,8 @@ function corsResponse(request, env, response) {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
   // the desktop app (its own origin) signs in and sends log reports from anywhere; both carry no browser cookie
-  if (url.pathname.startsWith("/api/auth/app/") || url.pathname === "/api/logs/reports") {
+  if (url.pathname.startsWith("/api/auth/app/") || url.pathname === "/api/logs/reports"
+    || url.pathname === "/api/logs/beta" || url.pathname === "/api/beta/tests" || url.pathname.startsWith("/api/beta/tests/")) {
     const headers = new Headers(response.headers);
     headers.set("access-control-allow-origin", "*");
     headers.set("access-control-allow-headers", "authorization, content-type");
@@ -952,7 +958,12 @@ async function appAccount(request, env) {
   const user = await env.DB.prepare(
     "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
   ).bind(account.discordId).first();
-  return json({ authenticated: true, account: { name: user?.globalName || user?.username || "Discord account" } });
+  return json({
+    authenticated: true,
+    account: { name: user?.globalName || user?.username || "Discord account" },
+    beta: await betaTester(account, env),
+    permissions: account.permissions || [],
+  });
 }
 async function appSignOut(request, env) {
   const raw = bearerToken(request);
@@ -1944,7 +1955,7 @@ async function leaderboardAccount(request, env) {
     await env.DB.prepare("UPDATE leaderboard_tokens SET last_used_at = ? WHERE token_hash = ?")
       .bind(Math.floor(Date.now() / 1000), tokenHash).run();
     const discordId = String(row.discordId);
-    return { discordId, viaToken: true, developerModeAvailable: await accountIsDeveloper(discordId, env) };
+    return { discordId, viaToken: true, ...await accountRoleFields(discordId, env) };
   }
   const account = await currentAccount(request, env);
   return account ? { ...account, viaToken: false } : null;
@@ -3454,25 +3465,42 @@ async function expireLogReports(env, now) {
   await clearLogReportRows(env, results || [], now);
 }
 
-// Developers (any account with the developer role, signed in on the website or in the aLogs app with its desktop
-// token) read reports and leave notes on the ones they work on. Clearing is for administrators: they read the notes and
-// clear a report once its fix is in.
-async function logReportDeveloper(request, env) {
+// Administrators and the owner (logs.read; signed in on the website or in the aLogs app with its desktop token) read
+// reports and leave notes on the ones they work on. Clearing is for the owner (logs.clear): they read the notes and
+// clear a report once its fix is in. Testers (the developer role) send reports but don't read them.
+const LOG_REPORT_DENIED = "Access denied.";
+async function logReportReader(request, env) {
   const account = await leaderboardAccount(request, env);
-  return account?.developerModeAvailable ? account : null;
+  return can(account, "logs.read") ? account : null;
 }
 
 // Newest first, without the address hash; ?all=1 includes cleared ones. Each with its notes, oldest first, and how many
 // screenshots came with it (GET .../<id>/screenshots/<n>, from 1).
 async function listLogReports(request, env) {
-  if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
+  if (!await logReportReader(request, env)) return json({ error: LOG_REPORT_DENIED }, 403);
   const all = new URL(request.url).searchParams.get("all") === "1";
-  const { results } = await env.DB.prepare(
+  // Beta results and bug reports (migration 0027) add their kind, summary and content.
+  const reportList = (beta) => env.DB.prepare(
     `SELECT report_id AS id, game_uid AS gameUid, note, app_version AS appVersion, size_bytes AS sizeBytes,
-       created_at AS createdAt, cleared_at AS clearedAt, screenshots_json AS shotsJson
+       created_at AS createdAt, cleared_at AS clearedAt, screenshots_json AS shotsJson${beta ? ", kind, summary, body_json AS bodyJson" : ""}
      FROM log_reports ${all ? "" : "WHERE cleared_at IS NULL"} ORDER BY created_at DESC LIMIT 500`,
   ).all();
-  const reports = (results || []).map(({ shotsJson, ...report }) => ({ ...report, screenshots: report.clearedAt ? 0 : reportScreenshots({ shotsJson }).length }));
+  let results;
+  try {
+    ({ results } = await reportList(true));
+  } catch (error) {
+    if (!/no such column/iu.test(String(error?.message || error))) throw error;
+    ({ results } = await reportList(false));
+  }
+  const reports = (results || []).map(({ shotsJson, bodyJson, ...report }) => {
+    let body = null;
+    try {
+      body = bodyJson ? JSON.parse(bodyJson) : null;
+    } catch {
+      body = null;
+    }
+    return { ...report, ...(body ? { body } : {}), screenshots: report.clearedAt ? 0 : reportScreenshots({ shotsJson }).length };
+  });
   if (reports.length) {
     const { results: notes } = await env.DB.prepare(
       `SELECT n.report_id AS reportId, n.note, n.created_at AS createdAt, COALESCE(u.discord_global_name, u.discord_username, n.discord_id) AS author
@@ -3487,7 +3515,7 @@ async function listLogReports(request, env) {
 }
 
 async function logReportZip(request, env, reportId) {
-  if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
+  if (!await logReportReader(request, env)) return json({ error: LOG_REPORT_DENIED }, 403);
   const row = await env.DB.prepare(
     "SELECT log_key AS logKey, game_uid AS gameUid, created_at AS createdAt, cleared_at AS clearedAt FROM log_reports WHERE report_id = ?",
   ).bind(reportId).first();
@@ -3502,7 +3530,7 @@ async function logReportZip(request, env, reportId) {
 }
 
 async function logReportScreenshot(request, env, reportId, number) {
-  if (!await logReportDeveloper(request, env)) return json({ error: "Developer access required." }, 403);
+  if (!await logReportReader(request, env)) return json({ error: LOG_REPORT_DENIED }, 403);
   const row = await env.DB.prepare(
     "SELECT screenshots_json AS shotsJson, cleared_at AS clearedAt FROM log_reports WHERE report_id = ?",
   ).bind(reportId).first();
@@ -3516,12 +3544,12 @@ async function logReportScreenshot(request, env, reportId, number) {
   return new Response(object.body, { status: 200, headers });
 }
 
-// A developer's note on a report they worked on: what they found, what they changed, the PR.
+// An administrator's note on a report they worked on: what they found, what they changed, the PR.
 async function addLogReportNote(request, env, reportId) {
   // a bearer token can't be sent by another site on its own; a website session must come from the site
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
-  const account = await logReportDeveloper(request, env);
-  if (!account) return json({ error: "Developer access required." }, 403);
+  const account = await logReportReader(request, env);
+  if (!account) return json({ error: LOG_REPORT_DENIED }, 403);
   let body;
   try {
     body = await readJsonBody(request, 16384);
@@ -3541,17 +3569,252 @@ async function addLogReportNote(request, env, reportId) {
 
 async function clearLogReports(request, env, reportId) {
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
-  const account = await logReportDeveloper(request, env);
-  if (!account) return json({ error: "Developer access required." }, 403);
-  if (!administratorAccountAllowed(account.discordId, env)) {
-    return json({ error: "Only administrators clear reports: leave a note on it instead." }, 403);
-  }
+  const account = await logReportReader(request, env);
+  if (!account) return json({ error: LOG_REPORT_DENIED }, 403);
+  if (!can(account, "logs.clear")) return json({ error: "Only the owner clears reports: leave a note on it instead." }, 403);
   const { results } = reportId
     ? await env.DB.prepare("SELECT report_id AS id, log_key AS logKey, screenshots_json AS shotsJson FROM log_reports WHERE report_id = ? AND cleared_at IS NULL").bind(reportId).all()
     : await env.DB.prepare("SELECT report_id AS id, log_key AS logKey, screenshots_json AS shotsJson FROM log_reports WHERE cleared_at IS NULL").all();
   if (reportId && !results?.length) return json({ error: "Report not found." }, 404);
   await clearLogReportRows(env, results || [], Math.floor(Date.now() / 1000));
   return json({ ok: true, cleared: results?.length || 0 });
+}
+
+// The aLogs Beta Menu: testers (any private role) with Developer Mode on (as the server acknowledged it) get a shared
+// list of things to test in the current build, mark each Working or Not working, and send the results or bug reports
+// with their logs. The owner (beta.manage) adds and rewords tests, retires them, and sees everyone's results.
+const BETA_TEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const BETA_REPORT_SHOTS = Object.freeze({ perBug: 3, total: 30, bytes: 4 * 1024 * 1024 });
+
+async function serverDeveloperMode(discordId, env) {
+  const row = await env.DB.prepare("SELECT data_json AS dataJson FROM progress_snapshots WHERE discord_id = ?").bind(discordId).first();
+  try {
+    return progressPayload(JSON.parse(row?.dataJson || "null"))?.preferences?.developerMode === true;
+  } catch {
+    return false;
+  }
+}
+
+async function betaTester(account, env) {
+  return Boolean(account?.developerModeAvailable) && await serverDeveloperMode(account.discordId, env);
+}
+
+// A beta route's account: the app's token or a website session, a private role and Developer Mode on.
+async function betaAccount(request, env) {
+  const account = await leaderboardAccount(request, env);
+  return account && await betaTester(account, env) ? account : null;
+}
+
+const betaText = (value, max) => String(value ?? "").trim().slice(0, max);
+
+async function listBetaTests(request, env) {
+  if (!env.DB) return json({ error: "The beta list is unavailable." }, 503);
+  const account = await betaAccount(request, env);
+  if (!account) return json({ error: "Beta access required." }, 403);
+  const manager = can(account, "beta.manage");
+  const { results } = await env.DB.prepare(
+    `SELECT test_id AS id, build, title, how, details, retired_at AS retiredAt, updated_at AS updatedAt
+     FROM beta_tests ${manager ? "" : "WHERE retired_at IS NULL"} ORDER BY sort, created_at, test_id`,
+  ).all();
+  const tests = results || [];
+  const counts = new Map();
+  if (manager && tests.length) {
+    const { results: marks } = await env.DB.prepare(
+      "SELECT test_id AS id, SUM(working = 1) AS working, SUM(working = 0) AS broken FROM beta_test_marks GROUP BY test_id",
+    ).all();
+    for (const row of marks || []) counts.set(row.id, { working: Number(row.working) || 0, broken: Number(row.broken) || 0 });
+  }
+  const { results: mine } = await env.DB.prepare(
+    "SELECT test_id AS id, working, marked_at AS at FROM beta_test_marks WHERE discord_id = ?",
+  ).bind(account.discordId).all();
+  const latest = tests.reduce((best, row) => (!best || row.updatedAt > best.updatedAt ? row : best), null);
+  return json({
+    build: latest?.build ?? null,
+    items: tests.map((row) => ({
+      id: row.id,
+      title: row.title,
+      how: row.how,
+      ...(row.details ? { details: row.details } : {}),
+      ...(manager ? { retired: row.retiredAt != null, results: counts.get(row.id) || { working: 0, broken: 0 } } : {}),
+    })),
+    mine: Object.fromEntries((mine || []).map((row) => [row.id, { working: row.working === 1, at: row.at }])),
+  });
+}
+
+// Add new tests and reword existing ones, in the order sent. A retired test stays retired.
+async function upsertBetaTests(request, env) {
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await betaAccount(request, env);
+  if (!can(account, "beta.manage")) return json({ error: "Beta management access required." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 256 * 1024);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const build = betaText(body?.build, 40);
+  const items = Array.isArray(body?.items) ? body.items : null;
+  if (!build || !items || items.length > 500) return json({ error: "A build and a list of up to 500 tests are required." }, 400);
+  const tests = items.map((item, index) => ({
+    id: String(item?.id ?? ""), title: betaText(item?.title, 200), how: betaText(item?.how, 2000),
+    details: betaText(item?.details, 4000) || null, sort: index,
+  }));
+  if (tests.some((test) => !BETA_TEST_ID.test(test.id) || !test.title || !test.how)) {
+    return json({ error: "Every test needs an id (letters, digits, . _ -), a title and how to test it." }, 400);
+  }
+  if (new Set(tests.map((test) => test.id)).size !== tests.length) return json({ error: "Test ids must be unique." }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  let added = 0;
+  let updated = 0;
+  for (const test of tests) {
+    const existing = await env.DB.prepare("SELECT 1 FROM beta_tests WHERE test_id = ?").bind(test.id).first();
+    if (existing) {
+      await env.DB.prepare("UPDATE beta_tests SET build = ?, title = ?, how = ?, details = ?, sort = ?, updated_at = ? WHERE test_id = ?")
+        .bind(build, test.title, test.how, test.details, test.sort, now, test.id).run();
+      updated += 1;
+    } else {
+      await env.DB.prepare(
+        "INSERT INTO beta_tests (test_id, build, title, how, details, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ).bind(test.id, build, test.title, test.how, test.details, test.sort, now, now).run();
+      added += 1;
+    }
+  }
+  return json({ added, updated });
+}
+
+async function retireBetaTest(request, env, testId) {
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await betaAccount(request, env);
+  if (!can(account, "beta.manage")) return json({ error: "Beta management access required." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 256);
+  } catch (error) {
+    return json({ error: error.message }, 400);
+  }
+  if (typeof body?.retired !== "boolean") return json({ error: "retired must be true or false." }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  const changed = await env.DB.prepare("UPDATE beta_tests SET retired_at = ?, updated_at = ? WHERE test_id = ?")
+    .bind(body.retired ? now : null, now, testId).run();
+  if (!Number(changed?.meta?.changes)) return json({ error: "Test not found." }, 404);
+  return json({ ok: true, id: testId, retired: body.retired });
+}
+
+function betaJsonList(value, max) {
+  try {
+    const list = JSON.parse(String(value || ""));
+    return Array.isArray(list) && list.length <= max ? list : null;
+  } catch {
+    return null;
+  }
+}
+
+// From the aLogs app only (its desktop token): test results or bug reports, always with the logs zip, and up to 3
+// screenshots per bug named bug-<bug>-<n>. Stored as a log report that administrators read, with a one-line summary.
+async function submitBetaReport(request, env) {
+  if (!env.DB || !env.EVIDENCE) return json({ error: "Beta reports are unavailable." }, 503);
+  if (!bearerToken(request).startsWith(LEADERBOARD_TOKEN_PREFIX)) return json({ error: "Sign in to aLogs first." }, 401);
+  const account = await betaAccount(request, env);
+  if (!account) return json({ error: "Beta access required." }, 403);
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("multipart/form-data")) {
+    return json({ error: "Send the report as multipart/form-data." }, 400);
+  }
+  if (Number(request.headers.get("content-length") || 0) > LOG_REPORT_MAX_BYTES + BETA_REPORT_SHOTS.total * BETA_REPORT_SHOTS.bytes + 262144) {
+    return json({ error: "The report is too large." }, 413);
+  }
+  let form;
+  try {
+    form = await request.formData();
+  } catch {
+    return json({ error: "Could not read the report." }, 400);
+  }
+  const kind = String(form.get("kind") || "");
+  if (kind !== "beta-tests" && kind !== "beta-bugs") return json({ error: "kind must be beta-tests or beta-bugs." }, 400);
+  const gameUid = String(form.get("uid") || "").trim();
+  if (!/^\d{6,20}$/u.test(gameUid)) return json({ error: "A game UID is required." }, 400);
+  const appVersion = betaText(form.get("app_version"), 40) || null;
+  const build = betaText(form.get("build"), 40);
+  if (!build) return json({ error: "The build is required." }, 400);
+  const logs = form.get("logs");
+  if (!logs || typeof logs === "string" || !logs.size) return json({ error: "The logs are required." }, 400);
+  if (logs.size > LOG_REPORT_MAX_BYTES) return json({ error: "The logs are too large." }, 413);
+  const head = new Uint8Array(await logs.slice(0, 4).arrayBuffer());
+  if (head[0] !== 0x50 || head[1] !== 0x4b || head[2] !== 0x03 || head[3] !== 0x04) return json({ error: "The logs must be a zip." }, 400);
+
+  let entries;
+  let summary;
+  if (kind === "beta-tests") {
+    const tests = betaJsonList(form.get("tests"), 500);
+    if (!tests || !tests.length) return json({ error: "The tests are required." }, 400);
+    entries = tests.map((test) => ({
+      id: String(test?.id ?? ""), title: betaText(test?.title, 200), tested: test?.tested === true,
+      working: test?.working === true ? true : test?.working === false ? false : null, note: betaText(test?.note, 2000) || null,
+    }));
+    if (entries.some((test) => !BETA_TEST_ID.test(test.id))) return json({ error: "Every test needs its id." }, 400);
+    const tested = entries.filter((test) => test.tested).length;
+    const broken = entries.filter((test) => test.tested && test.working === false).length;
+    summary = `${build}: ${tested} tested, ${broken} not working`;
+  } else {
+    const bugs = betaJsonList(form.get("bugs"), 50);
+    if (!bugs || !bugs.length) return json({ error: "The bugs are required." }, 400);
+    entries = bugs.map((bug) => ({
+      title: betaText(bug?.title, 200), area: betaText(bug?.area, 80) || null, severity: betaText(bug?.severity, 20) || null,
+      text: betaText(bug?.text, 4000), screenshots: Math.max(0, Math.min(BETA_REPORT_SHOTS.perBug, Number(bug?.screenshots) || 0)),
+    }));
+    if (entries.some((bug) => !bug.title)) return json({ error: "Every bug needs a title." }, 400);
+    summary = `${build}: ${entries.length} bug${entries.length === 1 ? "" : "s"}`;
+  }
+
+  const shots = [];
+  for (const [name, file] of form.entries()) {
+    if (!/^bug-/u.test(name)) continue;
+    const match = /^bug-(\d{1,2})-(\d)$/u.exec(name);
+    if (kind !== "beta-bugs" || !match || typeof file === "string" || !file.size) return json({ error: `Unexpected file ${name}.` }, 400);
+    const bug = Number(match[1]);
+    const number = Number(match[2]);
+    if (bug < 1 || bug > entries.length || number < 1 || number > BETA_REPORT_SHOTS.perBug) return json({ error: `Unexpected file ${name}.` }, 400);
+    if (file.size > BETA_REPORT_SHOTS.bytes) return json({ error: "A screenshot is too large (4 MB at most)." }, 413);
+    const type = screenshotType(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
+    if (!type) return json({ error: "Screenshots must be PNG, JPEG or WebP pictures." }, 400);
+    shots.push({ file, bug, number, ...type });
+  }
+  if (shots.length > BETA_REPORT_SHOTS.total) return json({ error: `At most ${BETA_REPORT_SHOTS.total} screenshots.` }, 400);
+
+  const now = Math.floor(Date.now() / 1000);
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const ipHash = await sha256(`${ip}|log-reports|${env.SESSION_SECRET || ""}`);
+  const counts = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM log_reports WHERE game_uid = ? AND created_at > ?) AS uidHour,
+            (SELECT COUNT(*) FROM log_reports WHERE cleared_at IS NULL) AS kept`,
+  ).bind(gameUid, now - 3600).first();
+  if (Number(counts?.uidHour) >= LOG_REPORT_LIMITS.perUidHour * 2) return json({ error: "Too many reports in the last hour. Try again later." }, 429);
+  if (Number(counts?.kept) >= LOG_REPORT_LIMITS.kept) return json({ error: "Log reports are full right now. Try again later." }, 503);
+
+  const reportId = randomToken(12);
+  const logKey = `logs/${reportId}.zip`;
+  await env.EVIDENCE.put(logKey, logs.stream(), { httpMetadata: { contentType: "application/zip" }, customMetadata: { uid: gameUid } });
+  const stored = [];
+  for (const shot of shots.sort((a, b) => a.bug - b.bug || a.number - b.number)) {
+    const key = `logs/${reportId}-bug-${shot.bug}-${shot.number}.${shot.ext}`;
+    await env.EVIDENCE.put(key, shot.file.stream(), { httpMetadata: { contentType: shot.type }, customMetadata: { uid: gameUid } });
+    stored.push({ key, type: shot.type, size: shot.file.size, bug: shot.bug });
+  }
+  await env.DB.prepare(
+    `INSERT INTO log_reports (report_id, game_uid, note, app_version, size_bytes, log_key, ip_hash, created_at, screenshots_json,
+       kind, body_json, summary, discord_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(reportId, gameUid, summary, appVersion, logs.size, logKey, ipHash, now, stored.length ? JSON.stringify(stored) : null,
+    kind, JSON.stringify({ build, [kind === "beta-tests" ? "tests" : "bugs"]: entries }), summary, account.discordId).run();
+  if (kind === "beta-tests") {
+    for (const test of entries.filter((entry) => entry.tested && entry.working !== null)) {
+      await env.DB.prepare(
+        `INSERT INTO beta_test_marks (discord_id, test_id, working, report_id, marked_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(discord_id, test_id) DO UPDATE SET working = excluded.working, report_id = excluded.report_id, marked_at = excluded.marked_at`,
+      ).bind(account.discordId, test.id, test.working ? 1 : 0, reportId, now).run();
+    }
+  }
+  await expireLogReports(env, now);
+  return json({ ok: true, reportId }, 201);
 }
 
 // Unreleased / unverified records for Developer Mode only. They live under releases/<release>/dev/ in R2,
@@ -3692,6 +3955,11 @@ async function api(request, env) {
   const photoMatch = url.pathname.match(/^\/api\/photos\/([A-Za-z0-9_-]{8,40})$/u);
   if (photoMatch && (request.method === "GET" || request.method === "HEAD")) return profilePhotoImage(request, env, photoMatch[1]);
   if (url.pathname === "/api/logs/reports" && request.method === "POST") return submitLogReport(request, env);
+  if (url.pathname === "/api/logs/beta" && request.method === "POST") return submitBetaReport(request, env);
+  if (url.pathname === "/api/beta/tests" && request.method === "GET") return listBetaTests(request, env);
+  if (url.pathname === "/api/beta/tests" && request.method === "POST") return upsertBetaTests(request, env);
+  const betaRetireMatch = url.pathname.match(/^\/api\/beta\/tests\/([A-Za-z0-9][A-Za-z0-9._-]{0,63})\/retire$/u);
+  if (betaRetireMatch && request.method === "POST") return retireBetaTest(request, env, betaRetireMatch[1]);
   if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);
   const logReportNotesMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})\/notes$/u);
