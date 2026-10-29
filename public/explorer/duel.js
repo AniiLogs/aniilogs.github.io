@@ -565,7 +565,19 @@
     return section;
   }
 
+  // With nothing picked yet, your side starts as the first Aniimo on your team (at its Stats-tab level).
+  function defaultYourAniimo(options) {
+    const formId = options.members?.[0];
+    if (settings.you.formId || !formId) return;
+    settings.you.formId = formId;
+    const member = options.memberStats?.[formId];
+    const cap = options.aniilog.stat_growth?.level_cap || 70;
+    settings.you.level = Math.round(clamp(member?.level ?? cap, 1, cap, cap));
+    settings.you.potential = Math.round(clamp(member?.potential ?? 0, 0, 30, 0));
+  }
+
   function render(options) {
+    defaultYourAniimo(options);
     const root = el("div", "duel");
     const rerender = options.rerender;
     const banner = el("p", "duel-banner");

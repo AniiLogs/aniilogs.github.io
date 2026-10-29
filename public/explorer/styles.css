@@ -12823,3 +12823,29 @@ html[data-embed="app"] #topbarLogoutButton {
     min-height: 0;
   }
 }
+
+/* ---- Fixes from the live check after the combined release. */
+/* "Sign in" stays on one line next to the Discord icon. */
+.account-sign-in span {
+  white-space: nowrap;
+}
+
+/* Add to team is the main action on a partner card, so it uses the accent instead of the muted button style. */
+.team-partners-add {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+}
+
+/* Maps without caves leave the underground toggle's icon empty; hide it instead of an empty box. */
+#undergroundLayerToggleIcon:not([src]) {
+  display: none;
+}
+
+/* Phones: the logo alone and the theme menu without its caption, so the theme menu no longer covers the name. */
+@media (max-width: 560px) {
+  .app-topbar-brand-name,
+  .theme-picker-copy {
+    display: none;
+  }
+}

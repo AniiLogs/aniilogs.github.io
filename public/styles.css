@@ -553,3 +553,9 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
 .profile-edit > summary { cursor: pointer; font-weight: 700; color: var(--accent, var(--mint)); }
 .profile-edit > form { margin-top: 0.75rem; max-width: 34rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Phones: the logo alone and the theme menu without its caption, so the theme menu no longer covers the name. */
+@media (max-width: 560px) {
+  .site-header .brand-name,
+  .theme-picker-copy { display: none; }
+}
