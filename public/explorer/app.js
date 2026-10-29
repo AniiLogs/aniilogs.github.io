@@ -1834,6 +1834,17 @@ function applyDeveloperOverlay(collection, records) {
   return out;
 }
 
+// Overlay entries (availability "unreleased" / "unverified") are shown but never counted. Item-log's public
+// entries have an availability object of their own ({ status }), which does not make them overlay entries.
+// (Same helpers as the combined preview branch; keep one copy when merging.)
+function isDeveloperOverlayEntry(entry) {
+  return typeof entry?.availability === "string" && Object.hasOwn(DEVELOPER_AVAILABILITY, entry.availability);
+}
+
+function countedEntries(entries) {
+  return entries.filter((entry) => !isDeveloperOverlayEntry(entry)).length;
+}
+
 function developerAvailabilityBadge(availability, note = "") {
   const label = DEVELOPER_AVAILABILITY[availability];
   if (!label) return null;
@@ -3949,7 +3960,7 @@ function itemlogEntryMatchesCategory(entry, category) {
 }
 
 function itemlogCategoryCount(category, entries = allCatalogEntriesForView("itemlog")) {
-  return entries.filter((entry) => itemlogEntryMatchesCategory(entry, category)).length;
+  return countedEntries(entries.filter((entry) => itemlogEntryMatchesCategory(entry, category)));
 }
 
 // Rarity tiers from lowest to highest; an item without a tier sorts below Common, and the top tier
@@ -3983,6 +3994,8 @@ function itemlogMethodLabelFromSourceId(sourceId) {
 
 function itemlogMethodSourceOptions(entries = allCatalogEntriesForView("itemlog")) {
   const methods = new Map();
+  // Filter counts follow the public totals: Developer Mode overlay entries are not counted.
+  entries = entries.filter((entry) => !isDeveloperOverlayEntry(entry));
   entries.forEach((entry) => {
     const entryMethods = new Map();
     itemlogObtainMethods(entry).forEach((method) => {
@@ -5235,7 +5248,7 @@ function renderCatalogCategoryToolbar(view) {
     normalizeItemlogFilterForEntries(categoryEntries);
     const appendCategoryOption = (parent, category, optionLabel = category) => {
       const rawCount = category === "all"
-        ? allEntries.length
+        ? countedEntries(allEntries)
         : itemlogCategoryCount(category, allEntries);
       const count = Number(rawCount);
       if (category !== "all" && (!Number.isFinite(count) || count <= 0)) return false;
@@ -5286,11 +5299,11 @@ function renderCatalogCategoryToolbar(view) {
       option.selected = state.itemlogFilters.source === source.id;
       parent.append(option);
     };
-    appendSourceOption(sourceSelect, { id: "all", label: "All filters", count: categoryEntries.length });
+    appendSourceOption(sourceSelect, { id: "all", label: "All filters", count: countedEntries(categoryEntries) });
 
-    const expeditionCount = categoryEntries.filter((entry) => itemlogExpeditionSources(entry).length > 0).length;
+    const expeditionCount = categoryEntries.filter((entry) => !isDeveloperOverlayEntry(entry) && itemlogExpeditionSources(entry).length > 0).length;
     // Items first added to the Item-log by the latest game update carry the build that added them.
-    const newEntries = categoryEntries.filter((entry) => entry?.added_in_build);
+    const newEntries = categoryEntries.filter((entry) => entry?.added_in_build && !isDeveloperOverlayEntry(entry));
     const featuredSources = document.createElement("optgroup");
     featuredSources.label = "Featured filters";
     if (newEntries.length) {
@@ -8487,7 +8500,7 @@ function renderCatalogPreview(options = {}) {
   } else if (view === "aniilog") {
     subtitle.textContent = "Current-build Aniimo records";
   } else if (view === "itemlog" && allEntries.length) {
-    subtitle.textContent = `${formatNumber(entries.length)} of ${formatNumber(allEntries.length)} packaged item definitions`;
+    subtitle.textContent = `${formatNumber(countedEntries(entries))} of ${formatNumber(countedEntries(allEntries))} packaged item definitions`;
   }
   if (!entries.length) {
     const entryLabel = view === "aniilog" ? "Aniimo" : "Item";
