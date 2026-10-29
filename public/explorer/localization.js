@@ -281,6 +281,7 @@
     ["Name, area, coordinate", "名称、区域、坐标", "名前、エリア、座標", "이름, 지역, 좌표"],
     ["Aniimo, form, or location", "Aniimo、形态或位置", "Aniimo、形態、場所", "Aniimo, 형태 또는 위치"],
     ["Aniimo, form, skill, or effect", "Aniimo、形态、技能或效果", "Aniimo、形態、スキル、効果", "Aniimo, 형태, 스킬 또는 효과"],
+    ["Aniimo, element, form, skill, or effect", "Aniimo、属性、形态、技能或效果", "Aniimo、属性、形態、スキル、効果", "Aniimo, 속성, 형태, 스킬 또는 효과"],
     ["Items", "道具", "アイテム", "아이템"],
     ["Eggs", "蛋", "タマゴ", "알"],
     ["Elite Eggs", "卓越伊莫蛋", "エクセレントアニモのタマゴ", "탁월 애니모 알"],

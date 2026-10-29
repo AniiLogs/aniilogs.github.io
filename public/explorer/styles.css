@@ -12849,3 +12849,123 @@ html[data-embed="app"] #topbarLogoutButton {
     display: none;
   }
 }
+
+/* ---- Checklists page header: the title and the Aniimo / Lumin tabs sit at the top of the page, like Team
+   Builder's title and tabs; the sidebar keeps search. Below it, the open list's name and its progress. */
+.checklist-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.checklist-page-header h1 {
+  margin: 0;
+  font-size: clamp(24px, 2.4vw, 34px);
+}
+
+.checklist-page-lede {
+  max-width: 800px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.checklist-page-controls {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 8px;
+  min-width: min(100%, 360px);
+}
+
+.checklist-page-controls .checklist-category-tabs {
+  width: 100%;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(var(--background-rgb), 0.42);
+  gap: 4px;
+}
+
+.checklist-page-controls .checklist-category-tab {
+  min-height: 44px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.checklist-page-controls .checklist-category-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.2);
+}
+
+.checklist-page-controls .lumin-checklist-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: 100%;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.checklist-page-controls .lumin-checklist-tabs[hidden] {
+  display: none;
+}
+
+.checklist-page-controls .lumin-checklist-tab {
+  flex: 1 1 110px;
+  min-height: 36px;
+}
+
+.checklist-page-controls .lumin-checklist-tab span {
+  font-size: 13px;
+}
+
+.checklist-page-controls .lumin-checklist-tab small {
+  font-size: 12px;
+}
+
+.checklist-panel-header h2 {
+  margin: 0;
+  font-size: clamp(20px, 1.8vw, 26px);
+}
+
+@media (max-width: 760px) {
+  .checklist-page-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .checklist-page-controls {
+    width: 100%;
+    min-width: 0;
+    justify-items: stretch;
+  }
+}
+
+/* Checklist Locate buttons and Lumin sub-tabs follow the theme (they were fixed dark colours, unreadable in the
+   light themes). */
+.checklist-locate {
+  border-color: var(--line);
+  background: rgba(var(--background-rgb), 0.55);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.lumin-checklist-tab {
+  border-color: var(--line);
+  background: rgba(var(--background-rgb), 0.45);
+  color: var(--text);
+}
+
+/* Skill fact boxes (Might, EP Cost, BREAK, Cooldown) follow the theme; they were fixed dark boxes, unreadable in
+   the light themes. */
+.catalog-ability-fact {
+  background: rgba(var(--background-rgb), 0.55);
+  color: var(--text);
+}
+
+.catalog-ability-fact--cooldown {
+  background: rgba(var(--accent-rgb), 0.12);
+}

@@ -4265,7 +4265,11 @@ function catalogEntriesForView(view = state.sidebarView) {
     if (view === "itemlog") entries = entries.filter(itemlogEntryMatchesFilters);
   }
   const query = catalogSearchForView(view).trim().toLowerCase();
-  if (query) {
+  // Searching just an element name ("fire") lists every Aniimo of that element, not only text mentions of it.
+  const elementQuery = view === "aniilog" && query ? aniilogElementSearch(query) : "";
+  if (elementQuery) {
+    entries = entries.filter((entry) => (entry?.elements || []).some((element) => catalogElementMeta(element).slug === elementQuery));
+  } else if (query) {
     const terms = query.split(/\s+/).filter(Boolean);
     entries = entries.filter((entry) => {
       const text = catalogEntrySearchText(entry);
@@ -4277,6 +4281,18 @@ function catalogEntriesForView(view = state.sidebarView) {
     return [...entries].sort(compareItemlogVariants);
   }
   return entries;
+}
+
+// The element a search names on its own, matched against the element names and their display labels.
+function aniilogElementSearch(query) {
+  const wanted = query.replace(/s+/gu, " ").trim();
+  for (const entry of state.aniilogData?.entries || []) {
+    for (const element of entry?.elements || []) {
+      const names = [element?.name, catalogElementLabel(element)].map((name) => String(name || "").toLowerCase());
+      if (names.includes(wanted)) return catalogElementMeta(element).slug;
+    }
+  }
+  return "";
 }
 
 function aniilogSortOptions() {
@@ -5041,7 +5057,7 @@ function renderCatalogSearch(view, existingLabel = null) {
   input.type = "search";
   input.autocomplete = "off";
   input.value = catalogSearchForView(view);
-  input.placeholder = view === "aniilog" ? "Aniimo, form, skill, or effect" : "Item, type, or source";
+  input.placeholder = view === "aniilog" ? "Aniimo, element, form, skill, or effect" : "Item, type, or source";
   input.addEventListener("input", () => {
     const selectionStart = input.selectionStart;
     const selectionEnd = input.selectionEnd;
@@ -10532,7 +10548,7 @@ function renderLuminChecklistTabs() {
 
 // Checklists is the hub for progress: whose progress this is, where it is kept, and the respawns ready to collect.
 function renderChecklistHubStatus() {
-  const kicker = els.checklistPanel.querySelector(".checklist-panel-kicker");
+  const kicker = els.checklistPanel.querySelector(".checklist-page-lede");
   if (!kicker) return;
   let status = els.checklistPanel.querySelector(".checklist-hub-status");
   if (!status) {

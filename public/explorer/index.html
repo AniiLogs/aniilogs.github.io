@@ -19,7 +19,7 @@
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
-    <link rel="stylesheet" href="./styles.css?v=0.18.4-live-fixes">
+    <link rel="stylesheet" href="./styles.css?v=0.18.5-checklists-header">
   </head>
   <body>
     <header class="app-topbar">
@@ -159,11 +159,9 @@
 
         <section id="checklistWorkspace" class="checklist-workspace" role="region" aria-labelledby="topNavChecklist" hidden>
           <div class="panel-heading">
-            <h2>Checklists</h2>
+            <h2>Filters</h2>
             <span id="checklistCount" class="filter-count" aria-live="polite">Loading</span>
           </div>
-          <div id="checklistCategoryTabs" class="checklist-category-tabs" role="tablist" aria-label="Checklist categories"></div>
-          <div id="luminChecklistTabs" class="lumin-checklist-tabs" role="tablist" aria-label="Lumin checklist sources" hidden></div>
           <label class="search-label" for="checklistSearchInput">Search</label>
           <input id="checklistSearchInput" class="search" type="search" autocomplete="off" placeholder="Aniimo, form, or location">
           <p id="checklistSyncNote" class="checklist-sync-note">Saved in this browser. Sign in to keep it on your account.</p>
@@ -250,17 +248,24 @@
         </div>
         <section id="catalogPanel" class="catalog-panel" role="region" aria-live="polite" hidden></section>
         <section id="teamPanel" class="team-panel" role="region" aria-live="polite" hidden></section>
-        <section id="checklistPanel" class="checklist-panel" role="region" aria-labelledby="checklistPanelTitle" hidden>
-          <header class="checklist-panel-header">
-            <div>
-              <p class="checklist-panel-kicker">Checklists</p>
-              <h1 id="checklistPanelTitle">Aniimo</h1>
+        <section id="checklistPanel" class="checklist-panel" role="region" aria-labelledby="checklistPanelHeading" hidden>
+          <header class="checklist-page-header">
+            <div class="checklist-page-copy">
+              <h1 id="checklistPanelHeading">Checklists</h1>
+              <p class="checklist-page-lede">Mark off every Aniimo form and Lumin as you find them.</p>
             </div>
+            <div class="checklist-page-controls">
+              <div id="checklistCategoryTabs" class="checklist-category-tabs" role="tablist" aria-label="Checklist categories"></div>
+              <div id="luminChecklistTabs" class="lumin-checklist-tabs" role="tablist" aria-label="Lumin checklist sources" hidden></div>
+            </div>
+          </header>
+          <div class="checklist-panel-header">
+            <h2 id="checklistPanelTitle">Aniimo</h2>
             <div class="checklist-panel-progress">
               <span id="checklistPanelCount" aria-live="polite"></span>
               <span class="checklist-progress-bar" aria-hidden="true"><span id="checklistProgressFill"></span></span>
             </div>
-          </header>
+          </div>
           <div id="checklistList" class="checklist-list" aria-live="polite"></div>
         </section>
       </section>
@@ -289,12 +294,12 @@
 
   <script defer src="./app-config.js?v=20261029-build3846247-team-build-r79"></script>
   <script defer src="../theme-shell.js?v=0.3.1-open-in-browser"></script>
-  <script defer src="./localization.js?v=0.6.2-lumin-amber"></script>
+  <script defer src="./localization.js?v=0.6.2-lumin-amber-element-search"></script>
   <script defer src="./progress-storage.js?v=0.2.0"></script>
   <script defer src="./view-model-catalog.js?v=0.1.0-build3634150"></script>
   <script defer src="/icons/alogs-loader.js?v=0.4.0"></script>
   <script defer src="./duel.js?v=0.1.1"></script>
-  <script defer src="./team-builder.js?v=0.5.3-team-build"></script>
-  <script defer src="./app.js?v=0.18.2-phone-header"></script>
+  <script defer src="./team-builder.js?v=0.5.4-your-team"></script>
+  <script defer src="./app.js?v=0.18.5-checklists-header"></script>
   </body>
 </html>

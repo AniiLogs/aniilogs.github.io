@@ -1072,14 +1072,14 @@
     const sidebar = host.sidebar;
     sidebar.textContent = "";
     const heading = el("div", "team-sidebar-heading");
-    heading.append(el("h2", "", "Team Builder"), button("Clear", "team-clear-button", () => {
+    // The page title (Team Builder) and the mode switch are in the main panel's header; the sidebar is the team.
+    heading.append(el("h2", "", "Your team"), button("Clear", "team-clear-button", () => {
       if (!window.confirm("Clear every slot in this team?")) return;
       model = defaultModel();
       persist();
       render();
     }));
-    sidebar.append(heading, renderLoadoutControls(), renderModeSwitch(true));
-    sidebar.append(el("p", "team-sidebar-description", MODE_NOTES[model.mode]));
+    sidebar.append(heading, renderLoadoutControls());
     const slots = el("div", "team-sidebar-slots");
     slotIndexes().forEach((index) => slots.append(renderSidebarSlot(model.members[index], index)));
     const shareWrap = el("div", "team-share-wrap");

@@ -38,7 +38,7 @@ test('public Aniilog offers View Model (no sign-in) and no background Pawney pre
   assert.match(explorer,/openDeveloperModelPreview\(previewButton\)/u);
   assert.doesNotMatch(explorer,/pawney-embed-prewarm|pawneyPrewarm|PawneyPrewarm|PAWNEY_PREWARM|Fast desktop viewer|Preload on desktop Map/u);
   assert.match(explorer,/const handoff = await response\.json\(\);\s*current\(\);\s*if \(!developerModeEnabled\(\) \|\| !state\.cloudSyncAuthenticated \|\| !authSessionToken\(\)\) return;\s*submitDeveloperPreviewHandoff\(handoff, selectedFields\)/u);
-  assert.match(explorerHtml,/\.\/app\.js\?v=0.18.2-phone-header/u);
+  assert.match(explorerHtml,/\.\/app\.js\?v=0.18.5-checklists-header/u);
   assert.doesNotMatch(functionSource('openDeveloperModelPreview'),/controller\.show\(/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+embedPath/u);
   assert.match(client,/form\.method='POST';form\.action=qaOrigin\+directPath/u);
