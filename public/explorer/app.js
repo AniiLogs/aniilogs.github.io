@@ -7408,8 +7408,10 @@ function renderItemLogClientReferences(entry) {
   const unlocks = Array.isArray(entry.unlock_references) ? entry.unlock_references : [];
   // Developer Mode overlay entries say why they are not public (their availability note).
   const showDeveloperRow = Boolean(DEVELOPER_AVAILABILITY[entry.availability]);
+  const developerNotes = (Array.isArray(entry.developer_notes) ? entry.developer_notes : [])
+    .filter((note) => DEVELOPER_AVAILABILITY[note?.availability] && note.label && note.value);
   // "How to obtain" already answers the question when the client has no direct reference.
-  if (!sources.length && !unlocks.length && !showDeveloperRow && itemlogObtainMethods(entry).length) return null;
+  if (!sources.length && !unlocks.length && !showDeveloperRow && !developerNotes.length && itemlogObtainMethods(entry).length) return null;
   const section = createCatalogSection("Client references");
   const note = document.createElement("p");
   note.className = "catalog-description";
@@ -7426,6 +7428,19 @@ function renderItemLogClientReferences(entry) {
     label.textContent = `${DEVELOPER_AVAILABILITY[entry.availability]} item`;
     const detail = document.createElement("p");
     detail.textContent = entry.availability_note || entry.client_visibility?.evidence || "";
+    row.append(label, detail);
+    list.append(row);
+  }
+  // Developer Mode overlay patches, e.g. the game's own placeholder description.
+  for (const note of developerNotes) {
+    const row = document.createElement("div");
+    row.className = "catalog-requirement-row";
+    const label = document.createElement("strong");
+    label.textContent = note.label;
+    const badge = developerAvailabilityBadge(note.availability, note.availability_note);
+    if (badge) label.append(" ", badge);
+    const detail = document.createElement("p");
+    detail.textContent = note.value;
     row.append(label, detail);
     list.append(row);
   }
