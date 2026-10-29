@@ -9100,9 +9100,17 @@ function updateChecklistCompletion(entry, completionState, checked) {
   }
 }
 
+// Breezy Plains rows need no region name; a later region's rows say theirs, since each region's
+// Aniilog numbers start again at #001.
+const CHECKLIST_FIRST_REGION_ID = "300001";
+
 function checklistMetaText(entry) {
   if (entry?.kind === "aniimo_form") {
-    return [entry.aniilog_number, entry.form_label].filter(Boolean).join(" - ");
+    const region = String(entry.aniilog_number || "").startsWith("#")
+      && entry.research_country?.id !== CHECKLIST_FIRST_REGION_ID
+      ? entry.research_country?.name
+      : "";
+    return [entry.aniilog_number, entry.form_label, region].filter(Boolean).join(" - ");
   }
   if (entry?.kind === "aniimo_special") {
     const label = entry.classification === "starter_choice" ? "Starter choice" : "Temporary evolution";
