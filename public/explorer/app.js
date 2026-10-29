@@ -57,8 +57,10 @@ async function loadOptionalLiveViewerManifest() {
     clearTimeout(timeout);
   }
 }
-const APP_VERSION = CONTENT_PACKAGE_VERSION
-  ? `Game build ${CONTENT_PACKAGE_VERSION}`
+// The game build the content was refreshed from (display only); the R2 release keeps its own id.
+const GAME_BUILD = String(SITE_CONFIG.gameBuild || CONTENT_PACKAGE_VERSION || "").trim();
+const APP_VERSION = GAME_BUILD
+  ? `Game build ${GAME_BUILD}`
   : "Game build unavailable";
 const GITHUB_COMMITS_URL = "https://api.github.com/repos/AniiLogs/aniilogs.github.io/commits?sha=main&per_page=30";
 const CHANGELOG_INTERNAL_MARKER_RE = /\[(?:skip changelog|internal)\]/i;

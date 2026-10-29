@@ -9,7 +9,10 @@
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
+    // contentPackageVersion names the reviewed R2 release (releases/3535596/) and the live viewer's
+    // approved package, so it stays put; gameBuild is only the game build shown to visitors.
     contentPackageVersion: 3535596,
+    gameBuild: 3846247,
     contentAvailable: true,
     aniilogAvailable: true,
     contentBaseUrl,

@@ -510,7 +510,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
   assert.match(explorer, /if \(!CONTENT_AVAILABLE\)/u);
   assert.match(explorer, /Awaiting reviewed snapshot/u);
-  assert.match(explorer, /`Game build \$\{CONTENT_PACKAGE_VERSION\}`/u);
+  assert.match(explorer, /`Game build \$\{GAME_BUILD\}`/u);
   assert.doesNotMatch(explorer, /v0\.9\.4-private-content/u);
   assert.match(explorerStyles, /\.content-unavailable\[hidden\]\s*\{\s*display: none/u);
 });
@@ -655,4 +655,15 @@ test("signed-in settings present cloud progress instead of browser-storage contr
   assert.match(explorer, /if \(state\.cloudSyncAuthenticated\) cloudAccount\.append\(cloudIdentity, stats\)/u);
   assert.match(explorer, /if \(!state\.cloudSyncAuthenticated\) appendSettingsStorageError\(settingsPanel\)/u);
   assert.match(explorer, /tracking and checklist progress sync across devices/u);
+});
+
+test("the shown game build is separate from the R2 release id", async () => {
+  const config = await readFile(new URL("../public/explorer/app-config.js", import.meta.url), "utf8");
+  // The R2 release and the live viewer's approved package stay on 3535596.
+  assert.match(config, /contentPackageVersion: 3535596,/u);
+  assert.match(config, /releases\/3535596"/u);
+  assert.match(config, /gameBuild: 3846247,/u);
+  assert.match(explorer, /const GAME_BUILD = String\(SITE_CONFIG\.gameBuild \|\| CONTENT_PACKAGE_VERSION \|\| ""\)\.trim\(\);/u);
+  assert.match(explorer, /\? `Game build \$\{GAME_BUILD\}`/u);
+  assert.match(explorer, /sourcePackage !== CONTENT_PACKAGE_VERSION/u);
 });
