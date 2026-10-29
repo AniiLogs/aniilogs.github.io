@@ -52,7 +52,7 @@
     ],
     sim_run: [
       { label: "Battle time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
-      { label: "Trial", value: (e) => (e.trial ? `${e.trial}${e.trialGroup && e.trialGroup !== "Other" ? ` · ${e.trialGroup}` : ""}` : "—") },
+      { label: "Trial", value: (e) => e.trialName || e.trial || "—" },
       { label: "Difficulty", value: (e) => e.difficulty || "—" },
       { label: "Buffs", value: (e) => number(e.buffs?.length) },
       { label: "Party", value: (e) => number(e.partySize) },
@@ -179,7 +179,8 @@
     if (state.order) params.set("order", state.order);
     const fields = board().fields;
     for (const name of ["cycle", "boss", "level", "difficulty", "trial", "party", "buff"]) {
-      const value = els.filters.elements[name]?.value;
+      let value = els.filters.elements[name]?.value;
+      if (name === "trial") value = String(value || "").split("|").pop();   // "<stage>|<element>": the API takes the element
       if (value && fields.includes(name)) params.set(name, value);
     }
     const player = els.filters.elements.player.value.trim();
@@ -272,35 +273,39 @@
     if (f.difficulty) fillSelect(f.difficulty, (facets.difficulties || []).map((row) => ({ value: row.value, label: row.value })), "Any difficulty");
     fillSelect(f.party, facets.partySizes.map((row) => ({ value: row.value, label: row.value === 1 ? "Solo" : `${row.value} players` })), "Any size");
     fillSelect(f.buff, (facets.buffs || []).map((row) => ({ value: row.name, label: `${row.name} (${row.count})` })), "Any buff");
-    fillSelect(f.trial, [...new Set((facets.trials || []).map((row) => row.trial))].map((name) => ({ value: name, label: name })), "All trials");
     fillSimPickers();
   }
-  // Holo-Battle Sim ranks each trial and difficulty on its own, so once any trial has runs both pickers name one
-  // (the hardest difficulty that trial has runs on, unless one was picked). The API sends the groups (Basic
-  // Training, Advanced Training, Elemental Crucible) and the difficulty order, easiest to hardest.
-  function difficultyOrder(a, b) {
-    const order = state.facets?.simRules?.difficulties || [];
-    return ((order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99)) || a.localeCompare(b);
-  }
+  // Holo-Battle Sim: one board per stage and difficulty. The Trial picker lists the game's stages from the API's rules,
+  // grouped (Basic Training: Training of Grass / Water / Fire; Elemental Crucible: Crucible of …), each option's value
+  // "<stage>|<element>"; Difficulty lists that stage's difficulties (the hardest one with runs, unless one was picked).
   function fillSimPickers() {
     const f = els.filters.elements;
-    const trials = state.facets?.trials || [];
-    if (state.mode !== "sim" || !trials.length) return;
-    const names = [...new Set(trials.map((row) => row.trial))].sort();
-    const trial = f.trial.dataset.pending ?? f.trial.value;
-    const groups = [...(state.facets.simRules?.groups || []).map((group) => group.label), "Other"];
-    const groupOf = (name) => trials.find((row) => row.trial === name)?.group || "Other";
-    f.trial.replaceChildren(...groups.map((label) => {
-      const inGroup = names.filter((name) => groupOf(name) === label);
-      return inGroup.length ? el("optgroup", { label }, inGroup.map((name) => el("option", { value: name, text: name }))) : null;
-    }).filter(Boolean));
-    f.trial.value = names.includes(trial) ? trial : f.trial.options[0]?.value ?? "";   // else the first group's first
+    const rules = state.facets?.simRules;
+    if (state.mode !== "sim" || !rules?.stages?.length) return;
+    const pendingElement = f.trial.dataset.pending;
+    const pendingLevel = f.difficulty.dataset.pending;
+    const chosen = pendingElement
+      ? `${(rules.stages.find((stage) => stage.difficulties.includes(pendingLevel)) || rules.stages[0]).id}|${pendingElement}`
+      : f.trial.value;
+    f.trial.replaceChildren(...rules.stages.map((stage) => el("optgroup", { label: stage.label },
+      rules.elements.map((element) => el("option", { value: `${stage.id}|${element}`,
+        text: `${stage.name.replace("{element}", element)}${stage.alias ? ` (${stage.alias.replace("{element}", element)})` : ""}` })))));
+    f.trial.value = [...f.trial.options].some((option) => option.value === chosen) ? chosen : f.trial.options[0].value;
     delete f.trial.dataset.pending;
-    const levels = trials.filter((row) => row.trial === f.trial.value && row.difficulty).map((row) => row.difficulty).sort(difficultyOrder);
-    const level = f.difficulty.dataset.pending ?? f.difficulty.value;
+    const [stageId, element] = f.trial.value.split("|");
+    const levels = rules.stages.find((stage) => stage.id === stageId).difficulties;
+    const withRuns = (state.facets.trials || []).filter((row) => row.trial === element && levels.includes(row.difficulty)).map((row) => row.difficulty);
+    const level = pendingLevel ?? f.difficulty.value;
     f.difficulty.replaceChildren(...levels.map((name) => el("option", { value: name, text: name })));
-    f.difficulty.value = levels.includes(level) ? level : levels.at(-1) ?? "";
+    f.difficulty.value = levels.includes(level) ? level : [...levels].reverse().find((name) => withRuns.includes(name)) || levels.at(-1);
     delete f.difficulty.dataset.pending;
+  }
+  // the board's name for the summary: "Training of Water - Hard"
+  function simBoardName() {
+    const f = els.filters.elements;
+    const [stageId, element] = String(f.trial.value || "").split("|");
+    const stage = state.facets?.simRules?.stages?.find((item) => item.id === stageId);
+    return stage && element ? `${stage.name.replace("{element}", element)}${f.difficulty.value ? ` - ${f.difficulty.value}` : ""}` : "";
   }
 
   // ---------------------------------------------------------------- table
@@ -801,8 +806,7 @@
     renderRows(result.entries);
     const first = result.total ? result.offset + 1 : 0;
     const last = result.offset + result.entries.length;
-    const simBoard = state.kind === "sim_run" && els.filters.elements.trial.value
-      ? `${els.filters.elements.trial.value}${els.filters.elements.difficulty.value ? ` - ${els.filters.elements.difficulty.value}` : ""}` : "";
+    const simBoard = state.kind === "sim_run" ? simBoardName() : "";
     els.summary.textContent = simBoard
       ? `${simBoard} · fastest Victory first · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`
       : `${board().label} · ranked by ${(state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;

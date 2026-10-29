@@ -1911,22 +1911,31 @@ const LEADERBOARD_SORTS = Object.freeze({
   player: "ASC",
 });
 // Egg Heist difficulties, hardest first
-// Holo-Battle Sim stages, as the Victory screen names them: the group a trial belongs to (by how its name starts)
-// and the difficulties easiest to hardest. Edit here when a game update adds stages or the real list is confirmed:
-// the facets send both to the page. Only Easy, Normal, Hard (Basic Training) and Challenge are seen on Sim so far;
-// the rest are the game's other difficulty words, placed by guess until the stage tables are checked.
+// Holo-Battle Sim stages, from the client's stage table: 12 stages, an element (Grass, Water, Fire) at Easy, Normal or
+// Hard ("Training of Water - Hard", Basic Training) or at Challenge ("Crucible of Fire - Challenge", which the Victory
+// screen also calls "Trial of Fire", Elemental Crucible). A run is stored by element (trial) and difficulty: one
+// board each. The facets send these rules to the page; a game update that adds stages only needs them edited.
 const SIM_RULES = Object.freeze({
-  groups: Object.freeze([
-    Object.freeze({ id: "basic", label: "Basic Training", prefix: "Training of " }),
-    Object.freeze({ id: "advanced", label: "Advanced Training", prefix: "Trial of " }),
-    Object.freeze({ id: "crucible", label: "Elemental Crucible", prefix: "Crucible of " }),
+  elements: Object.freeze(["Grass", "Water", "Fire"]),
+  difficulties: Object.freeze(["Easy", "Normal", "Hard", "Challenge"]),             // easiest to hardest
+  stages: Object.freeze([
+    Object.freeze({ id: "basic", label: "Basic Training", name: "Training of {element}", difficulties: Object.freeze(["Easy", "Normal", "Hard"]) }),
+    Object.freeze({ id: "crucible", label: "Elemental Crucible", name: "Crucible of {element}", alias: "Trial of {element}",
+      difficulties: Object.freeze(["Challenge"]) }),
   ]),
-  difficulties: Object.freeze(["Beginner", "Easy", "Normal", "Intermediate", "Hard", "Advanced", "Expert", "Challenge",
-    "Master", "Elite", "Nightmare", "Legendary"]),
-  confirmed: false,
+  confirmed: true,
 });
-function simGroupOf(trial) {
-  return SIM_RULES.groups.find((group) => String(trial || "").startsWith(group.prefix)) || null;
+// "Training of Water", "Trial of Fire", "Crucible of Fire" or just "Fire": the element, or null when it isn't one
+function simElement(trial) {
+  const match = String(trial || "").trim().match(/^(?:(?:Training|Trial|Crucible) of )?([A-Za-z]+)$/iu);
+  return match ? SIM_RULES.elements.find((element) => element.toLowerCase() === match[1].toLowerCase()) || null : null;
+}
+function simStage(difficulty) {
+  return SIM_RULES.stages.find((stage) => stage.difficulties.includes(difficulty)) || null;
+}
+function simStageName(element, difficulty) {
+  const stage = simStage(difficulty);
+  return element && stage ? stage.name.replace("{element}", element) : element || null;
 }
 
 const DIFFICULTY_RANK_SQL = (prefix) => `CASE ${prefix}difficulty WHEN 'Chaos' THEN 4 WHEN 'Nightmare' THEN 3 WHEN 'Hard' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END`;
@@ -2132,6 +2141,14 @@ export function leaderboardSubmission(value) {
   };
   const bad = Object.entries(record).find(([, field]) => field === undefined);
   if (bad) return { error: `Field ${bad[0]} is invalid.` };
+  // a Holo-Battle Sim run names one of the game's stages: stored by element, with a difficulty the stages have
+  if (record.kind === "sim_run" && record.trial !== null) {
+    record.trial = simElement(record.trial);
+    if (!record.trial) return { error: "Field trial is invalid." };
+  } else if (record.kind !== "sim_run") record.trial = null;
+  if (record.kind === "sim_run" && record.difficulty !== null && !SIM_RULES.difficulties.includes(record.difficulty)) {
+    return { error: "Field difficulty is invalid." };
+  }
   if (!record.clientRunId) return { error: "clientRunId is required." };
 
   const players = value.players ?? [];
@@ -2788,7 +2805,8 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
   if (!includeHidden) where.push("s.status = 'visible'");
   const exact = [["cycle", "s.cycle"], ["boss", "s.boss_id"], ["uid", "s.game_uid"], ["server", "s.server"], ["difficulty", "s.difficulty"], ["trial", "s.trial"]];
   for (const [name, column] of exact) {
-    const value = String(params.get(name) || "").trim();
+    let value = String(params.get(name) || "").trim();
+    if (name === "trial") value = simElement(value) || value;         // "Training of Water" or "Water"
     if (value && value.length <= 40) {
       where.push(`${column} = ?`);
       binds.push(value);
@@ -3386,7 +3404,8 @@ async function leaderboardEntries(request, env) {
       partySize: row.party_size,
       difficulty: row.difficulty || null,
       trial: row.trial || null,
-      trialGroup: row.trial ? simGroupOf(row.trial)?.label || "Other" : null,
+      trialName: row.trial ? simStageName(row.trial, row.difficulty) : null,
+      trialGroup: row.trial ? simStage(row.difficulty)?.label || null : null,
       defeats: row.defeats ?? null,
       server: row.server || null,
       profileId: row.profileId || null,
@@ -3445,7 +3464,7 @@ async function leaderboardFacets(request, env) {
     levels,
     partySizes: parties,
     difficulties,
-    trials: trials.map((row) => ({ ...row, group: simGroupOf(row.trial)?.label || "Other" })),
+    trials: trials.map((row) => ({ ...row, name: simStageName(row.trial, row.difficulty), group: simStage(row.difficulty)?.label || null })),
     simRules: mode === "sim" ? SIM_RULES : undefined,
     kinds,
     buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),

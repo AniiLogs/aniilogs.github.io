@@ -232,7 +232,7 @@ test("sim runs rank by clear time and filter by rogue buffs", async () => {
   assert.deepEqual(facets.buffs, [{ name: "Multi-Cast", count: 2 }, { name: "Trick Bomb", count: 1 }]);
 });
 
-test("Holo-Battle Sim boards: each trial and difficulty ranks Victory times, fastest first, best per player", async () => {
+test("Holo-Battle Sim boards: the game's 12 stages, each difficulty ranking Victory times, fastest first, best per player", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
   const run = (id, trial, difficulty, time, cleared = true) => ({ kind: "sim_run", clientRunId: id, trial, difficulty, clearTimeS: time, cleared, partySize: 4 });
@@ -241,24 +241,29 @@ test("Holo-Battle Sim boards: each trial and difficulty ranks Victory times, fas
   assert.equal((await send(SESSIONS.dev, run("a2", "Training of Water", "Hard", 470))).status, 201);
   assert.equal((await send(SESSIONS.user, run("b1", "Training of Water", "Hard", 495))).status, 201);
   assert.equal((await send(SESSIONS.dev2, run("c1", "Training of Water", "Hard", 300, false))).status, 201);   // not a Victory
-  assert.equal((await send(SESSIONS.user, run("b2", "Trial of Fire", "Challenge", 738))).status, 201);
   assert.equal((await send(SESSIONS.dev, run("a3", "Training of Water", "Normal", 200))).status, 201);
-  assert.equal((await send(SESSIONS.dev, run("bad", "<b>Water</b>", "Hard", 100))).status, 400);
+  // "Trial of Fire - Challenge" on the Victory screen is the Crucible of Fire: the same board as "Crucible of Fire"
+  assert.equal((await send(SESSIONS.user, run("b2", "Trial of Fire", "Challenge", 738))).status, 201);
+  assert.equal((await send(SESSIONS.dev2, run("d1", "Crucible of Fire", "Challenge", 760))).status, 201);
+  // not one of the game's stages
+  assert.equal((await send(SESSIONS.dev, run("bad1", "<b>Water</b>", "Hard", 100))).status, 400);
+  assert.equal((await send(SESSIONS.dev, run("bad2", "Training of Lightning", "Hard", 100))).status, 400);
+  assert.equal((await send(SESSIONS.dev, run("bad3", "Training of Water", "Nightmare", 100))).status, 400);
   const board = async (trial, difficulty) => (await (await call(env,
     `/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&trial=${encodeURIComponent(trial)}&difficulty=${encodeURIComponent(difficulty)}`)).json()).entries;
-  assert.deepEqual((await board("Training of Water", "Hard")).map((e) => [e.rank, e.player, e.clearTimeS, e.trial, e.difficulty]),
-    [[1, "DevOne", 470, "Training of Water", "Hard"], [2, "UserOne", 495, "Training of Water", "Hard"]]);
-  assert.deepEqual((await board("Trial of Fire", "Challenge")).map((e) => [e.player, e.clearTimeS]), [["UserOne", 738]]);
+  assert.deepEqual((await board("Water", "Hard")).map((e) => [e.rank, e.player, e.clearTimeS, e.trial, e.trialName, e.trialGroup]),
+    [[1, "DevOne", 470, "Water", "Training of Water", "Basic Training"], [2, "UserOne", 495, "Water", "Training of Water", "Basic Training"]]);
+  assert.deepEqual((await board("Crucible of Fire", "Challenge")).map((e) => [e.player, e.clearTimeS, e.trialName, e.trialGroup]),
+    [["UserOne", 738, "Crucible of Fire", "Elemental Crucible"], ["DevTwo", 760, "Crucible of Fire", "Elemental Crucible"]]);
   assert.deepEqual((await board("Training of Water", "Normal")).map((e) => e.clearTimeS), [200]);
-  assert.equal((await send(SESSIONS.dev2, run("d1", "Crucible of Grass", "Challenge", 900))).status, 201);
-  assert.deepEqual((await board("Crucible of Grass", "Challenge")).map((e) => [e.trial, e.trialGroup]), [["Crucible of Grass", "Elemental Crucible"]]);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
-  assert.deepEqual(facets.trials.map((t) => [t.group, t.trial, t.difficulty, t.count]), [
-    ["Elemental Crucible", "Crucible of Grass", "Challenge", 1], ["Basic Training", "Training of Water", "Hard", 4],
-    ["Basic Training", "Training of Water", "Normal", 1], ["Advanced Training", "Trial of Fire", "Challenge", 1]]);
-  // the groups and difficulty order come from the server's config, for the page's pickers
-  assert.deepEqual(facets.simRules.groups.map((g) => g.label), ["Basic Training", "Advanced Training", "Elemental Crucible"]);
-  assert.ok(facets.simRules.difficulties.indexOf("Hard") < facets.simRules.difficulties.indexOf("Challenge"));
+  assert.deepEqual(facets.trials.map((t) => [t.name, t.difficulty, t.count]),
+    [["Crucible of Fire", "Challenge", 2], ["Training of Water", "Hard", 4], ["Training of Water", "Normal", 1]]);
+  // the rules the page builds its pickers from: 3 elements x (Easy, Normal, Hard) + Challenge = 12 boards
+  assert.deepEqual(facets.simRules.elements, ["Grass", "Water", "Fire"]);
+  assert.deepEqual(facets.simRules.difficulties, ["Easy", "Normal", "Hard", "Challenge"]);
+  assert.equal(facets.simRules.elements.length * facets.simRules.stages.reduce((n, stage) => n + stage.difficulties.length, 0), 12);
+  assert.equal(facets.simRules.confirmed, true);
   assert.equal((await (await call(env, "/api/leaderboard/facets?mode=interlink")).json()).simRules, undefined);
 });
 
