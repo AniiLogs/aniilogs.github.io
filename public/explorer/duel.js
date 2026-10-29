@@ -8,7 +8,7 @@
   // Team Builder mounts it with render({ aniilog, data, members, memberStats, formLabel, contentUrl, developerMode, rerender }).
   const STORAGE_KEY = "aniilogs:duel:v1";
   const RULES = Object.freeze({
-    critRate: 0.1, // property_data 1001/1002 crit_rate_v (every Aniimo)
+    critRate: 0.1, // property_data[pet_data.propId].crit_rate_v: 10% for every current form (PetAttributeCalcUtils)
     critDamage: 0.5, // crit_dmg_v: a crit deals 1 + 0.5 = 1.5x, capped at 3x
     critCap: 3,
     sameElement: 0.1, // ability_setting_global_const_data.sameElementDamageAddRatio
