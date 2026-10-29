@@ -1,0 +1,597 @@
+(() => {
+  "use strict";
+
+  // 1v1: what one Aniimo's attacks do to another, with the game's own damage formulas decoded from its scripts
+  // (Data/formula_data.lua 3001 HP damage, 3023 BREAK damage; CombatActionTool's crit, element and same-element
+  // rules). Stats come from the Aniilog's stat_growth, so they match the Aniimo page. Every number assumes the
+  // attack lands: dodges, misses, positioning and buffs are not simulated.
+  // Team Builder mounts it with render({ aniilog, data, members, formLabel, contentUrl, developerMode, rerender }).
+  const STORAGE_KEY = "aniilogs:duel:v1";
+  const RULES = Object.freeze({
+    critRate: 0.1, // property_data 1001/1002 crit_rate_v (every Aniimo)
+    critDamage: 0.5, // crit_dmg_v: a crit deals 1 + 0.5 = 1.5x, capped at 3x
+    critCap: 3,
+    sameElement: 0.1, // ability_setting_global_const_data.sameElementDamageAddRatio
+    minimumShare: 0.1, // damage is at least 10% of ATK before skill power, however high DEF is
+    pvpFactor: 0.15, // formula 3001 pvpFactor when isPvp
+    breakTime: 6, // property_data 1001 break_time (seconds)
+    maxSeconds: 300,
+  });
+  const STAT_KEYS = Object.freeze({
+    Physical: ["Attack", "Defense"],
+    Magic: ["Magic Attack", "Magic Defense"],
+  });
+  const SHOWN_STATS = Object.freeze(["HP", "Attack", "Magic Attack", "Defense", "Magic Defense", "Break"]);
+
+  let settings = loadSettings();
+
+  function loadSettings() {
+    const defaults = {
+      you: { formId: "", level: 70, potential: 0 },
+      foe: { formId: "", level: 70, potential: 0 },
+      startHp: 100,
+      broken: false,
+      brokenBonus: 0,
+      pvp: false,
+      actionSeconds: 1,
+      rates: {},
+      off: {},
+    };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        return {
+          ...defaults,
+          ...saved,
+          you: { ...defaults.you, ...saved.you },
+          foe: { ...defaults.foe, ...saved.foe },
+          rates: { ...saved.rates },
+          off: { ...saved.off },
+        };
+      }
+    } catch {
+      // Storage can be unavailable; the calculator still works for this visit.
+    }
+    return defaults;
+  }
+
+  function saveSettings() {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Not saved; nothing else depends on it.
+    }
+  }
+
+  function clamp(value, min, max, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(Math.max(number, min), max) : fallback;
+  }
+
+  // --- Formatting ---------------------------------------------------------------------------------
+
+  function el(tag, className = "", text = "") {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== "") node.textContent = text;
+    return node;
+  }
+
+  function percent(value, digits = 1) {
+    if (!Number.isFinite(value)) return "–";
+    return `${value >= 100 ? Math.round(value) : value.toFixed(digits)}%`;
+  }
+
+  function seconds(value) {
+    return Number.isFinite(value) ? `${value.toFixed(value >= 10 ? 0 : 1)} s` : "–";
+  }
+
+  function whole(value) {
+    return Number.isFinite(value) ? Math.round(value).toLocaleString() : "–";
+  }
+
+  // --- Stats ----------------------------------------------------------------------------------------
+
+  function levelValue(growth, level, withExtra) {
+    const lv = growth.level_value;
+    const steps = Math.min(Math.max(level - lv.extra_from_level, 0), lv.extra_levels);
+    const extra = withExtra ? lv.extra_weight * (steps * (20 + 3 * steps) / 50) : 0;
+    return lv.per_level * level + lv.base + extra;
+  }
+
+  // Same as the Aniimo page's Growth view: the formula's +0.8% per potential level, then +4% every 4 levels.
+  function grownStat(growth, label, base, level, points) {
+    const formula = growth?.stats?.[label];
+    if (!formula || !Number.isFinite(base)) return null;
+    const total = Math.floor((base + formula.offset) * (1 + growth.attribute_point_bonus * points) / formula.divisor
+      * levelValue(growth, level, formula.extra) * formula.scale);
+    const step = growth.potentials?.percent_steps?.[label];
+    const bonus = step ? Math.floor(points / step.every) * step.percent : 0;
+    return Math.floor(total * (1 + bonus));
+  }
+
+  function sideStats(aniilog, entry, side) {
+    const stats = {};
+    for (const row of entry?.stats || []) {
+      stats[row.label] = grownStat(aniilog.stat_growth, row.label, Number(row.value), side.level, side.potential);
+    }
+    return stats;
+  }
+
+  // --- Elements -------------------------------------------------------------------------------------
+
+  function elementId(data, name) {
+    const wanted = String(name || "").toLowerCase();
+    return Object.entries(data?.elements || {}).find(([, element]) =>
+      String(element.name).toLowerCase() === wanted || String(element.key).toLowerCase() === wanted)?.[0] || null;
+  }
+
+  function entryElementIds(data, entry) {
+    const form = data?.forms?.[String(entry?.form_id)];
+    if (form?.elements?.length) return form.elements.map(String);
+    return (entry?.elements || []).map((element) => elementId(data, element.name)).filter(Boolean);
+  }
+
+  // CombatActionTool: the attack's multiplier against each defending element, multiplied together.
+  function elementFactor(data, attackElement, defenderIds) {
+    const against = data?.elements?.[attackElement]?.against || {};
+    return defenderIds.reduce((factor, id) => factor * (Number(against[id]) || 1), 1);
+  }
+
+  // --- Skills -------------------------------------------------------------------------------------
+
+  function hitRates(data, entry, skillId) {
+    const skill = (data?.forms?.[String(entry?.form_id)]?.skills || []).find((row) => String(row.id) === String(skillId));
+    const operation = (skill?.mechanics?.operations || []).find((row) => row.key === "instant_dmg_rate_v");
+    const values = (operation?.values || []).map(Number).filter((value) => value > 0);
+    return values.length ? [...new Set(values)].sort((left, right) => left - right) : [1];
+  }
+
+  function attacks(data, entry) {
+    const rows = [];
+    for (const [group, list] of [["", entry?.skills], ["Ultimate", entry?.ultimates]]) {
+      for (const skill of Array.isArray(list) ? list : []) {
+        const combat = skill.combat;
+        const id = String(skill.skill_id || skill.ultimate_id || "");
+        if (!combat || !id || !(Number(combat.might) > 0) || !STAT_KEYS[combat.category]) continue;
+        const rates = hitRates(data, entry, id);
+        rows.push({
+          id,
+          name: skill.name,
+          group: group || skill.group || "Skill",
+          icon: skill.icon,
+          category: combat.category,
+          element: elementId(data, combat.element),
+          elementName: combat.element,
+          elementColor: combat.element_color,
+          might: Number(combat.might),
+          breakPower: Number(combat.break_power) || 1,
+          cooldown: Math.max(Number(combat.cooldown) || 0, 0),
+          epCost: Number(combat.ep_cost) || 0,
+          rates,
+        });
+      }
+    }
+    return rows;
+  }
+
+  function chosenRate(attack) {
+    const saved = Number(settings.rates[attack.id]);
+    if (attack.rates.includes(saved)) return saved;
+    return attack.rates.includes(1) ? 1 : attack.rates[0];
+  }
+
+  // --- Damage ---------------------------------------------------------------------------------------
+
+  // Formula 3001 for one hit, with every modifier the scenario doesn't set left neutral (1x).
+  function hpDamage(attacker, defender, attack, scenario, crit) {
+    const [atkKey, defKey] = STAT_KEYS[attack.category];
+    const atk = Math.max(attacker.stats[atkKey] || 0, 0);
+    const def = defender.stats[defKey] || 0;
+    let damage = Math.max(atk - def, RULES.minimumShare * atk) * (chosenRate(attack) * attack.might / 10);
+    damage *= elementFactor(scenario.data, attack.element, defender.elements);
+    if (attacker.elements.includes(attack.element)) damage *= 1 + RULES.sameElement;
+    if (crit) damage *= Math.min(RULES.critCap, 1 + RULES.critDamage);
+    if (scenario.broken) damage *= 1 + scenario.brokenBonus;
+    damage = Math.max(damage, 0);
+    return scenario.pvp ? damage * RULES.pvpFactor : damage;
+  }
+
+  // Formula 3023 for one hit. Aniimo have no BREAK defense of their own (property_data gives pets none).
+  function breakDamage(attacker, defender, attack, scenario, crit) {
+    const bpAtk = attacker.stats.Break || 0;
+    let damage = bpAtk * (chosenRate(attack) * attack.might / 10) * attack.breakPower;
+    damage *= Math.max(1, elementFactor(scenario.data, attack.element, defender.elements));
+    if (crit) damage *= Math.min(RULES.critCap, 1 + RULES.critDamage);
+    return Math.max(damage, 0);
+  }
+
+  function averaged(normal, crit) {
+    return normal * (1 - RULES.critRate) + crit * RULES.critRate;
+  }
+
+  // Uses the strongest attack that is off cooldown, one attack every `actionSeconds`, until the HP is gone (or the
+  // time runs out). `pick` is "normal", "average" or "crit" for which damage each hit deals.
+  function rotation(rows, hp, actionSeconds, pick, limit = RULES.maxSeconds) {
+    const ready = new Map(rows.map((row) => [row.attack.id, 0]));
+    const used = new Map();
+    let time = 0;
+    let left = hp;
+    let dealt = 0;
+    let hits = 0;
+    let ep = 0;
+    const order = [...rows].sort((left, right) => right[pick] - left[pick]);
+    while (hits < 2000) {
+      const choice = order.find((row) => ready.get(row.attack.id) <= time + 1e-9);
+      if (!choice) {
+        time = Math.min(...ready.values());
+        continue;
+      }
+      if (time > limit) break;
+      hits += 1;
+      dealt += choice[pick];
+      ep += choice.attack.epCost;
+      left -= choice[pick];
+      used.set(choice.attack.name, (used.get(choice.attack.name) || 0) + 1);
+      ready.set(choice.attack.id, time + Math.max(choice.attack.cooldown, 0));
+      if (left <= 0) return { time, hits, used, dealt, ep, ko: true };
+      time += actionSeconds;
+    }
+    return { time: limit, hits, used, dealt, ep, ko: false };
+  }
+
+  function breakGauge(level) {
+    // Formula 3110 with property_data 1001's arguments {lv, 35, 1, 0}. How the game applies it to an Aniimo isn't
+    // confirmed, so it only shows in Developer Mode.
+    const lv = Math.min(80, Math.max(1, level));
+    let factor;
+    if (lv <= 20) factor = 0.00033478 * lv ** 3 - 0.00638831 * lv ** 2 + 9.16772211 * lv + 53.25878512;
+    else if (lv < 66) factor = 0.0000179869 * lv ** 4 - 0.0116044223 * lv ** 3 + 1.4768265884 * lv ** 2 - 43.5365263699 * lv + 619.0788382776;
+    else factor = 0.17038576 * lv ** 3 - 38.33469069 * lv ** 2 + 2888.21408629 * lv - 71268.29924774;
+    return Math.max(factor * 35, 0.01);
+  }
+
+  function matchup(aniilog, data, attackerSide, defenderSide, scenario) {
+    const attacker = sideModel(aniilog, data, attackerSide);
+    const defender = sideModel(aniilog, data, defenderSide);
+    if (!attacker.entry || !defender.entry) return null;
+    const maxHp = defender.stats.HP || 0;
+    const rows = attacks(data, attacker.entry).map((attack) => {
+      const normal = hpDamage(attacker, defender, attack, scenario, false);
+      const crit = hpDamage(attacker, defender, attack, scenario, true);
+      const breakNormal = breakDamage(attacker, defender, attack, scenario, false);
+      const breakCrit = breakDamage(attacker, defender, attack, scenario, true);
+      return {
+        attack,
+        normal,
+        crit,
+        average: averaged(normal, crit),
+        breakNormal,
+        breakAverage: averaged(breakNormal, breakCrit),
+        enabled: !settings.off[attack.id],
+      };
+    });
+    const startHp = maxHp * (scenario.startHp / 100);
+    const enabled = rows.filter((row) => row.enabled);
+    const plan = (pick, limit) => enabled.length ? rotation(enabled, startHp, scenario.actionSeconds, pick, limit) : null;
+    return {
+      attacker,
+      defender,
+      maxHp,
+      startHp,
+      rows,
+      average: plan("average"),
+      normal: plan("normal"),
+      crit: plan("crit"),
+      breakWindow: scenario.broken && enabled.length
+        ? rotation(enabled, Infinity, scenario.actionSeconds, "average", RULES.breakTime - 1e-6)
+        : null,
+    };
+  }
+
+  function sideModel(aniilog, data, side) {
+    const entry = (aniilog?.entries || []).find((row) => String(row.form_id) === String(side.formId)) || null;
+    return { entry, side, stats: entry ? sideStats(aniilog, entry, side) : {}, elements: entry ? entryElementIds(data, entry) : [] };
+  }
+
+  // --- Rendering ------------------------------------------------------------------------------------
+
+  function change(rerender, update) {
+    return (event) => {
+      update(event.target);
+      saveSettings();
+      rerender();
+    };
+  }
+
+  function numberField(label, value, { min, max, step = 1, suffix = "" }, onChange) {
+    const wrap = el("label", "duel-field");
+    wrap.append(el("span", "", label));
+    const input = el("input");
+    input.type = "number";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    input.inputMode = "decimal";
+    input.addEventListener("change", onChange);
+    wrap.append(input);
+    if (suffix) wrap.append(el("small", "", suffix));
+    return wrap;
+  }
+
+  function aniimoSelect(options, side, rerender) {
+    const select = el("select", "duel-aniimo-select");
+    select.setAttribute("aria-label", "Aniimo");
+    const blank = el("option", "", "Pick an Aniimo");
+    blank.value = "";
+    select.append(blank);
+    const team = options.members.filter((formId, index, list) => formId && list.indexOf(formId) === index);
+    const groups = [];
+    if (team.length) groups.push(["Your team", team]);
+    groups.push(["All Aniimo", (options.aniilog.entries || []).map((entry) => String(entry.form_id))]);
+    for (const [label, ids] of groups) {
+      const group = el("optgroup");
+      group.label = label;
+      for (const formId of ids) {
+        const entry = options.aniilog.entries.find((row) => String(row.form_id) === formId);
+        if (!entry) continue;
+        const option = el("option", "", options.formLabel(entry, options.data.forms?.[formId]));
+        option.value = formId;
+        option.selected = formId === String(side.formId) && (label === "Your team" || !team.includes(formId));
+        group.append(option);
+      }
+      select.append(group);
+    }
+    select.addEventListener("change", change(rerender, (target) => {
+      side.formId = target.value;
+    }));
+    return select;
+  }
+
+  function renderSide(options, key, title, rerender) {
+    const side = settings[key];
+    const model = sideModel(options.aniilog, options.data, side);
+    const card = el("section", `duel-side is-${key}`);
+    const head = el("header", "duel-side-head");
+    head.append(el("h3", "", title));
+    if (model.entry?.icon) {
+      const icon = el("img", "duel-side-icon");
+      icon.src = options.contentUrl ? options.contentUrl(model.entry.icon) : model.entry.icon;
+      icon.alt = "";
+      icon.loading = "lazy";
+      head.prepend(icon);
+    }
+    card.append(head, aniimoSelect(options, side, rerender));
+    const fields = el("div", "duel-side-fields");
+    fields.append(
+      numberField("Level", side.level, { min: 1, max: options.aniilog.stat_growth?.level_cap || 70 }, change(rerender, (target) => {
+        side.level = Math.round(clamp(target.value, 1, options.aniilog.stat_growth?.level_cap || 70, 70));
+      })),
+      numberField("Potential", side.potential, { min: 0, max: 30, suffix: "per stat" }, change(rerender, (target) => {
+        side.potential = Math.round(clamp(target.value, 0, 30, 0));
+      })),
+    );
+    card.append(fields);
+    if (model.entry) {
+      const chips = el("div", "duel-elements");
+      for (const id of model.elements) {
+        const element = options.data.elements?.[id];
+        const chip = el("span", "duel-element-chip", element?.name || id);
+        if (element?.color) chip.style.setProperty("--chip", element.color);
+        chips.append(chip);
+      }
+      card.append(chips);
+      const stats = el("dl", "duel-stats");
+      for (const label of SHOWN_STATS) {
+        if (!(label in model.stats)) continue;
+        const pair = el("div");
+        pair.append(el("dt", "", label === "Break" ? "BREAK" : label), el("dd", "", whole(model.stats[label])));
+        stats.append(pair);
+      }
+      card.append(stats);
+    }
+    return card;
+  }
+
+  function renderScenario(options, rerender) {
+    const box = el("section", "duel-scenario");
+    box.append(el("h3", "", "Scenario"));
+    const fields = el("div", "duel-scenario-fields");
+    fields.append(numberField("Opponent starts at", settings.startHp, { min: 1, max: 100, suffix: "% HP" }, change(rerender, (target) => {
+      settings.startHp = clamp(target.value, 1, 100, 100);
+    })));
+    const broken = el("label", "duel-check");
+    const brokenInput = el("input");
+    brokenInput.type = "checkbox";
+    brokenInput.checked = settings.broken;
+    brokenInput.addEventListener("change", change(rerender, (target) => {
+      settings.broken = target.checked;
+    }));
+    broken.append(brokenInput, el("span", "", `Opponent is broken (lasts ${RULES.breakTime} s)`));
+    fields.append(broken);
+    if (settings.broken) {
+      fields.append(numberField("Extra damage while broken", Math.round(settings.brokenBonus * 100), { min: 0, max: 500, suffix: "%" }, change(rerender, (target) => {
+        settings.brokenBonus = clamp(target.value, 0, 500, 0) / 100;
+      })));
+    }
+    const pvp = el("label", "duel-check");
+    const pvpInput = el("input");
+    pvpInput.type = "checkbox";
+    pvpInput.checked = settings.pvp;
+    pvpInput.addEventListener("change", change(rerender, (target) => {
+      settings.pvp = target.checked;
+    }));
+    pvp.append(pvpInput, el("span", "", `PvP (the game scales PvP damage to ${Math.round(RULES.pvpFactor * 100)}%)`));
+    fields.append(pvp, numberField("Time per attack", settings.actionSeconds, { min: 0.3, max: 5, step: 0.1, suffix: "s" }, change(rerender, (target) => {
+      settings.actionSeconds = clamp(target.value, 0.3, 5, 1);
+    })));
+    box.append(fields);
+    const notes = el("p", "duel-note");
+    notes.textContent = settings.broken
+      ? "Each enemy sets its own bonus for being broken (bosses show it on their BREAK bar), so enter it if you know it. 0% means no bonus."
+      : "Time per attack is how long one attack takes before the next. Animation times aren't in the game data, so 1 s is a stand-in.";
+    box.append(notes);
+    return box;
+  }
+
+  function verdictText(you, foe) {
+    const mine = you?.average;
+    const theirs = foe?.average;
+    if (!mine || !theirs) return "";
+    if (mine.ko && (!theirs.ko || mine.time < theirs.time)) return `You win the race: KO in ${seconds(mine.time)} vs ${seconds(theirs.time)}.`;
+    if (theirs.ko && (!mine.ko || theirs.time < mine.time)) return `The opponent wins the race: KO in ${seconds(theirs.time)} vs ${seconds(mine.time)}.`;
+    if (mine.ko && theirs.ko) return `Dead even: both KO in ${seconds(mine.time)}.`;
+    return `Neither side KOs within ${RULES.maxSeconds} s.`;
+  }
+
+  function planSummary(result, label) {
+    const box = el("div", "duel-plan");
+    if (!result?.average) {
+      box.append(el("p", "duel-note", "Turn on at least one attack."));
+      return box;
+    }
+    const { average, normal, crit } = result;
+    const head = el("p", "duel-plan-head");
+    const strong = el("strong", "", average.ko ? `KO in ${average.hits} hit${average.hits === 1 ? "" : "s"} · ${seconds(average.time)}` : `No KO in ${RULES.maxSeconds} s`);
+    head.append(strong, ` ${label}`);
+    const range = el("p", "duel-plan-range");
+    range.textContent = `No crits: ${normal.ko ? `${normal.hits} hits, ${seconds(normal.time)}` : "no KO"} · Every hit crits: ${crit.ko ? `${crit.hits} hits, ${seconds(crit.time)}` : "no KO"}`;
+    const used = el("p", "duel-plan-used");
+    used.textContent = `Uses ${[...average.used].map(([name, count]) => `${name} ×${count}`).join(", ")}${average.ep ? ` · spends ${whole(average.ep)} EP (EP isn’t limited here)` : ""}`;
+    box.append(head, range, used);
+    if (result.breakWindow) {
+      const window = el("p", "duel-plan-break");
+      window.textContent = `During the ${RULES.breakTime} s break: ${result.breakWindow.hits} hits for ${percent(result.breakWindow.dealt / result.maxHp * 100)} of max HP.`;
+      box.append(window);
+    }
+    return box;
+  }
+
+  function renderAttackTable(options, result, rerender) {
+    const table = el("div", "duel-table");
+    table.setAttribute("role", "table");
+    const head = el("div", "duel-row is-head");
+    head.setAttribute("role", "row");
+    ["", "Attack", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK"].forEach((label) => {
+      const cell = el("span", "", label);
+      cell.setAttribute("role", "columnheader");
+      head.append(cell);
+    });
+    table.append(head);
+    const hpShare = (value) => result.maxHp ? value / result.maxHp * 100 : NaN;
+    const toKo = (value) => value > 0 ? Math.ceil(result.startHp / value) : Infinity;
+    for (const row of result.rows) {
+      const line = el("div", `duel-row${row.enabled ? "" : " is-off"}`);
+      line.setAttribute("role", "row");
+      const toggle = el("input");
+      toggle.type = "checkbox";
+      toggle.checked = row.enabled;
+      toggle.title = "Use this attack in the KO plan";
+      toggle.setAttribute("aria-label", `Use ${row.attack.name}`);
+      toggle.addEventListener("change", change(rerender, (target) => {
+        if (target.checked) delete settings.off[row.attack.id];
+        else settings.off[row.attack.id] = true;
+      }));
+      const name = el("span", "duel-attack");
+      const title = el("strong", "", row.attack.name);
+      const meta = el("small", "", [row.attack.group, row.attack.category, row.attack.elementName].filter(Boolean).join(" · "));
+      if (row.attack.elementColor) name.style.setProperty("--chip", row.attack.elementColor);
+      name.append(title, meta);
+      let rate;
+      if (row.attack.rates.length > 1) {
+        rate = el("select", "duel-rate");
+        rate.setAttribute("aria-label", `${row.attack.name} hit strength`);
+        for (const value of row.attack.rates) {
+          const option = el("option", "", `${Math.round(value * 100)}%`);
+          option.value = String(value);
+          option.selected = value === chosenRate(row.attack);
+          rate.append(option);
+        }
+        rate.title = "This attack's hits use these shares of its Might in the game data (for example a stronger follow-up or a dodge bonus).";
+        rate.addEventListener("change", change(rerender, (target) => {
+          settings.rates[row.attack.id] = Number(target.value);
+        }));
+      } else {
+        rate = el("span", "", `${Math.round(row.attack.rates[0] * 100)}%`);
+      }
+      rate.classList.add("duel-cell-rate");
+      const cells = [
+        toggle,
+        name,
+        rate,
+        el("span", "", row.attack.cooldown ? `${row.attack.cooldown} s` : "–"),
+        el("span", "duel-num", percent(hpShare(row.normal))),
+        el("span", "duel-num", percent(hpShare(row.crit))),
+        el("span", "duel-num is-key", percent(hpShare(row.average))),
+        el("span", "duel-num", Number.isFinite(toKo(row.average)) ? String(toKo(row.average)) : "–"),
+        el("span", "duel-num", whole(row.breakAverage)),
+      ];
+      cells.forEach((cell, index) => {
+        cell.setAttribute("role", "cell");
+        if (index > 1) cell.dataset.label = ["", "", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK"][index];
+      });
+      line.append(...cells);
+      table.append(line);
+    }
+    return table;
+  }
+
+  function renderDirection(options, result, title, rerender) {
+    const section = el("section", "duel-direction");
+    section.append(el("h3", "", title));
+    if (!result) {
+      section.append(el("p", "duel-note", "Pick both Aniimo to see the numbers."));
+      return section;
+    }
+    const target = settings.startHp < 100 ? ` from ${percent(settings.startHp, 0)} HP` : "";
+    section.append(planSummary(result, `(${whole(result.startHp)} HP${target}, average with crits)`));
+    section.append(renderAttackTable(options, result, rerender));
+    if (options.developerMode) {
+      const gauge = breakGauge(result.defender.side.level);
+      const best = Math.max(0, ...result.rows.filter((row) => row.enabled).map((row) => row.breakAverage));
+      const dev = el("p", "duel-dev");
+      const badge = el("span", "duel-dev-badge", "Unverified");
+      dev.append(badge, ` BREAK gauge from formula 3110 at Lv ${result.defender.side.level}: ${whole(gauge)} (${best ? `${Math.ceil(gauge / best)} of the strongest BREAK hit` : "no BREAK damage"}). How the game sizes an Aniimo's gauge isn't confirmed.`);
+      section.append(dev);
+    }
+    return section;
+  }
+
+  function render(options) {
+    const root = el("div", "duel");
+    const rerender = options.rerender;
+    const banner = el("p", "duel-banner");
+    const strong = el("strong", "", "Assumes every attack lands.");
+    banner.append(strong, ` No dodges, misses or blocks, and no buffs or team effects. Crits use the game's base ${Math.round(RULES.critRate * 100)}% chance for ${1 + RULES.critDamage}× damage; "Average" mixes them in, and the KO plan shows the no-crit and all-crit range too.`);
+    root.append(banner);
+    const setup = el("div", "duel-setup");
+    setup.append(renderSide(options, "you", "Your Aniimo", rerender), renderScenario(options, rerender), renderSide(options, "foe", "Opponent", rerender));
+    root.append(setup);
+    const scenario = {
+      data: options.data,
+      startHp: settings.startHp,
+      broken: settings.broken,
+      brokenBonus: settings.broken ? settings.brokenBonus : 0,
+      pvp: settings.pvp,
+      actionSeconds: settings.actionSeconds,
+    };
+    const youHit = matchup(options.aniilog, options.data, settings.you, settings.foe, scenario);
+    // The opponent's attack back on you always starts from your full HP and isn't broken.
+    const foeHit = matchup(options.aniilog, options.data, settings.foe, settings.you, { ...scenario, startHp: 100, broken: false, brokenBonus: 0 });
+    const verdict = verdictText(youHit, foeHit);
+    if (verdict) root.append(el("p", "duel-verdict", verdict));
+    const results = el("div", "duel-results");
+    results.append(
+      renderDirection(options, youHit, "You → Opponent", rerender),
+      renderDirection(options, foeHit, "Opponent → You", rerender),
+    );
+    root.append(results);
+    const sources = el("p", "duel-sources");
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    root.append(sources);
+    return root;
+  }
+
+  window.AniilogsDuel = Object.freeze({ render, rules: RULES, hpDamage, breakDamage, rotation, grownStat });
+})();

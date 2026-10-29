@@ -62,7 +62,7 @@
     try {
       const saved = JSON.parse(window.localStorage.getItem(VIEW_STORAGE_KEY) || "null");
       return {
-        page: saved?.page === "types" ? "types" : "team",
+        page: ["types", "duel"].includes(saved?.page) ? saved.page : "team",
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
       };
     } catch {
@@ -1483,7 +1483,7 @@
   function renderPageSwitch() {
     const group = el("div", "team-mode-switch");
     group.setAttribute("role", "tablist");
-    [["team", "Team"], ["types", "Type matchups"]].forEach(([id, label]) => {
+    [["team", "Team"], ["types", "Type matchups"], ["duel", "1v1"]].forEach(([id, label]) => {
       const control = button(label, "team-mode-button", () => {
         viewState.page = id;
         saveViewState();
@@ -1502,16 +1502,44 @@
     const header = el("header", "team-builder-header");
     const copy = el("div");
     const typesPage = viewState.page === "types";
-    copy.append(el("h1", "", typesPage ? "Type matchups" : "Team Builder"), el("p", "", typesPage
+    // 1v1 lives in duel.js; without it the tab falls back to the team page.
+    const duelPage = viewState.page === "duel" && Boolean(window.AniilogsDuel);
+    copy.append(el("h1", "", typesPage ? "Type matchups" : duelPage ? "1v1" : "Team Builder"), el("p", "", typesPage
       ? "See what an element or pair of elements is weak to and strong against, and which Aniimo have that typing."
-      : MODE_NOTES[model.mode]));
+      : duelPage
+        ? "How much one Aniimo’s attacks take off another, and how fast each side gets the KO."
+        : MODE_NOTES[model.mode]));
     const controls = el("div", "team-header-controls");
     controls.append(renderPageSwitch());
-    if (!typesPage) controls.append(renderModeSwitch());
+    if (!typesPage && !duelPage) controls.append(renderModeSwitch());
     header.append(copy, controls);
     panel.append(header);
     if (typesPage) panel.append(renderTypesPage());
+    else if (duelPage) panel.append(renderDuelPage());
     else panel.append(renderOverview(), renderTeamPage());
+  }
+
+  function renderDuelPage() {
+    return window.AniilogsDuel.render({
+      aniilog,
+      data,
+      members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
+      formLabel,
+      developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),
+      rerender: renderPanel,
+    });
+  }
+
+  function renderDuelPage() {
+    return window.AniilogsDuel.render({
+      aniilog,
+      data,
+      members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
+      formLabel,
+      contentUrl: host.contentUrl,
+      developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),
+      rerender: renderPanel,
+    });
   }
 
   function renderLoading() {

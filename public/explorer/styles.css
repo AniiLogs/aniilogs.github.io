@@ -12097,3 +12097,353 @@ html[data-embed="app"] #topbarLogoutButton {
   padding: 3px 10px;
   cursor: pointer;
 }
+
+/* ---- Team Builder 1v1 (duel.js): setup cards, the scenario, and each side's attack table. */
+.duel {
+  display: grid;
+  gap: 14px;
+  container-type: inline-size;
+  font-size: 14px;
+}
+
+.duel-banner {
+  margin: 0;
+  border: 1px solid var(--accent-strong);
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.12);
+  padding: 10px 14px;
+  line-height: 1.45;
+}
+
+.duel-banner strong {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+
+.duel-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.duel-side,
+.duel-scenario,
+.duel-direction {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(var(--panel-rgb), 0.6);
+  padding: 12px;
+}
+
+.duel h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.duel-side-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.duel-side-icon {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.duel-side.is-foe .duel-side-head h3 {
+  color: var(--danger);
+}
+
+.duel select,
+.duel input[type="number"] {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2, var(--panel));
+  color: var(--text);
+  font: inherit;
+  padding: 4px 8px;
+}
+
+.duel-aniimo-select {
+  width: 100%;
+}
+
+.duel-side-fields,
+.duel-scenario-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: start;
+}
+
+.duel-field {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.duel-field input {
+  width: 92px;
+}
+
+.duel-field small {
+  font-size: 12px;
+}
+
+.duel-field:has(small) {
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: 6px;
+}
+
+.duel-field:has(small) > span {
+  grid-column: 1 / -1;
+}
+
+.duel-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  align-self: end;
+}
+
+.duel-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-strong);
+}
+
+.duel-elements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.duel-element-chip {
+  border: 1px solid var(--chip, var(--line));
+  border-radius: 999px;
+  color: var(--chip, var(--text));
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 9px;
+}
+
+.duel-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.duel-stats dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.duel-stats dd {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.duel-note,
+.duel-sources {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.duel-verdict {
+  margin: 0;
+  border-radius: 10px;
+  background: rgba(var(--accent-2-rgb, var(--accent-rgb)), 0.14);
+  font-size: 16px;
+  font-weight: 750;
+  padding: 10px 14px;
+  text-align: center;
+}
+
+.duel-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.duel-plan {
+  display: grid;
+  gap: 3px;
+}
+
+.duel-plan p {
+  margin: 0;
+}
+
+.duel-plan-head strong {
+  font-size: 18px;
+}
+
+.duel-plan-range,
+.duel-plan-used {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.duel-plan-break {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.duel-table {
+  display: grid;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.duel-row {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 1.6fr) 64px 64px repeat(4, minmax(56px, 0.7fr)) minmax(56px, 0.7fr);
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 5px 6px;
+}
+
+.duel-row:not(.is-head) {
+  background: rgba(var(--background-rgb), 0.45);
+}
+
+.duel-row.is-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.duel-row.is-off {
+  opacity: 0.5;
+}
+
+.duel-attack {
+  display: grid;
+  min-width: 0;
+  border-left: 3px solid var(--chip, var(--line));
+  padding-left: 8px;
+}
+
+.duel-attack strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duel-attack small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.duel-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.duel-num.is-key {
+  font-weight: 800;
+}
+
+.duel-rate {
+  width: 64px;
+  min-height: 30px !important;
+  padding: 2px 4px !important;
+}
+
+.duel-dev {
+  margin: 0;
+  border: 1px dashed #6c5aa8;
+  border-radius: 8px;
+  color: #b9a4f5;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.duel-dev-badge {
+  border: 1px solid #6c5aa8;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  padding: 0 6px;
+}
+
+@container (max-width: 1100px) {
+  .duel-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 820px) {
+  .duel-setup {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .duel-scenario {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* Phones: each attack becomes a small card with labelled numbers. */
+@container (max-width: 560px) {
+  .duel-setup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .duel-scenario {
+    grid-row: auto;
+  }
+
+  .duel-row.is-head {
+    display: none;
+  }
+
+  /* Name and hit strength on top, then Cooldown/Damage/With crit/Average, then Hits to KO and BREAK. */
+  .duel-row {
+    grid-template-columns: 22px repeat(4, minmax(0, 1fr));
+    row-gap: 6px;
+  }
+
+  .duel-row > :nth-child(2) {
+    grid-column: 2 / 5;
+  }
+
+  .duel-row > :nth-child(3) {
+    grid-column: 5;
+    justify-self: end;
+  }
+
+  .duel-row > :nth-child(n + 4) {
+    display: grid;
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .duel-row > :nth-child(n + 4)::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .duel-row > :nth-child(4),
+  .duel-row > :nth-child(8) {
+    grid-column: 2;
+  }
+}
