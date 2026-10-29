@@ -7,11 +7,11 @@
 
   // Boards per mode: which records they rank, what they can be ranked by, and which filters apply.
   const BOARDS = Object.freeze({
-    // Interlink runs weekly (a new week starts Wednesday 20:00 UTC) with three bosses; seasons add the weeks up.
+    // Interlink runs weekly (a new week starts Wednesday 20:00 UTC) with three bosses (left, center, right).
+    // Per Boss: a week's three boards; Season Ladder: a split's (or a whole season's) weeks added up.
     interlink: [
-      { kind: "interlink_week_view", label: "This week", custom: "week", sorts: [], fields: [] },
-      { kind: "interlink_season_view", label: "Season", custom: "season", sorts: [], fields: [] },
-      { kind: "interlink_run", label: "All runs", sorts: ["score", "team_dps", "clear_time_s", "stars", "p_dps", "p_break", "p_taken", "p_heal", "meter_dps"], fields: ["cycle", "boss", "level", "party", "cleared"] },
+      { kind: "interlink_boss", label: "Per Boss", custom: "boss", sorts: [], fields: [] },
+      { kind: "interlink_ladder", label: "Season Ladder", custom: "season", sorts: [], fields: [] },
     ],
     sim: [
       { kind: "sim_run", label: "Full clears", sorts: ["clear_time_s", "floors"], fields: ["party", "buff"] },
@@ -31,33 +31,6 @@
   });
   // Table columns per board; `sort` makes the header clickable.
   const COLUMNS = Object.freeze({
-    interlink_run: [
-      { label: "Boss", value: (e) => bossLabel(e) },
-      { label: "Score", sort: "score", value: (e) => number(e.score) },
-      { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
-      { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) + (e.cleared === false ? " (timed out)" : "") },
-      { label: "Team DPS", sort: "team_dps", value: (e) => number(e.teamDps) },
-      // the player's own Battle Data card for that run
-      { label: "Avg DPS", sort: "p_dps", value: (e) => number(e.avgDps) },
-      { label: "BREAK", sort: "p_break", value: (e) => number(e.breakValue) },
-      { label: "Damage taken", sort: "p_taken", value: (e) => number(e.damageTaken) },
-      { label: "Healing", sort: "p_heal", value: (e) => number(e.heal) },
-      { label: "Party", value: (e) => number(e.partySize) },
-      { label: "Week", value: (e) => e.cycle || "—" },
-      { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
-    ],
-    interlink_week: [
-      { label: "Week", value: (e) => e.cycle || "—" },
-      { label: "Weekly score", sort: "score", value: (e) => number(e.score) },
-      { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
-      { label: "Recorded", value: (e) => date(e.playedAt || e.submittedAt) },
-    ],
-    interlink_best: [
-      { label: "Boss", value: (e) => bossLabel(e) },
-      { label: "Best score", sort: "score", value: (e) => number(e.score) },
-      { label: "Stars", sort: "stars", value: (e) => number(e.stars) },
-      { label: "Week", value: (e) => e.cycle || "—" },
-    ],
     eggheist_season: [
       { label: "Rank", sort: "standing", value: (e) => e.seasonRank?.name || (e.seasonRank?.tier ? `Tier ${e.seasonRank.tier}` : "—") },
       // Egg Emperor is the top rank: its points are maxed out (it counts stars instead)
@@ -92,12 +65,14 @@
     boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"), account: $("[data-account]"),
-    weekly: $("[data-weekly]"), weekSelect: $("[data-week-select]"), seasonSelect: $("[data-season-select]"),
-    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), rankBy: $("[data-rank-by]"),
-    weekPick: $("[data-week-pick]"), seasonPick: $("[data-season-pick]"), subTabs: $("[data-sub-tabs]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"),
+    interlink: $("[data-interlink]"), tableWrap: $("[data-table-wrap]"),
   };
   const state = {
-    mode: "interlink", kind: "interlink_week_view", sort: "", order: "", offset: 0, week: "", sub: "total", season: "", server: "", rankBy: "score",
+    mode: "interlink", kind: "interlink_boss", sort: "", order: "", offset: 0, server: "",
+    // Interlink: the week shown, the board opened with "View all" and its ladder, each board's ladder, the boss a phone
+    // shows (0 left, 1 center, 2 right), and the Season Ladder's season, split ("all": the whole season) and order
+    week: "", viewBoss: "", viewLadder: "score", ladders: {}, slot: 1, season: "", split: "", rank: "score",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0,
   };
 
@@ -154,10 +129,6 @@
   function date(unix) {
     return unix ? new Date(unix * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
   }
-  function bossLabel(entry) {
-    const name = entry.boss?.name || entry.boss?.id || "—";
-    return entry.boss?.level ? `${name} · Lv ${entry.boss.level}` : name;
-  }
   function board() {
     return BOARDS[state.mode].find((item) => item.kind === state.kind) || BOARDS[state.mode][0];
   }
@@ -172,7 +143,8 @@
     state.sort = params.get("sort") || "";
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
-    state.week = params.get("week") || ""; state.sub = params.get("board") || "total"; state.season = params.get("season") || "";
+    state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
+    state.season = params.get("season") || ""; state.split = params.get("split") || ""; state.rank = params.get("rank") === "stars" ? "stars" : "score";
     state.server = params.get("server") || "";
     for (const name of ["cycle", "boss", "level", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
@@ -186,13 +158,19 @@
   function query() {
     const params = new URLSearchParams({ mode: state.mode, kind: state.kind });
     if (state.server) params.set("server", state.server);              // every board: one game server, or all
-    if (board().custom === "week") {
+    if (board().custom === "boss") {
       if (state.week) params.set("week", state.week);
-      if (state.sub !== "total") params.set("board", state.sub);
+      if (state.viewBoss) {
+        params.set("boss", state.viewBoss);
+        params.set("ladder", state.viewLadder);
+        if (state.offset) params.set("offset", String(state.offset));
+      }
       return params;
     }
     if (board().custom === "season") {
       if (state.season) params.set("season", state.season);
+      if (state.split) params.set("split", state.split);
+      if (state.rank === "stars") params.set("rank", "stars");
       return params;
     }
     if (state.sort) params.set("sort", state.sort);
@@ -236,6 +214,7 @@
       state.sort = "";
       state.order = "";
       state.offset = 0;
+      state.viewBoss = "";
       state.expanded.clear();
       renderControls();
       void loadEntries();
@@ -249,16 +228,14 @@
       els.boardTabs.hidden = false;
     } else els.boardTabs.replaceChildren(...BOARDS[state.mode].map((item) => el("button", {
       type: "button", role: "tab", "aria-selected": String(item.kind === state.kind), "data-kind": item.kind,
-      text: item.kind === "interlink_week_view" && weekTabLabel ? weekTabLabel : item.label,
+      text: item.label,
       onclick: () => pickBoard(item.kind),
     })));
     if (state.mode !== "eggheist") els.boardTabs.hidden = BOARDS[state.mode].length < 2;
     const custom = board().custom;
     els.filters.hidden = Boolean(custom);
-    els.weekly.hidden = !custom;
-    els.weekPick.hidden = custom !== "week";
-    els.subTabs.hidden = custom !== "week";
-    els.seasonPick.hidden = custom !== "season";
+    els.interlink.hidden = !custom;
+    els.tableWrap.hidden = false;
     for (const node of [els.prev, els.next, els.page]) node.hidden = Boolean(custom);
     if (custom) return;
     const sorts = board().sorts;
@@ -410,25 +387,6 @@
     const weeks = Math.max(1, Math.ceil((now - week.end) / (7 * 86400)));
     return weeks === 1 ? "last week" : `${weeks} weeks ago`;
   }
-  let weekTabLabel = "";   // "This week", or "Last week" / "N weeks ago" once the newest known week has ended
-  const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
-  function weekLabel(week) {
-    const start = new Date(week.start * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    return `Week of ${start} · ${week.bosses.map((boss) => boss.name.replace(/^Omega /u, "")).join(", ")} (${weekAgo(week)})`;
-  }
-  // What a boss board can rank by: each one is a separate best (the app sends a run when it beats any of them).
-  const BOSS_METRICS = [
-    { id: "score", label: "Score", value: (e) => e.score },
-    { id: "clear", label: "Fastest clear", value: (e) => e.clearTimeS, low: true },
-    { id: "dps", label: "Avg DPS", value: (e) => e.avgDps },
-    { id: "break", label: "BREAK", value: (e) => e.breakValue },
-    { id: "taken", label: "Damage taken", value: (e) => e.damageTaken },
-    { id: "heal", label: "Healing", value: (e) => e.heal },
-  ];
-  function playerCell(entry) {
-    return el("td", { class: "lb-player" }, profileName(entry.player, entry.profileId, {}, entry.uid),
-      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), proofButton(entry.proofId));
-  }
   // A picture icon next to a name when the run has its result screenshot, for anyone: hover it to see the screenshot
   // as large as the window allows, click (or tap) to keep it open.
   const proofImages = new Map();                       // submission id -> object URL, loaded once per page
@@ -529,98 +487,262 @@
     return el("button", { type: "button", class: "lb-info", popovertarget: id, "aria-label": INFO[key].title, text: "i",
       onclick: (event) => event.stopPropagation() });
   }
-  function scoreHeader(text) {
-    const tip = el("div", { id: "lbScoreInfo", class: "lb-info-pop", popover: "auto" },
-      el("strong", { text: "How Challenge Score works" }),
-      el("ul", {},
-        el("li", { text: "Each star is worth 1,000: 500 for reaching it, plus up to 500 for the boss HP you take off on the way to the next star." }),
-        el("li", { text: "15 stars = 15,000. Taking the boss down after that is worth up to 5,000 more." }),
-        el("li", { text: "Finishing early adds a further bonus that the game doesn't publish. We're still working it out from recorded runs." })),
-      el("p", { text: "Boss boards rank by stars, then score, then fastest clear. A clear means 15 stars, then ending early." }));
-    return el("th", { scope: "col" }, el("span", { class: "lb-th-info" }, el("span", { text }),
-      el("button", { type: "button", class: "lb-info", popovertarget: "lbScoreInfo", "aria-label": "How Challenge Score works", text: "i" })), tip);
+  // ---------------------------------------------------------------- Interlink: Per Boss and Season Ladder
+  // What a boss board can rank by (the API's ?ladder=). Each is a separate best, with the run behind it as its proof.
+  const LADDERS = [
+    { id: "score", label: "Score", proof: "score", value: (e) => number(e.score) },
+    { id: "stars", label: "Stars", proof: "score", value: (e) => number(e.score) },
+    { id: "clear", label: "Fastest clear", short: "Time", proof: "clear", value: (e) => clearText(e) },
+    { id: "teamDps", label: "Team DPS", proof: "score", value: (e) => number(e.teamDps) },
+    { id: "dps", label: "Avg DPS (one player)", short: "Avg DPS", proof: "dps", value: (e) => number(e.avgDps) },
+    { id: "break", label: "BREAK damage (one player)", short: "BREAK", proof: "break", value: (e) => number(e.breakValue) },
+    { id: "heal", label: "Healing (one player)", short: "Healing", proof: "heal", value: (e) => number(e.heal) },
+  ];
+  function ladderOf(id) {
+    return LADDERS.find((ladder) => ladder.id === id) || LADDERS[0];
   }
-  function table(headers, rows, empty) {
-    els.head.replaceChildren(el("tr", {}, headers.map((text) => (/score$/u.test(text) ? scoreHeader(text) : el("th", { scope: "col", text })))));
-    els.rows.replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: String(headers.length), class: "lb-empty", text: empty }))]));
+  const BOARD_ROWS = 10;                                  // a boss board's top rows; "View all" pages the rest
+  const FULL_ROWS = 25;
+  const SLOT_CLASSES = ["is-left", "is-center", "is-right"];
+  // A run's time, kept short for phones: the clear time, or "No clear" (time ran out, or no kill recorded)
+  function clearText(entry) {
+    return entry.clearTimeS == null ? "No clear" : duration(entry.clearTimeS);
   }
-  async function loadInterlink(requestId) {
-    const custom = board().custom;
-    const ask = new URLSearchParams();
-    if (custom === "week" && state.week) ask.set("cycle", state.week);
-    else if (custom === "season" && state.season) ask.set("season", state.season);
+  function shortDate(unix) {
+    return new Date(unix * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function weekRange(week) {
+    return `Week of ${shortDate(week.start)} – ${shortDate(week.end)}`;
+  }
+  // When the newest run on these boards reached AniiLogs
+  function updatedLine(unix) {
+    if (!unix) return el("p", { class: "lb-updated" }, el("i", { "aria-hidden": "true" }), "No runs sent yet");
+    const minutes = Math.max(0, Math.round((Date.now() / 1000 - unix) / 60));
+    const ago = minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago`
+      : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
+    const when = new Date(unix * 1000).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    return el("p", { class: "lb-updated", title: "When the newest run on these boards reached AniiLogs" },
+      el("i", { "aria-hidden": "true" }), `Updated ${when} (${ago})`);
+  }
+  function playerName(entry, proofId) {
+    return el("span", { class: "lb-who-name" }, profileName(entry.player, entry.profileId, {}, entry.uid),
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), proofButton(proofId));
+  }
+  function bossHead(boss, className, detail = "") {
+    return el("div", { class: className },
+      el("div", {}, el("div", { class: "lb-slot", text: [boss.slot || "Boss", detail].filter(Boolean).join(" · ") }),
+        el("h3", {}, boss.name, boss.level ? el("small", { text: ` · Lv ${boss.level}` }) : null)),
+      boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap)) : null);
+  }
+  function failed() {
+    els.summary.textContent = "The leaderboard could not be loaded.";
+    els.interlink.replaceChildren();
+    els.tableWrap.hidden = true;
+  }
+
+  // Per Boss: the week's three boards, each with its own ladder menu.
+  function bossBoard(boss) {
+    const ladder = ladderOf(state.ladders[boss.id]);
+    const select = el("select", { "aria-label": `Rank the ${boss.slot || boss.name} board by`,
+      onchange: (event) => { void loadBoard(boss.id, event.target.value); } },
+    ...LADDERS.map((item) => el("option", { value: item.id, text: item.label })));
+    select.value = ladder.id;
+    const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
+      el("span", { class: "lb-rk", text: String(entry.rank) }),
+      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId), el("small", { text: clearText(entry) })),
+      el("span", { class: "lb-val", text: ladder.value(entry) }),
+      stars(entry.stars)));
+    return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id,
+      "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
+    bossHead(boss, "lb-boss-head"),
+    el("label", { class: "lb-ladder" }, el("span", { text: "Ladder" }), select),
+    rows.length ? el("ol", { class: "lb-rows" }, rows)
+      : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
+    boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(boss.total)} →`,
+      onclick: () => { state.viewBoss = boss.id; state.viewLadder = ladder.id; state.offset = 0; void loadEntries(); } }) : null);
+  }
+  // One board's ladder changed: reload just that board.
+  async function loadBoard(bossId, ladderId) {
+    state.ladders[bossId] = ladderOf(ladderId).id;
+    const ask = new URLSearchParams({ cycle: state.week, boss: bossId, ladder: state.ladders[bossId], limit: String(BOARD_ROWS) });
     if (state.server) ask.set("server", state.server);
-    let response = await apiFetch(`/leaderboard/interlink${ask.size ? `?${ask}` : ""}`);
-    if (requestId !== state.requestId) return;
-    let data = response.ok ? await response.json() : null;
-    if (custom === "season" && data && !state.season) {            // no season picked: the current week's season
-      state.season = String(data.cycle?.season ?? "");
-      response = await apiFetch(`/leaderboard/interlink?season=${encodeURIComponent(state.season)}${state.server ? `&server=${encodeURIComponent(state.server)}` : ""}`);
-      if (requestId !== state.requestId) return;
-      data = response.ok ? await response.json() : null;
+    const response = await apiFetch(`/leaderboard/interlink?${ask}`);
+    const boss = response.ok ? (await response.json()).bosses?.[0] : null;
+    const old = els.interlink.querySelector(`[data-board-id="${CSS.escape(bossId)}"]`);
+    if (boss && old) old.replaceWith(bossBoard(boss));
+  }
+  function showSlot() {
+    for (const node of els.interlink.querySelectorAll(".lb-boss")) {
+      node.dataset.shown = String(!SLOT_CLASSES.some((name) => node.classList.contains(name)) || node.classList.contains(SLOT_CLASSES[state.slot]));
     }
-    if (!data) { els.summary.textContent = "The leaderboard could not be loaded."; els.rows.replaceChildren(); return; }
-    if (custom === "week") {
-      state.week = data.cycle.id;
-      const now = Date.now() / 1000;
-      const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id).reverse();
-      els.weekSelect.replaceChildren(...weeks.map((week) => el("option", { value: week.id, text: weekLabel(week) })));
-      // the tab names the newest week the way it is now: "This week" while it runs, then "Last week", "2 weeks ago"
-      const newest = data.weeks.find((week) => week.id === data.current) || data.cycle;
-      const tab = [...els.boardTabs.children].find((button) => button.dataset.kind === "interlink_week_view");
-      weekTabLabel = capital(weekAgo(newest));
-      if (tab) tab.textContent = weekTabLabel;
-      const when = weekAgo(data.cycle);
-      els.weekSelect.value = state.week;
-      const subs = [{ id: "total", name: "Week total" }, ...data.bosses];
-      if (!subs.some((sub) => sub.id === state.sub)) state.sub = "total";
-      els.subTabs.replaceChildren(...subs.map((sub) => el("button", {
-        type: "button", role: "tab", "aria-selected": String(sub.id === state.sub), text: sub.name,
-        onclick: () => { state.sub = sub.id; void loadEntries(); },
-      })));
-      writeUrl();
-      els.rankBy.hidden = true;
-      if (state.sub === "total") {
-        table(["#", "Player", "Week score", "Stars", ...data.bosses.map((boss) => boss.name)],
-          data.week.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
-            playerCell(entry), el("td", { text: number(entry.total) }), el("td", {}, stars(entry.stars)),
-            ...data.bosses.map((boss) => el("td", {}, entry.scores[boss.id] == null ? "—"
-              : el("span", { class: "lb-boss-cell" }, el("span", { text: number(entry.scores[boss.id]) }), stars(entry.bossStars?.[boss.id])))))),
-          when === "this week" ? "No scores this week yet." : "No scores that week.");
-        els.summary.textContent = `Week total · each player's best score on each of ${when === "this week" ? "this week's" : "that week's"} three bosses (${when}), added up · ${number(data.week.length)} player${data.week.length === 1 ? "" : "s"}`;
-      } else {
-        const bossBoard = data.bosses.find((boss) => boss.id === state.sub);
-        // each best is a board of its own: score (stars, then score), fastest clear, and each player's own card
-        const metric = BOSS_METRICS.find((m) => m.id === state.rankBy) || BOSS_METRICS[0];
-        const sorted = metric.id === "score" ? bossBoard.entries : [...bossBoard.entries]
-          .filter((entry) => metric.value(entry) != null)
-          .sort((a, b) => (metric.low ? metric.value(a) - metric.value(b) : metric.value(b) - metric.value(a)));
-        els.rankBy.hidden = false;
-        els.rankBy.replaceChildren(el("span", { text: "Rank by" }), ...BOSS_METRICS.map((m) => el("button", {
-          type: "button", "aria-pressed": String(m.id === metric.id), text: m.label,
-          onclick: () => { state.rankBy = m.id; void loadEntries(); },
-        })));
-        table(["#", "Player", "Best score", "Stars", "Fastest clear", "Avg DPS", "BREAK", "Damage taken", "Healing"],
-          sorted.map((entry, index) => el("tr", { class: entry.own ? "is-own" : null },
-            el("td", { class: "lb-rank", text: String(metric.id === "score" ? entry.rank : index + 1) }),
-            playerCell({ ...entry, proofId: entry.proofIds?.[metric.id] || entry.proofId }), el("td", { text: number(entry.score) }), el("td", {}, stars(entry.stars)),
-            el("td", { text: entry.clearTimeS == null ? "—" : duration(entry.clearTimeS) }),
-            el("td", { text: number(entry.avgDps) }), el("td", { text: number(entry.breakValue) }),
-            el("td", { text: number(entry.damageTaken) }), el("td", { text: number(entry.heal) }))),
-          metric.id === "score" ? `No scores on this boss ${when === "this week" ? "this week yet" : "that week"}.` : `No ${metric.label.toLowerCase()} on this boss ${when === "this week" ? "this week yet" : "that week"}.`);
-        els.summary.textContent = `${bossBoard.name} · each player's best score (${when}) · ${number(bossBoard.entries.length)} player${bossBoard.entries.length === 1 ? "" : "s"}`;
+    for (const button of els.interlink.querySelectorAll("[data-slot-index]")) {
+      button.setAttribute("aria-selected", String(Number(button.dataset.slotIndex) === state.slot));
+    }
+  }
+  function weekNav(data) {
+    const now = Date.now() / 1000;
+    const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id);   // in time order
+    const at = weeks.findIndex((week) => week.id === data.cycle.id);
+    const go = (week) => { state.week = week.id; state.ladders = {}; state.viewBoss = ""; state.offset = 0; void loadEntries(); };
+    const when = weekAgo(data.cycle);
+    return el("div", { class: "lb-week-nav" },
+      el("button", { type: "button", "aria-label": "Previous week", text: "‹", disabled: at <= 0, onclick: () => go(weeks[at - 1]) }),
+      el("span", {}, weekRange(data.cycle), el("small", { text: ` · ${when === "this week" ? "current" : when}` })),
+      el("button", { type: "button", "aria-label": "Next week", text: "›", disabled: at < 0 || at >= weeks.length - 1, onclick: () => go(weeks[at + 1]) }));
+  }
+  function renderPerBoss(data) {
+    const caps = data.rules?.starCaps || [];
+    const clear = [...new Set(data.rules?.clearStars || [])];
+    const slotted = data.bosses.filter((boss) => boss.slotIndex != null);
+    els.interlink.replaceChildren(
+      el("div", { class: "lb-subbar" }, weekNav(data), updatedLine(data.updatedAt)),
+      el("p", { class: "lb-rules" },
+        caps.length ? el("span", {}, el("b", { text: "Max stars " }), caps.join(" / ")) : null,
+        clear.length === 1 ? el("span", { text: `A kill is ${clear[0]} stars` }) : null,
+        el("span", { text: "Best run per player per boss" }),
+        el("span", { text: "Ranked by score; pick another ladder in each board's menu" })),
+      el("div", { class: "lb-slot-switch", role: "tablist", "aria-label": "Boss" }, ...slotted.map((boss) => el("button", {
+        type: "button", role: "tab", "data-slot-index": boss.slotIndex, "aria-selected": String(boss.slotIndex === state.slot),
+        class: SLOT_CLASSES[boss.slotIndex], onclick: () => { state.slot = boss.slotIndex; showSlot(); },
+      }, boss.slot, el("small", { text: boss.name.replace(/^(Alpha|Omega) /u, "") })))),
+      el("div", { class: "lb-bosses" }, data.bosses.map(bossBoard)),
+      el("p", { class: "lb-note", text: "Only what the result screens show: score, stars, clear time, team DPS and each player's Avg DPS, BREAK damage and healing." }));
+    els.tableWrap.hidden = true;
+    els.summary.textContent = "";
+  }
+
+  // "View all": one board, every player, paged, with every figure and a ladder chip row.
+  const FULL_COLUMNS = [
+    { id: "score", label: "Score", value: (e) => number(e.score) },
+    { id: "stars", label: "Stars", value: (e) => stars(e.stars) },
+    { id: "clear", label: "Time", value: (e) => clearText(e) },
+    { id: "teamDps", label: "Team DPS", value: (e) => number(e.teamDps) },
+    { id: "dps", label: "Avg DPS", value: (e) => number(e.avgDps) },
+    { id: "break", label: "BREAK", value: (e) => number(e.breakValue) },
+    { id: "heal", label: "Healing", value: (e) => number(e.heal) },
+  ];
+  function renderFull(data) {
+    const boss = data.bosses[0];
+    const ladder = ladderOf(state.viewLadder);
+    const back = () => { state.viewBoss = ""; state.offset = 0; void loadEntries(); };
+    if (!boss) { back(); return; }
+    // the ladder's figure first; on phones the figures it isn't ranked by beyond score and stars fold away
+    const columns = [...FULL_COLUMNS.filter((column) => column.id === ladder.id), ...FULL_COLUMNS.filter((column) => column.id !== ladder.id)];
+    els.interlink.replaceChildren(
+      el("div", { class: "lb-subbar" },
+        el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
+          el("span", { text: `${boss.slot ? `${boss.slot} boss` : boss.name} · ${weekRange(data.cycle)}` })),
+        updatedLine(data.updatedAt)),
+      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`),
+      el("div", { class: "lb-chips", role: "group", "aria-label": "Ladder" }, LADDERS.map((item) => el("button", {
+        type: "button", "aria-pressed": String(item.id === ladder.id), text: item.short || item.label,
+        onclick: () => { state.viewLadder = item.id; state.offset = 0; void loadEntries(); },
+      }))));
+    els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" }),
+      columns.map((column, index) => el("th", { scope: "col", class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null, text: column.label }))));
+    els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
+      el("td", { class: "lb-rank", text: String(entry.rank) }),
+      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId)),
+      columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null }, column.value(entry)))))
+      : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
+    els.tableWrap.hidden = false;
+    const first = boss.total ? state.offset + 1 : 0;
+    const last = state.offset + boss.entries.length;
+    els.page.textContent = boss.total ? `${first}–${last} of ${number(boss.total)}` : "";
+    for (const node of [els.prev, els.next, els.page]) node.hidden = boss.total <= FULL_ROWS;
+    els.prev.disabled = state.offset <= 0;
+    els.next.disabled = last >= boss.total;
+    els.summary.textContent = `${boss.name} · ranked by ${ladder.label.toLowerCase()} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
+  }
+  function fold(column, index) {
+    return index && !["score", "stars", "clear"].includes(column.id) ? "lb-hide-sm" : "";
+  }
+
+  // Season Ladder: each player's best on each boss of each week, added up over a split (stars reset each split) or a season.
+  function splitOf(seasons, cycle) {
+    const season = seasons.find((item) => item.season === cycle.season);
+    return season?.splits.find((split) => split.start <= cycle.start && cycle.start <= split.end)?.id ?? null;
+  }
+  function renderSeason(data) {
+    const pick = el("select", { "aria-label": "Season or split", onchange: (event) => {
+      [state.season, state.split] = event.target.value.split("|");
+      void loadEntries();
+    } }, ...[...data.seasons].sort((a, b) => b.end - a.end).flatMap((season) => [
+      ...[...season.splits].reverse().map((split) => el("option", { value: `${season.season}|${split.id}`,
+        text: `Season ${season.season} · ${split.label} (${shortDate(split.start)} – ${shortDate(split.end)})` })),
+      el("option", { value: `${season.season}|all`, text: `Season ${season.season} · whole season` }),
+    ]));
+    pick.value = `${data.season}|${data.split ?? "all"}`;
+    const now = Date.now() / 1000;
+    const played = data.weeks.filter((week) => week.start <= now).length;
+    els.interlink.replaceChildren(
+      el("div", { class: "lb-subbar" }, el("label", { class: "lb-split" }, el("span", { text: "Split" }), pick), updatedLine(data.updatedAt)),
+      el("p", { class: "lb-rules" }, el("span", { text: "Each week: your best run on the left, center and right boss, added together; then every week added up." }),
+        el("span", { text: "Stars reset when a split starts, so the current split shows first." })),
+      el("div", { class: "lb-chips", role: "group", "aria-label": "Rank by" }, [["score", "Combined score"], ["stars", "Total stars"]].map(([id, label]) => el("button", {
+        type: "button", "aria-pressed": String(state.rank === id), text: label,
+        onclick: () => { state.rank = id; void loadEntries(); },
+      }))));
+    const most = Math.max(1, ...data.standings.map((entry) => Number(entry.stars) || 0));
+    els.head.replaceChildren(el("tr", {}, ["#", "Player", "Combined score", "Total stars", "Weeks", "Best week"].map((text, index) => el("th", {
+      scope: "col", text, class: [index === (state.rank === "stars" ? 3 : 2) ? "is-ranked" : "", index > 3 ? "lb-hide-sm" : ""].join(" ").trim() || null,
+    }))));
+    els.rows.replaceChildren(...(data.standings.length ? data.standings.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
+      el("td", { class: "lb-rank", text: String(entry.rank) }),
+      el("td", { class: "lb-player" }, playerName(entry), el("span", { class: "lb-bar", "aria-hidden": "true" },
+        el("i", { style: `width: ${Math.round((Number(entry.stars) || 0) / most * 100)}%` }))),
+      el("td", { class: state.rank === "score" ? "is-ranked" : null, text: number(entry.total) }),
+      el("td", { class: state.rank === "stars" ? "is-ranked" : null }, stars(entry.stars)),
+      el("td", { class: "lb-hide-sm", text: `${number(entry.weeks)} / ${number(played)}` }),
+      el("td", { class: "lb-hide-sm", text: number(entry.bestWeek) })))
+      : [el("tr", {}, el("td", { colspan: "6", class: "lb-empty", text: "No scores in this split yet." }))]));
+    els.tableWrap.hidden = false;
+    els.summary.textContent = `${pick.selectedOptions[0]?.textContent || `Season ${data.season}`} · ${number(data.standings.length)} player${data.standings.length === 1 ? "" : "s"}`;
+  }
+
+  async function loadInterlink(requestId) {
+    const ask = new URLSearchParams();
+    if (state.server) ask.set("server", state.server);
+    const get = async (params) => {
+      const response = await apiFetch(`/leaderboard/interlink?${params}`);
+      return response.ok ? response.json() : null;
+    };
+    if (board().custom === "season") {
+      if (!state.season) {                                   // nothing picked: the current week's season and split
+        const now = await get(new URLSearchParams([...ask, ["limit", "1"]]));
+        if (requestId !== state.requestId) return;
+        if (!now) { failed(); return; }
+        state.season = String(now.cycle.season ?? "");
+        state.split = String(splitOf(now.seasons || [], now.cycle) ?? "all");
       }
+      ask.set("season", state.season);
+      ask.set("split", state.split || "all");
+      if (state.rank === "stars") ask.set("sort", "stars");
+      const data = await get(ask);
+      if (requestId !== state.requestId) return;
+      if (!data) { failed(); return; }
+      writeUrl();
+      renderSeason(data);
       return;
     }
-    const seasons = [...new Set(data.weeks.map((week) => week.season))].filter((value) => value != null);
-    els.seasonSelect.replaceChildren(...seasons.map((value) => el("option", { value: String(value), text: `Season ${value}` })));
-    els.seasonSelect.value = String(data.season);
+    if (state.week) ask.set("cycle", state.week);
+    if (state.viewBoss) {
+      ask.set("boss", state.viewBoss);
+      ask.set("ladder", state.viewLadder);
+      ask.set("limit", String(FULL_ROWS));
+      ask.set("offset", String(state.offset));
+    } else {
+      state.ladders = {};
+      ask.set("ladder", "score");
+      ask.set("limit", String(BOARD_ROWS));
+    }
+    const data = await get(ask);
+    if (requestId !== state.requestId) return;
+    if (!data) { failed(); return; }
+    state.week = data.cycle.id;
     writeUrl();
-    table(["#", "Player", "Season score", "Stars", "Weeks played"],
-      data.standings.map((entry) => el("tr", { class: entry.own ? "is-own" : null }, el("td", { class: "lb-rank", text: String(entry.rank) }),
-        playerCell(entry), el("td", { text: number(entry.total) }), el("td", {}, stars(entry.stars)), el("td", { text: number(entry.weeks) }))),
-      "No scores this season yet.");
-    els.summary.textContent = `Season ${data.season} · every week's scores added up (${number(data.weeks.length)} weeks) · ${number(data.standings.length)} player${data.standings.length === 1 ? "" : "s"}`;
+    if (state.viewBoss) renderFull(data);
+    else renderPerBoss(data);
   }
 
   async function loadEntries() {
@@ -718,15 +840,15 @@
     }, event.target.type === "search" ? 300 : 0);
   });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
-  els.weekSelect.addEventListener("change", () => { state.week = els.weekSelect.value; void loadEntries(); });
   els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
-  els.seasonSelect.addEventListener("change", () => { state.season = els.seasonSelect.value; void loadEntries(); });
+  // a board opened with "View all" pages by FULL_ROWS, the record boards by PAGE_SIZE
+  const pageSize = () => (board().custom ? FULL_ROWS : PAGE_SIZE);
   els.prev.addEventListener("click", () => {
-    state.offset = Math.max(0, state.offset - PAGE_SIZE);
+    state.offset = Math.max(0, state.offset - pageSize());
     void loadEntries();
   });
   els.next.addEventListener("click", () => {
-    state.offset += PAGE_SIZE;
+    state.offset += pageSize();
     void loadEntries();
   });
 

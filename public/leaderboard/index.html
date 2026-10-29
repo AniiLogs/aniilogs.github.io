@@ -21,10 +21,10 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
-    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.2.0-phones">
+    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.0-per-boss">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
     <script src="/theme-shell.js?v=0.3.1-open-in-browser" defer></script>
-    <script src="/leaderboard/leaderboard.js?v=0.1.1-egg-max" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.2.0-per-boss" defer></script>
   </head>
   <body>
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -84,16 +84,7 @@
           <select data-server-select></select>
         </label>
         <div class="lb-tabs lb-board-tabs" role="tablist" aria-label="Board" data-board-tabs></div>
-        <div class="lb-weekly" data-weekly hidden>
-          <label data-week-pick>Week
-            <select data-week-select></select>
-          </label>
-          <label data-season-pick hidden>Season
-            <select data-season-select></select>
-          </label>
-          <div class="lb-tabs lb-sub-tabs" role="tablist" aria-label="Week board" data-sub-tabs></div>
-          <div class="lb-rank-by" data-rank-by hidden></div>
-        </div>
+        <div class="lb-interlink" data-interlink hidden></div>
 
         <form class="lb-filters" data-filters>
           <label>Rank by
@@ -127,7 +118,7 @@
 
         <p class="lb-facts" data-mode-note hidden>Egg Heist: season standings rank by rank, then Egg Emperor stars, then rank points (from the game's Rank Info screen). Matches come from each match's end screen.</p>
         <p class="lb-summary" data-summary role="status" aria-live="polite"></p>
-        <div class="lb-table-wrap">
+        <div class="lb-table-wrap" data-table-wrap>
           <table class="lb-table">
             <thead data-head></thead>
             <tbody data-rows></tbody>

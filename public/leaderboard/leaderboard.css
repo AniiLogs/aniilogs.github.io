@@ -58,7 +58,7 @@
 }
 /* Every dropdown on the boards (week, season, server, filters): themed like the tabs, with a themed arrow and an
    open list in the theme's own colours instead of the browser's grey box. */
-.lb-filters select, .lb-weekly select, .lb-server select {
+.lb-filters select, .lb-interlink select, .lb-server select {
   appearance: none;
   -webkit-appearance: none;
   min-width: 9rem;
@@ -82,11 +82,11 @@
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.lb-filters select:hover, .lb-weekly select:hover, .lb-server select:hover { border-color: var(--accent); }
-.lb-filters select:focus-visible, .lb-weekly select:focus-visible, .lb-server select:focus-visible {
+.lb-filters select:hover, .lb-interlink select:hover, .lb-server select:hover { border-color: var(--accent); }
+.lb-filters select:focus-visible, .lb-interlink select:focus-visible, .lb-server select:focus-visible {
   border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
 }
-.lb-filters select option, .lb-weekly select option, .lb-server select option { background-color: var(--panel); color: var(--text); }
+.lb-filters select option, .lb-interlink select option, .lb-server select option { background-color: var(--panel); color: var(--text); }
 .lb-filter-wide input[type="search"] { min-width: 14rem; }
 .lb-filters .lb-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
 
@@ -130,15 +130,10 @@
 .lb-ai { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); font-size: 0.75em; font-weight: 700; letter-spacing: 0.04em; opacity: 0.8; }
 a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 
-/* Interlink weeks and seasons */
-.lb-weekly { display: flex; flex-wrap: wrap; align-items: end; gap: 0.6rem 1rem; margin: 0.4rem 0 0.8rem; }
-.lb-weekly label { display: grid; gap: 0.25rem; font-size: 0.78rem; font-weight: 700; }
-.lb-weekly select { max-width: 100%; }
-.lb-sub-tabs { flex-basis: 100%; }
+/* Interlink: the star icon, and the "i" explanations */
 .lb-stars { display: inline-flex; align-items: center; gap: 0.3rem; font-variant-numeric: tabular-nums; }
 .lb-star { width: 1.1em; height: 1.1em; flex: none; }
 .lb-empty { padding: 1.2rem; text-align: center; opacity: 0.7; }
-.lb-boss-cell { display: inline-flex; align-items: center; gap: 0.6rem; }
 .lb-th-info { display: inline-flex; align-items: center; gap: 0.4rem; }
 .lb-info { display: inline-grid; width: 1.25rem; height: 1.25rem; place-items: center; padding: 0; border: 1px solid var(--line);
   border-radius: 50%; background: transparent; color: var(--ink-soft); font: italic 700 0.75rem/1 Georgia, serif; text-transform: none; cursor: pointer; }
@@ -149,7 +144,6 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-info-pop::backdrop { background: rgba(0, 0, 0, 0.35); }
 .lb-info-pop ul { margin: 0.5rem 0; padding-left: 1.1rem; color: var(--ink-soft); }
 .lb-info-pop p { margin: 0; color: var(--ink-soft); }
-.lb-boss-cell .lb-stars { opacity: 0.9; font-size: 0.9em; }
 
 /* a teammate's unclaimed row, a lookalike name */
 .lb-mark { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 12%, transparent); font-size: 0.72em; font-weight: 700; letter-spacing: 0.03em; opacity: 0.75; cursor: help; }
@@ -186,11 +180,6 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-proof-tabs button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 .lb-proof-tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
 
-/* boss boards: rank by score, fastest clear or a Battle Data stat */
-.lb-rank-by { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; color: var(--ink-soft); font-size: 0.85rem; }
-.lb-rank-by[hidden] { display: none; }
-.lb-rank-by button { padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
-.lb-rank-by button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 /* Egg Heist: the Ladders dropdown in place of board tabs (styled like the other board dropdowns) */
 .lb-ladders { display: inline-grid; gap: 0.25rem; font-size: 0.78rem; font-weight: 700; }
@@ -208,10 +197,10 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   .lb-gate, .lb-board { padding: 1rem 0.85rem; border-radius: 16px; }
   .lb-tabs { gap: 0.4rem; }
   .lb-tabs button { padding: 0.45rem 0.8rem; font-size: 0.85rem; }
-  .lb-filters, .lb-weekly { gap: 0.6rem; }
-  .lb-filters label, .lb-weekly label { flex: 1 1 100%; }
+  .lb-filters { gap: 0.6rem; }
+  .lb-filters label { flex: 1 1 100%; }
   .lb-filters label.lb-check { flex: 0 1 auto; }
-  .lb-filters select, .lb-weekly select, .lb-server select, .lb-ladders select, .lb-filters input[type="search"], .lb-filter-wide input[type="search"] {
+  .lb-filters select, .lb-interlink select, .lb-server select, .lb-ladders select, .lb-filters input[type="search"], .lb-filter-wide input[type="search"] {
     width: 100%; min-width: 0;
   }
   /* Server and Ladders stack like the other pickers: label above, full width */
@@ -223,4 +212,89 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   .lb-table th { font-size: 0.66rem; }
   .lb-rank { width: 1.8rem; }
   .lb-pager { gap: 0.5rem; }
+}
+
+/* Interlink: Per Boss (three boards, one a phone at a time) and Season Ladder */
+.lb-interlink { --lb-left: #6fa8ff; --lb-center: #f2a93b; --lb-right: #c792ff; display: grid; gap: 0.8rem; margin-bottom: 0.8rem; }
+.lb-interlink[hidden] { display: none; }
+.lb-interlink .is-left { --slot: var(--lb-left); }
+.lb-interlink .is-center { --slot: var(--lb-center); }
+.lb-interlink .is-right { --slot: var(--lb-right); }
+.lb-subbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem 1rem; }
+.lb-week-nav { display: flex; align-items: center; gap: 0.5rem; font-weight: 800; }
+.lb-week-nav small { color: var(--muted); font-weight: 700; }
+.lb-week-nav button { width: 2rem; height: 2rem; flex: none; border: 1px solid var(--line); border-radius: 50%; background: transparent;
+  color: var(--text); font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.lb-week-nav button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.lb-week-nav button:disabled { opacity: 0.35; cursor: default; }
+.lb-updated { display: flex; align-items: center; gap: 0.5rem; margin: 0; color: var(--muted); font-size: 0.8rem; }
+.lb-updated i { width: 0.5rem; height: 0.5rem; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18); }
+.lb-rules { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin: 0; color: var(--muted); font-size: 0.8rem; }
+.lb-rules b { color: var(--text); }
+.lb-note { margin: 0; color: var(--muted); font-size: 0.8rem; }
+
+.lb-bosses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; }
+.lb-boss { display: grid; align-content: start; gap: 0.6rem; min-width: 0; border: 1px solid var(--line); border-top: 4px solid var(--slot, var(--accent));
+  border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 55%, transparent); padding: 0.75rem; }
+.lb-boss-head, .lb-full-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.lb-boss-head > div:first-child, .lb-full-head > div:first-child { min-width: 0; }
+.lb-slot { color: var(--slot, var(--accent)); font-size: 0.7rem; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; }
+.lb-boss h3, .lb-full-head h3 { margin: 0; font-size: 1.05rem; line-height: 1.2; }
+.lb-boss h3 small, .lb-full-head h3 small { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.lb-cap { display: grid; justify-items: end; gap: 0.1rem; flex: none; color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+.lb-cap .lb-stars { color: var(--text); font-size: 1rem; font-weight: 900; }
+.lb-ladder { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
+.lb-interlink .lb-ladder select { flex: 1; min-width: 0; }
+.lb-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto 3.4rem; align-items: center; gap: 0.5rem;
+  border-radius: 8px; padding: 0.35rem 0.45rem; font-variant-numeric: tabular-nums; }
+.lb-row:nth-child(odd) { background: color-mix(in srgb, var(--panel) 70%, transparent); }
+.lb-row.is-own { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+.lb-rk { color: var(--muted); font-weight: 900; text-align: center; }
+.lb-row:nth-child(1) .lb-rk { color: #e8b923; }
+.lb-row:nth-child(2) .lb-rk { color: #a9b6ba; }
+.lb-row:nth-child(3) .lb-rk { color: #d08a5a; }
+.lb-who { display: grid; min-width: 0; }
+.lb-who-name { overflow: hidden; font-size: 0.9rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.lb-who-name a { color: inherit; }
+.lb-who small { color: var(--muted); font-size: 0.75rem; }
+.lb-val { font-weight: 900; text-align: right; }
+.lb-row .lb-stars { justify-content: flex-end; font-size: 0.82rem; font-weight: 800; }
+.lb-more { border: 1px solid rgba(var(--accent-rgb), 0.6); border-radius: 10px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent);
+  font: inherit; font-weight: 900; padding: 0.5rem; cursor: pointer; }
+.lb-more:hover { background: rgba(var(--accent-rgb), 0.16); }
+
+/* View all: one board, every figure */
+.lb-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; font-weight: 800; }
+.lb-back { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 900; padding: 0; cursor: pointer; }
+.lb-full-head { border: 1px solid var(--line); border-top: 4px solid var(--slot, var(--accent)); border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-2) 55%, transparent); padding: 0.8rem 1rem; }
+.lb-full-head h3 { font-size: 1.3rem; }
+.lb-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.lb-chips button { border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit;
+  font-size: 0.82rem; font-weight: 800; padding: 0.35rem 0.8rem; cursor: pointer; }
+.lb-chips button[aria-pressed="true"] { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.lb-table .is-ranked { color: var(--accent); font-weight: 900; }
+.lb-who-name .lb-proof { margin-left: 2px; }
+
+/* Season Ladder */
+.lb-split { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.8rem; font-weight: 800; }
+.lb-bar { display: block; height: 4px; margin-top: 4px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--line) 70%, transparent); }
+.lb-bar i { display: block; height: 100%; background: linear-gradient(90deg, #e8b923, #ffd98a); }
+
+/* Phones and the Companion app: one boss at a time, picked with Left / Center / Right */
+.lb-slot-switch { display: none; }
+@media (max-width: 760px) {
+  .lb-bosses { grid-template-columns: minmax(0, 1fr); }
+  .lb-boss[data-shown="false"] { display: none; }
+  .lb-slot-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; }
+  .lb-slot-switch button { border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 0.85rem;
+    font-weight: 900; padding: 0.45rem 0.25rem; cursor: pointer; }
+  .lb-slot-switch button small { display: block; overflow: hidden; font-size: 0.7rem; font-weight: 700; opacity: 0.85; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-slot-switch button[aria-selected="true"] { background: var(--slot, var(--accent)); color: #10181b; }
+  .lb-subbar { flex-direction: column; align-items: stretch; }
+  .lb-week-nav { justify-content: space-between; }
+  .lb-split { display: grid; }
+  .lb-split select { width: 100%; min-width: 0; }
+  .lb-hide-sm { display: none; }
 }
