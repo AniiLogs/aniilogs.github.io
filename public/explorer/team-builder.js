@@ -2011,5 +2011,17 @@
     requestDeveloperOverlay();
   }
 
+  // A #guide-… link followed on an open page also opens the Guide on that section.
+  window.addEventListener("hashchange", () => {
+    if (!/^#guide-/u.test(window.location.hash) || !host) return;
+    if (viewState.page !== "guide") {
+      viewState.page = "guide";
+      saveViewState();
+      render();
+      return;
+    }
+    document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
   window.AniilogsTeamBuilder = Object.freeze({ show });
 })();

@@ -7,8 +7,8 @@
   // Team Builder mounts it with render().
   const BASIS_LABELS = Object.freeze({
     exact: ["From the game files", "Read straight from the game's scripts or tables."],
-    "by-name": ["Matched by name", "The formula input is matched to a game stat by its name; the code that passes it in runs on the game's server."],
-    inferred: ["Inferred", "A reasoned reading of the game data, not something the files state outright."],
+    "by-name": ["Not verified: matched by name", "The formula input is matched to a game stat by its name; the code that passes it in runs on the game's server. Not yet checked in the game."],
+    inferred: ["Not verified: inferred", "A reasoned reading of the game data, not something the files state outright. Not yet checked in the game."],
     text: ["From the game text", "Taken from the game's own skill text rather than its effect data."],
   });
   const SECTION_PREFIX = "guide-";
@@ -100,6 +100,17 @@
     node.append(head);
     (section.paragraphs || []).forEach((text) => node.append(el("p", "", text)));
     if (section.table?.rows?.length) node.append(renderTable(section.table));
+    // Open questions to test in the game, as a checklist.
+    if (section.tests?.length) {
+      const list = el("ul", "guide-tests");
+      section.tests.forEach((test) => {
+        const item = el("li");
+        item.id = `${SECTION_PREFIX}test-${test.id}`;
+        item.append(el("span", "guide-test-box", ""), el("span", "", test.text));
+        list.append(item);
+      });
+      node.append(list);
+    }
     if (section.note) node.append(el("p", "guide-note", section.note));
     const back = el("a", "guide-back", "Back to contents");
     back.href = "#guide-contents";

@@ -13602,3 +13602,39 @@ details.guide-toc summary {
   margin: 0;
   font-size: 16px;
 }
+
+/* Try-Hard Guide: open questions to test in the game, shown as a checklist; unverified labels stand out. */
+.guide-tests {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide-tests li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(var(--background-rgb), 0.4);
+  padding: 8px 10px;
+}
+
+.guide-test-box {
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+  border: 2px solid #f2a93b;
+  border-radius: 4px;
+}
+
+.guide-basis.is-inferred,
+.guide-basis.is-by-name,
+.duel-step-basis {
+  border-color: #f2a93b;
+  background: rgba(242, 169, 59, 0.12);
+  color: #f2a93b;
+}

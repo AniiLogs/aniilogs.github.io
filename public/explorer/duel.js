@@ -327,7 +327,7 @@
           normal: result.hit,
           crit: result.crit,
           average: result.average,
-          // Toughness: how much of the target's toughness gauge (60 for an Aniimo) one hit drains (exact).
+          // Toughness: how much of the target's toughness gauge one hit drains, before the level gap (exact).
           toughness: attack.breakPower === null || !window.AniilogsDamage?.toughnessDrain
             ? NaN : window.AniilogsDamage.toughnessDrain(attack.breakPower, { hitShare: chosenRate(attack) }),
           breakNormal: attack.breakPower === null ? NaN : result.break,
@@ -772,7 +772,7 @@
         const entry = (options.aniilog.entries || []).find((row) => String(row.form_id) === String(effect.form_id));
         copy.append(
           el("strong", "", `${effect.label} ${formatEffect(effect, value)}`),
-          el("small", "", [effect.source?.name || effect.name, entry?.name, WHO_LABELS[effect.who] || effect.who, effect.basis !== "exact" ? effect.basis : ""].filter(Boolean).join(" · ")),
+          el("small", "", [effect.source?.name || effect.name, entry?.name, WHO_LABELS[effect.who] || effect.who, effect.basis === "inferred" ? "not verified: inferred" : effect.basis === "by-name" ? "not verified: matched by name" : effect.basis !== "exact" ? effect.basis : ""].filter(Boolean).join(" · ")),
         );
         label.append(check, copy);
         item.append(label);
@@ -822,7 +822,7 @@
       const value = Number(step.value);
       const shown = step.label.startsWith("Base") ? whole(value) : `×${Math.round(value * 1000) / 1000}`;
       item.append(el("span", "", step.label), el("b", "", shown));
-      if (step.basis && step.basis !== "exact") item.append(el("small", "duel-step-basis", step.basis));
+      if (step.basis && step.basis !== "exact") item.append(el("small", "duel-step-basis", step.basis === "inferred" ? "not verified: inferred" : step.basis === "by-name" ? "not verified: matched by name" : step.basis));
       list.append(item);
     }
     const crit = Number.isFinite(row.critChance)
@@ -866,7 +866,7 @@
     );
     root.append(results);
     const sources = el("p", "duel-sources");
-    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. Toughness is how much of the target’s 60-point toughness gauge a hit drains; BREAK dmg is formula 3023 from the BREAK stat. Which of the two triggers BREAK is decided on the game’s server, so there’s no hits-to-BREAK figure yet. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. Toughness is how much of the target’s toughness gauge a hit drains (an Aniimo’s gauge is 60; other targets differ, and the level gap changes it); BREAK dmg is formula 3023 from the BREAK stat. Which of the two triggers BREAK is decided on the game’s server, so there’s no hits-to-BREAK figure yet. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
     root.append(sources);
     return root;
   }
