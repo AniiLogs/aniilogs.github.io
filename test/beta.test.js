@@ -19,10 +19,12 @@ async function tokenHash(token) {
 
 // In-memory SQLite with every migration, the owner (ADMIN_DISCORD_IDS), a tester (developer role), an administrator and
 // a player, each with Developer Mode on unless `devMode` leaves them out, and an aLogs app token each.
-async function setup({ devMode = ["owner", "tester", "admin", "player"] } = {}) {
+async function setup({ devMode = ["owner", "tester", "admin", "player"], keepSeed = false } = {}) {
   const sqlite = new DatabaseSync(":memory:");
   const dir = resolve(import.meta.dirname, "..", "migrations");
   for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) sqlite.exec(readFileSync(resolve(dir, file), "utf8"));
+  // Most tests start from an empty list; migration 0028 seeds the first real one.
+  if (!keepSeed) sqlite.exec("DELETE FROM beta_tests");
   const statement = (sql, values = []) => ({
     async first() { return sqlite.prepare(sql).get(...values) ?? null; },
     async all() { return { results: sqlite.prepare(sql).all(...values) }; },
@@ -199,4 +201,12 @@ test("publishing is upsert-only: the RC43 bundle's first 12 tests leave the othe
   assert.equal((await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: long })).status, 400);
   const odd = { build: "x", items: [{ id: "odd", title: "t", how: "h", details: [{ text: "no" }] }] };
   assert.equal((await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body: odd })).status, 400);
+});
+
+test("migration 0028 seeds the 26 tests of 0.1.28-RC43, the same as the seed file", async () => {
+  const { env, tokens } = await setup({ keepSeed: true });
+  const seed = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "scripts", "beta-seed-0.1.28-RC43.json"), "utf8"));
+  const list = await (await app(env, tokens.tester, "/api/beta/tests")).json();
+  assert.equal(list.build, "0.1.28-RC43");
+  assert.deepEqual(list.items, seed.items);
 });
