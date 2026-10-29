@@ -3879,6 +3879,7 @@ function itemlogEntryMatchesFilter(entry, selectedSource, park = "all", tier = "
   if (selectedSource === "all") return true;
   if (selectedSource === "has-held-stats") return Boolean(entry?.held_item_details?.base_attributes?.length);
   if (selectedSource === "has-rv-details") return Boolean(entry?.rv_details);
+  if (selectedSource === "new-in-build") return Boolean(entry?.added_in_build);
   if (selectedSource.startsWith("quality:")) {
     return String(entry?.quality || "") === selectedSource.slice("quality:".length);
   }
@@ -5147,16 +5148,25 @@ function renderCatalogCategoryToolbar(view) {
     appendSourceOption(sourceSelect, { id: "all", label: "All filters", count: categoryEntries.length });
 
     const expeditionCount = categoryEntries.filter((entry) => itemlogExpeditionSources(entry).length > 0).length;
+    // Items first added to the Item-log by the latest game update carry the build that added them.
+    const newEntries = categoryEntries.filter((entry) => entry?.added_in_build);
     const featuredSources = document.createElement("optgroup");
     featuredSources.label = "Featured filters";
+    if (newEntries.length) {
+      appendSourceOption(featuredSources, {
+        id: "new-in-build",
+        label: `New in game build ${newEntries[0].added_in_build}`,
+        count: newEntries.length,
+      });
+    }
     if (expeditionCount) {
       appendSourceOption(featuredSources, {
         id: "rv-expedition",
         label: "RV Park Expeditions",
         count: expeditionCount,
       });
-      sourceSelect.append(featuredSources);
     }
+    if (featuredSources.children.length) sourceSelect.append(featuredSources);
 
     const methodSources = itemlogMethodSourceOptions(categoryEntries);
     const acquisitionSources = document.createElement("optgroup");
