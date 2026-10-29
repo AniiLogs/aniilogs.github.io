@@ -20,30 +20,32 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.13.4-phone-topbar">
+    <link rel="stylesheet" href="/styles.css?v=0.13.5-site-chrome">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.0">
     <script src="/explorer/app-config.js?v=20261029-build3846247-damage-ui-r80" defer></script>
     <script src="/theme-shell.js?v=0.3.1-open-in-browser" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
-    <script src="/app.js?v=0.10.4-search" defer></script>
+    <script src="/site-chrome.js?v=0.1.0" defer></script>
+    <script src="/app.js?v=0.10.5-site-chrome" defer></script>
   </head>
-  <body>
+  <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
-    <header class="site-header">
-      <a class="brand" href="/" aria-label="AniiLogs home">
-        <img class="brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
-        <span class="brand-name">Anii<span>Logs</span></span>
+    <header class="app-topbar" data-chrome-page="home">
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <img class="app-topbar-brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
       </a>
       <nav aria-label="Main navigation">
-        <a href="/explorer/">Map</a>
-        <a href="/explorer/?view=aniilog">Aniilog</a>
-        <a href="/explorer/?view=itemlog">Item-log</a>
-        <a href="/explorer/?view=checklist">Checklists</a>
-        <a href="/explorer/?view=team">Team Builder</a>
-        <a href="/leaderboard/">Leaderboards</a>
-        <a href="/companion/">Companion App</a>
-        <a href="/?view=profile">Profiles</a>
+        <a href="/explorer/" data-chrome-link="map">Map</a>
+        <a href="/explorer/?view=aniilog" data-chrome-link="aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog" data-chrome-link="itemlog">Item-log</a>
+        <a href="/explorer/?view=checklist" data-chrome-link="checklist">Checklists</a>
+        <a href="/explorer/?view=team" data-chrome-link="team">Team Builder</a>
+        <a href="/leaderboard/" data-chrome-link="leaderboards">Leaderboards</a>
+        <a href="/companion/" data-chrome-link="companion">Companion App</a>
+        <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
       </nav>
-      <div class="account-actions">
+      <div class="app-topbar-actions">
         <label class="theme-picker-label">
           <span class="theme-picker-copy">Theme</span>
           <select class="theme-picker" data-site-theme-select aria-label="Website theme">
@@ -68,7 +70,10 @@
           <option value="zh-CN">🇨🇳</option>
           <option value="zh-TW">🇹🇼</option>
         </select>
-        <a class="account-settings-shortcut" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">⚙</a>
+        <a class="settings-gear-button" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">
+          <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+          <span class="settings-gear-label">Settings</span>
+        </a>
         <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
           <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
           <span>Sign in</span>
@@ -234,7 +239,7 @@
       </section>
 
       <section id="my-profile" class="profile-overview" aria-labelledby="my-profile-title" data-profile-overview hidden>
-        <div class="profile-search" data-profile-search hidden>
+        <div class="profile-search" data-profile-finder hidden>
           <label class="profile-search-field">
             <span class="sr-only">Find a player</span>
             <input type="search" placeholder="Find a player by name or UID" autocomplete="off" spellcheck="false" maxlength="40"
@@ -243,7 +248,11 @@
           <ul class="profile-search-results" id="profile-search-results" role="listbox" hidden data-profile-search-results></ul>
           <a class="profile-search-back" href="/?view=profile" hidden data-profile-back>Back to my profile</a>
         </div>
-        <p class="profile-signin" data-profile-signin hidden>Sign in with Discord to see your profile. You can still look up anyone whose profile is public.</p>
+        <div class="profile-signin" data-profile-signin hidden>
+          <strong>Sign in to see your profile.</strong>
+          <p>Your profile is private until you make it public. You can still look up anyone whose profile is public with the search above.</p>
+          <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
+        </div>
         <header class="profile-overview-header">
           <img class="profile-avatar" alt="" width="64" height="64" data-overview-avatar hidden>
           <div>

@@ -548,7 +548,10 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
 .profile-search-empty { padding: 0.6rem 0.75rem; color: var(--muted, var(--ink-soft)); font-size: 0.85rem; }
 .profile-search-back { font-size: 0.88rem; }
 .profile-search-back[hidden], .profile-signin[hidden], .profile-edit[hidden] { display: none; }
-.profile-signin { margin: 0 0 1rem; color: var(--muted, var(--ink-soft)); }
+.profile-signin { display: grid; justify-items: start; gap: 0.5rem; margin: 0 0 1rem; border: 1px solid var(--line); border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--text); padding: 1.3rem 1.4rem; }
+.profile-signin strong { font-size: 1.1rem; }
+.profile-signin p { margin: 0; color: var(--muted, var(--ink-soft)); }
 .profile-edit { margin: 0 0 1.25rem; }
 .profile-edit > summary { cursor: pointer; font-weight: 700; color: var(--accent, var(--mint)); }
 .profile-edit > form { margin-top: 0.75rem; max-width: 34rem; }

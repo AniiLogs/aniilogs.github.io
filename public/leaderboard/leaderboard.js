@@ -64,7 +64,7 @@
     board: $("[data-board]"), badge: $("[data-preview-badge]"), filters: $("[data-filters]"),
     boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
-    login: $("[data-login]"), account: $("[data-account]"),
+    login: $("[data-login]"),
     serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"),
     interlink: $("[data-interlink]"), tableWrap: $("[data-table-wrap]"),
   };
@@ -859,51 +859,17 @@
     els.gateTitle.textContent = title;
     els.gateDetail.replaceChildren(detail, link ? el("a", { href: link.href, text: link.text }) : "");
   }
-  // Finishes a Discord sign-in that returned to this page (one-time handoff in the URL fragment).
-  async function consumeAuthHandoff() {
-    const fragment = new URLSearchParams(window.location.hash.replace(/^#/u, ""));
-    const handoff = fragment.get("aniilogs_auth") || "";
-    if (!handoff) return;
-    fragment.delete("aniilogs_auth");
-    const cleanUrl = new URL(window.location.href);
-    cleanUrl.hash = fragment.toString();
-    window.history.replaceState(null, "", cleanUrl);
-    const response = await apiFetch("/auth/exchange", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ handoff }),
-    });
-    if (!response.ok) return;
-    const result = await response.json();
-    if (/^[A-Za-z0-9_-]{32,256}$/u.test(String(result.token || ""))) {
-      window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, result.token);
-    }
-  }
-
   async function start() {
     if (!API_URL) return gate("Leaderboards are unavailable.", "The AniiLogs API is not configured for this page.");
-    try {
-      await consumeAuthHandoff();
-    } catch {
-      // A failed handoff leaves the page signed out; the gate explains what to do.
-    }
-    const returnUrl = new URL(window.location.href);
-    returnUrl.hash = "";
-    els.login.href = `${API_URL}/auth/discord/start?return_to=${encodeURIComponent(returnUrl.toString())}`;
+    // the top bar (site-chrome.js) finishes a returning Discord sign-in and shows the account first
+    await window.AniilogsChrome?.ready;
     let status;
-    let account = null;
     try {
-      const [statusResponse, meResponse] = await Promise.all([apiFetch("/leaderboard/status"), apiFetch("/auth/me")]);
-      status = await statusResponse.json();
-      const me = await meResponse.json();
-      if (me.authenticated) account = me.account;
+      status = await (await apiFetch("/leaderboard/status")).json();
     } catch {
       return gate("Leaderboards are temporarily unavailable.", "The account service could not be reached. Try again shortly.");
     }
     state.status = status;
-    if (account) {
-      els.login.hidden = true;
-      els.account.hidden = false;
-      els.account.textContent = account.displayName || account.globalName || account.username;
-    }
     if (!status.public) {
       if (!status.authenticated) return gate("Leaderboards are in developer preview.", "Sign in with a developer account to preview them. ", { href: els.login.href, text: "Sign in with Discord" });
       if (!status.canRead) return gate("Leaderboards are in developer preview.", "They will open to everyone once they are ready.");

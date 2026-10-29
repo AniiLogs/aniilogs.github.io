@@ -23,27 +23,30 @@
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"aLogs","alternateName":"Aniiloger's Companion App","operatingSystem":"Windows 10, Windows 11","applicationCategory":"GameApplication","description":"aLogs, a free and ad-free Windows app for Aniimo: a boss DPS meter overlay and an Egg Heist overlay (Sanctum Helper), with your Holo-Battle results saved and your leaderboard records sent with proof.","url":"https://aniilogs.github.io/companion/","downloadUrl":"https://github.com/AniiLogs/aniilogs.github.io/releases/latest/download/AniiLogs-Companion-Setup.exe","image":"https://aniilogs.github.io/icons/og-card.png","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
     <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
     <link rel="stylesheet" href="/companion/companion.css?v=0.2.0-alogs">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.0">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
     <script src="/theme-shell.js?v=0.3.1-open-in-browser" defer></script>
+    <script src="/site-chrome.js?v=0.1.0" defer></script>
     <script src="/companion/companion.js?v=1" defer></script>
   </head>
-  <body>
+  <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
-    <header class="site-header">
-      <a class="brand" href="/" aria-label="AniiLogs home">
-        <img class="brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
-        <span class="brand-name">Anii<span>Logs</span></span>
+    <header class="app-topbar" data-chrome-page="companion" data-chrome-account>
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <img class="app-topbar-brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
       </a>
       <nav aria-label="Main navigation">
-        <a href="/explorer/">Map</a>
-        <a href="/explorer/?view=aniilog">Aniilog</a>
-        <a href="/explorer/?view=itemlog">Item-log</a>
-        <a href="/explorer/?view=team">Team Builder</a>
-        <a href="/leaderboard/">Leaderboards</a>
-        <a href="/companion/" aria-current="page">Companion App</a>
-        <a href="/?view=profile">Profiles</a>
+        <a href="/explorer/" data-chrome-link="map">Map</a>
+        <a href="/explorer/?view=aniilog" data-chrome-link="aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog" data-chrome-link="itemlog">Item-log</a>
+        <a href="/explorer/?view=checklist" data-chrome-link="checklist">Checklists</a>
+        <a href="/explorer/?view=team" data-chrome-link="team">Team Builder</a>
+        <a href="/leaderboard/" data-chrome-link="leaderboards">Leaderboards</a>
+        <a href="/companion/" data-chrome-link="companion" aria-current="page">Companion App</a>
+        <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
       </nav>
-      <div class="account-actions">
+      <div class="app-topbar-actions">
         <label class="theme-picker-label">
           <span class="theme-picker-copy">Theme</span>
           <select class="theme-picker" data-site-theme-select aria-label="Website theme">
@@ -53,6 +56,42 @@
             <option value="pawney">Pawney</option>
           </select>
         </label>
+        <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
+          <option value="en">🇺🇸</option>
+          <option value="de-DE">🇩🇪</option>
+          <option value="es-ES">🇪🇸</option>
+          <option value="fr-FR">🇫🇷</option>
+          <option value="id-ID">🇮🇩</option>
+          <option value="ja">🇯🇵</option>
+          <option value="ko">🇰🇷</option>
+          <option value="pt-PT">🇵🇹</option>
+          <option value="ru-RU">🇷🇺</option>
+          <option value="th-TH">🇹🇭</option>
+          <option value="vi-VN">🇻🇳</option>
+          <option value="zh-CN">🇨🇳</option>
+          <option value="zh-TW">🇹🇼</option>
+        </select>
+        <a class="settings-gear-button" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">
+          <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+          <span class="settings-gear-label">Settings</span>
+        </a>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span data-account hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <a href="/?view=profile" data-profile-link hidden>My Profile</a>
+            <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
+            <a href="/explorer/?settings=1">Settings</a>
+            <button type="button" data-logout hidden>Log out</button>
+          </div>
+        </details>
       </div>
     </header>
 

@@ -1,0 +1,478 @@
+/* The shared top bar on Leaderboards, Companion App and Profiles: the explorer's own top bar, account menu and phone
+   bottom tabs, copied from public/explorer/styles.css (every rule naming .app-topbar, .theme-picker, .account-menu,
+   .account-sign-in, .discord-icon, .settings-gear, .language-picker or .bottom-tabs), so the five explorer sections
+   and these three pages share one look. Keep it in step when the explorer's top bar changes. */
+
+.app-topbar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 58px;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(var(--panel-rgb), 0.97);
+  box-shadow: 0 10px 28px rgba(var(--background-rgb), 0.3);
+  padding: 8px 16px;
+  view-transition-name: aniilogs-topbar;
+}
+
+.app-topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.app-topbar-brand-mark {
+  display: block;
+  width: 43px;
+  height: 43px;
+  flex: none;
+}
+
+.app-topbar-brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.app-topbar-brand-name span {
+  color: color-mix(in srgb, var(--accent) 38%, var(--text));
+}
+
+.app-topbar nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.app-topbar nav a {
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--muted) 76%, var(--text));
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.app-topbar nav a:hover,
+.app-topbar nav a:focus-visible,
+.app-topbar nav a[aria-current="page"] {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.13);
+  color: color-mix(in srgb, var(--accent) 34%, var(--text));
+  outline: none;
+}
+
+.app-topbar nav .nav-disabled,
+.app-topbar nav .nav-disabled:hover {
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 68%, var(--background));
+  cursor: not-allowed;
+}
+
+.app-topbar-context {
+  display: none;
+}
+
+.app-topbar-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.theme-picker-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.theme-picker-copy {
+  white-space: nowrap;
+}
+
+.theme-picker {
+  width: 7rem;
+  min-height: 24px;
+  max-width: 7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-2) 88%, var(--accent));
+  color: var(--text);
+  padding: 2px 24px 2px 10px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  text-align: center;
+  text-align-last: center;
+  cursor: pointer;
+}
+
+.theme-picker:hover,
+.theme-picker:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 2px;
+}
+
+.account-menu {
+  position: relative;
+  color: var(--text);
+}
+
+.account-menu > summary {
+  list-style: none;
+}
+
+.account-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-menu-trigger {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, #5865f2 64%, var(--line));
+  border-radius: 999px;
+  background: #5865f2;
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 7px 18px rgba(38, 45, 116, 0.3);
+  text-decoration: none;
+}
+
+.account-menu-trigger:hover,
+.account-menu-trigger:focus-visible,
+.account-menu[open] .account-menu-trigger {
+  background: #4752c4;
+  outline: 2px solid rgba(88, 101, 242, 0.38);
+  outline-offset: 2px;
+}
+
+.discord-icon {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+
+.account-menu-chevron {
+  transition: transform 140ms ease;
+}
+
+.account-menu[open] .account-menu-chevron {
+  transform: rotate(180deg);
+}
+
+.account-menu-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  display: grid;
+  width: max-content;
+  min-width: 190px;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px;
+  box-shadow: var(--shadow);
+}
+
+.account-menu-popover a,
+.account-menu-popover button {
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 780;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.account-menu-popover a:hover,
+.account-menu-popover a:focus-visible,
+.account-menu-popover button:hover,
+.account-menu-popover button:focus-visible {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+  outline: none;
+}
+
+.settings-gear-button {
+  position: static;
+  display: inline-grid;
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  line-height: 0;
+  padding: 0;
+}
+
+.settings-gear-button:hover,
+.settings-gear-button:focus-visible,
+.settings-gear-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: color-mix(in srgb, var(--accent) 28%, var(--text));
+  outline: none;
+}
+
+.settings-gear-label {
+  display: none;
+}
+
+.account-menu-popover .settings-gear-button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.account-menu-popover .settings-gear-label {
+  display: inline;
+}
+
+.language-picker {
+  width: 38px;
+  height: 34px;
+  flex: 0 0 38px;
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-2) 88%, var(--accent));
+  color: var(--text);
+  padding: 0;
+  font: inherit;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+  text-align-last: center;
+  cursor: pointer;
+}
+
+.language-picker:hover,
+.language-picker:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 2px;
+}
+
+@media (max-width: 820px) {
+  .app-topbar {
+    position: sticky;
+    grid-template-areas:
+    "brand actions"
+    "nav nav";
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    overflow: visible;
+    padding-inline: 12px;
+  }
+
+  .app-topbar-brand {
+    grid-area: brand;
+  }
+
+  .app-topbar nav {
+    grid-area: nav;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-topbar nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-topbar-context {
+    display: none;
+  }
+
+  .app-topbar-actions {
+    grid-area: actions;
+  }
+
+  .app-topbar-actions .theme-picker {
+    width: 6.75rem;
+    max-width: 6.75rem;
+  }
+
+  .app-topbar-actions .theme-picker-copy {
+    font-size: 9px;
+  }
+
+  .account-menu-trigger > span:not(.account-menu-chevron) {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+  }
+
+  .account-sign-in {
+    width: 36px;
+    min-height: 36px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+}
+
+html[data-embed="app"] .app-topbar-brand,
+html[data-embed="app"] .app-topbar nav {
+  display: none !important;
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .app-topbar {
+    zoom: var(--ui-scale);
+  }
+}
+
+html[data-embed="app"] .theme-picker-label {
+  display: none !important;
+}
+
+.account-menu-extras {
+  display: grid;
+  gap: 8px;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.account-menu-characters {
+  display: grid;
+  gap: 2px;
+}
+
+.account-menu-characters small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account-menu-character-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.account-menu-character-list button {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.bottom-tabs {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  html:not([data-embed="app"]) .app-topbar nav {
+    display: none;
+  }
+
+  html:not([data-embed="app"]) .app-topbar {
+    grid-template-areas: "brand actions";
+  }
+
+  html:not([data-embed="app"]) .bottom-tabs {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-top: 1px solid var(--line);
+    background: rgba(var(--panel-rgb), 0.98);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    backdrop-filter: blur(8px);
+  }
+
+  .bottom-tabs a {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    min-height: 56px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+    text-decoration: none;
+  }
+
+  .bottom-tabs a svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .bottom-tabs a[aria-current="page"] {
+    color: var(--accent);
+  }
+}
+
+.account-sign-in span {
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .app-topbar-brand-name,
+  .theme-picker-copy {
+    display: none;
+  }
+}
+
+/* ---- On these pages: the bar is fixed on wide screens, so the page starts under it; on phones it scrolls with the
+   page (sticky) and the bottom tabs need room at the end. The settings gear is a link here (the settings panel
+   lives in the explorer). */
+body.site-chrome-page { padding-top: 58px; }
+.settings-icon { width: 22px; height: 22px; stroke-width: 2.15; }
+.settings-gear-button { box-sizing: border-box; border: 1px solid transparent; border-radius: 999px; text-decoration: none; }
+.app-topbar nav a { text-decoration: none; }
+@media (max-width: 820px) {
+  body.site-chrome-page { padding-top: 0; }
+  html:not([data-embed="app"]) body.site-chrome-page { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+}
+html[data-embed="app"] body.site-chrome-page { padding-top: 0; }
+html[data-embed="app"] body.site-chrome-page .app-topbar { position: static; }

@@ -730,7 +730,7 @@ function profileHref(params) {
 if (PROFILE_VIEW) {
   document.body.classList.add("profile-page");
   profileOverview.hidden = false;
-  document.querySelector("[data-profile-search]").hidden = false;
+  document.querySelector("[data-profile-finder]").hidden = false;
   const back = document.querySelector("[data-profile-back]");
   back.href = profileHref({ view: "profile" });
   // your profile editor (name, about, public switch) sits under "Edit profile" on your own profile
@@ -787,7 +787,7 @@ if (PROFILE_VIEW) {
     if (event.key === "ArrowUp") { event.preventDefault(); (i > 0 ? links[i - 1] : input).focus(); }
     if (event.key === "Escape") { close(); input.focus(); }
   });
-  document.addEventListener("click", (event) => { if (!event.target.closest("[data-profile-search]")) close(); });
+  document.addEventListener("click", (event) => { if (!event.target.closest("[data-profile-finder]")) close(); });
 }
 
 if (!API_URL) {
