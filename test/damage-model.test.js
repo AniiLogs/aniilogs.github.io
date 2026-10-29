@@ -89,3 +89,17 @@ test("BREAK damage is formula 3023: (BREAK - BREAK DEF) x Might / 10 x bpRate, w
   assert.equal(D.hitsToBreak({ pet_break_bar: { by_level: [2185, 27866] } }, 2, result.break), 19);
   assert.equal(D.hit(breaker, defender, { ...kick, breakRate: 0 }, context).break, 0);
 });
+
+test("stat-scaled buff values follow base x min(max, min + stat x rate)", () => {
+  const waltz = { stat: "ATK", bases: [0.35], min: 0.8, per_point: 0.00075, max: 1.4 };
+  assert.equal(Math.round(D.scaledValue(waltz, { ATK: 400 }) * 1e6) / 1e6, 0.385);
+  assert.equal(D.scaledValue(waltz, { ATK: 5000 }), 0.35 * 1.4);
+  const range = D.scaledRange(waltz);
+  assert.equal(Math.round(range.from * 1000) / 1000, 0.28);
+  assert.equal(Math.round(range.to * 1000) / 1000, 0.49);
+  assert.equal(Math.round(range.cap_at), 800);
+  const guard = { stat: "P.DEF", bases: [100], min: 0, per_point: 0.002, max: 1.2, round_down: true };
+  assert.equal(D.scaledValue(guard, { "P.DEF": 499 }), 99);
+  assert.equal(D.scaledValue(guard, { "P.DEF": 900 }), 120);
+  assert.equal(Math.round(D.scaledValue({ ...waltz, factor: -1 }, { ATK: 0 }) * 1000) / 1000, -0.28);
+});
