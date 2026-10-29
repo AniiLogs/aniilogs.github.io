@@ -5916,6 +5916,13 @@ function renderCatalogAbilityBehavior(ability) {
   return details;
 }
 
+// The Try-Hard Guide's note for a skill or trait of the Aniimo being shown, when the game text leaves something out.
+function abilityExplanation(kind, id) {
+  if (!id || !window.AniilogsGuide?.explanationFor) return null;
+  const entry = (state.aniilogData?.entries || []).find((row) => row.id === state.catalogSelection.aniilog);
+  return window.AniilogsGuide.explanationFor(kind, id, entry?.form_id);
+}
+
 function renderCatalogAbilitySection(title, abilities, emptyText = "No data available.") {
   const section = createCatalogSection(title);
   const compact = title === "Ultimate" || title === "Traits" || title === "Aniilog Research" || title === "Mobility skills";
@@ -6010,6 +6017,9 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
       const name = document.createElement("strong");
       name.textContent = displayed.name || "Ability";
       heading.append(name);
+      // What the game text leaves out (damage-guide.js "i" notes, matched to this form).
+      const note = abilityExplanation(title === "Traits" ? "trait" : "skill", displayed.trait_id || displayed.skill_id || ability.trait_id || ability.skill_id);
+      if (note?.text) heading.append(afpInfo(note.text));
       if (displayed.core) {
         const coreBadge = document.createElement("span");
         coreBadge.className = "catalog-core-skill-badge";
@@ -11061,7 +11071,8 @@ function catalogSearchShortcutTarget() {
   let node = null;
   if (view === "aniilog" || view === "itemlog") node = els.catalogSidebarContent?.querySelector(".catalog-search");
   else if (view === "checklist") node = document.getElementById("checklistSearchInput");
-  else if (view === "team") node = document.querySelector("#teamSidebarContent .team-sidebar-heading");
+  // On the Try-Hard Guide it goes back to the contents instead.
+  else if (view === "team") node = document.getElementById("guide-contents") || document.querySelector("#teamSidebarContent .team-sidebar-heading");
   else node = document.getElementById("searchInput");
   return node && node.getClientRects().length ? node : null;
 }
@@ -11086,6 +11097,10 @@ function updateCatalogSearchShortcut() {
     show = rect.bottom < bar || rect.top > window.innerHeight;
   }
   button.hidden = !show;
+  const contents = input?.id === "guide-contents";
+  button.dataset.mode = contents ? "contents" : "search";
+  button.setAttribute("aria-label", contents ? "Back to contents" : "Back to search");
+  button.title = button.getAttribute("aria-label");
 }
 
 function initCatalogSearchShortcut() {
@@ -11097,7 +11112,8 @@ function initCatalogSearchShortcut() {
   button.hidden = true;
   button.setAttribute("aria-label", "Back to search");
   button.title = "Back to search";
-  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>';
+  button.innerHTML = '<svg class="is-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>'
+    + '<svg class="is-contents" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
   button.addEventListener("click", returnToCatalogSearch);
   document.body.append(button);
   let frame = 0;

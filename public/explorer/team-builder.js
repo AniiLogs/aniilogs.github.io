@@ -62,7 +62,8 @@
     try {
       const saved = JSON.parse(window.localStorage.getItem(VIEW_STORAGE_KEY) || "null");
       return {
-        page: ["types", "duel"].includes(saved?.page) ? saved.page : "team",
+        // A shared link to a Guide section (#guide-…) opens the Guide.
+        page: /^#guide-/u.test(window.location.hash) ? "guide" : ["types", "duel", "guide"].includes(saved?.page) ? saved.page : "team",
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
         memberTab: String(saved?.memberTab || "skills"),
       };
@@ -127,6 +128,11 @@
     // Stats tab inputs (also read by the 1v1 tab); unset means level cap and no potential.
     if (Number.isFinite(Number(value?.level)) && value?.level !== null && value?.level !== "") member.level = Math.round(Number(value.level));
     if (Number.isFinite(Number(value?.potential)) && value?.potential !== null && value?.potential !== "") member.potential = Math.round(Number(value.potential));
+    // Stats tab card calculator: personality letters (one per pair) and one held item with its level.
+    if (Array.isArray(value?.personality)) member.personality = value.personality.map(String).filter((letter) => /^[EISNTFJP]$/u.test(letter)).slice(0, 4);
+    if (value?.heldItem && Number.isFinite(Number(value.heldItem.itemId))) {
+      member.heldItem = { itemId: String(value.heldItem.itemId), level: Math.max(0, Math.round(Number(value.heldItem.level) || 0)) };
+    }
     return member;
   }
 
@@ -659,13 +665,28 @@
     return section;
   }
 
-  function renderSkillCard(skill, slotLabel) {
+  // The Try-Hard Guide's note for a skill or trait when its game text leaves something out (damage-guide.js).
+  function guideNote(kind, id, formId) {
+    const note = window.AniilogsGuide?.explanationFor?.(kind, id, formId);
+    if (!note?.text) return null;
+    const line = el("p", "team-guide-note");
+    line.append(el("strong", "", "Worth knowing: "), note.text);
+    return line;
+  }
+
+  function formIdOf(form) {
+    return Object.keys(data?.forms || {}).find((id) => data.forms[id] === form) || null;
+  }
+
+  function renderSkillCard(skill, slotLabel, formId) {
     const card = el("article", "team-skill-summary");
     if (skill.icon) card.append(icon(skill.icon, "team-skill-icon"));
     const copy = el("div", "team-skill-copy");
     const top = el("div", "team-skill-top");
     top.append(el("strong", "", skill.name), pill(slotLabel));
     copy.append(top);
+    const note = guideNote("skill", skill.id, formId);
+    if (note) copy.append(note);
     const meta = [
       skill.might !== null ? `Might ${skill.might}` : "",
       Number(skill.ep_cost) > 0 ? `EP ${skill.ep_cost}` : "",
@@ -1162,7 +1183,7 @@
       section.append(el("p", "team-empty-copy", allyOnly ? "This Aniimo has no Core skill." : "Choose skills to see how they work."));
     } else {
       const cards = el("div", "team-skill-cards");
-      chosen.forEach(({ skill, slot }) => cards.append(renderSkillCard(skill, slot)));
+      chosen.forEach(({ skill, slot }) => cards.append(renderSkillCard(skill, slot, member.formId)));
       section.append(cards);
     }
     const normal = skillsOf(form, "normal")[0];
@@ -1189,6 +1210,8 @@
       const copy = el("div", "team-skill-copy");
       copy.append(el("div", "team-skill-top"));
       copy.firstChild.append(el("strong", "", trait.name || "Trait"), pill("Trait"));
+      const traitNote = guideNote("trait", trait.id, formIdOf(form));
+      if (traitNote) copy.append(traitNote);
       if (trait.description) copy.append(el("small", "", trait.description));
       if (trait.buffs.length) {
         const list = el("ul", "team-buff-list");
@@ -1496,10 +1519,132 @@
     return label;
   }
 
+  const PERSONALITY_PAIRS = Object.freeze([["E", "I"], ["S", "N"], ["T", "F"], ["J", "P"]]);
+  const CARD_STATS = Object.freeze(["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"]);
+
+  // The game's stat card for this member (damage-model.js statTotals): base stats from level and potential, then
+  // personality and held item, and CP. Resonance and collection bonuses aren't included.
+  function renderCardCalculator(member, entry) {
+    const model = window.AniilogsDamage;
+    const growth = aniilog?.stat_growth;
+    if (!model?.statTotals || !growth) return null;
+    const box = el("div", "team-card-calc");
+    const traits = data?.personality?.traits || [];
+    const chosen = new Set(member.personality || []);
+    const pairs = el("div", "team-card-personality");
+    pairs.append(el("span", "team-field-label", "Personality"));
+    PERSONALITY_PAIRS.forEach((pair) => {
+      const group = el("div", "team-card-pair");
+      group.setAttribute("role", "group");
+      pair.forEach((letter) => {
+        const trait = traits.find((row) => row.letter === letter);
+        const control = button(letter, "team-card-letter", () => {
+          const next = new Set(member.personality || []);
+          pair.forEach((other) => next.delete(other));
+          if (!chosen.has(letter)) next.add(letter);
+          member.personality = [...next];
+          persist();
+          render();
+        });
+        control.setAttribute("aria-pressed", String(chosen.has(letter)));
+        control.title = trait ? `${trait.name}: ${trait.battle}` : letter;
+        group.append(control);
+      });
+      pairs.append(group);
+    });
+    box.append(pairs);
+
+    const form = data?.forms?.[member.formId];
+    const items = (form?.recommended?.held_items || []).flatMap((item) => item.tiers.map((tier) => ({ ...tier, name: item.name })));
+    const itemRow = el("div", "team-card-item");
+    const itemSelect = el("select", "team-select");
+    itemSelect.setAttribute("aria-label", "Held item");
+    const none = el("option", "", "No held item");
+    none.value = "";
+    itemSelect.append(none);
+    items.forEach((tier) => {
+      const option = el("option", "", `${tier.name} (${tier.quality_label || `quality ${tier.quality}`})`);
+      option.value = String(tier.item_id);
+      option.selected = String(tier.item_id) === member.heldItem?.itemId;
+      itemSelect.append(option);
+    });
+    itemSelect.addEventListener("change", () => {
+      member.heldItem = itemSelect.value ? { itemId: itemSelect.value, level: member.heldItem?.level || 0 } : undefined;
+      if (!member.heldItem) delete member.heldItem;
+      persist();
+      render();
+    });
+    const levels = Object.keys(data?.held_item_levels || {}).map(Number).filter(Number.isFinite);
+    const maxItemLevel = levels.length ? Math.max(...levels) : 0;
+    itemRow.append(el("label", "team-field", ""));
+    itemRow.firstChild.append(el("span", "team-field-label", "Held item"), itemSelect);
+    if (member.heldItem && maxItemLevel) {
+      itemRow.append(numberField(`Item level (0–${maxItemLevel})`, member.heldItem.level || 0, 0, maxItemLevel, (next) => {
+        member.heldItem = { ...member.heldItem, level: next };
+        persist();
+        render();
+      }));
+    }
+    box.append(itemRow);
+
+    const cap = Number(growth.level_cap) || 70;
+    const maxPotential = Number(growth.attribute_points_max) || 20;
+    const totals = model.statTotals(data, aniilog, member.formId, {
+      level: clampInt(member.level ?? cap, 1, cap, cap),
+      potential: clampInt(member.potential ?? 0, 0, maxPotential, 0),
+      personality: member.personality || [],
+      heldItems: member.heldItem ? [{ itemId: member.heldItem.itemId, level: member.heldItem.level || 0 }] : [],
+    });
+    if (!totals) return box;
+    const table = el("table", "team-stats-table team-card-table");
+    const head = el("tr");
+    ["Stat", "Species", "Base", "Card total"].forEach((text) => head.append(el("th", "", text)));
+    table.append(el("thead"), el("tbody"));
+    table.tHead.append(head);
+    const species = Object.fromEntries((entry?.stats || []).map((row) => [model.STAT_ALIASES?.[row.label] || row.label, row.value]));
+    CARD_STATS.forEach((stat) => {
+      const line = el("tr");
+      const total = totals.total[stat];
+      const base = totals.base[stat];
+      const bonus = el("td", "team-card-total", total === null ? "–" : total.toLocaleString());
+      const sources = totals.bonus?.[stat]?.sources || [];
+      if (sources.length) bonus.title = sources.map((row) => `${row.source}: ${row.key} ${row.value}`).join("\n");
+      line.append(el("th", "", stat), el("td", "", String(species[stat] ?? "–")), el("td", "", base === null ? "–" : base.toLocaleString()), bonus);
+      table.tBodies[0].append(line);
+    });
+    box.append(table);
+    if (Number.isFinite(totals.cp)) {
+      const cp = el("p", "team-card-cp");
+      cp.append(el("strong", "", "CP "), totals.cp.toLocaleString());
+      box.append(cp);
+    }
+    box.append(el("p", "team-data-note", "Card total = base × (1 + potential, personality and held-item percentages) + flat bonuses, as the game adds them up. Not included: resonance and collection bonuses, and held-item talents."));
+    return box;
+  }
+
   function renderStatTable(member, entry) {
     const section = el("section", "team-config-section");
     const growth = aniilog?.stat_growth;
     const grownStat = window.AniilogsDuel?.grownStat;
+    const calculator = window.AniilogsDamage?.statTotals && entry?.stats?.length;
+    if (calculator && growth) {
+      const cap = Number(growth.level_cap) || 70;
+      const maxPotential = Number(growth.attribute_points_max) || 20;
+      const level = clampInt(member.level ?? cap, 1, cap, cap);
+      const potential = clampInt(member.potential ?? 0, 0, maxPotential, 0);
+      section.append(sectionHeading("Stats", `Level ${level}, potential ${potential}`));
+      const inputs = el("div", "team-stats-inputs");
+      inputs.append(
+        numberField(`Level (1–${cap})`, level, 1, cap, (next) => { member.level = next; persist(); render(); }),
+        numberField(`Potential, each stat (0–${maxPotential})`, potential, 0, maxPotential, (next) => { member.potential = next; persist(); render(); }),
+      );
+      section.append(inputs);
+      const card = renderCardCalculator(member, entry);
+      if (card) {
+        section.append(card);
+        return section;
+      }
+    }
     if (!growth || typeof grownStat !== "function" || !entry?.stats?.length) {
       section.append(sectionHeading("Stats"), el("p", "team-empty-copy", "Stat growth isn’t available for this Aniimo."));
       return section;
@@ -1773,7 +1918,8 @@
   function renderPageSwitch() {
     const group = el("div", "team-mode-switch");
     group.setAttribute("role", "tablist");
-    [["team", "Team"], ["types", "Type matchups"], ["duel", "1v1"]].forEach(([id, label]) => {
+    [["team", "Team"], ["types", "Type matchups"], ["duel", "1v1"], ["guide", window.AniilogsGuide?.title || "Guide"]].forEach(([id, label]) => {
+      if (id === "guide" && !window.AniilogsGuidePage) return;
       const control = button(label, "team-mode-button", () => {
         viewState.page = id;
         saveViewState();
@@ -1794,18 +1940,24 @@
     const typesPage = viewState.page === "types";
     // 1v1 lives in duel.js; without it the tab falls back to the team page.
     const duelPage = viewState.page === "duel" && Boolean(window.AniilogsDuel);
-    copy.append(el("h1", "", typesPage ? "Type matchups" : duelPage ? "1v1" : "Team Builder"), el("p", "", typesPage
+    // The Try-Hard Guide lives in guide-page.js (text from damage-guide.js).
+    const guidePage = viewState.page === "guide" && Boolean(window.AniilogsGuidePage);
+    const guideTitle = window.AniilogsGuide?.title || "Guide";
+    copy.append(el("h1", "", typesPage ? "Type matchups" : duelPage ? "1v1" : guidePage ? guideTitle : "Team Builder"), el("p", "", typesPage
       ? "See what an element or pair of elements is weak to and strong against, and which Aniimo have that typing."
       : duelPage
         ? "How much one Aniimo’s attacks take off another, and how fast each side gets the KO."
-        : MODE_NOTES[model.mode]));
+        : guidePage
+          ? "How to get more damage out of your team, and why."
+          : MODE_NOTES[model.mode]));
     const controls = el("div", "team-header-controls");
     controls.append(renderPageSwitch());
-    if (!typesPage && !duelPage) controls.append(renderModeSwitch());
+    if (!typesPage && !duelPage && !guidePage) controls.append(renderModeSwitch());
     header.append(copy, controls);
     panel.append(header);
     if (typesPage) panel.append(renderTypesPage());
     else if (duelPage) panel.append(renderDuelPage());
+    else if (guidePage) panel.append(window.AniilogsGuidePage.render());
     else panel.append(renderOverview(), renderTeamPage());
   }
 

@@ -75,3 +75,24 @@ test("Team Builder has a 1v1 tab that hands off to duel.js", () => {
   assert.match(teamBuilder, /window\.AniilogsDuel\.render\(\{/u);
   assert.match(explorerHtml, /<script defer src="\.\/duel\.js\?v=[^"]+"><\/script>/u);
 });
+
+const guidePage = await readFile(new URL("../public/explorer/guide-page.js", import.meta.url), "utf8");
+
+test("the 1v1 uses the damage model, the team's buffs and debuffs, and shows how a hit was worked out", () => {
+  assert.match(source, /model\.hit\(side\(attacker, attackerMods\), side\(defender, scenario\.defenderMods \|\| \{\}\)/u);
+  assert.match(source, /model\.options\(options\.data, formIds\)/u);
+  // A teammate's own self buffs don't reach the Aniimo you attack with.
+  assert.match(source, /if \(String\(effect\.form_id\) !== you && !TEAM_WIDE\.has\(effect\.who\)\) continue;/u);
+  assert.match(source, /attackerMods: mods\.you, defenderMods: mods\.foe/u);
+  assert.match(source, /attackerMods: mods\.foe, defenderMods: mods\.you/u);
+  assert.match(source, /function renderSteps\(row, result\)/u);
+});
+
+test("the Try-Hard Guide has contents, a link per section and Back to contents", () => {
+  assert.match(guidePage, /link\.href = `#\$\{SECTION_PREFIX\}\$\{section\.id\}`/u);
+  assert.match(guidePage, /"Back to contents"/u);
+  assert.match(guidePage, /const SECTION_PREFIX = "guide-";/u);
+  assert.match(teamBuilder, /\["guide", window\.AniilogsGuide\?\.title \|\| "Guide"\]/u);
+  assert.match(teamBuilder, /page: \/\^#guide-\/u\.test\(window\.location\.hash\) \? "guide"/u);
+  assert.match(explorerHtml, /<script defer src="\.\/guide-page\.js\?v=[^"]+"><\/script>/u);
+});

@@ -41,6 +41,9 @@
       actionSeconds: 1,
       rates: {},
       off: {},
+      buffs: {},
+      tiers: {},
+      steps: {},
     };
     try {
       const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
@@ -52,6 +55,9 @@
           foe: { ...defaults.foe, ...saved.foe },
           rates: { ...saved.rates },
           off: { ...saved.off },
+          buffs: { ...saved.buffs },
+          tiers: { ...saved.tiers },
+          steps: { ...saved.steps },
         };
       }
     } catch {
@@ -115,7 +121,19 @@
     return Math.floor(total * (1 + bonus));
   }
 
-  function sideStats(aniilog, entry, side) {
+  // The game's stat calculator (damage-model.js statTotals: base x (1 + potential %) and so on) when it is loaded;
+  // otherwise the Aniimo page's growth formula.
+  function sideStats(aniilog, data, entry, side) {
+    const model = window.AniilogsDamage;
+    const totals = model?.statTotals && data?.forms?.[String(entry?.form_id)]
+      ? model.statTotals(data, aniilog, String(entry.form_id), { level: side.level, potential: side.potential })
+      : null;
+    if (totals) {
+      return {
+        HP: totals.total.HP, Attack: totals.total.ATK, Defense: totals.total["P.DEF"], "EP Regen": totals.total.REGEN,
+        "Magic Defense": totals.total["M.DEF"], Break: totals.total.BREAK, cp: totals.cp,
+      };
+    }
     const stats = {};
     for (const row of entry?.stats || []) {
       stats[row.label] = grownStat(aniilog.stat_growth, row.label, Number(row.value), side.level, side.potential);
@@ -256,12 +274,61 @@
     return Math.max(factor * 35, 0.01);
   }
 
+  // One attack through damage-model.js (Team Builder's port of formulas 3001/3023 with every bracket), with the
+  // picked buffs and debuffs; falls back to the simple formula above when the model isn't loaded.
+  function modelHit(attacker, defender, attack, scenario) {
+    const model = window.AniilogsDamage;
+    if (!model?.hit) return null;
+    const side = (model, modifiers) => ({
+      atk: model.stats.Attack || 0,
+      pdef: model.stats.Defense || 0,
+      mdef: model.stats["Magic Defense"] || 0,
+      breakAtk: model.stats.Break || 0,
+      breakDef: 0,
+      elements: model.elements,
+      modifiers,
+    });
+    const attackerMods = { ...(scenario.attackerMods || {}) };
+    if (scenario.broken && scenario.brokenBonus) attackerMods.dmg_break_add_ratio = (attackerMods.dmg_break_add_ratio || 0) + scenario.brokenBonus;
+    const type = attack.group === "Normal" ? "basic" : attack.group === "Ultimate" ? "ultimate" : "skill";
+    return model.hit(side(attacker, attackerMods), side(defender, scenario.defenderMods || {}), {
+      might: attack.might,
+      breakPower: attack.breakPower,
+      element: attack.element,
+      category: attack.category === "Magic" ? "Magical" : "Physical",
+      type,
+      hitShare: chosenRate(attack),
+    }, {
+      elements: scenario.data?.elements,
+      sameElementBonus: scenario.data?.combat?.same_element_bonus,
+      elementKeys: scenario.data?.combat?.element_damage_keys,
+      broken: scenario.broken,
+      pvp: scenario.pvp,
+    });
+  }
+
   function matchup(aniilog, data, attackerSide, defenderSide, scenario) {
     const attacker = sideModel(aniilog, data, attackerSide);
     const defender = sideModel(aniilog, data, defenderSide);
     if (!attacker.entry || !defender.entry) return null;
     const maxHp = defender.stats.HP || 0;
     const rows = attacks(data, attacker.entry).map((attack) => {
+      const result = modelHit(attacker, defender, attack, scenario);
+      if (result) {
+        return {
+          attack,
+          normal: result.hit,
+          crit: result.crit,
+          average: result.average,
+          breakNormal: result.break,
+          breakAverage: result.break,
+          critChance: result.critChance,
+          critMultiplier: result.critMultiplier,
+          steps: result.steps || [],
+          ignored: result.ignored || "",
+          enabled: !settings.off[attack.id],
+        };
+      }
       const normal = hpDamage(attacker, defender, attack, scenario, false);
       const crit = hpDamage(attacker, defender, attack, scenario, true);
       const breakNormal = breakDamage(attacker, defender, attack, scenario, false);
@@ -273,6 +340,7 @@
         average: averaged(normal, crit),
         breakNormal,
         breakAverage: averaged(breakNormal, breakCrit),
+        steps: [],
         enabled: !settings.off[attack.id],
       };
     });
@@ -296,7 +364,7 @@
 
   function sideModel(aniilog, data, side) {
     const entry = (aniilog?.entries || []).find((row) => String(row.form_id) === String(side.formId)) || null;
-    return { entry, side, stats: entry ? sideStats(aniilog, entry, side) : {}, elements: entry ? entryElementIds(data, entry) : [] };
+    return { entry, side, stats: entry ? sideStats(aniilog, data, entry, side) : {}, elements: entry ? entryElementIds(data, entry) : [] };
   }
 
   // --- Rendering ------------------------------------------------------------------------------------
@@ -355,7 +423,7 @@
       if (member) {
         const cap = options.aniilog.stat_growth?.level_cap || 70;
         side.level = Math.round(clamp(member.level ?? cap, 1, cap, cap));
-        side.potential = Math.round(clamp(member.potential ?? 0, 0, 30, 0));
+        side.potential = Math.round(clamp(member.potential ?? 0, 0, 20, 0));
       }
     }));
     return select;
@@ -380,8 +448,8 @@
       numberField("Level", side.level, { min: 1, max: options.aniilog.stat_growth?.level_cap || 70 }, change(rerender, (target) => {
         side.level = Math.round(clamp(target.value, 1, options.aniilog.stat_growth?.level_cap || 70, 70));
       })),
-      numberField("Potential", side.potential, { min: 0, max: 30, suffix: "per stat" }, change(rerender, (target) => {
-        side.potential = Math.round(clamp(target.value, 0, 30, 0));
+      numberField("Potential", side.potential, { min: 0, max: 20, suffix: "per stat" }, change(rerender, (target) => {
+        side.potential = Math.round(clamp(target.value, 0, 20, 0));
       })),
     );
     card.append(fields);
@@ -494,6 +562,8 @@
     const hpShare = (value) => result.maxHp ? value / result.maxHp * 100 : NaN;
     const toKo = (value) => value > 0 ? Math.ceil(result.startHp / value) : Infinity;
     for (const row of result.rows) {
+      // Which direction this table is, so opening an attack's working opens it on this side only.
+      const stepKey = `${result.attacker.side === settings.you ? "you" : "foe"}:${row.attack.id}`;
       const line = el("div", `duel-row${row.enabled ? "" : " is-off"}`);
       line.setAttribute("role", "row");
       const toggle = el("input");
@@ -505,7 +575,14 @@
         if (target.checked) delete settings.off[row.attack.id];
         else settings.off[row.attack.id] = true;
       }));
-      const name = el("span", "duel-attack");
+      const name = el("button", "duel-attack");
+      name.type = "button";
+      name.setAttribute("aria-expanded", String(Boolean(settings.steps[stepKey])));
+      name.title = "Show how this was worked out";
+      name.addEventListener("click", change(rerender, () => {
+        if (settings.steps[stepKey]) delete settings.steps[stepKey];
+        else settings.steps[stepKey] = true;
+      }));
       const title = el("strong", "", row.attack.name);
       const meta = el("small", "", [row.attack.group, row.attack.category, row.attack.elementName].filter(Boolean).join(" · "));
       if (row.attack.elementColor) name.style.setProperty("--chip", row.attack.elementColor);
@@ -545,6 +622,7 @@
       });
       line.append(...cells);
       table.append(line);
+      if (settings.steps[stepKey] && row.steps?.length) table.append(renderSteps(row, result));
     }
     return table;
   }
@@ -578,7 +656,169 @@
     const member = options.memberStats?.[formId];
     const cap = options.aniilog.stat_growth?.level_cap || 70;
     settings.you.level = Math.round(clamp(member?.level ?? cap, 1, cap, cap));
-    settings.you.potential = Math.round(clamp(member?.potential ?? 0, 0, 30, 0));
+    settings.you.potential = Math.round(clamp(member?.potential ?? 0, 0, 20, 0));
+  }
+
+  // --- Buffs and debuffs from your team ------------------------------------------------------------
+
+  const PERCENT_KEY = /(_rate|_ratio|_p)(_v)?$/u;
+
+  // What can apply in this 1v1: everything your Aniimo brings itself, and from teammates only what reaches your
+  // Aniimo (team and active-Aniimo buffs) or the opponent (debuffs). A teammate's own self buffs don't count.
+  // A held item's rarities fold into one effect with a rarity choice.
+  const TEAM_WIDE = new Set(["ally", "player", "active Aniimo", "enemy"]);
+
+  function teamEffects(options) {
+    const model = window.AniilogsDamage;
+    if (!model?.options) return [];
+    const you = String(settings.you.formId || "");
+    const formIds = [...new Set([...(options.members || []), you].filter(Boolean).map(String))];
+    const effects = [];
+    const items = new Map();
+    for (const effect of model.options(options.data, formIds)) {
+      if (String(effect.form_id) !== you && !TEAM_WIDE.has(effect.who)) continue;
+      if (effect.source?.kind !== "held item") {
+        effects.push(effect);
+        continue;
+      }
+      const id = `item:${effect.form_id}:${effect.name}:${effect.key}`;
+      let row = items.get(id);
+      if (!row) {
+        row = { ...effect, id, tiers: [] };
+        items.set(id, row);
+        effects.push(row);
+      }
+      const quality = /\(([^)]+)\)$/u.exec(effect.source?.name || "")?.[1] || `Tier ${row.tiers.length + 1}`;
+      row.tiers.push({ label: quality, value: Number(effect.values?.[0]) });
+      row.source = { ...effect.source, name: effect.name };
+    }
+    return effects;
+  }
+
+  // The strongest listed level of an effect, times the stacks picked.
+  function effectValue(effect) {
+    if (effect.tiers?.length) {
+      const tier = effect.tiers[Math.min(Number(settings.tiers?.[effect.id] ?? effect.tiers.length - 1), effect.tiers.length - 1)];
+      return Number.isFinite(tier?.value) ? tier.value : null;
+    }
+    const values = (effect.values || []).map(Number).filter(Number.isFinite);
+    if (!values.length) return null;
+    const value = values[values.length - 1];
+    const stacks = Math.min(Math.max(Number(settings.buffs[effect.id]) || 1, 1), effect.stacks || 1);
+    return value * stacks;
+  }
+
+  // Picked effects summed per holder: your side (self, ally, player, active Aniimo) and the opponent (enemy).
+  function pickedModifiers(effects) {
+    const mods = { you: {}, foe: {} };
+    for (const effect of effects) {
+      if (!settings.buffs[effect.id]) continue;
+      const value = effectValue(effect);
+      if (value === null) continue;
+      const side = effect.who === "enemy" ? mods.foe : mods.you;
+      side[effect.key] = (side[effect.key] || 0) + value;
+    }
+    return mods;
+  }
+
+  function formatEffect(effect, value) {
+    if (value === null) return "(amount not in the data)";
+    const percent = PERCENT_KEY.test(effect.key) || Math.abs(value) < 1;
+    const amount = percent ? `${Math.round(value * 1000) / 10}%` : `${Math.round(value * 10) / 10}`;
+    return `${value >= 0 ? "+" : ""}${amount}`;
+  }
+
+  const WHO_LABELS = Object.freeze({ self: "self", ally: "team", player: "team", "active Aniimo": "active Aniimo", enemy: "enemy" });
+
+  function renderBuffs(options, effects, rerender) {
+    const section = el("section", "duel-buffs");
+    const head = el("header", "duel-buffs-head");
+    head.append(el("h3", "", "Buffs and debuffs"), el("p", "duel-note", "From the Aniimo on your team: their skills, Ultimates, traits and recommended held items. Buffs go on your Aniimo; debuffs go on the opponent, where they also weaken its hits on you. Each uses its strongest listed level."));
+    section.append(head);
+    if (!effects.length) {
+      section.append(el("p", "duel-note", options.members?.length ? "Your team’s Aniimo don’t list any damage effects." : "Add Aniimo to your team on the Team page to pick their buffs and debuffs here."));
+      return section;
+    }
+    const groups = [["On your Aniimo", effects.filter((effect) => effect.who !== "enemy")], ["On the opponent", effects.filter((effect) => effect.who === "enemy")]];
+    const lists = el("div", "duel-buff-groups");
+    for (const [title, rows] of groups) {
+      if (!rows.length) continue;
+      const group = el("div", "duel-buff-group");
+      group.append(el("h4", "", title));
+      for (const effect of rows) {
+        const value = effectValue(effect);
+        const item = el("div", `duel-buff${value === null ? " is-unknown" : ""}`);
+        const label = el("label", "duel-buff-label");
+        const check = el("input");
+        check.type = "checkbox";
+        check.checked = Boolean(settings.buffs[effect.id]);
+        check.disabled = value === null;
+        check.addEventListener("change", change(rerender, (target) => {
+          if (target.checked) settings.buffs[effect.id] = 1;
+          else delete settings.buffs[effect.id];
+        }));
+        const copy = el("span", "duel-buff-copy");
+        const entry = (options.aniilog.entries || []).find((row) => String(row.form_id) === String(effect.form_id));
+        copy.append(
+          el("strong", "", `${effect.label} ${formatEffect(effect, value)}`),
+          el("small", "", [effect.source?.name || effect.name, entry?.name, WHO_LABELS[effect.who] || effect.who, effect.basis !== "exact" ? effect.basis : ""].filter(Boolean).join(" · ")),
+        );
+        label.append(check, copy);
+        item.append(label);
+        if (effect.tiers?.length > 1) {
+          const tier = el("select", "duel-buff-tier");
+          tier.setAttribute("aria-label", `${effect.name} rarity`);
+          const chosen = Math.min(Number(settings.tiers?.[effect.id] ?? effect.tiers.length - 1), effect.tiers.length - 1);
+          effect.tiers.forEach((row, index) => {
+            const option = el("option", "", row.label);
+            option.value = String(index);
+            option.selected = index === chosen;
+            tier.append(option);
+          });
+          tier.addEventListener("change", change(rerender, (target) => {
+            settings.tiers = { ...settings.tiers, [effect.id]: Number(target.value) };
+          }));
+          item.append(tier);
+        }
+        if ((effect.stacks || 1) > 1 && settings.buffs[effect.id]) {
+          const stacks = el("label", "duel-buff-stacks");
+          const input = el("input");
+          input.type = "number";
+          input.min = "1";
+          input.max = String(effect.stacks);
+          input.value = String(settings.buffs[effect.id]);
+          input.setAttribute("aria-label", `${effect.label} stacks`);
+          input.addEventListener("change", change(rerender, (target) => {
+            settings.buffs[effect.id] = Math.round(clamp(target.value, 1, effect.stacks, 1));
+          }));
+          stacks.append(input, el("small", "", `of ${effect.stacks} stacks`));
+          item.append(stacks);
+        }
+        group.append(item);
+      }
+      lists.append(group);
+    }
+    section.append(lists);
+    return section;
+  }
+
+  // "How this was worked out": each multiplier the damage model applied, and how sure it is.
+  function renderSteps(row, result) {
+    const box = el("div", "duel-steps");
+    const list = el("ol");
+    for (const step of row.steps) {
+      const item = el("li");
+      const value = Number(step.value);
+      const shown = step.label.startsWith("Base") ? whole(value) : `×${Math.round(value * 1000) / 1000}`;
+      item.append(el("span", "", step.label), el("b", "", shown));
+      if (step.basis && step.basis !== "exact") item.append(el("small", "duel-step-basis", step.basis));
+      list.append(item);
+    }
+    const crit = Number.isFinite(row.critChance)
+      ? `Crit: ${Math.round(row.critChance * 100)}% chance for ×${Math.round(row.critMultiplier * 100) / 100}.`
+      : "";
+    box.append(list, el("p", "duel-note", `One hit: ${whole(row.normal)} damage (${percent(result.maxHp ? row.normal / result.maxHp * 100 : NaN)} of max HP). ${crit}`.trim()));
+    return box;
   }
 
   function render(options) {
@@ -592,6 +832,9 @@
     const setup = el("div", "duel-setup");
     setup.append(renderSide(options, "you", "Your Aniimo", rerender), renderScenario(options, rerender), renderSide(options, "foe", "Opponent", rerender));
     root.append(setup);
+    const effects = teamEffects(options);
+    const mods = pickedModifiers(effects);
+    root.append(renderBuffs(options, effects, rerender));
     const scenario = {
       data: options.data,
       startHp: settings.startHp,
@@ -600,9 +843,9 @@
       pvp: settings.pvp,
       actionSeconds: settings.actionSeconds,
     };
-    const youHit = matchup(options.aniilog, options.data, settings.you, settings.foe, scenario);
+    const youHit = matchup(options.aniilog, options.data, settings.you, settings.foe, { ...scenario, attackerMods: mods.you, defenderMods: mods.foe });
     // The opponent's attack back on you always starts from your full HP and isn't broken.
-    const foeHit = matchup(options.aniilog, options.data, settings.foe, settings.you, { ...scenario, startHp: 100, broken: false, brokenBonus: 0 });
+    const foeHit = matchup(options.aniilog, options.data, settings.foe, settings.you, { ...scenario, startHp: 100, broken: false, brokenBonus: 0, attackerMods: mods.foe, defenderMods: mods.you });
     const verdict = verdictText(youHit, foeHit);
     if (verdict) root.append(el("p", "duel-verdict", verdict));
     const results = el("div", "duel-results");
