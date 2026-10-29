@@ -12969,3 +12969,16 @@ html[data-embed="app"] #topbarLogoutButton {
 .catalog-ability-fact--cooldown {
   background: rgba(var(--accent-rgb), 0.12);
 }
+
+/* The Aniimo page's artwork: the panels now carry the text, so the artwork behind them can be strong (it was 24%,
+   set when text sat straight on it). No blur on the panels, so the art stays sharp; their fill keeps text readable. */
+.catalog-panel.is-aniilog-form .catalog-aniilog-record:not(.is-live-ready):not(.is-model-view):not(.is-showcase) .catalog-aniimo-video-backdrop {
+  opacity: 0.7;
+  filter: none;
+}
+
+.catalog-panel.is-aniilog-form .afp-panel {
+  background: rgba(var(--panel-rgb), 0.55);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
