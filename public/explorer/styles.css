@@ -13047,3 +13047,119 @@ html[data-embed="app"] #topbarLogoutButton {
     scroll-margin-top: 72px;
   }
 }
+
+/* "i" buttons: big enough to tap, and their explanation opens in a bubble (afpInfo in app.js). */
+.afp-info {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin-left: 4px;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  cursor: pointer;
+  position: relative;
+}
+
+/* A larger invisible touch target around the small circle. */
+.afp-info::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+
+.afp-info[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.afp-info-tip {
+  position: fixed;
+  z-index: 120;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.afp-info-tip[hidden] {
+  display: none;
+}
+
+/* The Map's filter-shortcuts "i" also opens on tap (it only opened on hover or keyboard focus). */
+.filter-shortcut-info:focus + .filter-shortcut-tooltip {
+  display: grid;
+}
+
+/* Recommended held items on the Aniimo page's Build tab. */
+.afp-held-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.afp-held-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--background-rgb), 0.45);
+  padding: 8px 10px;
+}
+
+.afp-held-item-icon {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.afp-held-item-name {
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 750;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.afp-held-item-name.is-linked:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.afp-held-item-name .catalog-item-reference-amount {
+  display: none;
+}
+
+.afp-held-item-tiers {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.afp-held-item-tiers strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.afp-held-item-tiers .is-quality-3 strong { color: #5aa7ff; }
+.afp-held-item-tiers .is-quality-4 strong { color: #b98cff; }
+.afp-held-item-tiers .is-quality-5 strong { color: #f2a93b; }

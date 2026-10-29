@@ -7228,14 +7228,64 @@ function afpNone(text) {
   return empty;
 }
 
+// An "i" that explains something. Tapping or clicking it shows the text in a small bubble (hover-only tooltips
+// never show on phones); a second tap, a tap elsewhere or Escape closes it.
 function afpInfo(text) {
-  const info = document.createElement("span");
+  const info = document.createElement("button");
+  info.type = "button";
   info.className = "afp-info";
   info.textContent = "i";
-  info.title = text;
   info.setAttribute("aria-label", text);
-  info.tabIndex = 0;
+  info.setAttribute("aria-expanded", "false");
+  info.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleAfpInfoTip(info, text);
+  });
   return info;
+}
+
+function closeAfpInfoTip() {
+  const tip = document.getElementById("afpInfoTip");
+  if (!tip || tip.hidden) return;
+  tip.hidden = true;
+  document.querySelectorAll(".afp-info[aria-expanded=\"true\"]").forEach((node) => node.setAttribute("aria-expanded", "false"));
+}
+
+function toggleAfpInfoTip(anchor, text) {
+  let tip = document.getElementById("afpInfoTip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "afpInfoTip";
+    tip.className = "afp-info-tip";
+    tip.setAttribute("role", "tooltip");
+    tip.hidden = true;
+    document.body.append(tip);
+    document.addEventListener("click", (event) => {
+      if (!tip.contains(event.target)) closeAfpInfoTip();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeAfpInfoTip();
+    });
+    // Scrolling away closes it; a small nudge while tapping does not.
+    document.addEventListener("scroll", () => {
+      const open = document.querySelector(".afp-info[aria-expanded=\"true\"]");
+      if (open && Math.abs(open.getBoundingClientRect().top - Number(tip.dataset.anchorTop)) > 40) closeAfpInfoTip();
+    }, { capture: true, passive: true });
+  }
+  const wasOpen = !tip.hidden && anchor.getAttribute("aria-expanded") === "true";
+  closeAfpInfoTip();
+  if (wasOpen) return;
+  tip.textContent = text;
+  tip.hidden = false;
+  anchor.setAttribute("aria-expanded", "true");
+  const rect = anchor.getBoundingClientRect();
+  tip.dataset.anchorTop = String(rect.top);
+  const width = Math.min(280, window.innerWidth - 24);
+  tip.style.width = `${width}px`;
+  tip.style.left = `${Math.min(Math.max(12, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 12)}px`;
+  const below = rect.bottom + 8;
+  const height = tip.offsetHeight;
+  tip.style.top = `${below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 8) : below}px`;
 }
 
 function afpSegmented(options, value, onChange, label) {
@@ -7781,6 +7831,70 @@ function renderAfpHabitatTab(entry) {
   return box;
 }
 
+// Recommended held items: each item once, with what every rarity of it gives. The bonuses come from the Team
+// Builder data, loaded the first time a Build tab opens; until then the items show by name.
+function loadAfpTeamData() {
+  if (state.afpTeamData || state.afpTeamDataLoading) return;
+  state.afpTeamDataLoading = fetch(TEAM_BUILDER_DATA_URL)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      state.afpTeamData = payload?.forms ? payload : { forms: {} };
+      if (state.sidebarView === "aniilog") afpRerender();
+    })
+    .catch(() => {
+      state.afpTeamData = { forms: {} };
+    });
+}
+
+function renderAfpHeldItems(entry) {
+  const recommended = entry.recommended || {};
+  const detailed = state.afpTeamData?.forms?.[String(entry.form_id)]?.recommended?.held_items;
+  if (!state.afpTeamData) loadAfpTeamData();
+  const items = [];
+  if (Array.isArray(detailed) && detailed.length) {
+    detailed.forEach((item) => items.push(item));
+  } else {
+    for (const item of recommended.equipment || []) {
+      let row = items.find((existing) => existing.name === item.name);
+      if (!row) items.push(row = { name: item.name, tiers: [] });
+      row.tiers.push({ item_id: item.item_id });
+    }
+  }
+  if (!items.length) return null;
+  const section = createCatalogSection("Recommended held items");
+  const list = document.createElement("div");
+  list.className = "afp-held-items";
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "afp-held-item";
+    card.append(makeIcon("afp-held-item-icon", item.icon || ""));
+    const copy = document.createElement("div");
+    const best = item.tiers?.[item.tiers.length - 1];
+    copy.append(renderItemlogReference({ item_id: best?.item_id, name: item.name, amount: 1 }, "afp-held-item-name"));
+    const tiers = document.createElement("ul");
+    tiers.className = "afp-held-item-tiers";
+    (item.tiers || []).forEach((tier) => {
+      if (!tier.quality_label) return;
+      const row = document.createElement("li");
+      row.className = `is-quality-${tier.quality || 0}`;
+      const label = document.createElement("strong");
+      label.textContent = tier.quality_label;
+      const stats = (tier.stats || []).map((stat) => {
+        const value = Number(stat.value);
+        const amount = Number.isFinite(value) && Math.abs(value) < 1 ? `+${Math.round(value * 1000) / 10}%` : `+${stat.value}`;
+        return `${stat.label} ${amount}`;
+      }).join(" · ");
+      row.append(label, ` ${stats}`);
+      tiers.append(row);
+    });
+    if (tiers.childElementCount) copy.append(tiers);
+    card.append(copy);
+    list.append(card);
+  });
+  section.append(list);
+  return section;
+}
+
 function renderAfpBuildTab(entry) {
   const box = document.createElement("div");
   box.className = "afp-tab-stack";
@@ -7803,16 +7917,8 @@ function renderAfpBuildTab(entry) {
     section.append(list);
     box.append(section);
   }
-  const equipment = [];
-  for (const item of recommended.equipment || []) if (!equipment.some((row) => row.name === item.name)) equipment.push(item);
-  if (equipment.length) {
-    const section = createCatalogSection("Recommended equipment");
-    const list = document.createElement("div");
-    list.className = "catalog-item-reference-grid";
-    equipment.forEach((item) => list.append(renderItemlogReference({ ...item, amount: 1 })));
-    section.append(list);
-    box.append(section);
-  }
+  const heldItems = renderAfpHeldItems(entry);
+  if (heldItems) box.append(heldItems);
   const presets = recommended.attribute_presets || [];
   if (presets.length) {
     const section = createCatalogSection("Attribute point presets");
@@ -9981,6 +10087,7 @@ function syncMobileCatalogStickyIdentity() {
   if (!stickyIdentity) {
     stickyIdentity = identity.cloneNode(true);
     stickyIdentity.classList.remove("is-under-sticky");
+    stickyIdentity.querySelectorAll("img").forEach((image) => { image.loading = "eager"; });
     stickyIdentity.classList.add("catalog-mobile-sticky-identity", `catalog-mobile-sticky-${view}`, "is-stuck");
     const stickyEyebrow = stickyIdentity.querySelector(".catalog-eyebrow");
     const stickyName = stickyIdentity.querySelector("h2");
@@ -11926,11 +12033,15 @@ function searchText(parts) {
   return values.join(" ").toLowerCase();
 }
 
+// Icons load only when they come near the screen (a list can hold hundreds), except map pins and the map selection,
+// which would otherwise pop in while panning.
 function makeIcon(className, source) {
   const icon = document.createElement("img");
   icon.className = className;
   icon.alt = "";
   icon.draggable = false;
+  icon.decoding = "async";
+  if (!/(^|\s)(pin-|selection-|catalog-hero-icon|afp-form-icon|catalog-evolution-icon)/u.test(className)) icon.loading = "lazy";
   if (source) {
     icon.src = contentUrl(source);
     icon.addEventListener("error", () => {
