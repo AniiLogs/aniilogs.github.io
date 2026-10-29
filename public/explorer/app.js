@@ -4808,7 +4808,8 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   copy.className = "catalog-index-copy";
   const name = document.createElement("strong");
   name.textContent = entry.name;
-  const listBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
+  // Item-log rows add their own badge.
+  const listBadge = view === "aniilog" ? developerAvailabilityBadge(entry.availability, entry.availability_note) : null;
   if (listBadge) name.append(" ", listBadge);
   const meta = document.createElement("small");
   if (view === "aniilog") {
