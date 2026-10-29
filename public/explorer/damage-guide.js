@@ -1,7 +1,8 @@
 // The Try-Hard Guide's text and the "i" notes for skills and traits whose game text leaves something
 // out. Plain-text paragraphs (no HTML); the page renders them. Each section says how sure it is:
 // exact (read from the game's scripts or tables), by-name (matched to a game attribute by its name),
-// inferred (a reasoned reading), text (from the game's own skill text, not its effect data). Numbers come
+// inferred (a reasoned reading), text (from the game's own skill text, not its effect data). A section
+// may carry `tests`: [{ id, text }] for things to check in the game before they can be trusted. Numbers come
 // from build 3846247; see damage-model.js for the maths.
 (() => {
   const TITLE = "Try-Hard Guide";
@@ -91,7 +92,8 @@
       basis: "exact",
       paragraphs: [
         "Every skill has its own BREAK power, separate from its Might. For example, Fire Bolt has Might 30 and BREAK power 10.",
-        "Each hit lowers the target's toughness by its share of the skill's BREAK power. Elemental toughness bonuses on the target, attacker vs target body size and the level gap scale that amount. Pets start with 60 toughness. Hits do nothing to toughness while the target is in BREAK, recovering from it, or under super armour.",
+        "Each hit lowers the target's toughness by its share of the skill's BREAK power. Elemental toughness bonuses on the target, attacker vs target body size and the level gap scale that amount. Hits do nothing to toughness while the target is in BREAK, recovering from it, or under super armour.",
+        "Toughness depends on what you're fighting. The game's templates give 10, 30, 50, 60 (pets) or 120, and some targets can't be broken at all. The world scales to your level, and the level gap also changes how much each hit takes off. So the number of hits to BREAK something changes with the target and your level.",
         "Your BREAK stat feeds a separate BREAK damage formula: BREAK minus the target's BREAK resistance, times BREAK power ÷ 10, plus its own crit and element terms. A bad element matchup never lowers it.",
         "Which of the two actually triggers the BREAK state is decided on the game's server, so the site doesn't promise a \"hits to BREAK\" number yet.",
         "BREAK Efficiency on you and \"BREAK damage taken\" on the target add together (by name). Some effects add damage against a target already in BREAK, for example Pawney's Ironclad Armament +30% (inferred).",
@@ -115,6 +117,22 @@
         "The base value comes from the Aniimo's species points, level and potential. The game can also give an owned Aniimo species points of its own, which replace the listed ones, so your card may not match the site's numbers exactly.",
         "Personality traits each give one bonus and one home bonus, for example Energetic: ATK +2%, BREAK +2%. Natures are flavour only.",
         "A held item's stat grows with its level: +5% of its base per level up to level 10, then +10% per level, doubling at level 15.",
+      ],
+    },
+    {
+      id: "untested",
+      title: "Not verified yet",
+      basis: "inferred",
+      paragraphs: [
+        "These come from reading the game files but haven't been checked in the game. Treat them as unconfirmed until someone tests them.",
+      ],
+      tests: [
+        { id: "break-gauge", text: "Which gauge starts BREAK: toughness (drained by each skill's BREAK power) or BREAK damage (from your BREAK stat). Test: count how many Fire Kicks it takes to BREAK a pet at your level. 3 would mean toughness (60 ÷ 24). The answer depends on the target's toughness and the level gap, so note what you fought and both levels." },
+        { id: "magic-defence", text: "Magical skills hit against M.DEF and Physical skills against P.DEF. Test: hit the same target with a Physical and a Magical skill of similar Might, and compare against its P.DEF and M.DEF." },
+        { id: "amp-sides", text: "Damage Amp counts from the attacker and Damage Reduction from the target, in one pot." },
+        { id: "attack-type-bonus", text: "Basic attack, skill and Ultimate damage bonuses are their own multiplier." },
+        { id: "vs-break", text: "Bonus damage against a target in BREAK (e.g. Ironclad Armament) is its own multiplier." },
+        { id: "level-gap", text: "Which side of the level-gap table applies to whom. The world scales with your level, so this matters in most fights." },
       ],
     },
     {
