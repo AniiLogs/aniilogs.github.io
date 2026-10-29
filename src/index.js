@@ -2903,6 +2903,91 @@ function withProfiles(players, profiles) {
 // result-screen runs or battle-prep bests for that week. Every past week stays viewable.
 
 // The weeks: built in, plus what developer accounts' desktop apps uploaded from the game data (newer patches).
+// Interlink rules that change with game updates, kept in one place so a patch only needs this edited:
+// - slots: what the game calls the three boss positions, in the order a week lists its bosses (cycle.bosses).
+//   slotsConfirmed says whether that order has been checked in the game.
+// - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
+//   early from there); the last entry whose fromCycle is at or below the week's id applies. Weeks before 4000:
+//   15 stars cleared any boss. From 4000 (20 / 40 / 20) the clear line is taken as each boss's full stars until
+//   it's checked in the game.
+// - splitBlock: weeks are grouped into splits (the game resets stars) by their id block: 3000-3005 is one split,
+//   4000 starts the next.
+const INTERLINK_RULES = Object.freeze({
+  slots: Object.freeze(["Left", "Center", "Right"]),
+  slotsConfirmed: false,
+  starCaps: Object.freeze([
+    Object.freeze({ fromCycle: 0, caps: Object.freeze([15, 30, 15]), clear: Object.freeze([15, 15, 15]) }),
+    Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 40, 20]) }),
+  ]),
+  splitBlock: 1000,
+});
+
+function interlinkStarRule(cycleId) {
+  const id = Number(cycleId) || 0;
+  return INTERLINK_RULES.starCaps.filter((rule) => rule.fromCycle <= id).at(-1) || INTERLINK_RULES.starCaps[0];
+}
+
+function interlinkStarCaps(cycleId) {
+  return interlinkStarRule(cycleId).caps;
+}
+
+function interlinkSplitOf(cycleId) {
+  return Math.floor((Number(cycleId) || 0) / INTERLINK_RULES.splitBlock);
+}
+
+// Every season with its splits (weeks grouped by id block, in time order), for the Season Ladder selector.
+function interlinkSeasons(list) {
+  const seasons = new Map();
+  for (const cycle of list) {
+    if (cycle.season == null) continue;
+    const season = seasons.get(cycle.season) || { season: cycle.season, start: cycle.start, end: cycle.end, splits: new Map() };
+    season.start = Math.min(season.start, cycle.start);
+    season.end = Math.max(season.end, cycle.end);
+    const id = interlinkSplitOf(cycle.id);
+    const split = season.splits.get(id) || { id, start: cycle.start, end: cycle.end, weeks: 0 };
+    split.start = Math.min(split.start, cycle.start);
+    split.end = Math.max(split.end, cycle.end);
+    split.weeks += 1;
+    season.splits.set(id, split);
+    seasons.set(cycle.season, season);
+  }
+  return [...seasons.values()].sort((a, b) => a.start - b.start).map((season) => ({
+    season: season.season, start: season.start, end: season.end,
+    splits: [...season.splits.values()].sort((a, b) => a.start - b.start).map((split, index) => ({ ...split, label: `Split ${index + 1}` })),
+  }));
+}
+
+// When the newest run in these weeks reached the site (the boards' "last updated").
+async function interlinkUpdatedAt(env, cycles) {
+  if (!cycles.length) return null;
+  const row = await env.DB.prepare(
+    `SELECT MAX(s.created_at) AS at FROM ${CREDITED_RUNS} s
+     WHERE s.status = 'visible' AND s.kind IN ('interlink_run', 'interlink_best') AND s.cycle IN (${cycles.map(() => "?").join(", ")})`,
+  ).bind(...cycles).first();
+  return row?.at ?? null;
+}
+
+// The ladders a boss board can be ranked by: only figures the game's result screens show. Ties: higher score, then
+// whoever got there first. "clear" is the fastest full-star clear and lists only cleared runs.
+const INTERLINK_LADDERS = Object.freeze({
+  score: { key: "score" },
+  stars: { key: "stars" },
+  clear: { key: "clearTimeS", ascending: true },
+  teamDps: { key: "teamDps" },
+  dps: { key: "avgDps" },
+  break: { key: "breakValue" },
+  heal: { key: "heal" },
+});
+
+function rankedLadder(rows, ladderId) {
+  const ladder = INTERLINK_LADDERS[ladderId] || INTERLINK_LADDERS.score;
+  const value = (row) => Number(row[ladder.key]);
+  return rows.filter((row) => Number.isFinite(value(row)) && row[ladder.key] !== null)
+    .sort((a, b) => (ladder.ascending ? value(a) - value(b) : value(b) - value(a))
+      || (Number(b.score) || 0) - (Number(a.score) || 0) || a.firstAt - b.firstAt)
+    .map((row, index) => ({ rank: index + 1, ...row }));
+}
+
 async function interlinkCycles(env) {
   const byId = new Map(INTERLINK_CYCLES.map((cycle) => [cycle.id, cycle]));
   try {
@@ -3001,6 +3086,7 @@ async function interlinkBests(env, cycles, list, server = null) {
        MAX(s.score) AS score, MAX(s.stars) AS stars,
        MIN(CASE WHEN ${clearedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
        MAX(s.p_dps) AS avgDps, MAX(s.p_break) AS breakValue, MAX(s.p_taken) AS damageTaken, MAX(s.p_heal) AS heal,
+       MAX(s.team_dps) AS teamDps,
        CASE WHEN s.who LIKE 'name:%' THEN MAX(s.teammate) ELSE
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
@@ -3025,6 +3111,13 @@ async function interlinkBests(env, cycles, list, server = null) {
   return (results || []).filter((row) => {
     const cycle = interlinkCycle(list, row.cycle);
     return !cycle || cycle.bosses.some((boss) => boss.id === String(row.bossId));
+  }).map((row) => {
+    // the SQL keeps runs with at least the old 15 stars; that week's rules may ask more for that boss slot
+    const cycle = interlinkCycle(list, row.cycle);
+    const slot = cycle ? cycle.bosses.findIndex((boss) => boss.id === String(row.bossId)) : -1;
+    const clear = slot >= 0 ? interlinkStarRule(row.cycle).clear[slot] : null;
+    if (clear && (Number(row.stars) || 0) < clear) row.clearTimeS = null;
+    return row;
   });
 }
 
@@ -3074,22 +3167,36 @@ async function interlinkBoards(request, env) {
   if (seasonParam !== null) {
     // Season standings: every week of the season added up.
     const season = Number(seasonParam);
-    const cycles = list.filter((cycle) => cycle.season === season).map((cycle) => cycle.id);
-    if (!cycles.length) return json({ error: "Unknown season." }, 404);
+    // ?split=<id> narrows the season to one split (stars reset between splits); without it, the whole season
+    const splitParam = params.get("split");
+    const split = splitParam === null || splitParam === "" || splitParam === "all" ? null : Number(splitParam);
+    const inSeason = list.filter((cycle) => cycle.season === season);
+    const cycles = inSeason.filter((cycle) => split === null || interlinkSplitOf(cycle.id) === split).map((cycle) => cycle.id);
+    if (!inSeason.length) return json({ error: "Unknown season." }, 404);
     const players = new Map();
     for (const row of await interlinkBests(env, cycles, list, server)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
-        total: 0, stars: 0, weeks: new Set(), bosses: 0, firstAt: row.firstAt };
+        total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt };
       player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
       player.weeks.add(row.cycle); player.bosses += 1;
+      player.weekTotals.set(row.cycle, (player.weekTotals.get(row.cycle) || 0) + (Number(row.score) || 0));
       player.firstAt = Math.min(player.firstAt, row.firstAt);
       players.set(row.discordId, player);
     }
-    const standings = ranked([...players.values()], "total").map(({ discordId, weeks: played, firstAt, ...row }) => ({
-      ...row, weeks: played.size, own: own(discordId),
+    // ranked by combined score; ?sort=stars ranks by total stars (then score)
+    const order = params.get("sort") === "stars" ? "stars" : "total";
+    const sorted = [...players.values()].sort((a, b) => (order === "stars" ? b.stars - a.stars || b.total - a.total : b.total - a.total)
+      || a.firstAt - b.firstAt);
+    const standings = sorted.map(({ discordId, weeks: played, weekTotals, firstAt, ...row }, index) => ({
+      rank: index + 1, ...row, weeks: played.size, bestWeek: Math.max(0, ...weekTotals.values()), own: own(discordId),
     }));
-    return json({ season, weeks: weeks.filter((week) => week.season === season), standings, server, servers });
+    return json({
+      season, split, sort: order === "stars" ? "stars" : "score",
+      weeks: weeks.filter((week) => week.season === season && (split === null || interlinkSplitOf(week.id) === split)),
+      seasons: interlinkSeasons(list), updatedAt: await interlinkUpdatedAt(env, cycles),
+      standings, server, servers,
+    });
   }
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
@@ -3103,11 +3210,30 @@ async function interlinkBoards(request, env) {
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
   }
-  const bosses = bossIds.map((id) => {
+  // ?ladder= ranks every board by that figure (default: the old order, most stars then score; the site asks for
+  // score); ?limit=&offset= pages each board (total says how many there are); ?boss= keeps one board.
+  const ladderParam = String(params.get("ladder") || "");
+  const ladder = INTERLINK_LADDERS[ladderParam] ? ladderParam : null;
+  const limitParam = Number(params.get("limit"));
+  const limit = Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : null;
+  const offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
+  const onlyBoss = params.get("boss") ? String(params.get("boss")) : null;
+  const caps = interlinkStarCaps(cycle.id);
+  const bosses = bossIds.filter((id) => !onlyBoss || id === onlyBoss).map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
-    const entries = rankedBossRuns(rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row })))
+    const slotIndex = cycle.bosses.findIndex((boss) => boss.id === id);
+    const runs = rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row }));
+    const all = (ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs))
       .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder", own: own(discordId) }));
-    return { id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id, entries };
+    return {
+      id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id,
+      slot: slotIndex >= 0 ? INTERLINK_RULES.slots[slotIndex] || null : null,
+      slotIndex: slotIndex >= 0 ? slotIndex : null,
+      starCap: slotIndex >= 0 ? caps[slotIndex] ?? null : null,
+      level: listed?.level ?? cycle.level ?? null,
+      total: all.length,
+      entries: limit ? all.slice(offset, offset + limit) : all,
+    };
   });
   const totals = new Map();
   for (const row of rows) {
@@ -3120,7 +3246,13 @@ async function interlinkBoards(request, env) {
     totals.set(row.discordId, player);
   }
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
-  return json({ cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers });
+  return json({
+    cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers,
+    ladder: ladder || "stars", offset, limit, updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
+    seasons: interlinkSeasons(list),
+    rules: { slots: INTERLINK_RULES.slots, slotsConfirmed: INTERLINK_RULES.slotsConfirmed, starCaps: caps,
+      clearStars: interlinkStarRule(cycle.id).clear, ladders: Object.keys(INTERLINK_LADDERS) },
+  });
 }
 
 async function leaderboardEntries(request, env) {

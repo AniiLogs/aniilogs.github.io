@@ -1056,3 +1056,84 @@ test("the profiles sitemap lists public profiles until their owner turns search 
   assert.equal((await (await call(env, `/api/profiles/${dev.profile.publicId}`)).json()).profile.listedInSearch, false);
   assert.equal((await save(SESSIONS.dev, { displayName: "Dev", listedInSearch: "no" })).status, 400);
 });
+
+test("Interlink Per Boss boards: slots, star caps, ladders, paging, one boss, and last updated", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  // a developer's app uploads the new split's first week (the game data lists Scorchhowl, Glameep, Minespine)
+  const bosses = [{ id: "80000098", name: "Alpha Scorchhowl" }, { id: "80000112", name: "Alpha Glameep" }, { id: "80000096", name: "Alpha Minespine" }];
+  const start = 1793239200;
+  assert.equal((await call(env, "/api/leaderboard/interlink/cycles", { token: a, method: "POST", body: { cycles: [{ id: "4000", season: 1, start, end: start + 4 * 86400, bosses }] } })).status, 200);
+  const glameep = { id: "80000112", name: "Alpha Glameep", level: 60 };
+  // dev: 34,000 and 40 stars cleared in 1:40; user: 36,000, 39 stars, timed out (more score, fewer stars)
+  await send(a, run("g1", { cycle: "4000", boss: glameep, score: 34000, stars: 40, clearTimeS: 100, cleared: true, teamDps: 50000, playedAt: start + 100 }));
+  await send(b, run("g2", { cycle: "4000", boss: glameep, score: 36000, stars: 39, clearTimeS: 180, cleared: false, teamDps: 61000, playedAt: start + 200 }));
+  // 20 stars on the center boss used to count as a clear; under 20 / 40 / 20 it doesn't
+  await send(a, run("g3", { cycle: "4000", boss: { id: "80000098", name: "Alpha Scorchhowl", level: 60 }, score: 15000, stars: 20, clearTimeS: 120, cleared: true, playedAt: start + 300 }));
+
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=score&limit=10")).json();
+  assert.deepEqual(week.bosses.map((x) => [x.slot, x.name, x.starCap]), [["Left", "Alpha Scorchhowl", 20], ["Center", "Alpha Glameep", 40], ["Right", "Alpha Minespine", 20]]);
+  assert.deepEqual(week.rules.starCaps, [20, 40, 20]);
+  assert.equal(week.rules.slotsConfirmed, false);
+  assert.equal(week.ladder, "score");
+  // ranked by score: the timed-out 36,000 beats the cleared 34,000
+  assert.deepEqual(week.bosses[1].entries.map((e) => [e.rank, e.score, e.clearTimeS]), [[1, 36000, null], [2, 34000, 100]]);
+  assert.equal(week.bosses[1].total, 2);
+  // the left boss at its full 20 stars is a clear
+  assert.equal(week.bosses[0].entries[0].clearTimeS, 120);
+  assert.ok(week.updatedAt > 0);
+  // other ladders: fastest clear lists only clears; team DPS
+  const fastest = await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=clear")).json();
+  assert.deepEqual(fastest.bosses[1].entries.map((e) => e.clearTimeS), [100]);
+  const dps = await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=teamDps")).json();
+  assert.deepEqual(dps.bosses[1].entries.map((e) => e.teamDps), [61000, 50000]);
+  // one boss, paged
+  const page = await (await call(env, "/api/leaderboard/interlink?cycle=4000&boss=80000112&ladder=score&limit=1&offset=1")).json();
+  assert.deepEqual(page.bosses.map((x) => x.id), ["80000112"]);
+  assert.deepEqual(page.bosses[0].entries.map((e) => [e.rank, e.score]), [[2, 34000]]);
+  assert.equal(page.bosses[0].total, 2);
+  // an unknown ladder falls back to the old order (most stars first)
+  const old = await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=nope")).json();
+  assert.deepEqual(old.bosses[1].entries.map((e) => e.score), [34000, 36000]);
+});
+
+test("Interlink Season Ladder: splits, combined score, total stars, best week", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const b = await namedToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const bosses = [{ id: "80000098", name: "Alpha Scorchhowl" }, { id: "80000112", name: "Alpha Glameep" }, { id: "80000096", name: "Alpha Minespine" }];
+  const start = 1793239200;
+  await call(env, "/api/leaderboard/interlink/cycles", { token: a, method: "POST", body: { cycles: [{ id: "4000", season: 1, start, end: start + 4 * 86400, bosses }] } });
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const glameep = { id: "80000112", name: "Alpha Glameep", level: 60 };
+  // split 3 (weeks 3000-3005): dev 12,000; user 15,000. split 4 (week 4000): dev 30,000 + 10,000; user 20,000
+  await send(a, run("s1", { cycle: "3005", boss: sherro, score: 12000, stars: 15 }));
+  await send(b, run("s2", { cycle: "3005", boss: sherro, score: 15000, stars: 15 }));
+  await send(a, run("s3", { cycle: "4000", boss: glameep, score: 30000, stars: 30 }));
+  await send(a, run("s4", { cycle: "4000", boss: { id: "80000098", name: "Alpha Scorchhowl", level: 60 }, score: 10000, stars: 12 }));
+  await send(b, run("s5", { cycle: "4000", boss: glameep, score: 20000, stars: 38 }));
+
+  const split4 = await (await call(env, "/api/leaderboard/interlink?season=1&split=4")).json();
+  assert.equal(split4.split, 4);
+  assert.deepEqual(split4.standings.map((p) => [p.rank, p.player, p.total, p.stars, p.weeks, p.bestWeek]),
+    [[1, "DevOne", 40000, 42, 1, 40000], [2, "UserOne", 20000, 38, 1, 20000]]);
+  assert.deepEqual(split4.weeks.map((w) => w.id), ["4000"]);
+  // by total stars instead
+  const byStars = await (await call(env, "/api/leaderboard/interlink?season=1&split=4&sort=stars")).json();
+  assert.deepEqual(byStars.standings.map((p) => [p.player, p.stars]), [["DevOne", 42], ["UserOne", 38]]);
+  assert.equal(byStars.sort, "stars");
+  // the earlier split, and the whole season adding both
+  const split3 = await (await call(env, "/api/leaderboard/interlink?season=1&split=3")).json();
+  assert.deepEqual(split3.standings.map((p) => [p.player, p.total]), [["UserOne", 15000], ["DevOne", 12000]]);
+  const whole = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
+  assert.equal(whole.split, null);
+  assert.deepEqual(whole.standings.map((p) => [p.player, p.total, p.weeks]), [["DevOne", 52000, 2], ["UserOne", 35000, 2]]);
+  // the selector's list: season 1's splits in time order (the game data also files week 1002 under season 1)
+  const season1 = whole.seasons.find((s) => s.season === 1);
+  assert.deepEqual(season1.splits.map((s) => [s.id, s.label]), [[1, "Split 1"], [3, "Split 2"], [4, "Split 3"]]);
+  assert.equal(season1.splits.at(-1).start, start);
+  assert.ok(whole.updatedAt > 0);
+});
