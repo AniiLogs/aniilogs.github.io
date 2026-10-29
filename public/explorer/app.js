@@ -10521,6 +10521,31 @@ function renderLuminChecklistTabs() {
   els.luminChecklistTabs.hidden = availableTabs.length === 0;
 }
 
+// Checklists is the hub for progress: whose progress this is, where it is kept, and the respawns ready to collect.
+function renderChecklistHubStatus() {
+  const kicker = els.checklistPanel.querySelector(".checklist-panel-kicker");
+  if (!kicker) return;
+  let status = els.checklistPanel.querySelector(".checklist-hub-status");
+  if (!status) {
+    status = document.createElement("div");
+    status.className = "checklist-hub-status";
+    kicker.after(status);
+  }
+  status.replaceChildren();
+  const who = document.createElement("span");
+  who.textContent = [
+    ACTIVE_CHARACTER ? `Progress for UID ${ACTIVE_CHARACTER}${ACTIVE_CHARACTER_FROM_APP ? " (from the aLogs app)" : ""}` : "Progress for your account",
+    state.cloudSyncAuthenticated ? "Synced with your account" : "Saved in this browser",
+  ].join(" · ");
+  const ready = respawnQueue().ready.length;
+  const respawns = document.createElement("button");
+  respawns.type = "button";
+  respawns.className = "checklist-hub-respawns";
+  respawns.textContent = ready ? `Respawns · ${ready} ready` : "Respawns";
+  respawns.addEventListener("click", openRespawnPanel);
+  status.append(who, respawns);
+}
+
 function renderChecklist() {
   els.checklistCategoryTabs.textContent = "";
   els.luminChecklistTabs.textContent = "";
@@ -10586,6 +10611,7 @@ function renderChecklist() {
   els.checklistPanelTitle.textContent = [activeCategory?.label || state.checklistCategory, activeLuminTab?.label]
     .filter(Boolean).join(" · ");
   els.checklistPanelCount.textContent = els.checklistCount.textContent;
+  renderChecklistHubStatus();
   els.checklistProgressFill.style.width = `${progress.total ? (progress.completed / progress.total) * 100 : 0}%`;
   const missingSparklingOnly = state.checklistCategory === "aniimo" && state.checklistMissingSparkling;
   const visibleEntries = entries.filter(checklistEntryMatches).filter((entry) => {
@@ -10674,6 +10700,7 @@ function updateWorkspaceTabs() {
   else if (state.sidebarView === "checklist") els.topNavChecklist?.setAttribute("aria-current", "page");
   else if (state.sidebarView === "team") els.topNavTeam?.setAttribute("aria-current", "page");
   else els.topNavMap?.setAttribute("aria-current", "page");
+  syncBottomTabs();
   els.topNavProfiles?.removeAttribute("aria-current");
   if (els.topbarContext) {
     els.topbarContext.textContent = {
@@ -10881,6 +10908,42 @@ function showWorkspaceView(view) {
   if (view === "map") url.searchParams.delete("view");
   else url.searchParams.set("view", view);
   window.history.pushState({ workspaceView: view }, "", url);
+}
+
+// Phones: a bottom tab bar replaces the top page links (the aLogs app shows its own tabs, so it has none).
+const BOTTOM_TABS = Object.freeze([
+  ["map", "Map", "/explorer/", "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Zm0 0v14m6-12v14"],
+  ["aniilog", "Aniilog", "/explorer/?view=aniilog", "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11"],
+  ["itemlog", "Item-log", "/explorer/?view=itemlog", "M12 3 4 7v10l8 4 8-4V7l-8-4Zm0 0v18M4 7l8 4 8-4"],
+  ["checklist", "Checklists", "/explorer/?view=checklist", "M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"],
+  ["team", "Team", "/explorer/?view=team", "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20a6 6 0 0 1 12 0m-2 0a6 6 0 0 1 10-4"],
+]);
+
+function initBottomTabs() {
+  if (document.getElementById("bottomTabs")) return;
+  const nav = document.createElement("nav");
+  nav.id = "bottomTabs";
+  nav.className = "bottom-tabs";
+  nav.setAttribute("aria-label", "Sections");
+  BOTTOM_TABS.forEach(([view, label, href, path]) => {
+    const link = document.createElement("a");
+    link.href = href;
+    link.dataset.view = view;
+    link.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg><span></span>`;
+    link.querySelector("span").textContent = label;
+    link.addEventListener("click", (event) => openWorkspaceFromNavigation(event, view));
+    nav.append(link);
+  });
+  document.body.append(nav);
+  syncBottomTabs();
+}
+
+function syncBottomTabs() {
+  document.querySelectorAll("#bottomTabs a").forEach((link) => {
+    const active = link.dataset.view === state.sidebarView || (link.dataset.view === "map" && !["aniilog", "itemlog", "checklist", "team"].includes(state.sidebarView));
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
 }
 
 function openWorkspaceFromNavigation(event, view) {
@@ -14602,6 +14665,7 @@ function initRespawnBell() {
 async function init() {
   loadLocalTracking();
   initRespawnBell();
+  initBottomTabs();
   await hydrateCloudProgress();
   applyThemePreference();
   syncDesktopSelectionPlacement();
