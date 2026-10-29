@@ -52,7 +52,7 @@
     ],
     sim_run: [
       { label: "Battle time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
-      { label: "Trial", value: (e) => e.trial || "—" },
+      { label: "Trial", value: (e) => (e.trial ? `${e.trial}${e.trialGroup && e.trialGroup !== "Other" ? ` · ${e.trialGroup}` : ""}` : "—") },
       { label: "Difficulty", value: (e) => e.difficulty || "—" },
       { label: "Buffs", value: (e) => number(e.buffs?.length) },
       { label: "Party", value: (e) => number(e.partySize) },
@@ -276,10 +276,11 @@
     fillSimPickers();
   }
   // Holo-Battle Sim ranks each trial and difficulty on its own, so once any trial has runs both pickers name one
-  // (the hardest difficulty that trial has runs on, unless one was picked). Difficulties go easiest to hardest.
-  const SIM_DIFFICULTIES = ["Easy", "Normal", "Hard", "Challenge"];
+  // (the hardest difficulty that trial has runs on, unless one was picked). The API sends the groups (Basic
+  // Training, Advanced Training, Elemental Crucible) and the difficulty order, easiest to hardest.
   function difficultyOrder(a, b) {
-    return ((SIM_DIFFICULTIES.indexOf(a) + 1 || 99) - (SIM_DIFFICULTIES.indexOf(b) + 1 || 99)) || a.localeCompare(b);
+    const order = state.facets?.simRules?.difficulties || [];
+    return ((order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99)) || a.localeCompare(b);
   }
   function fillSimPickers() {
     const f = els.filters.elements;
@@ -287,8 +288,13 @@
     if (state.mode !== "sim" || !trials.length) return;
     const names = [...new Set(trials.map((row) => row.trial))].sort();
     const trial = f.trial.dataset.pending ?? f.trial.value;
-    f.trial.replaceChildren(...names.map((name) => el("option", { value: name, text: name })));
-    f.trial.value = names.includes(trial) ? trial : names[0];
+    const groups = [...(state.facets.simRules?.groups || []).map((group) => group.label), "Other"];
+    const groupOf = (name) => trials.find((row) => row.trial === name)?.group || "Other";
+    f.trial.replaceChildren(...groups.map((label) => {
+      const inGroup = names.filter((name) => groupOf(name) === label);
+      return inGroup.length ? el("optgroup", { label }, inGroup.map((name) => el("option", { value: name, text: name }))) : null;
+    }).filter(Boolean));
+    f.trial.value = names.includes(trial) ? trial : f.trial.options[0]?.value ?? "";   // else the first group's first
     delete f.trial.dataset.pending;
     const levels = trials.filter((row) => row.trial === f.trial.value && row.difficulty).map((row) => row.difficulty).sort(difficultyOrder);
     const level = f.difficulty.dataset.pending ?? f.difficulty.value;

@@ -1911,6 +1911,24 @@ const LEADERBOARD_SORTS = Object.freeze({
   player: "ASC",
 });
 // Egg Heist difficulties, hardest first
+// Holo-Battle Sim stages, as the Victory screen names them: the group a trial belongs to (by how its name starts)
+// and the difficulties easiest to hardest. Edit here when a game update adds stages or the real list is confirmed:
+// the facets send both to the page. Only Easy, Normal, Hard (Basic Training) and Challenge are seen on Sim so far;
+// the rest are the game's other difficulty words, placed by guess until the stage tables are checked.
+const SIM_RULES = Object.freeze({
+  groups: Object.freeze([
+    Object.freeze({ id: "basic", label: "Basic Training", prefix: "Training of " }),
+    Object.freeze({ id: "advanced", label: "Advanced Training", prefix: "Trial of " }),
+    Object.freeze({ id: "crucible", label: "Elemental Crucible", prefix: "Crucible of " }),
+  ]),
+  difficulties: Object.freeze(["Beginner", "Easy", "Normal", "Intermediate", "Hard", "Advanced", "Expert", "Challenge",
+    "Master", "Elite", "Nightmare", "Legendary"]),
+  confirmed: false,
+});
+function simGroupOf(trial) {
+  return SIM_RULES.groups.find((group) => String(trial || "").startsWith(group.prefix)) || null;
+}
+
 const DIFFICULTY_RANK_SQL = (prefix) => `CASE ${prefix}difficulty WHEN 'Chaos' THEN 4 WHEN 'Nightmare' THEN 3 WHEN 'Hard' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END`;
 // Sorts that only order the rows: each player's row is still their best by the board's main measure (best loot,
 // best score...), then the list is ordered by name, date or difficulty.
@@ -3368,6 +3386,7 @@ async function leaderboardEntries(request, env) {
       partySize: row.party_size,
       difficulty: row.difficulty || null,
       trial: row.trial || null,
+      trialGroup: row.trial ? simGroupOf(row.trial)?.label || "Other" : null,
       defeats: row.defeats ?? null,
       server: row.server || null,
       profileId: row.profileId || null,
@@ -3426,7 +3445,8 @@ async function leaderboardFacets(request, env) {
     levels,
     partySizes: parties,
     difficulties,
-    trials,
+    trials: trials.map((row) => ({ ...row, group: simGroupOf(row.trial)?.label || "Other" })),
+    simRules: mode === "sim" ? SIM_RULES : undefined,
     kinds,
     buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     sorts: Object.keys(LEADERBOARD_SORTS),

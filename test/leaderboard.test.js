@@ -250,9 +250,16 @@ test("Holo-Battle Sim boards: each trial and difficulty ranks Victory times, fas
     [[1, "DevOne", 470, "Training of Water", "Hard"], [2, "UserOne", 495, "Training of Water", "Hard"]]);
   assert.deepEqual((await board("Trial of Fire", "Challenge")).map((e) => [e.player, e.clearTimeS]), [["UserOne", 738]]);
   assert.deepEqual((await board("Training of Water", "Normal")).map((e) => e.clearTimeS), [200]);
+  assert.equal((await send(SESSIONS.dev2, run("d1", "Crucible of Grass", "Challenge", 900))).status, 201);
+  assert.deepEqual((await board("Crucible of Grass", "Challenge")).map((e) => [e.trial, e.trialGroup]), [["Crucible of Grass", "Elemental Crucible"]]);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
-  assert.deepEqual(facets.trials.map((t) => [t.trial, t.difficulty, t.count]),
-    [["Training of Water", "Hard", 4], ["Training of Water", "Normal", 1], ["Trial of Fire", "Challenge", 1]]);
+  assert.deepEqual(facets.trials.map((t) => [t.group, t.trial, t.difficulty, t.count]), [
+    ["Elemental Crucible", "Crucible of Grass", "Challenge", 1], ["Basic Training", "Training of Water", "Hard", 4],
+    ["Basic Training", "Training of Water", "Normal", 1], ["Advanced Training", "Trial of Fire", "Challenge", 1]]);
+  // the groups and difficulty order come from the server's config, for the page's pickers
+  assert.deepEqual(facets.simRules.groups.map((g) => g.label), ["Basic Training", "Advanced Training", "Elemental Crucible"]);
+  assert.ok(facets.simRules.difficulties.indexOf("Hard") < facets.simRules.difficulties.indexOf("Challenge"));
+  assert.equal((await (await call(env, "/api/leaderboard/facets?mode=interlink")).json()).simRules, undefined);
 });
 
 test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
