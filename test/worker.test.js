@@ -357,6 +357,33 @@ test("roles: testers cannot manage roles, administrators grant only the develope
   assert.equal((await me(state.tokens.admin)).role, "player");
 });
 
+test("before migration 0026 adds the role column, testers keep developer access and only the administrator grant waits", async () => {
+  const state = await authenticatedTestDatabase();
+  // A database without developer_roles.role: any query naming the column fails the way D1 does.
+  const DB = {
+    ...state.DB,
+    prepare(sql) {
+      if (/developer_roles/u.test(sql) && /\brole\b/u.test(sql.replace(/developer_roles/gu, ""))) {
+        const fail = async () => { throw new Error("D1_ERROR: no such column: role: SQLITE_ERROR"); };
+        return { bind: () => ({ first: fail, run: fail, all: fail }), all: fail };
+      }
+      return state.DB.prepare(sql);
+    },
+  };
+  const env = { DB, PUBLIC_SITE_ORIGIN: "https://aniilogs.github.io", ADMIN_DISCORD_IDS: state.discordIds.owner };
+  const me = async (token) => (await (await worker.fetch(apiRequest("/api/auth/me", token), env)).json()).account;
+  state.developers.add(state.discordIds.other);
+  assert.equal((await me(state.tokens.other)).role, "developer");
+  assert.equal((await me(state.tokens.other)).developerModeAvailable, true);
+  const list = await worker.fetch(apiRequest("/api/admin/developers", state.tokens.owner), env);
+  assert.equal(list.status, 200);
+  assert.equal((await list.json()).accounts.find((row) => row.discordId === state.discordIds.other).role, "developer");
+  const grant = (body) => worker.fetch(apiRequest(`/api/admin/developers/${state.discordIds.admin}`, state.tokens.owner, { method: "PUT", body: JSON.stringify(body) }), env);
+  assert.equal((await grant({ role: "administrator" })).status, 503);
+  assert.equal((await grant({})).status, 200);
+  assert.equal((await me(state.tokens.admin)).role, "developer");
+});
+
 test("role managers list bounded Discord logins with each account's role", async () => {
   const state = await authenticatedTestDatabase();
   const env = {

@@ -675,10 +675,23 @@ export function can(account, permission) {
   return Array.isArray(account?.permissions) && account.permissions.includes(permission);
 }
 
+// Until migration 0026 adds developer_roles.role, every row is a developer and no administrator can be stored.
+function missingRoleColumn(error) {
+  return /no such column:?\s*(?:developer_roles\.)?role\b|has no column named role\b/iu.test(String(error?.message || error));
+}
+
 async function storedDeveloperRole(discordId, env) {
-  const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, role FROM developer_roles WHERE discord_id = ? LIMIT 1",
-  ).bind(String(discordId)).first();
+  let row;
+  try {
+    row = await env.DB.prepare(
+      "SELECT discord_id AS discordId, role FROM developer_roles WHERE discord_id = ? LIMIT 1",
+    ).bind(String(discordId)).first();
+  } catch (error) {
+    if (!missingRoleColumn(error)) throw error;
+    row = await env.DB.prepare(
+      "SELECT discord_id AS discordId FROM developer_roles WHERE discord_id = ? LIMIT 1",
+    ).bind(String(discordId)).first();
+  }
   return row ? (row.role === "administrator" ? "administrator" : "developer") : null;
 }
 
@@ -749,11 +762,21 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
   }
   const now = Math.floor(Date.now() / 1000);
   if (enabled) {
-    await env.DB.prepare(
-      `INSERT INTO developer_roles (discord_id, role, granted_by_discord_id, created_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(discord_id) DO UPDATE SET role = excluded.role, granted_by_discord_id = excluded.granted_by_discord_id`,
-    ).bind(discordId, role, account.discordId, now).run();
+    try {
+      await env.DB.prepare(
+        `INSERT INTO developer_roles (discord_id, role, granted_by_discord_id, created_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(discord_id) DO UPDATE SET role = excluded.role, granted_by_discord_id = excluded.granted_by_discord_id`,
+      ).bind(discordId, role, account.discordId, now).run();
+    } catch (error) {
+      if (!missingRoleColumn(error)) throw error;
+      if (role === "administrator") return json({ error: "The administrator role needs database migration 0026 first." }, 503);
+      await env.DB.prepare(
+        `INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(discord_id) DO UPDATE SET granted_by_discord_id = excluded.granted_by_discord_id`,
+      ).bind(discordId, account.discordId, now).run();
+    }
   } else {
     await env.DB.prepare("DELETE FROM developer_roles WHERE discord_id = ?").bind(discordId).run();
   }
@@ -763,17 +786,23 @@ async function updateDeveloperRole(request, env, discordId, enabled) {
 async function listDeveloperAccounts(request, env) {
   const account = await currentAccount(request, env);
   if (!can(account, "roles.grant.developer")) return json({ error: "Role management access required." }, 403);
-  const result = await env.DB.prepare(
+  const accountList = (roleColumn) => env.DB.prepare(
     `SELECT users.discord_id AS discordId,
             users.discord_username AS discordUsername,
             users.discord_global_name AS discordGlobalName,
-            developer_roles.discord_id AS grantedDeveloperId,
-            developer_roles.role AS grantedRole
+            developer_roles.discord_id AS grantedDeveloperId${roleColumn ? ", developer_roles.role AS grantedRole" : ""}
        FROM users
        LEFT JOIN developer_roles ON developer_roles.discord_id = users.discord_id
       ORDER BY users.updated_at DESC, users.discord_id ASC
       LIMIT 201`,
   ).all();
+  let result;
+  try {
+    result = await accountList(true);
+  } catch (error) {
+    if (!missingRoleColumn(error)) throw error;
+    result = await accountList(false);
+  }
   const rows = result?.results || [];
   return json({
     accounts: rows.slice(0, 200).map((row) => {
