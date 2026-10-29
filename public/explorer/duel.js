@@ -228,7 +228,7 @@
   // Formula 3023 for one hit. Aniimo have no BREAK defense of their own (property_data gives pets none).
   function breakDamage(attacker, defender, attack, scenario, crit) {
     const bpAtk = attacker.stats.Break || 0;
-    let damage = bpAtk * (chosenRate(attack) * (attack.breakPower ?? attack.might) / 10) * attack.breakRate;
+    let damage = bpAtk * (chosenRate(attack) * attack.might / 10) * attack.breakRate;
     damage *= Math.max(1, elementFactor(scenario.data, attack.element, defender.elements));
     if (crit) damage *= Math.min(RULES.critCap, 1 + RULES.critDamage);
     return Math.max(damage, 0);
@@ -268,16 +268,6 @@
     return { time: limit, hits, used, dealt, ep, ko: false };
   }
 
-  function breakGauge(level) {
-    // Formula 3110 with property_data 1001's arguments {lv, 35, 1, 0}. How the game applies it to an Aniimo isn't
-    // confirmed, so it only shows in Developer Mode.
-    const lv = Math.min(80, Math.max(1, level));
-    let factor;
-    if (lv <= 20) factor = 0.00033478 * lv ** 3 - 0.00638831 * lv ** 2 + 9.16772211 * lv + 53.25878512;
-    else if (lv < 66) factor = 0.0000179869 * lv ** 4 - 0.0116044223 * lv ** 3 + 1.4768265884 * lv ** 2 - 43.5365263699 * lv + 619.0788382776;
-    else factor = 0.17038576 * lv ** 3 - 38.33469069 * lv ** 2 + 2888.21408629 * lv - 71268.29924774;
-    return Math.max(factor * 35, 0.01);
-  }
 
   // One attack through damage-model.js (Team Builder's port of formulas 3001/3023 with every bracket), with the
   // picked buffs and debuffs; falls back to the simple formula above when the model isn't loaded.
@@ -298,8 +288,7 @@
     const type = attack.group === "Normal" ? "basic" : attack.group === "Ultimate" ? "ultimate" : "skill";
     return model.hit(side(attacker, attackerMods), side(defender, scenario.defenderMods || {}), {
       might: attack.might,
-      // BREAK: the skill's tpPower and its bpRate (damage-model.js 0.1.1); unknown tpPower gives no BREAK figure.
-      breakPower: attack.breakPower ?? 0,
+      // BREAK (formula 3023): the skill's Might times its bpRate; tpPower only drains toughness.
       breakRate: attack.breakRate,
       element: attack.element,
       category: attack.category === "Magic" ? "Magical" : "Physical",
@@ -327,11 +316,14 @@
           normal: result.hit,
           crit: result.crit,
           average: result.average,
-          // Toughness: how much of the target's toughness gauge one hit drains, before the level gap (exact).
+          // Toughness: how much of the target's toughness (stagger) gauge one hit drains, before the level gap.
           toughness: attack.breakPower === null || !window.AniilogsDamage?.toughnessDrain
             ? NaN : window.AniilogsDamage.toughnessDrain(attack.breakPower, { hitShare: chosenRate(attack) }),
-          breakNormal: attack.breakPower === null ? NaN : result.break,
-          breakAverage: attack.breakPower === null ? NaN : result.break,
+          breakNormal: result.break,
+          breakAverage: result.break + (result.critChance || 0) * ((result.breakCrit ?? result.break) - result.break),
+          hitsToBreak: window.AniilogsDamage?.hitsToBreak
+            ? window.AniilogsDamage.hitsToBreak(scenario.data, defender.side.level, result.break + (result.critChance || 0) * ((result.breakCrit ?? result.break) - result.break))
+            : null,
           critChance: result.critChance,
           critMultiplier: result.critMultiplier,
           steps: result.steps || [],
@@ -563,7 +555,7 @@
     table.setAttribute("role", "table");
     const head = el("div", "duel-row is-head");
     head.setAttribute("role", "row");
-    ["", "Attack", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Toughness"].forEach((label) => {
+    ["", "Attack", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Hits to BREAK*"].forEach((label) => {
       const cell = el("span", "", label);
       cell.setAttribute("role", "columnheader");
       head.append(cell);
@@ -625,11 +617,11 @@
         el("span", "duel-num is-key", percent(hpShare(row.average))),
         el("span", "duel-num", Number.isFinite(toKo(row.average)) ? String(toKo(row.average)) : "–"),
         el("span", "duel-num", whole(row.breakAverage)),
-        el("span", "duel-num", Number.isFinite(row.toughness) ? `${Math.round(row.toughness * 10) / 10}` : "–"),
+        el("span", "duel-num duel-unverified", Number.isFinite(row.hitsToBreak) ? String(row.hitsToBreak) : "–"),
       ];
       cells.forEach((cell, index) => {
         cell.setAttribute("role", "cell");
-        if (index > 1) cell.dataset.label = ["", "", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Toughness"][index];
+        if (index > 1) cell.dataset.label = ["", "", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Hits to BREAK*"][index];
       });
       line.append(...cells);
       table.append(line);
@@ -648,13 +640,11 @@
     const target = settings.startHp < 100 ? ` from ${percent(settings.startHp, 0)} HP` : "";
     section.append(planSummary(result, `(${whole(result.startHp)} HP${target}, average with crits)`));
     section.append(renderAttackTable(options, result, rerender));
-    if (options.developerMode) {
-      const gauge = breakGauge(result.defender.side.level);
-      const best = Math.max(0, ...result.rows.filter((row) => row.enabled).map((row) => row.breakAverage));
-      const dev = el("p", "duel-dev");
-      const badge = el("span", "duel-dev-badge", "Unverified");
-      dev.append(badge, ` BREAK gauge from formula 3110 at Lv ${result.defender.side.level}: ${whole(gauge)} (${best ? `${Math.ceil(gauge / best)} of the strongest BREAK hit` : "no BREAK damage"}). How the game sizes an Aniimo's gauge isn't confirmed.`);
-      section.append(dev);
+    const bar = window.AniilogsDamage?.breakBar?.(options.data, result.defender.side.level);
+    if (Number.isFinite(bar)) {
+      const line = el("p", "duel-dev");
+      line.append(el("span", "duel-dev-badge", "Not verified"), ` * The opponent's BREAK bar at Lv ${result.defender.side.level} is ${whole(bar)} (formula 3110). Hits to BREAK counts one attack over and over (average BREAK with crits). Not yet checked in the game: use one attack on a same-level Aniimo until it’s BREAKed, then compare the count with this column.`);
+      section.append(line);
     }
     return section;
   }
@@ -828,7 +818,8 @@
     const crit = Number.isFinite(row.critChance)
       ? `Crit: ${Math.round(row.critChance * 100)}% chance for ×${Math.round(row.critMultiplier * 100) / 100}.`
       : "";
-    box.append(list, el("p", "duel-note", `One hit: ${whole(row.normal)} damage (${percent(result.maxHp ? row.normal / result.maxHp * 100 : NaN)} of max HP). ${crit}`.trim()));
+    const toughness = Number.isFinite(row.toughness) ? ` Toughness drained: ${Math.round(row.toughness * 10) / 10} (not verified: a separate stagger gauge).` : "";
+    box.append(list, el("p", "duel-note", `One hit: ${whole(row.normal)} damage (${percent(result.maxHp ? row.normal / result.maxHp * 100 : NaN)} of max HP), ${whole(row.breakAverage)} BREAK. ${crit}${toughness}`.trim()));
     return box;
   }
 
@@ -866,7 +857,7 @@
     );
     root.append(results);
     const sources = el("p", "duel-sources");
-    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. Toughness is how much of the target’s toughness gauge a hit drains (an Aniimo’s gauge is 60; other targets differ, and the level gap changes it); BREAK dmg is formula 3023 from the BREAK stat. Which of the two triggers BREAK is decided on the game’s server, so there’s no hits-to-BREAK figure yet. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. BREAK dmg is formula 3023: BREAK stat × Might ÷ 10 × the skill’s BREAK rate, and it can crit. Hits to BREAK divides the opponent’s BREAK bar by it and isn’t checked in the game yet. Toughness (a separate stagger gauge) is in each attack’s working. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
     root.append(sources);
     return root;
   }

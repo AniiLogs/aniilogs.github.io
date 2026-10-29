@@ -79,3 +79,13 @@ test("toughness drain is hit share x the skill's BREAK power x the target's modi
   assert.equal(D.toughnessDrain(24), 24);
   assert.equal(D.toughnessDrain(24, { hitShare: 0.5, tpReduceAdd: 0.25, sizeResistRate: 2 }), 7.5);
 });
+
+test("BREAK damage is formula 3023: (BREAK - BREAK DEF) x Might / 10 x bpRate, with crit, not Damage Amp", () => {
+  const breaker = { ...attacker, breakAtk: 208, critDamage: 0.5, modifiers: { taken_dmg_inc_rate_v: 0.5 } };
+  const kick = { might: 72, breakRate: 1, element: 5, category: "Physical", type: "skill" };
+  const result = D.hit(breaker, { ...defender, elements: [3], breakDef: 0 }, kick, context);
+  assert.equal(Math.round(result.break * 10) / 10, 1497.6);
+  assert.equal(Math.round(result.breakCrit * 10) / 10, 2246.4);
+  assert.equal(D.hitsToBreak({ pet_break_bar: { by_level: [2185, 27866] } }, 2, result.break), 19);
+  assert.equal(D.hit(breaker, defender, { ...kick, breakRate: 0 }, context).break, 0);
+});

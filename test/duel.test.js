@@ -34,9 +34,9 @@ test("HP damage follows formula 3001: max(ATK - DEF, 10% ATK) x Might / 10, elem
   assert.ok(Math.abs(duel.hpDamage(attacker, defender, fireKick, { ...scenario, broken: true, brokenBonus: 0.5 }, false) - plain * 1.5) < 1e-9);
 });
 
-test("BREAK damage follows formula 3023 with the skill's tpPower and never drops below 1x for elements", () => {
+test("BREAK damage follows formula 3023 (Might x BREAK rate) and never drops below 1x for elements", () => {
   const resist = { stats: {}, elements: ["5"] };
-  assert.ok(Math.abs(duel.breakDamage(attacker, resist, fireKick, scenario, false) - 182 * 2.4) < 1e-9);
+  assert.ok(Math.abs(duel.breakDamage(attacker, resist, fireKick, scenario, false) - 182 * 7.2) < 1e-9);
 });
 
 test("the KO plan uses the strongest attack off cooldown and stops at the KO", () => {
@@ -62,12 +62,12 @@ test("stats use the same growth as the Aniimo page", () => {
   assert.equal(duel.grownStat(growth, "HP", 67, 70, 0), 6858);
 });
 
-test("the page says every number assumes the attacks land, covers crits, and keeps the gauge in Developer Mode", () => {
+test("the page says every number assumes the attacks land, covers crits, and marks Hits to BREAK as not verified", () => {
   assert.match(source, /"Assumes every attack lands\."/u);
   assert.match(source, /Crits use the game's base/u);
   assert.match(source, /No crits: .*Every hit crits:/u);
-  assert.match(source, /if \(options\.developerMode\) \{\s+const gauge = breakGauge/u);
-  assert.match(source, /"Unverified"/u);
+  assert.match(source, /window\.AniilogsDamage\?\.breakBar\?\.\(options\.data, result\.defender\.side\.level\)/u);
+  assert.match(source, /"Not verified"/u);
 });
 
 test("Team Builder has a 1v1 tab that hands off to duel.js", () => {
