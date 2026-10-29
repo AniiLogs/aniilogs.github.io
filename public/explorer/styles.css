@@ -11045,7 +11045,10 @@ html[data-embed="app"] body > footer { display: none !important; }
   min-height: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(var(--panel-rgb), 0.92);
+  /* See-through, so the Aniimo artwork behind the page still shows; the light blur keeps text readable. */
+  background: rgba(var(--panel-rgb), 0.35);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
   overflow: hidden;
 }
 
@@ -11591,7 +11594,9 @@ html[data-embed="app"] body > footer { display: none !important; }
     overflow-x: auto;
     scrollbar-width: none;
     padding: 6px 0;
-    background: var(--background);
+    background: rgba(var(--background-rgb), 0.6);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
   }
 
   .afp-jump button {
@@ -12446,4 +12451,145 @@ html[data-embed="app"] #topbarLogoutButton {
   .duel-row > :nth-child(8) {
     grid-column: 2;
   }
+}
+
+/* ---- Aniimo header on phones: icon and name on the first row, then the form chips as one scrolling row, then
+   View Model / Show Artwork / Locate on Map as equal buttons. The pinned copy that follows you down the page uses
+   the same rows, smaller. Skill tag rows wrap instead of cutting off. */
+.afp-skill-tags {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+@media (max-width: 760px) {
+  .catalog-aniilog-record > .catalog-identity,
+  .catalog-mobile-sticky-aniilog.is-stuck {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 8px;
+  }
+
+  .catalog-aniilog-record > .catalog-identity > div:not(.catalog-identity-actions),
+  .catalog-mobile-sticky-aniilog.is-stuck > div:not(.catalog-identity-actions) {
+    display: contents;
+  }
+
+  .catalog-aniilog-record > .catalog-identity > .catalog-hero-icon,
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-hero-icon {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    align-self: start;
+  }
+
+  .catalog-aniilog-record > .catalog-identity :is(.catalog-sticky-indicator, .catalog-eyebrow, h2, .catalog-tags),
+  .catalog-mobile-sticky-aniilog.is-stuck :is(.catalog-eyebrow, h2) {
+    grid-column: 2;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .catalog-aniilog-record > .catalog-identity .catalog-eyebrow,
+  .catalog-mobile-sticky-aniilog.is-stuck .catalog-eyebrow {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .catalog-aniilog-record > .catalog-identity .afp-forms,
+  .catalog-mobile-sticky-aniilog.is-stuck .afp-forms {
+    grid-column: 1 / -1;
+    flex-wrap: nowrap;
+    margin: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    pointer-events: auto;
+    scrollbar-width: none;
+  }
+
+  .afp-forms::-webkit-scrollbar {
+    display: none;
+  }
+
+  .afp-forms .afp-form {
+    flex: none;
+    min-height: 36px;
+    white-space: nowrap;
+  }
+
+  .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions,
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+    pointer-events: auto;
+  }
+
+  .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions > button,
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions > button {
+    min-width: 0;
+    min-height: 40px;
+    border-radius: 10px;
+    padding: 0 8px;
+    font-size: 13px;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The pinned copy: a 40px icon, the subtitle under the name, and no Selected Aniimo label or tags. */
+  .catalog-mobile-sticky-aniilog.is-stuck {
+    grid-template-columns: 40px minmax(0, 1fr);
+    row-gap: 6px;
+  }
+
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-hero-icon {
+    width: 40px;
+    height: 40px;
+    grid-row: 1 / span 2;
+  }
+
+  .catalog-mobile-sticky-aniilog.is-stuck :is(.catalog-sticky-indicator, .catalog-tags) {
+    display: none;
+  }
+
+  .catalog-mobile-sticky-aniilog.is-stuck h2 {
+    grid-row: 1;
+  }
+
+  .catalog-mobile-sticky-aniilog.is-stuck .catalog-eyebrow {
+    grid-row: 2;
+  }
+
+  .catalog-mobile-sticky-aniilog.is-stuck .afp-form {
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions > button {
+    min-height: 34px;
+    font-size: 12px;
+  }
+}
+
+/* The narrowest phones fit two buttons per row; a third takes the whole second row. */
+@media (max-width: 400px) {
+  .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions,
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions > button:nth-child(3):last-child,
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions > button:nth-child(3):last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.catalog-identity.is-under-sticky {
+  visibility: hidden;
 }

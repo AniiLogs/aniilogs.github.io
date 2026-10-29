@@ -9932,6 +9932,7 @@ function setAniilogModelMode(enabled) {
 
 function removeMobileCatalogStickyIdentity() {
   document.querySelector(".catalog-mobile-sticky-identity")?.remove();
+  document.querySelectorAll(".catalog-identity.is-under-sticky").forEach((node) => node.classList.remove("is-under-sticky"));
 }
 
 function syncMobileCatalogStickyIdentity() {
@@ -9959,6 +9960,7 @@ function syncMobileCatalogStickyIdentity() {
   }
   if (!stickyIdentity) {
     stickyIdentity = identity.cloneNode(true);
+    stickyIdentity.classList.remove("is-under-sticky");
     stickyIdentity.classList.add("catalog-mobile-sticky-identity", `catalog-mobile-sticky-${view}`, "is-stuck");
     const stickyEyebrow = stickyIdentity.querySelector(".catalog-eyebrow");
     const stickyName = stickyIdentity.querySelector("h2");
@@ -9978,9 +9980,16 @@ function syncMobileCatalogStickyIdentity() {
     stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button").forEach((button) => {
       button.addEventListener("click", () => identity.querySelector(`.${button.classList[0]}`)?.click());
     });
+    // So do its form chips (same order as the header's).
+    const sourceForms = identity.querySelectorAll(".afp-form");
+    stickyIdentity.querySelectorAll(".afp-form").forEach((button, index) => {
+      button.addEventListener("click", () => sourceForms[index]?.click());
+    });
     document.body.append(stickyIdentity);
   }
   stickyIdentity.classList.toggle("is-showcase", view === "aniilog" && state.aniilogShowcaseMode);
+  // The real header scrolls on under the pinned copy; hide it so its buttons don’t peek out below.
+  identity.classList.add("is-under-sticky");
   stickyIdentity.style.setProperty("--catalog-sticky-left", `${Math.max(0, identityRect.left)}px`);
   stickyIdentity.style.setProperty("--catalog-sticky-width", `${Math.max(0, identityRect.width)}px`);
 }
