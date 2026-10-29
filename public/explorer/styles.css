@@ -12593,3 +12593,233 @@ html[data-embed="app"] #topbarLogoutButton {
 .catalog-identity.is-under-sticky {
   visibility: hidden;
 }
+/* ---- Team Builder recommended partners, member tabs, Build and Stats (team-builder.js).
+   Own block for the redesign merge; container queries on .team-panel so app mode works. */
+.team-panel {
+  container: team-panel / inline-size;
+}
+
+.team-partners {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.team-partners-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.team-partners-chip {
+  display: flex;
+  flex: 1 1 300px;
+  align-items: center;
+  max-width: 460px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.team-partners-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+}
+
+.team-partners-icon--empty {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+}
+
+.team-partners-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+.team-partners-copy small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.team-partners-add,
+.team-partners-replace {
+  flex: none;
+  min-height: 44px;
+}
+
+.team-member-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.team-member-tab {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.team-member-tab.is-active {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.team-member-tab-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 320px;
+}
+
+.team-build,
+.team-stats {
+  display: grid;
+  gap: 12px;
+}
+
+.team-build-item,
+.team-build-preset,
+.team-stats-trait {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.team-build-preset,
+.team-stats-trait {
+  display: grid;
+  gap: 4px;
+}
+
+.team-build-preset p,
+.team-stats-trait p {
+  margin: 0;
+}
+
+.team-build-preset small,
+.team-stats-trait small {
+  color: var(--muted);
+}
+
+.team-build-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+
+.team-build-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.team-build-tiers {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.team-build-percent {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.team-stats-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.team-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.team-stats-table th,
+.team-stats-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.team-stats-table th:first-child {
+  text-align: left;
+}
+
+.team-stats-table thead th {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.team-stats-traits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.team-stats-natures {
+  margin: 8px 0 0;
+}
+
+@container team-panel (max-width: 640px) {
+  .team-partners-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 4px;
+  }
+
+  .team-partners-chip {
+    flex: none;
+    flex-wrap: wrap;
+    width: min(300px, 80cqi);
+    max-width: none;
+    scroll-snap-align: start;
+  }
+
+  .team-partners-add,
+  .team-partners-replace {
+    flex-basis: 100%;
+  }
+
+  .team-member-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .team-stats-traits {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container team-panel (max-width: 560px) {
+  .team-stats-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .team-member-tab-panel {
+    min-height: 0;
+  }
+}

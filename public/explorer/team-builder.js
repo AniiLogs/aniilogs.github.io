@@ -64,9 +64,10 @@
       return {
         page: ["types", "duel"].includes(saved?.page) ? saved.page : "team",
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
+        memberTab: String(saved?.memberTab || "skills"),
       };
     } catch {
-      return { page: "team", types: [] };
+      return { page: "team", types: [], memberTab: "skills" };
     }
   }
 
@@ -79,7 +80,7 @@
   }
 
   function openTypes(types) {
-    viewState = { page: "types", types: types.map(String).slice(0, MAX_TYPE_SELECTION) };
+    viewState = { ...viewState, page: "types", types: types.map(String).slice(0, MAX_TYPE_SELECTION) };
     saveViewState();
     render();
     host.panel.scrollTo?.({ top: 0 });
@@ -122,10 +123,11 @@
       ? value.activeSkills.slice(0, MAX_ACTIVE_SKILLS).map((skill) => String(skill || ""))
       : [];
     while (activeSkills.length < MAX_ACTIVE_SKILLS) activeSkills.push("");
-    return {
-      formId: String(value?.formId || ""),
-      activeSkills,
-    };
+    const member = { formId: String(value?.formId || ""), activeSkills };
+    // Stats tab inputs (also read by the 1v1 tab); unset means level cap and no potential.
+    if (Number.isFinite(Number(value?.level)) && value?.level !== null && value?.level !== "") member.level = Math.round(Number(value.level));
+    if (Number.isFinite(Number(value?.potential)) && value?.potential !== null && value?.potential !== "") member.potential = Math.round(Number(value.potential));
+    return member;
   }
 
   function normalizeModel(value) {
@@ -1116,7 +1118,7 @@
       card.append(copy);
       grid.append(card);
     });
-    section.append(heading, grid);
+    section.append(heading, renderPartners(), grid);
     return section;
   }
 
@@ -1259,7 +1261,13 @@
       const swap = renderSwapBar(index);
       if (swap) wrapper.append(swap);
     }
-    wrapper.append(renderSkillLoadout(member, form, index), renderTraits(form));
+    const tab = memberTab();
+    const body = el("div", "team-member-tab-panel");
+    body.setAttribute("role", "tabpanel");
+    if (tab === "build") body.append(renderBuild(member, form));
+    else if (tab === "stats") body.append(renderStats(member, entry));
+    else body.append(renderSkillLoadout(member, form, index), renderTraits(form));
+    wrapper.append(renderMemberTabs(), body);
     return wrapper;
   }
 
@@ -1271,6 +1279,285 @@
     main.append(renderMember(model.members[model.activeSlot], model.activeSlot));
     columns.append(main, renderScenario());
     return columns;
+  }
+
+  // --- Recommended partners, build and stats ---------------------------------------------------
+  // From pet_data's recommend* fields (team_builder_data.json `recommended`), the Aniilog's stat_growth
+  // through duel.js's grownStat, and pet_talent_data personality traits (`personality`).
+
+  const MEMBER_TABS = Object.freeze([
+    { id: "skills", label: "Skills" },
+    { id: "build", label: "Build" },
+    { id: "stats", label: "Stats" },
+  ]);
+  let developerOverlay = null;
+
+  function developerMode() {
+    return typeof window.developerModeEnabled === "function" && window.developerModeEnabled();
+  }
+
+  // Developer Mode adds unreleased partners and held items from dev-content/team-builder/overlay.json.
+  function requestDeveloperOverlay() {
+    if (!developerMode() || typeof window.loadDeveloperOverlay !== "function") {
+      developerOverlay = null;
+      return;
+    }
+    void window.loadDeveloperOverlay("team-builder").then((overlay) => {
+      if (overlay === developerOverlay) return;
+      developerOverlay = overlay;
+      render();
+    });
+  }
+
+  function developerAdditions(formId, field) {
+    if (!developerOverlay || !developerMode()) return [];
+    return developerOverlay.records
+      .filter((record) => record.op === "patch" && record.target === "forms" && String(record.match?.form_id) === String(formId))
+      .flatMap((record) => (Array.isArray(record.append?.[field]) ? record.append[field] : [])
+        .map((value) => ({ ...value, availability: record.availability, availability_note: record.availability_note || "" })));
+  }
+
+  function availabilityBadge(item) {
+    return typeof window.developerAvailabilityBadge === "function"
+      ? window.developerAvailabilityBadge(item.availability, item.availability_note)
+      : null;
+  }
+
+  function percentText(value) {
+    return `${formatNumber(value * 100)}%`;
+  }
+
+  function sectionHeading(title, note = "") {
+    const heading = el("div", "team-section-heading");
+    heading.append(el("div", "", title));
+    if (note) heading.append(el("small", "", note));
+    return heading;
+  }
+
+  // Partners the game recommends for anyone in the slots, minus Aniimo already on the team.
+  function recommendedPartners() {
+    const onTeam = new Set(model.members.map((member) => member.formId).filter(Boolean));
+    const partners = new Map();
+    slotIndexes().forEach((index) => {
+      const member = model.members[index];
+      const form = formFor(member);
+      if (!form) return;
+      const by = entryForForm(member.formId)?.name || form.name;
+      const add = (formId, unreleased = null) => {
+        const key = String(formId);
+        if (onTeam.has(key)) return;
+        if (!partners.has(key)) partners.set(key, { formId: key, unreleased, by: [] });
+        const row = partners.get(key);
+        if (!row.by.includes(by)) row.by.push(by);
+      };
+      (form.recommended?.partners || []).forEach((formId) => add(formId));
+      developerAdditions(member.formId, "recommended_partners").forEach((partner) => add(partner.form_id, partner));
+    });
+    return [...partners.values()];
+  }
+
+  function renderPartnerAdd(formId) {
+    const empty = slotIndexes().find((index) => !model.members[index].formId);
+    if (empty !== undefined) return button("Add to team", "team-loadout-action team-partners-add", () => addToTeam(formId));
+    const options = slotIndexes().map((index) => {
+      const member = model.members[index];
+      return { value: String(index), label: `${slotRole(index)}: ${entryForForm(member.formId)?.name || formFor(member)?.name || "Empty"}` };
+    });
+    return selectControl("Add to team", [{ value: "", label: "Replace…" }, ...options], "", (value) => {
+      if (value !== "") addToTeam(formId, Number(value));
+    }, "team-partners-replace");
+  }
+
+  function renderPartnerChip(partner) {
+    const extra = partner.unreleased;
+    const entry = extra ? null : entryForForm(partner.formId);
+    const form = extra ? null : data.forms[partner.formId];
+    const chip = el("article", "team-partners-chip");
+    if (entry?.icon) chip.append(icon(entry.icon, "team-partners-icon"));
+    else chip.append(el("span", "team-partners-icon team-partners-icon--empty", "?"));
+    const copy = el("div", "team-partners-copy");
+    const name = el("strong", "", extra ? extra.name : formLabel(entry, form));
+    if (extra) {
+      const badge = availabilityBadge(extra);
+      if (badge) name.append(" ", badge);
+      if (extra.name_source) chip.title = `Name from ${extra.name_source}`;
+    }
+    const elements = extra ? extra.elements || [] : form?.elements || [];
+    copy.append(name);
+    if (elements.length) copy.append(chipRow(elements));
+    copy.append(el("small", "", `Recommended for ${partner.by.join(", ")}`));
+    chip.append(copy);
+    if (!extra) chip.append(renderPartnerAdd(partner.formId));
+    return chip;
+  }
+
+  function renderPartners() {
+    const strip = el("section", "team-partners");
+    strip.append(sectionHeading("Recommended partners", "The game’s suggested teammates for this team"));
+    const partners = recommendedPartners();
+    if (!partners.length) {
+      const anyone = slotIndexes().some((index) => formFor(model.members[index]));
+      strip.append(el("p", "team-empty-copy", anyone
+        ? "Every partner the game recommends for this team is already on it."
+        : "Add an Aniimo to see the partners the game recommends for it."));
+      return strip;
+    }
+    const row = el("div", "team-partners-row");
+    partners.forEach((partner) => row.append(renderPartnerChip(partner)));
+    strip.append(row);
+    return strip;
+  }
+
+  function memberTab() {
+    return MEMBER_TABS.some((tab) => tab.id === viewState.memberTab) ? viewState.memberTab : "skills";
+  }
+
+  function renderMemberTabs() {
+    const tabs = el("div", "team-member-tabs");
+    tabs.setAttribute("role", "tablist");
+    MEMBER_TABS.forEach((tab) => {
+      const node = button(tab.label, "team-member-tab", () => {
+        viewState.memberTab = tab.id;
+        saveViewState();
+        render();
+      });
+      node.setAttribute("role", "tab");
+      node.setAttribute("aria-selected", String(memberTab() === tab.id));
+      if (memberTab() === tab.id) node.classList.add("is-active");
+      tabs.append(node);
+    });
+    return tabs;
+  }
+
+  function renderHeldItem(item) {
+    const card = el("article", "team-build-item");
+    if (item.icon) card.append(icon(item.icon, "team-build-icon"));
+    const copy = el("div", "team-build-copy");
+    const name = el("strong", "", item.name || "Held item");
+    if (item.availability) {
+      const badge = availabilityBadge(item);
+      if (badge) name.append(" ", badge);
+    }
+    const tiers = el("ul", "team-build-tiers");
+    (item.tiers || []).forEach((tier) => {
+      const stats = (tier.stats || []).map((stat) => `${stat.label || `Stat ${stat.stat}`} +${percentText(stat.value)}`).join(", ");
+      tiers.append(el("li", "", `${tier.quality_label || `Quality ${tier.quality}`}: ${stats || "no base stat"}`));
+    });
+    copy.append(name, tiers);
+    card.append(copy);
+    return card;
+  }
+
+  function renderBuild(member, form) {
+    const recommended = form.recommended || {};
+    const wrap = el("div", "team-build");
+    const items = el("section", "team-config-section");
+    items.append(sectionHeading("Recommended held items", "Base stat at each quality"));
+    const heldItems = [...(recommended.held_items || []), ...developerAdditions(member.formId, "held_items")];
+    if (!heldItems.length) items.append(el("p", "team-empty-copy", "The game recommends no held items for this Aniimo."));
+    heldItems.forEach((item) => items.append(renderHeldItem(item)));
+    items.append(el("p", "team-data-note", "Base stats come from the game’s held-item table. Each item’s extra effects (its buff and energy bonuses) aren’t traced yet, so they aren’t listed. The game data also names recommended gems, but nothing in the game reads them, so they aren’t shown."));
+
+    const presets = el("section", "team-config-section");
+    presets.append(sectionHeading("Attribute point presets", "The game’s recommended splits"));
+    const rows = recommended.attribute_presets || [];
+    if (!rows.length) presets.append(el("p", "team-empty-copy", "The game has no attribute presets for this Aniimo."));
+    rows.forEach((preset) => {
+      const card = el("article", "team-build-preset");
+      const top = el("div", "team-skill-top");
+      top.append(el("strong", "", preset.title || "Preset"));
+      if (preset.default) top.append(pill("Default"));
+      if (preset.percent !== null && preset.percent !== undefined) top.append(el("span", "team-build-percent", `${preset.percent}%`));
+      card.append(top);
+      if (preset.summary) card.append(el("p", "", preset.summary));
+      if (preset.allocation) card.append(el("small", "", preset.allocation));
+      presets.append(card);
+    });
+    if (rows.length) presets.append(el("p", "team-data-note", "The percentage is the one the game shows on each preset."));
+    wrap.append(items, presets);
+    return wrap;
+  }
+
+  function clampInt(value, min, max, fallback) {
+    const number = Math.round(Number(value));
+    return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+  }
+
+  function numberField(labelText, value, min, max, onChange) {
+    const label = el("label", "team-field team-stats-field");
+    const input = el("input", "team-select");
+    input.type = "number";
+    input.inputMode = "numeric";
+    input.min = String(min);
+    input.max = String(max);
+    input.value = String(value);
+    input.addEventListener("change", () => onChange(clampInt(input.value, min, max, value)));
+    label.append(el("span", "team-field-label", labelText), input);
+    return label;
+  }
+
+  function renderStatTable(member, entry) {
+    const section = el("section", "team-config-section");
+    const growth = aniilog?.stat_growth;
+    const grownStat = window.AniilogsDuel?.grownStat;
+    if (!growth || typeof grownStat !== "function" || !entry?.stats?.length) {
+      section.append(sectionHeading("Stats"), el("p", "team-empty-copy", "Stat growth isn’t available for this Aniimo."));
+      return section;
+    }
+    const cap = Number(growth.level_cap) || 70;
+    const maxPotential = Number(growth.attribute_points_max) || 20;
+    const level = clampInt(member.level ?? cap, 1, cap, cap);
+    const potential = clampInt(member.potential ?? 0, 0, maxPotential, 0);
+    section.append(sectionHeading("Stats", `Level ${level}, potential ${potential}`));
+    const inputs = el("div", "team-stats-inputs");
+    inputs.append(
+      numberField(`Level (1–${cap})`, level, 1, cap, (next) => { member.level = next; persist(); render(); }),
+      numberField(`Potential, each stat (0–${maxPotential})`, potential, 0, maxPotential, (next) => { member.potential = next; persist(); render(); }),
+    );
+    section.append(inputs);
+    const table = el("table", "team-stats-table");
+    const head = el("tr");
+    ["Stat", "Species value", `Level ${level}`].forEach((text) => head.append(el("th", "", text)));
+    table.append(el("thead"), el("tbody"));
+    table.tHead.append(head);
+    entry.stats.forEach((row) => {
+      const value = grownStat(growth, row.label, Number(row.value), level, potential);
+      const line = el("tr");
+      line.append(el("th", "", row.label), el("td", "", String(row.value)), el("td", "", value === null ? "–" : value.toLocaleString()));
+      table.tBodies[0].append(line);
+    });
+    section.append(table, el("p", "team-data-note", "Exact base stats from the game’s own formulas (formula_data.lua 3003 HP, 3004 Attack and Magic Attack, 3007 Defense and Magic Defense, 3008 EP Regen, 3018 Break) and the potential bonus in pet_attr_convert_data. Not included: allocated attribute points, held items, personality traits and other bonuses."));
+    return section;
+  }
+
+  function renderPersonality(entry) {
+    const section = el("section", "team-config-section");
+    section.append(sectionHeading("Personality", "Rolled at random on each Aniimo"));
+    const traits = data?.personality?.traits || [];
+    const list = el("div", "team-stats-traits");
+    traits.forEach((trait) => {
+      const card = el("article", "team-stats-trait");
+      const top = el("div", "team-skill-top");
+      top.append(el("strong", "", trait.name || trait.letter), pill(trait.letter));
+      card.append(top);
+      if (trait.battle) card.append(el("p", "", `Battle: ${trait.battle}`));
+      if (trait.home) card.append(el("small", "", `Home: ${trait.home}`));
+      list.append(card);
+    });
+    if (traits.length) section.append(list);
+    if (data?.personality?.note) section.append(el("p", "team-data-note", data.personality.note));
+    const natures = entry?.profile?.natures || [];
+    if (natures.length) {
+      section.append(el("p", "team-stats-natures", `Natures: ${natures.map((nature) => `${nature.name} ${nature.percent}%`).join(" · ")}`),
+        el("p", "team-data-note", "Natures are flavour only: the game gives them no stat change."));
+    }
+    return section;
+  }
+
+  function renderStats(member, entry) {
+    const wrap = el("div", "team-stats");
+    wrap.append(renderStatTable(member, entry), renderPersonality(entry));
+    return wrap;
   }
 
   // --- Type matchups -------------------------------------------------------------------------
@@ -1315,9 +1602,9 @@
         || String(left.entry?.name || left.form.name).localeCompare(String(right.entry?.name || right.form.name)));
   }
 
-  function addToTeam(formId) {
+  function addToTeam(formId, targetSlot) {
     const empty = slotIndexes().find((index) => !model.members[index].formId);
-    const slot = empty ?? model.activeSlot;
+    const slot = targetSlot ?? empty ?? model.activeSlot;
     model.members[slot] = { ...defaultMember(), formId };
     model.activeSlot = slot;
     persist();
@@ -1381,18 +1668,19 @@
       [`Takes ${WEAK}×`, attackersAt(type, WEAK), "resist"],
     ])));
     if (types.length > 1) {
-      // Facts per element only: the game tables do not say how two defending elements combine.
+      // Combat code (CombatActionTool, getElementAgainstValue) multiplies the defending elements' values.
+      const times = (value) => `${Number(value.toFixed(2))}×`;
       const onAll = (multiplier) => elementIds().filter((attacker) => types.every((type) => element(attacker).against[type] === multiplier));
       const mixed = elementIds().filter((attacker) => {
         const values = types.map((type) => element(attacker).against[type]);
         return values.includes(STRONG) && values.includes(WEAK);
       });
       section.append(matchupBlock("Across both elements", [
-        [`${STRONG}× on both`, onAll(STRONG), "weak"],
-        [`${WEAK}× on both`, onAll(WEAK), "resist"],
-        [`${STRONG}× on one, ${WEAK}× on the other`, mixed, "mixed"],
+        [`Takes ${times(STRONG * STRONG)} (${STRONG}× on both)`, onAll(STRONG), "weak"],
+        [`Takes ${times(WEAK * WEAK)} (${WEAK}× on both)`, onAll(WEAK), "resist"],
+        [`Takes ${times(STRONG * WEAK)} (${STRONG}× on one, ${WEAK}× on the other)`, mixed, "mixed"],
       ]));
-      section.append(el("p", "team-data-note", "The game's tables give one multiplier per element pair. How two defending elements combine is decided in battle and isn't in the data, so each element is listed on its own."));
+      section.append(el("p", "team-data-note", "In battle the game multiplies the values for each defending element, so 1.6 × 1.6 = 2.56. The attacker's element-advantage stats and an elemental shield on the target (its element replaces the target's) can change the result."));
     }
     types.forEach((type) => section.append(matchupBlock(`${element(type).name} attacking`, [
       [`Deals ${STRONG}×`, defendersAt(type, STRONG), "strong"],
@@ -1563,6 +1851,7 @@
     model.members.forEach(validateMember);
     persist();
     render();
+    requestDeveloperOverlay();
   }
 
   window.AniilogsTeamBuilder = Object.freeze({ show });
