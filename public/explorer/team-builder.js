@@ -1525,17 +1525,6 @@
       data,
       members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
       formLabel,
-      developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),
-      rerender: renderPanel,
-    });
-  }
-
-  function renderDuelPage() {
-    return window.AniilogsDuel.render({
-      aniilog,
-      data,
-      members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
-      formLabel,
       contentUrl: host.contentUrl,
       developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),
       rerender: renderPanel,
