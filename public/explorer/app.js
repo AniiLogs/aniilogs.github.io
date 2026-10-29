@@ -9260,6 +9260,16 @@ function renderItemLogCatalogRecord(entry) {
     appendGameRichText(description, entry.description);
     record.append(description);
   }
+  // The game's "use" text, shown under the description (it carries the same rich-text tags).
+  if (entry.use_text) {
+    const use = document.createElement("p");
+    use.className = "catalog-description catalog-use-text";
+    const label = document.createElement("strong");
+    label.textContent = "Use: ";
+    use.append(label);
+    appendGameRichText(use, entry.use_text);
+    record.append(use);
+  }
 
   const details = createCatalogSection("Item details");
   const facts = document.createElement("dl");

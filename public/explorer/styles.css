@@ -13163,3 +13163,13 @@ html[data-embed="app"] #topbarLogoutButton {
 .afp-held-item-tiers .is-quality-3 strong { color: #5aa7ff; }
 .afp-held-item-tiers .is-quality-4 strong { color: #b98cff; }
 .afp-held-item-tiers .is-quality-5 strong { color: #f2a93b; }
+
+/* An item's use text, under its description. */
+.catalog-use-text {
+  margin-top: -4px;
+  color: var(--muted);
+}
+
+.catalog-use-text strong {
+  color: var(--text);
+}
