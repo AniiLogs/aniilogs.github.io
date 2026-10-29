@@ -732,22 +732,34 @@
   function compareEffects(base, upgrade, change) {
     const opKey = (operation) => `${operation.key}|${operation.on}|${requiresKey(operation.requires)}`;
     const opValue = (operation) => [formatValues(operation.key, operation.values), ...(operation.formulas || [])].filter(Boolean).join(" · ") || "runtime value";
+    // Rows name their condition; an upgrade effect that only adds "doesn't have X" is compared with the
+    // normal version's unconditional one (e.g. Tail Flick Combo's plain hits vs its Elasticity Burst hits).
+    const when = (requires) => (requires?.length ? ` (${conditionText(requires).replace(/\.$/u, "").replace(/^Only/u, "only")})` : "");
     const baseOps = new Map((base.mechanics?.operations || []).map((operation) => [opKey(operation), operation]));
     const upgradeOps = new Map((upgrade.mechanics?.operations || []).map((operation) => [opKey(operation), operation]));
+    const matchedBase = new Set();
     upgradeOps.forEach((operation, key) => {
-      const before = baseOps.get(key);
-      const where = `${operation.label} → ${WHO_LABELS[operation.on] || operation.on}`;
+      let beforeKey = baseOps.has(key) ? key : null;
+      if (!beforeKey && operation.requires?.length && operation.requires.every((item) => !item.holds)) {
+        const plain = `${operation.key}|${operation.on}|`;
+        if (baseOps.has(plain) && !upgradeOps.has(plain)) beforeKey = plain;
+      }
+      const before = beforeKey ? baseOps.get(beforeKey) : null;
+      if (beforeKey) matchedBase.add(beforeKey);
+      const where = `${operation.label} → ${WHO_LABELS[operation.on] || operation.on}${when(operation.requires)}`;
       if (!before) change(where, "not in the normal version", opValue(operation));
       else if (opValue(before) !== opValue(operation) || before.count !== operation.count) {
         change(where, `${opValue(before)} (${before.count}×)`, `${opValue(operation)} (${operation.count}×)`);
       }
     });
     baseOps.forEach((operation, key) => {
-      if (!upgradeOps.has(key)) change(`${operation.label} → ${WHO_LABELS[operation.on] || operation.on}`, opValue(operation), "removed");
+      if (!upgradeOps.has(key) && !matchedBase.has(key)) {
+        change(`${operation.label} → ${WHO_LABELS[operation.on] || operation.on}${when(operation.requires)}`, opValue(operation), "removed");
+      }
     });
     const linkKey = (link) => `${link.id}|${link.on}|${requiresKey(link.requires)}`;
     const linkValue = (link) => [link.duration ? `${formatNumber(link.duration)}s` : "", link.stacks ? `${link.stacks} stacks` : ""].filter(Boolean).join(", ") || "applied";
-    const linkName = (link) => `${buff(link.id)?.name || "Unnamed effect"} on ${WHO_LABELS[link.on] || link.on}`;
+    const linkName = (link) => `${buff(link.id)?.name || "Unnamed effect"} on ${WHO_LABELS[link.on] || link.on}${when(link.requires)}`;
     const visible = (links) => (links || []).filter((link) => !isInternal(link.id));
     const baseLinks = new Map(visible(base.mechanics?.buffs).map((link) => [linkKey(link), link]));
     const upgradeLinks = new Map(visible(upgrade.mechanics?.buffs).map((link) => [linkKey(link), link]));
