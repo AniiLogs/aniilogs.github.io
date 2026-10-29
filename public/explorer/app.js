@@ -628,6 +628,10 @@ const state = {
   },
   aniilogFiltersOpen: false,
   aniilogArea: "all",
+  aniilogStatView: "Base",
+  aniilogFormTab: "Evolution",
+  aniilogSkillSelection: {},
+  aniilogGrowth: { level: 70, potentials: {} },
   aniilogSeason: "all",
   aniilogShowcaseMode: REQUESTED_ANIIMO_ARTWORK && REQUESTED_WORKSPACE_VIEW === "aniilog",
   aniilogModelMode: false,
@@ -7081,6 +7085,780 @@ function attachPackedAniimoBackdrop(record, entry) {
   video.play().catch(() => {});
 }
 
+// ---- The Aniimo form page: one fixed grid (header, Stats, Skills, Ultimate/Trait/Field abilities, Profile and a
+// tabbed panel) in the same place for every form. It fits a 16:9 screen without the page scrolling; long content
+// scrolls inside its own panel. Narrower spaces (tablets, phones, the aLogs app panel) stack the same panels.
+
+const AFP_ROLE_KEYS = Object.freeze({ DPS: "DPS", BREAK: "BREAK", SUPPORT: "SUP", HEALER: "HEAL", REGEN: "ENERGY" });
+const AFP_STAT_KEYS = Object.freeze({
+  HP: "hp_max_cur", Attack: "atk_cur", "Magic Attack": "atk_cur", Defense: "def_cur",
+  "Magic Defense": "def_mag_cur", "EP Regen": "ep_regen_force_cur", Break: "bp_atk_cur",
+});
+const AFP_TABS = Object.freeze(["Evolution", "Research", "Habitat", "Resonance", "Build", "Rewards"]);
+const AFP_KEY_LEVELS = Object.freeze([1, 20, 40, 60, 70]);
+const AFP_SKILL_SLOTS = 7;
+
+function afpRoleExplanation(entry) {
+  return state.aniilogData?.role_explanations?.[AFP_ROLE_KEYS[String(entry.role || "").toUpperCase()]] || null;
+}
+
+function afpPanel(className, title, aside = null) {
+  const section = document.createElement("section");
+  section.className = `afp-panel ${className}`;
+  section.dataset.afpSection = className.replace(/^afp-/u, "");
+  const header = document.createElement("header");
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  header.append(heading);
+  if (aside) {
+    const extra = document.createElement("div");
+    extra.className = "afp-aside";
+    extra.append(aside);
+    header.append(extra);
+  }
+  const body = document.createElement("div");
+  body.className = "afp-body";
+  section.append(header, body);
+  return { section, body, header };
+}
+
+function afpNone(text) {
+  const empty = document.createElement("p");
+  empty.className = "afp-none";
+  empty.textContent = text;
+  return empty;
+}
+
+function afpInfo(text) {
+  const info = document.createElement("span");
+  info.className = "afp-info";
+  info.textContent = "i";
+  info.title = text;
+  info.setAttribute("aria-label", text);
+  info.tabIndex = 0;
+  return info;
+}
+
+function afpSegmented(options, value, onChange, label) {
+  const group = document.createElement("div");
+  group.className = "afp-segmented";
+  group.setAttribute("role", "tablist");
+  group.setAttribute("aria-label", label);
+  options.forEach((option) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "tab");
+    button.textContent = option;
+    button.setAttribute("aria-selected", String(option === value));
+    button.addEventListener("click", () => onChange(option));
+    group.append(button);
+  });
+  return group;
+}
+
+function afpRerender() {
+  const panel = els.catalogPanel;
+  const scrollers = [...panel.querySelectorAll(".afp-body, .afp-skill-detail")].map((node) => [node.closest("[data-afp-section]")?.dataset.afpSection, node.className, node.scrollTop]);
+  renderCatalogPreview();
+  for (const [section, className, top] of scrollers) {
+    const node = panel.querySelector(`[data-afp-section="${section}"] .${className.split(" ")[0]}`);
+    if (node) node.scrollTop = top;
+  }
+}
+
+// ---- Stats: base values with the game's stat explanations; Growth computes every level (and potentials) with the
+// game's own formulas (stat_growth in aniilog_data.json, decoded from the game scripts).
+
+function afpLevelValue(growth, level, withExtra) {
+  const lv = growth.level_value;
+  const steps = Math.min(Math.max(level - lv.extra_from_level, 0), lv.extra_levels);
+  const extra = withExtra ? lv.extra_weight * (steps * (20 + 3 * steps) / 50) : 0;
+  return lv.per_level * level + lv.base + extra;
+}
+
+// One stat at a level with `points` potential levels: the formula's +0.8% per level, then the +4% every 4 levels.
+function afpGrownStat(growth, label, base, level, points = 0) {
+  const formula = growth?.stats?.[label];
+  if (!formula) return null;
+  const value = afpLevelValue(growth, level, formula.extra);
+  const total = Math.floor((base + formula.offset) * (1 + growth.attribute_point_bonus * points) / formula.divisor * value * formula.scale);
+  const step = growth.potentials?.percent_steps?.[label];
+  const percent = step ? Math.floor(points / step.every) * step.percent : 0;
+  return Math.floor(total * (1 + percent));
+}
+
+function afpGrowthState() {
+  state.aniilogGrowth ||= { level: 70, potentials: {} };
+  return state.aniilogGrowth;
+}
+
+function renderAfpStats(entry) {
+  const view = state.aniilogStatView || "Base";
+  const growth = state.aniilogData?.stat_growth;
+  const views = growth ? ["Base", "Growth"] : ["Base"];
+  const { section, body } = afpPanel("afp-stats", "Stats", afpSegmented(views, view, (next) => {
+    state.aniilogStatView = next;
+    afpRerender();
+  }, "Stat view"));
+  const stats = Array.isArray(entry.stats) ? entry.stats : [];
+  const explanations = state.aniilogData?.stat_explanations || {};
+  if (!stats.length) {
+    body.append(afpNone("No stats are listed for this form."));
+    return section;
+  }
+  if (view === "Base" || !growth) {
+    const max = Math.max(140, ...stats.map((stat) => Number(stat.value) || 0));
+    stats.forEach((stat) => {
+      const row = document.createElement("div");
+      row.className = "afp-stat-row";
+      const label = document.createElement("span");
+      label.className = "afp-stat-label";
+      label.textContent = stat.label;
+      const explanation = explanations[AFP_STAT_KEYS[stat.label]];
+      if (explanation?.text) label.append(" ", afpInfo(`${explanation.game_label || stat.label}: ${explanation.text}`));
+      const bar = document.createElement("span");
+      bar.className = "afp-stat-bar";
+      const fill = document.createElement("i");
+      fill.style.width = `${Math.min(100, (Number(stat.value) / max) * 100)}%`;
+      bar.append(fill);
+      const value = document.createElement("b");
+      value.textContent = formatNumber(stat.value, 0);
+      row.append(label, bar, value);
+      body.append(row);
+    });
+    const total = document.createElement("div");
+    total.className = "afp-stat-total";
+    const totalLabel = document.createElement("span");
+    totalLabel.textContent = "Base stat total";
+    const totalValue = document.createElement("b");
+    totalValue.textContent = formatNumber(aniilogBaseStatTotal(entry), 0);
+    total.append(totalLabel, totalValue);
+    body.append(total);
+    const role = afpRoleExplanation(entry);
+    if (role?.text) {
+      const line = document.createElement("p");
+      line.className = "afp-role-line";
+      const name = document.createElement("strong");
+      name.textContent = role.label || entry.role;
+      line.append(name, ` · ${role.text}`);
+      body.append(line);
+    }
+    return section;
+  }
+
+  // Growth: a level slider and a potential level per stat; the table shows key levels and the chosen one.
+  const settings = afpGrowthState();
+  const cap = growth.level_cap || 70;
+  const maxPotential = (growth.potentials?.max_level || 20) + (growth.potentials?.extra_max_level || 0);
+  const controls = document.createElement("div");
+  controls.className = "afp-growth-controls";
+  const levelLabel = document.createElement("label");
+  levelLabel.className = "afp-growth-level";
+  const levelText = document.createElement("span");
+  levelText.textContent = `Level ${settings.level}`;
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = "1";
+  slider.max = String(cap);
+  slider.value = String(Math.min(settings.level, cap));
+  slider.setAttribute("aria-label", "Aniimo level");
+  slider.addEventListener("input", () => {
+    settings.level = Number(slider.value);
+    levelText.textContent = `Level ${settings.level}`;
+    renderTable();
+  });
+  levelLabel.append(levelText, slider);
+  const presets = document.createElement("div");
+  presets.className = "afp-growth-presets";
+  const presetLabel = document.createElement("span");
+  presetLabel.textContent = "All potentials";
+  presets.append(presetLabel);
+  [0, 10, growth.potentials?.max_level || 20, maxPotential].forEach((points) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = String(points);
+    button.addEventListener("click", () => {
+      stats.forEach((stat) => { settings.potentials[stat.label] = points; });
+      renderTable();
+    });
+    presets.append(button);
+  });
+  const earned = growth.potentials?.points_by_level?.[settings.level - 1];
+  const earnedNote = document.createElement("p");
+  earnedNote.className = "afp-growth-note";
+  controls.append(levelLabel, presets, earnedNote);
+  const table = document.createElement("table");
+  table.className = "afp-growth-table";
+  body.append(controls, table);
+
+  // Each stat: its potential level, a curve from level 1 to the cap with a dot at the chosen level, and the value there.
+  function renderTable() {
+    const level = settings.level;
+    table.replaceChildren();
+    const head = document.createElement("tr");
+    ["Stat", "Potential", `Lv 1–${cap}`, `Lv ${level}`].forEach((text, index) => {
+      const cell = document.createElement("th");
+      cell.textContent = text;
+      if (index === 3) cell.className = "is-current";
+      head.append(cell);
+    });
+    table.append(head);
+    stats.forEach((stat) => {
+      const points = settings.potentials[stat.label] || 0;
+      const base = Number(stat.value) || 0;
+      const values = Array.from({ length: cap }, (_, index) => afpGrownStat(growth, stat.label, base, index + 1, points) ?? 0);
+      const row = document.createElement("tr");
+      const name = document.createElement("th");
+      name.scope = "row";
+      name.textContent = stat.label;
+      const potentialCell = document.createElement("td");
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.max = String(maxPotential);
+      input.value = String(points);
+      input.setAttribute("aria-label", `${stat.label} potential level`);
+      input.addEventListener("change", () => {
+        settings.potentials[stat.label] = Math.max(0, Math.min(maxPotential, Math.round(Number(input.value) || 0)));
+        renderTable();
+      });
+      potentialCell.append(input);
+      const curveCell = document.createElement("td");
+      curveCell.className = "afp-growth-curve";
+      const top = Math.max(...values, 1);
+      const pointsList = values.map((value, index) => `${(index / (cap - 1)) * 100},${30 - (value / top) * 28}`).join(" ");
+      const [x, y] = pointsList.split(" ")[level - 1].split(",");
+      curveCell.innerHTML = `<svg viewBox="-2 0 104 32" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pointsList}"/><circle cx="${x}" cy="${y}" r="2.6"/></svg>`;
+      curveCell.title = AFP_KEY_LEVELS.filter((value) => value <= cap).map((value) => `Lv ${value}: ${formatNumber(values[value - 1], 0)}`).join(" · ");
+      const valueCell = document.createElement("td");
+      valueCell.className = "is-current";
+      valueCell.textContent = formatNumber(values[level - 1], 0);
+      row.append(name, potentialCell, curveCell, valueCell);
+      table.append(row);
+    });
+    const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
+    earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
+    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more (up to ${maxPotential} per stat). Values are before Resonance, gear, talents and buffs. Formulas from the game scripts.`));
+  }
+  renderTable();
+  void earned;
+  return section;
+}
+
+// ---- Skills: up to seven fixed slots (Basic, the Core switch-skill, Active skills) and one shared detail area.
+
+function afpOrderedSkills(entry) {
+  return (Array.isArray(entry.skills) ? entry.skills : [])
+    .map((skill, index) => ({ skill, index }))
+    .sort((left, right) => Number(right.skill?.group === "Normal") - Number(left.skill?.group === "Normal")
+      || Number(Boolean(right.skill?.core)) - Number(Boolean(left.skill?.core))
+      || left.index - right.index)
+    .map(({ skill }) => skill);
+}
+
+function renderAfpSkills(entry) {
+  const skills = afpOrderedSkills(entry);
+  const count = document.createElement("span");
+  count.textContent = `${skills.length} skill${skills.length === 1 ? "" : "s"} · select one for details`;
+  const { section, body } = afpPanel("afp-skills", "Skills", count);
+  const selectedKey = state.aniilogSkillSelection?.[entry.id];
+  const selected = Math.max(0, skills.findIndex((skill) => skill.skill_id === selectedKey));
+  const list = document.createElement("div");
+  list.className = "afp-skill-slots";
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Skills");
+  for (let slot = 0; slot < Math.max(AFP_SKILL_SLOTS, skills.length); slot += 1) {
+    const skill = skills[slot];
+    if (!skill) {
+      const empty = document.createElement("div");
+      empty.className = "afp-skill-slot is-empty";
+      empty.textContent = "No skill in this slot";
+      list.append(empty);
+      continue;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "afp-skill-slot";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(slot === selected));
+    const icon = makeIcon("afp-skill-icon", skill.icon);
+    icon.alt = "";
+    const copy = document.createElement("span");
+    copy.className = "afp-skill-copy";
+    const name = document.createElement("strong");
+    name.textContent = skill.name || "Skill";
+    const kind = document.createElement("span");
+    kind.className = `afp-skill-kind${skill.core ? " is-core" : ""}`;
+    kind.textContent = skill.group === "Normal" ? "Basic" : skill.core ? "Core" : "Active";
+    const tags = document.createElement("span");
+    tags.className = "afp-skill-tags";
+    const combat = skill.combat || {};
+    [combat.category === "Magic" ? "Magical" : combat.category, ...(combat.types || [])].filter(Boolean).forEach((text) => {
+      const tag = document.createElement("span");
+      tag.textContent = text;
+      tags.append(tag);
+    });
+    if (combat.element) {
+      const element = document.createElement("span");
+      element.className = "is-element";
+      element.style.setProperty("--afp-element", combat.element_color || catalogElementMeta(combat.element).color);
+      element.textContent = catalogElementLabel(combat.element);
+      tags.append(element);
+    }
+    const heading = document.createElement("span");
+    heading.className = "afp-skill-heading";
+    heading.append(name, kind);
+    if (skill.upgrade) {
+      const upgrade = document.createElement("span");
+      upgrade.className = "afp-skill-kind";
+      upgrade.textContent = "Lv 1 ↔ 2";
+      heading.append(upgrade);
+    }
+    copy.append(heading, tags);
+    const numbers = document.createElement("span");
+    numbers.className = "afp-skill-numbers";
+    [["Might", combat.might, ""], ["EP", combat.ep_cost, ""], ["BREAK", Number.isFinite(Number(combat.break_power)) ? Number(combat.break_power) * 100 : null, "%"], ["CD", combat.cooldown, "s"]]
+      .forEach(([label, value, suffix]) => {
+        const cell = document.createElement("span");
+        const number = document.createElement("b");
+        number.textContent = value === null || value === undefined ? "–" : `${formatNumber(value, 2)}${suffix}`;
+        const small = document.createElement("small");
+        small.textContent = label;
+        cell.append(number, small);
+        numbers.append(cell);
+      });
+    button.append(icon, copy, numbers);
+    button.addEventListener("click", () => {
+      state.aniilogSkillSelection = { ...(state.aniilogSkillSelection || {}), [entry.id]: skill.skill_id };
+      afpRerender();
+    });
+    list.append(button);
+  }
+  const detail = document.createElement("div");
+  detail.className = "afp-skill-detail";
+  if (skills[selected]) {
+    // The site's full skill card: badges, numbers, Lv 1 <-> 2 core upgrade, stat scaling, "How this skill works"
+    // and unlock forms.
+    const card = renderCatalogAbilitySection("Combat skills", [skills[selected]]).querySelector(".catalog-ability-card");
+    if (card) detail.append(card);
+  } else {
+    detail.append(afpNone("No combat skill data is currently available."));
+  }
+  body.append(list, detail);
+  return section;
+}
+
+// ---- Ultimate, trait and field abilities.
+
+function renderAfpKit(entry) {
+  const { section, body } = afpPanel("afp-kit", "Ultimate · Trait · Field abilities");
+  const ultimate = renderCatalogAbilitySection("Ultimate", entry.ultimates, "No Ultimate for this form.");
+  ultimate.classList.add("afp-ultimate");
+  const traits = renderCatalogAbilitySection("Traits", entry.traits, "No trait is listed for this form.");
+  traits.classList.add("afp-traits");
+  body.append(ultimate, traits);
+  if (Array.isArray(entry.mobility_skills) && entry.mobility_skills.length) {
+    body.append(renderCatalogAbilitySection("Mobility skills", entry.mobility_skills));
+  }
+  const exploration = renderCatalogLevels("Exploration", entry.exploration, "None", { compact: true });
+  if (entry.explore_ability?.name) {
+    const ability = document.createElement("div");
+    ability.className = "catalog-level-card afp-explore-ability";
+    const name = document.createElement("strong");
+    name.textContent = entry.explore_ability.name;
+    const label = document.createElement("span");
+    label.textContent = "Exploration ability";
+    ability.append(name, label);
+    const grid = exploration.querySelector(".catalog-level-grid");
+    exploration.querySelector(".catalog-empty-detail")?.remove();
+    if (grid) grid.prepend(ability);
+    else {
+      const wrap = document.createElement("div");
+      wrap.className = "catalog-level-grid catalog-level-grid--compact";
+      wrap.append(ability);
+      exploration.append(wrap);
+    }
+  }
+  const extraTraversal = developerModeEnabled() ? afpDeveloperDetails(entry)?.fields?.extra_traversal || [] : [];
+  if (extraTraversal.length) {
+    const row = document.createElement("div");
+    row.className = "afp-dev-chips";
+    extraTraversal.forEach((flag) => {
+      const chip = document.createElement("span");
+      chip.className = "afp-dev-chip";
+      chip.textContent = flag.label;
+      const badge = developerAvailabilityBadge("unverified", "A movement flag in the game tables; not confirmed as a live mechanic.");
+      if (badge) chip.append(" ", badge);
+      row.append(chip);
+    });
+    exploration.append(row);
+  }
+  body.append(exploration, renderCatalogHomelandLevels(entry.homeland));
+  return section;
+}
+
+// ---- Profile.
+
+function afpDeveloperDetails(entry) {
+  const details = Array.isArray(entry.developer_details) ? entry.developer_details[0] : null;
+  return details && typeof details === "object" ? details : null;
+}
+
+function afpFact(list, label, value, extra = null) {
+  if (value === null || value === undefined || value === "") return;
+  const row = document.createElement("div");
+  const term = document.createElement("dt");
+  term.textContent = label;
+  if (extra) term.append(" ", extra);
+  const detail = document.createElement("dd");
+  if (value instanceof Node) detail.append(value);
+  else detail.textContent = value;
+  row.append(term, detail);
+  list.append(row);
+  return row;
+}
+
+function renderAfpProfile(entry) {
+  const profile = entry.profile || {};
+  const cry = profile.cries?.happy || null;
+  const { section, body } = afpPanel("afp-profile", "Profile", cry ? document.createTextNode(`“${cry}”`) : null);
+  if (profile.tagline) {
+    const quote = document.createElement("p");
+    quote.className = "afp-quote";
+    quote.textContent = `“${profile.tagline}”`;
+    body.append(quote);
+  }
+  if (entry.description) {
+    const description = document.createElement("p");
+    description.className = "afp-description";
+    appendGameRichText(description, entry.description);
+    body.append(description);
+  }
+  const facts = document.createElement("dl");
+  facts.className = "afp-facts";
+  afpFact(facts, "Height", Number.isFinite(profile.height_m) ? `${formatNumber(profile.height_m, 2)} m` : null);
+  afpFact(facts, "Weight", Number.isFinite(profile.weight_kg) ? `${formatNumber(profile.weight_kg, 2)} kg` : null);
+  if (profile.gender) {
+    if (profile.gender.genderless) afpFact(facts, "Gender", "Genderless");
+    else {
+      const gender = document.createElement("span");
+      gender.className = "afp-gender";
+      const bar = document.createElement("span");
+      bar.className = "afp-gender-bar";
+      const male = document.createElement("i");
+      male.style.width = `${profile.gender.male_percent}%`;
+      const female = document.createElement("i");
+      female.style.width = `${profile.gender.female_percent}%`;
+      bar.append(male, female);
+      gender.append(bar, `♂ ${formatNumber(profile.gender.male_percent, 1)}% · ♀ ${formatNumber(profile.gender.female_percent, 1)}%`);
+      afpFact(facts, "Gender", gender);
+    }
+  }
+  if (Array.isArray(profile.natures) && profile.natures.length) {
+    afpFact(facts, "Natures", profile.natures.map((nature) => `${nature.name} ${formatNumber(nature.percent, 1)}%`).join(" · "));
+  }
+  if (profile.shiny) {
+    afpFact(facts, "Base shiny odds", profile.shiny.one_in ? `1 in ${formatNumber(profile.shiny.one_in, 0)} (base rate)` : "Can't be shiny",
+      afpInfo(profile.shiny.note || "Base rate from the game tables; server-side bonuses may apply."));
+  }
+  if (profile.cries) {
+    const cries = [["Happy", profile.cries.happy], ["Alert", profile.cries.alert], ["Angry", profile.cries.angry]].filter(([, text]) => text);
+    if (cries.length) afpFact(facts, "Cries", cries.map(([mood, text]) => `${mood}: ${text}`).join(" · "));
+  }
+  const details = developerModeEnabled() ? afpDeveloperDetails(entry) : null;
+  if (details) {
+    const fields = details.fields || {};
+    const badge = () => developerAvailabilityBadge("unverified", "Read from the game tables; what it means in game is not confirmed yet.");
+    const devFact = (label, value) => {
+      const row = afpFact(facts, label, value, badge());
+      row?.classList.add("is-developer");
+    };
+    devFact("Active time", fields.sleep_day_time === 1 ? "Sleeps by day (value 1)" : fields.sleep_day_time === 2 ? "Sleeps at night (value 2)" : null);
+    devFact("Temperament", fields.aggressiveness ?? null);
+    devFact("Weather", fields.weather ? fields.weather.name || fields.weather.text || `#${fields.weather.hash}` : null);
+    devFact("Size class", fields.size_class ?? null);
+    devFact("Quality tier", fields.quality_tier ?? null);
+  }
+  if (!facts.childElementCount && !body.childElementCount) body.append(afpNone("No profile details are listed for this form."));
+  body.append(facts);
+  return section;
+}
+
+// ---- The tabbed panel: Evolution, Research, Habitat, Resonance, Build, Rewards (and Developer in Developer Mode).
+
+function afpRequirementLines(requirement) {
+  if (!requirement) return [];
+  return [
+    requirement.level ? `Level ${requirement.level}` : "",
+    ...(requirement.items || []).map((item) => `${item.name} ×${item.amount ?? 1}`),
+    ...(requirement.conditions || []).filter((text) => !/^aniimo level \d+$/iu.test(text) && !/level/iu.test(text.split(" ")[0] || "")),
+  ].filter(Boolean);
+}
+
+function renderAfpEvolutionTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack";
+  const requirements = new Map((entry.evolution_requirements || []).map((row) => [row.target?.id, row]));
+  const reached = (entry.evolves_from || [])[0];
+  const evolution = {
+    ...entry,
+    requirements: afpRequirementLines(reached),
+    evolution: {
+      from: entry.evolution?.from || [],
+      to: (entry.evolution?.to || []).map((target) => ({ ...target, requirements: afpRequirementLines(requirements.get(target.id)) })),
+    },
+  };
+  const section = renderCatalogEvolution(evolution);
+  if (section) box.append(section);
+  else box.append(afpNone("This form doesn't evolve and isn't evolved into."));
+  const flavours = [reached?.flavour, ...[...requirements.values()].map((row) => row.flavour)].filter(Boolean);
+  flavours.forEach((text) => {
+    const line = document.createElement("p");
+    line.className = "afp-quote";
+    line.textContent = `“${text}”`;
+    box.append(line);
+  });
+  if (entry.form_change_cost) {
+    const row = document.createElement("div");
+    row.className = "afp-inline-row";
+    const label = document.createElement("span");
+    label.textContent = "Change into this form:";
+    row.append(label, renderItemlogReference(entry.form_change_cost));
+    box.append(row);
+  }
+  return box;
+}
+
+function renderAfpResearchTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack";
+  const research = renderAniimoResearch(entry, state.aniilogData?.aniimo_research);
+  if (research) box.append(research);
+  const points = entry.research_points;
+  if (points?.per_level?.length) {
+    const row = document.createElement("p");
+    row.className = "afp-inline-row";
+    row.textContent = `Research points per level: ${points.per_level.map((value, index) => `Lv ${index + 1} ${formatNumber(value, 0)}`).join(" · ")}`;
+    box.append(row);
+    if (points.completion_reward) {
+      const reward = document.createElement("div");
+      reward.className = "afp-inline-row";
+      const label = document.createElement("span");
+      label.textContent = "Completion reward:";
+      reward.append(label, renderItemlogReference(points.completion_reward));
+      box.append(reward);
+    }
+  }
+  box.append(renderCatalogAbilitySection("Aniilog Research", entry.aniilog_research, "No Aniilog Research entry is currently listed for this form."));
+  return box;
+}
+
+function renderAfpHabitatTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack";
+  if (Array.isArray(entry.map_ids) && entry.map_ids.length) {
+    const locate = document.createElement("button");
+    locate.type = "button";
+    locate.className = "catalog-locate-button";
+    locate.textContent = "Locate on Map";
+    locate.addEventListener("click", () => locateAniilogEntry(entry));
+    box.append(locate);
+  }
+  box.append(renderCatalogLocations(entry));
+  if (entry.spawn_requirements?.length) {
+    const requirements = createCatalogSection("Spawn requirements");
+    const list = document.createElement("ul");
+    list.className = "catalog-requirement-list";
+    entry.spawn_requirements.forEach((requirement) => {
+      const row = document.createElement("li");
+      row.textContent = requirement;
+      list.append(row);
+    });
+    requirements.append(list);
+    box.append(requirements);
+  }
+  const bosses = renderAniilogBossVariants(entry.boss_variants);
+  if (bosses) box.append(bosses);
+  return box;
+}
+
+function renderAfpBuildTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack";
+  const recommended = entry.recommended || {};
+  const partners = (recommended.partners || []).filter((partner) => partner?.name);
+  if (partners.length) {
+    const section = createCatalogSection("Recommended partners");
+    const list = document.createElement("div");
+    list.className = "catalog-item-reference-grid";
+    partners.forEach((partner) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "catalog-item-reference is-linked";
+      button.textContent = `${partner.name}${partner.form_label && partner.form_label !== "Basic Form" ? ` (${partner.form_label})` : ""}`;
+      button.title = `Open ${partner.name} in the Aniilog`;
+      button.disabled = !partner.published;
+      button.addEventListener("click", () => openAniilogRecord(partner.id));
+      list.append(button);
+    });
+    section.append(list);
+    box.append(section);
+  }
+  const equipment = [];
+  for (const item of recommended.equipment || []) if (!equipment.some((row) => row.name === item.name)) equipment.push(item);
+  if (equipment.length) {
+    const section = createCatalogSection("Recommended equipment");
+    const list = document.createElement("div");
+    list.className = "catalog-item-reference-grid";
+    equipment.forEach((item) => list.append(renderItemlogReference({ ...item, amount: 1 })));
+    section.append(list);
+    box.append(section);
+  }
+  const presets = recommended.attribute_presets || [];
+  if (presets.length) {
+    const section = createCatalogSection("Attribute point presets");
+    const list = document.createElement("div");
+    list.className = "catalog-requirements-list";
+    presets.forEach((preset) => {
+      const row = document.createElement("div");
+      row.className = "catalog-requirement-row";
+      const title = document.createElement("strong");
+      title.textContent = `${preset.title}${preset.default ? " · default" : ""}`;
+      const detail = document.createElement("p");
+      detail.textContent = [preset.summary, preset.allocation].filter(Boolean).join(". ");
+      row.append(title, detail);
+      list.append(row);
+    });
+    section.append(list);
+    box.append(section);
+  }
+  if (!box.childElementCount) box.append(afpNone("No recommended build is listed for this form."));
+  return box;
+}
+
+function renderAfpRewardsTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack";
+  [["Release rewards", entry.rewards?.release], ["Report rewards", entry.rewards?.report],
+    ["Research completion", entry.research_points?.completion_reward ? [entry.research_points.completion_reward] : []]]
+    .forEach(([title, items]) => {
+      if (!items?.length) return;
+      const section = createCatalogSection(title);
+      const list = document.createElement("div");
+      list.className = "catalog-item-reference-grid";
+      items.forEach((item) => list.append(renderItemlogReference(item)));
+      section.append(list);
+      box.append(section);
+    });
+  if (!box.childElementCount) box.append(afpNone("No rewards are listed for this form."));
+  return box;
+}
+
+function renderAfpDeveloperTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack";
+  const statSection = createCatalogSection(`Base stats compared · Total ${aniilogBaseStatTotal(entry)}`);
+  statSection.append(renderAniilogStatComparison(entry));
+  box.append(statSection);
+  const details = afpDeveloperDetails(entry);
+  if (!details) {
+    box.append(afpNone("No developer details are loaded for this form."));
+    return box;
+  }
+  const fields = details.fields || {};
+  const facts = document.createElement("dl");
+  facts.className = "afp-facts";
+  const home = fields.home || {};
+  afpFact(facts, "Home comfort", home.comfort ?? null);
+  afpFact(facts, "Home voucher rate", home.voucher_rate ?? null);
+  afpFact(facts, "Home food cost speed", home.food_cost_speed ?? null);
+  afpFact(facts, "PvP skill ids", (fields.pvp_skills || []).join(", ") || null);
+  afpFact(facts, "Colour variants (Chinese-only)", (fields.colour_variants || []).map((row) => `${row.name} ${row.colour1}`).join(" · ") || null);
+  afpFact(facts, "Per-nature lines", (fields.nature_lines || []).map((row) => `${row.nature}: ${row.text}`).join(" · ") || null);
+  Object.entries(details.internal || {}).forEach(([key, value]) => afpFact(facts, `${key} (internal)`, typeof value === "object" ? JSON.stringify(value) : String(value)));
+  const section = createCatalogSection("Table values");
+  const note = document.createElement("p");
+  note.className = "catalog-description";
+  note.textContent = details.availability_note || "Read from the game tables; unverified or internal.";
+  section.append(note, facts);
+  box.append(section);
+  return box;
+}
+
+function renderAfpTabs(entry) {
+  const tabs = [...AFP_TABS, ...(developerModeEnabled() ? ["Developer"] : [])];
+  const current = tabs.includes(state.aniilogFormTab) ? state.aniilogFormTab : "Evolution";
+  const section = document.createElement("section");
+  section.className = "afp-panel afp-tabs";
+  section.dataset.afpSection = "tabs";
+  const bar = afpSegmented(tabs, current, (next) => {
+    state.aniilogFormTab = next;
+    afpRerender();
+  }, "Form details");
+  bar.classList.add("afp-tabbar");
+  const body = document.createElement("div");
+  body.className = "afp-body";
+  const renderers = {
+    Evolution: renderAfpEvolutionTab, Research: renderAfpResearchTab, Habitat: renderAfpHabitatTab,
+    Resonance: (value) => renderAniimoProgression(value, state.aniilogData?.aniimo_progression) || afpNone("No Resonance data is listed for this form."),
+    Build: renderAfpBuildTab, Rewards: renderAfpRewardsTab, Developer: renderAfpDeveloperTab,
+  };
+  body.append(renderers[current](entry));
+  section.append(bar, body);
+  return section;
+}
+
+// The section jump bar used when the panels stack (phones, tablets, the aLogs app panel).
+function renderAfpJumpBar() {
+  const nav = document.createElement("nav");
+  nav.className = "afp-jump";
+  nav.setAttribute("aria-label", "Jump to section");
+  [["stats", "Stats"], ["skills", "Skills"], ["kit", "Kit"], ["profile", "Profile"], ["tabs", "Details"]].forEach(([id, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      els.catalogPanel.querySelector(`[data-afp-section="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    nav.append(button);
+  });
+  return nav;
+}
+
+function renderAniilogFormGrid(entry) {
+  const grid = document.createElement("div");
+  grid.className = "afp";
+  grid.append(renderAfpJumpBar(), renderAfpStats(entry), renderAfpSkills(entry), renderAfpKit(entry), renderAfpProfile(entry), renderAfpTabs(entry));
+  return grid;
+}
+
+// The family's forms as pills in the header (the same choice as the artwork "Form" menu).
+function renderAfpFormPills(entry) {
+  const family = String(entry.base_id || entry.research_id || entry.name || "");
+  const forms = allCatalogEntriesForView("aniilog").filter((candidate) => String(candidate?.base_id || candidate?.research_id || candidate?.name || "") === family);
+  if (forms.length < 2) return null;
+  const row = document.createElement("div");
+  row.className = "afp-forms";
+  row.setAttribute("aria-label", "Forms");
+  forms.forEach((form) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "afp-form";
+    button.setAttribute("aria-pressed", String(form.id === entry.id));
+    const icon = makeIcon("afp-form-icon", form.icon);
+    icon.alt = "";
+    button.append(icon, String(form.form_label || "Form").replace(/ Form$/u, ""));
+    const badge = developerAvailabilityBadge(form.availability, form.availability_note);
+    if (badge) button.append(" ", badge);
+    button.addEventListener("click", () => {
+      state.catalogSelection.aniilog = form.id;
+      renderCatalogPreview();
+    });
+    row.append(button);
+  });
+  return row;
+}
+
 function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
@@ -7112,13 +7890,18 @@ function renderAniilogCatalogRecord(entry) {
   tags.className = "catalog-tags";
   if (entry.role) {
     const roleMeta = catalogRoleMeta(entry.role);
-    tags.append(createCatalogTag(`Class: ${entry.role}`, `catalog-role-tag role-${roleMeta.slug}`, roleMeta));
+    const roleTag = createCatalogTag(`Class: ${entry.role}`, `catalog-role-tag role-${roleMeta.slug}`, roleMeta);
+    const role = afpRoleExplanation(entry);
+    if (role?.text) roleTag.title = `${role.label || entry.role}: ${role.text}`;
+    tags.append(roleTag);
   }
   (entry.elements || []).forEach((element) => {
     const elementMeta = catalogElementMeta(element);
     tags.append(createCatalogTag(`Type: ${catalogElementLabel(element)} ${element.level}`, `catalog-element-tag element-${elementClassName(element)}`, elementMeta));
   });
   copy.append(stickyIndicator, number, name, tags);
+  const formPills = renderAfpFormPills(entry);
+  if (formPills) copy.append(formPills);
   identity.append(icon, copy);
   const actions = document.createElement("div");
   actions.className = "catalog-identity-actions";
@@ -7132,64 +7915,7 @@ function renderAniilogCatalogRecord(entry) {
     identity.append(actions);
   }
   record.append(identity);
-
-  if (entry.description) {
-    const description = document.createElement("p");
-    description.className = "catalog-description";
-    appendGameRichText(description, entry.description);
-    record.append(description);
-  }
-
-  if (developerModeEnabled()) {
-    const statSection = createCatalogSection(`Base stats · Total ${aniilogBaseStatTotal(entry)}`);
-    statSection.append(renderAniilogStatComparison(entry));
-    record.append(statSection);
-  }
-
-  record.append(renderCatalogAbilitySection("Combat skills", entry.skills, "No combat skill data is currently available."));
-  const utilityGrid = document.createElement("div");
-  utilityGrid.className = "catalog-utility-grid";
-  utilityGrid.append(
-    renderCatalogAbilitySection("Ultimate", entry.ultimates, "No Ultimate ability is currently listed for this form."),
-    renderCatalogAbilitySection("Traits", entry.traits, "No gameplay trait is currently listed for this form."),
-    renderCatalogAbilitySection("Mobility skills", entry.mobility_skills, "No Mobility skill is currently listed for this form."),
-    renderCatalogLevels("Exploration", entry.exploration, "None", { compact: true }),
-    renderCatalogHomelandLevels(entry.homeland),
-  );
-  record.append(utilityGrid);
-
-  if (entry.spawn_requirements?.length) {
-    const requirements = createCatalogSection("Spawn requirements");
-    const list = document.createElement("ul");
-    list.className = "catalog-requirement-list";
-    entry.spawn_requirements.forEach((requirement) => {
-      const row = document.createElement("li");
-      row.textContent = requirement;
-      list.append(row);
-    });
-    requirements.append(list);
-    record.append(requirements);
-  }
-
-  record.append(renderCatalogLocations(entry));
-  const bossVariants = renderAniilogBossVariants(entry.boss_variants);
-  if (bossVariants) record.append(bossVariants);
-  const evolution = renderCatalogEvolution(entry);
-  if (evolution) record.append(evolution);
-  const progression = renderAniimoProgression(entry, state.aniilogData?.aniimo_progression);
-  const research = renderAniimoResearch(entry, state.aniilogData?.aniimo_research);
-  if (progression || research) {
-    const lowerGrid = document.createElement("div");
-    lowerGrid.className = "catalog-progression-research-grid";
-    if (progression) lowerGrid.append(progression);
-    if (research) lowerGrid.append(research);
-    record.append(lowerGrid);
-  }
-  record.append(renderCatalogAbilitySection(
-    "Aniilog Research",
-    entry.aniilog_research,
-    "No Aniilog Research entry is currently listed for this form.",
-  ));
+  record.append(renderAniilogFormGrid(entry));
   return record;
 }
 
@@ -8630,6 +9356,7 @@ function renderCatalogPreview(options = {}) {
   if (currentIndex?.dataset.catalogView === view) state.catalogIndexScroll[view] = currentIndex.scrollTop;
   els.catalogPanel.querySelector(".catalog-aniimo-live-viewer")?.stop();
   els.catalogPanel.textContent = "";
+  els.catalogPanel.classList.remove("is-aniilog-form");
   els.catalogPanel.setAttribute("aria-label", `${title} catalogue`);
 
   const heading = document.createElement("header");
@@ -8742,6 +9469,7 @@ function renderCatalogPreview(options = {}) {
   }
   renderCatalogSidebar(view, sidebarTitle, allEntries, entries, selected.id, "", true, options);
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
+  els.catalogPanel.classList.toggle("is-aniilog-form", view === "aniilog");
   if (view === "aniilog") {
     const showcaseButton = document.createElement("button");
     showcaseButton.type = "button";
@@ -8763,7 +9491,17 @@ function renderCatalogPreview(options = {}) {
       headingActions.prepend(modelButton);
       attachViewModel(els.catalogPanel.querySelector(".catalog-aniilog-record"), selected, modelAppearances);
     }
-    els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
+    // View Model and Show Artwork sit in the form header beside Locate on Map (the page header row is then empty,
+    // which gives the fixed grid more height).
+    const identity = els.catalogPanel.querySelector(".catalog-aniilog-record > .catalog-identity");
+    let identityActions = identity?.querySelector(".catalog-identity-actions");
+    if (identity && !identityActions) {
+      identityActions = document.createElement("div");
+      identityActions.className = "catalog-identity-actions";
+      identity.append(identityActions);
+    }
+    if (identityActions) identityActions.prepend(...headingActions.childNodes);
+    else els.catalogPanel.querySelector(".catalog-heading")?.append(headingActions);
     const selectedFamily = String(selected.base_id || selected.research_id || selected.name || "");
     const variants = (state.aniilogData?.entries || [])
       .filter((candidate) => String(candidate?.base_id || candidate?.research_id || candidate?.name || "") === selectedFamily)
@@ -9157,6 +9895,10 @@ function syncMobileCatalogStickyIdentity() {
     if (stickyLocate && sourceLocate) {
       stickyLocate.addEventListener("click", () => sourceLocate.click());
     }
+    // The cloned View Model / Show Artwork buttons press the real ones.
+    stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button").forEach((button) => {
+      button.addEventListener("click", () => identity.querySelector(`.${button.classList[0]}`)?.click());
+    });
     document.body.append(stickyIdentity);
   }
   stickyIdentity.classList.toggle("is-showcase", view === "aniilog" && state.aniilogShowcaseMode);

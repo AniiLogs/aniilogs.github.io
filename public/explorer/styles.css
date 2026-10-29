@@ -94,7 +94,7 @@ button[aria-pressed="true"] {
   position: absolute;
   inset: 58px 0 0;
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  grid-template-columns: clamp(280px, 21vw, 360px) minmax(0, 1fr);
   width: auto;
   height: auto;
   overflow: hidden;
@@ -11024,4 +11024,715 @@ html[data-embed="app"] body > footer { display: none !important; }
 .availability-badge.is-unverified {
   background: #8b9099;
   color: #111317;
+}
+
+/* ---- Aniimo form page (afp): one fixed grid for every form. Wide screens see the whole form without the page
+   scrolling (long content scrolls inside its own panel); narrower spaces stack the same panels in the same order. */
+.catalog-aniilog-record {
+  container-type: inline-size;
+}
+
+.afp {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.afp-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--panel-rgb), 0.92);
+  overflow: hidden;
+}
+
+.afp-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.afp-panel > header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.afp-aside {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.afp-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.afp-none {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.afp-info {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.afp-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.afp-segmented button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.afp-segmented button[aria-selected="true"] {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+}
+
+/* Header: form pills under the name. */
+.afp-forms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.afp-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(var(--background-rgb), 0.55);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 10px 2px 3px;
+  cursor: pointer;
+}
+
+.afp-form[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  font-weight: 700;
+}
+
+.afp-form-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #e8ecef;
+  object-fit: cover;
+}
+
+/* Stats */
+.afp-stat-row {
+  display: grid;
+  grid-template-columns: minmax(118px, 9.5em) minmax(0, 1fr) 3em;
+  align-items: center;
+  gap: 10px;
+  min-height: 27px;
+}
+
+.afp-stat-label {
+  white-space: nowrap;
+}
+
+.afp-stat-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+  overflow: hidden;
+}
+
+.afp-stat-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+}
+
+.afp-stat-row b,
+.afp-stat-total b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.afp-stat-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.afp-role-line,
+.afp-growth-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.afp-role-line strong {
+  color: var(--text);
+}
+
+.afp-growth-controls {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.afp-growth-level {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.afp-growth-level input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.afp-growth-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.afp-growth-presets button {
+  min-width: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+
+.afp-growth-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.afp-growth-table th,
+.afp-growth-table td {
+  padding: 3px 5px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.afp-growth-table th[scope="row"],
+.afp-growth-table tr:first-child th:first-child {
+  text-align: left;
+}
+
+.afp-growth-table tr:first-child th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.afp-growth-table .is-current {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.afp-growth-table input {
+  width: 3.4em;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--background-rgb), 0.6);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  padding: 1px 4px;
+}
+
+/* Skills: fixed slots and one shared detail area. */
+.afp-skills .afp-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.afp-skill-slots {
+  display: grid;
+  gap: 4px;
+}
+
+.afp-skill-slot {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.afp-skill-slot:hover {
+  background: rgba(var(--accent-rgb), 0.05);
+}
+
+.afp-skill-slot[aria-selected="true"] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+}
+
+.afp-skill-slot.is-empty {
+  grid-template-columns: 1fr;
+  min-height: 30px;
+  padding-block: 2px;
+  border: 1px dashed color-mix(in srgb, var(--line) 70%, transparent);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: default;
+}
+
+.afp-skill-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.afp-skill-copy {
+  min-width: 0;
+}
+
+.afp-skill-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.afp-skill-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.afp-skill-kind {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 0 4px;
+  text-transform: uppercase;
+}
+
+.afp-skill-kind.is-core {
+  border-color: var(--accent-2);
+  background: var(--accent-2);
+  color: #1b1406;
+}
+
+.afp-skill-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+
+.afp-skill-tags span {
+  flex: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  font-size: 12px;
+  padding: 0 5px;
+}
+
+.afp-skill-tags .is-element {
+  background: color-mix(in srgb, var(--afp-element, #888) 45%, transparent);
+}
+
+.afp-skill-numbers {
+  display: grid;
+  grid-template-columns: repeat(4, 3.4em);
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.afp-skill-numbers small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.afp-skill-detail {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.afp-skill-detail .catalog-ability-card {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+/* Kit: Ultimate and trait cards, exploration and homeland. */
+.afp-kit .afp-body {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.afp-ultimate .catalog-ability-card {
+  border-color: color-mix(in srgb, var(--accent-2) 55%, var(--line));
+  background: linear-gradient(90deg, rgba(var(--accent-2-rgb), 0.08), transparent 65%);
+}
+
+.afp-explore-ability {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.afp-dev-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.afp-dev-chip {
+  border: 1px dashed rgba(var(--accent-2-rgb), 0.6);
+  border-radius: 999px;
+  font-size: 13px;
+  padding: 2px 8px;
+}
+
+/* Profile */
+.afp-quote {
+  margin: 0 0 8px;
+  border-left: 3px solid var(--accent-strong);
+  padding-left: 8px;
+  font-style: italic;
+}
+
+.afp-description {
+  margin: 0 0 8px;
+  color: color-mix(in srgb, var(--text) 85%, var(--muted));
+}
+
+.afp-facts {
+  display: grid;
+  margin: 0;
+}
+
+.afp-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.afp-facts dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.afp-facts dd {
+  margin: 0;
+  text-align: right;
+}
+
+.afp-facts > .is-developer {
+  margin-top: 4px;
+  border: 1px dashed rgba(var(--accent-2-rgb), 0.55);
+  border-radius: 6px;
+  background: rgba(var(--accent-2-rgb), 0.08);
+  padding: 4px 6px;
+}
+
+.afp-gender {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.afp-gender-bar {
+  display: inline-flex;
+  width: 80px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.afp-gender-bar i {
+  background: #5aa7ff;
+}
+
+.afp-gender-bar i + i {
+  background: #ff7fb2;
+}
+
+/* Tabs */
+.afp-tabbar {
+  justify-self: start;
+  margin: 8px 10px 0;
+  border-radius: 10px;
+}
+
+.afp-tab-stack {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.afp-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The section jump bar is only for the stacked layouts. */
+.afp-jump {
+  display: none;
+}
+
+/* Wide: the fixed grid. */
+@container (min-width: 900px) {
+  .afp {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.22fr);
+    grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas: "stats skills kit" "profile skills tabs";
+  }
+
+  .afp-stats { grid-area: stats; }
+  .afp-skills { grid-area: skills; }
+  .afp-kit { grid-area: kit; }
+  .afp-profile { grid-area: profile; }
+  .afp-tabs { grid-area: tabs; }
+}
+
+/* Tablet-wide: two columns, Skills across. */
+@container (min-width: 640px) and (max-width: 899.98px) {
+  .afp {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "jump jump" "stats kit" "skills skills" "profile tabs";
+  }
+
+  .afp-jump { grid-area: jump; }
+  .afp-stats { grid-area: stats; }
+  .afp-skills { grid-area: skills; }
+  .afp-kit { grid-area: kit; }
+  .afp-profile { grid-area: profile; }
+  .afp-tabs { grid-area: tabs; }
+}
+
+/* Stacked (phones, the aLogs app panel): the same panels in the same order, with a jump bar. */
+@container (max-width: 899.98px) {
+  .afp-jump {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 6px 0;
+    background: var(--background);
+  }
+
+  .afp-jump button {
+    flex: none;
+    min-height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    padding: 4px 14px;
+  }
+
+  .afp-panel {
+    overflow: visible;
+    scroll-margin-top: 52px;
+  }
+
+  .afp-body,
+  .afp-skill-detail,
+  .afp-skills .afp-body {
+    overflow: visible;
+  }
+}
+
+@container (max-width: 520px) {
+  .afp-skill-numbers {
+    grid-template-columns: repeat(2, 3.2em);
+  }
+
+  .afp-skill-numbers span:nth-child(n + 3) {
+    display: none;
+  }
+
+  .afp-stat-row {
+    grid-template-columns: minmax(104px, 8em) minmax(0, 1fr) 3em;
+  }
+}
+
+/* Wide desktop windows: the page fills the catalogue panel without scrolling, and scales up on big screens. */
+@media (min-width: 1280px) and (min-height: 700px) {
+  .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    overflow: hidden;
+    padding: clamp(10px, 1.2vw, 20px);
+  }
+
+  .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) > .catalog-heading {
+    display: none;
+  }
+
+  .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .catalog-aniilog-record {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    min-height: 0;
+    padding: 12px;
+  }
+
+  .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .catalog-aniilog-record > .catalog-identity {
+    margin: -12px -12px 0;
+    padding: 12px;
+  }
+
+  .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .afp {
+    min-height: 0;
+  }
+}
+
+
+/* Big screens: the header, sidebar and page panels scale up together (the map canvas keeps its own pixels, so its
+   pointer maths are untouched). 1440p is about 1.3x and 4K about 1.75x of the 1080p layout. */
+:root {
+  --ui-scale: 1;
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  :root { --ui-scale: 1.3; }
+}
+
+@media (min-width: 2900px) and (min-height: 1600px) {
+  :root { --ui-scale: 1.75; }
+}
+
+@media (min-width: 2200px) and (min-height: 1200px) {
+  .app-topbar,
+  .sidebar,
+  .catalog-panel,
+  .team-panel,
+  .checklist-panel {
+    zoom: var(--ui-scale);
+  }
+
+  .app-shell {
+    inset: calc(58px * var(--ui-scale)) 0 0;
+    grid-template-columns: calc(var(--ui-scale) * clamp(280px, 21vw, 360px)) minmax(0, 1fr);
+  }
+}
+
+.afp-growth-curve {
+  width: 42%;
+  padding-inline: 6px;
+}
+
+.afp-growth-curve svg {
+  display: block;
+  width: 100%;
+  height: 26px;
+  overflow: visible;
+}
+
+.afp-growth-curve polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.afp-growth-curve circle {
+  fill: var(--accent-2);
+  stroke: var(--background);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The aLogs app (?embed=app): the app owns the theme and the account, so the site hides its theme picker and its
+   sign-in and log-out controls (who is signed in can still show); the language picker stays. */
+html[data-embed="app"] .theme-picker-label,
+html[data-embed="app"] #topbarSignInLink,
+html[data-embed="app"] #topbarLogoutButton {
+  display: none !important;
+}
+
+.open-in-browser-link {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  padding: 4px 12px;
+  text-decoration: none;
+  white-space: nowrap;
 }

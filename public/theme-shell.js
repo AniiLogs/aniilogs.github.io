@@ -16,7 +16,31 @@
   } catch {
     // no session storage: only the first page knows it is embedded
   }
-  if (embedded) document.documentElement.dataset.embed = "app";
+  if (embedded) {
+    document.documentElement.dataset.embed = "app";
+    // "Open in browser": the page as it is now, without the app's own parameters (the app opens target="_blank"
+    // links in the system browser).
+    document.addEventListener("DOMContentLoaded", () => {
+      const actions = document.querySelector(".app-topbar-actions");
+      if (!actions || document.getElementById("openInBrowserLink")) return;
+      const link = document.createElement("a");
+      link.id = "openInBrowserLink";
+      link.className = "open-in-browser-link";
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Open in browser";
+      const update = () => {
+        const url = new URL(window.location.href);
+        ["embed", "uid", "theme", "v"].forEach((name) => url.searchParams.delete(name));
+        url.hash = "";
+        link.href = url.toString();
+      };
+      update();
+      link.addEventListener("pointerdown", update);
+      link.addEventListener("focus", update);
+      actions.prepend(link);
+    });
+  }
 
   const PREFERENCES_KEY = "aniilogs:explorer:preferences:v1";
   const LEGACY_MODE_KEY = "aniilogs:color-mode:v1";
