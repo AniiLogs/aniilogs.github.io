@@ -91,6 +91,18 @@ test("dev content rejects other paths and the public relay never serves dev/", a
   assert.deepEqual(f.reads.filter((key) => key.includes("/dev/")), []);
 });
 
+test("reward-container map icons are public; other source-named paths stay private", async () => {
+  const f = await fixture();
+  f.env.CONTENT.get = async (key) => { f.reads.push(key); return { body: "png", httpMetadata: {} }; };
+  const ok = await worker.fetch(request("/api/content/releases/3535596/assets/icons/source_clay_pot.png"), f.env);
+  assert.equal(ok.status, 200);
+  for (const path of ["assets/source_art/x.png", "assets/icons/source-clay_pot.png", "assets/icons/sub/source_x.png",
+    "assets/icons/source_x.webp", "data/source_x.json"]) {
+    assert.equal((await worker.fetch(request(`/api/content/releases/3535596/${path}`), f.env)).status, 404, path);
+  }
+  assert.deepEqual(f.reads, ["releases/3535596/assets/icons/source_clay_pot.png"]);
+});
+
 const source = (await readFile(new URL("../public/explorer/app.js", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
 function region(start, end) {
   const a = source.indexOf(start), z = source.indexOf(end, a + start.length);

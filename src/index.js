@@ -262,6 +262,8 @@ function validContentKey(pathname) {
 function publicReleaseContentKey(key) {
   const relative = key.slice(`releases/${CONTENT_RELEASE}/`.length);
   const segments = relative.toLowerCase().split("/");
+  // Map icons for reward containers (source:clay_pot …) are named after their item ids, not source files.
+  if (/^assets\/icons\/source_[a-z0-9_]+\.png$/u.test(segments.join("/"))) return true;
   if (segments.some((segment) => PRIVATE_RELEASE_SEGMENTS.has(segment)
     || /^(?:private|source|shader|renderer|asset-package|qa)[-_.]/u.test(segment)
     || segment.startsWith("."))) return false;
