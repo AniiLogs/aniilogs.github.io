@@ -2531,10 +2531,10 @@ async function runMatters(env, row, submissionId, flags) {
   return Number(above?.players || 0) < top ? "top of its board" : null;
 }
 
-// At most VERIFY_DAILY_LIMIT AI readings a UTC day (default 120: two screens a run fits inside Workers AI's free
-// 10,000 neurons), counted from the runs read today.
+// At most VERIFY_DAILY_LIMIT AI readings a UTC day (default 500, the owner's cap: two screens a run is about 80
+// neurons, so at most ~40,000 neurons a day, ~$0.33 above Workers AI's free 10,000), counted from the runs read today.
 async function aiReadingsLeft(env) {
-  const limit = Math.max(0, Number.parseInt(env.VERIFY_DAILY_LIMIT || "120", 10) || 0);
+  const limit = Math.max(0, Number.parseInt(env.VERIFY_DAILY_LIMIT || "500", 10) || 0);
   const day = Math.floor(Date.now() / 86400000) * 86400;
   const row = await env.DB.prepare(
     "SELECT COUNT(*) AS used FROM leaderboard_submissions WHERE verify_at >= ? AND json_extract(verify_json, '$.model') IS NOT NULL",
