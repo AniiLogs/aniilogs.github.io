@@ -355,6 +355,43 @@ test("second reading (shadow mode): Workers AI re-reads the whole screens; a mis
   assert.equal((await call(plain, "/api/leaderboard/submissions", { token: await namedToken(plain, SESSIONS.user), method: "POST", form })).status, 201);
 });
 
+test("free checks on every run; the AI reading only for runs that matter, and at most VERIFY_DAILY_LIMIT a day", async () => {
+  const AI = { calls: 0, async run(model, input) { this.calls += 1; return { response: input.prompt.includes("Battle Data") ? '{"cards": []}' : '{"score": null}' }; } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev,
+    VERIFY_DAILY_LIMIT: "2", VERIFY_TOP_RANK: "1" });
+  const token = await namedToken(env, SESSIONS.user);
+  const send = (id, overrides, screens = true) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(id, overrides)));
+    for (const part of screens ? ["evidence", "evidence_full", "battle", "battle_full"] : ["evidence"]) {
+      form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+    }
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  const state = (id) => sqlite.prepare("SELECT verify_state AS state, verify_json AS json FROM leaderboard_submissions WHERE client_run_id = ?").get(id);
+  // a sound run that's this player's first on the boss: a personal best, so it's read (2 screens)
+  await send("pb", { score: 20000, stars: 20 });
+  assert.equal(AI.calls, 2);
+  assert.equal(JSON.parse(state("pb").json).reason, "personal best");
+  // lower than their best and not top of the board: free checks only, passing (no state, the rules recorded)
+  await send("ordinary", { score: 19000, stars: 19 });
+  assert.equal(AI.calls, 2);
+  assert.deepEqual([state("ordinary").state, JSON.parse(state("ordinary").json).rules.flags], [null, []]);
+  // 36,230 with 6 stars: stars don't track score; Avg DPS far above the team's: listed for review even without screens
+  await send("odd", { score: 36230, stars: 6, cycle: "4000", boss: { id: "80000098", name: "Alpha Scorchhowl", level: 60 },
+    players: [{ name: "MinMax", avgDps: 1371292, self: true }] }, false);
+  const odd = JSON.parse(state("odd").json).rules.flags.map((flag) => flag.rule);
+  assert.equal(state("odd").state, "mismatch");
+  assert.ok(odd.includes("stars track score") && odd.includes("Avg DPS plausible") && odd.includes("Avg DPS add up to team DPS"));
+  // the daily cap (2 readings): a third run that matters isn't read today
+  await send("pb2", { score: 25000, stars: 20, cycle: "3003", boss: { id: "80000099", name: "Alpha Irisal", level: 60 }, players: [] });
+  await send("pb3", { score: 25000, stars: 20, cycle: "3003", boss: { id: "80000102", name: "Alpha Panpanta", level: 60 }, players: [] });
+  assert.equal(AI.calls, 4);
+  assert.match(JSON.parse(state("pb3").json).ai, /today's limit/u);
+  // shadow mode: every run still on the boards
+  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).total, 5);
+});
+
 test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });

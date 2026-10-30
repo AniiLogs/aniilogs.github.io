@@ -2383,11 +2383,11 @@ async function submitLeaderboardRecord(request, env) {
     record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats, record.trial,
   ).run();
   await corroborateRun(env, submissionId);
-  // the second reading of the whole screens (shadow mode), after the response when the platform allows
-  if (env.AI && parsed.evidenceFull) {
-    const reading = secondReadRun(env, submissionId).catch((error) => console.error("Second reading failed", error));
-    if (env.waitUntil) env.waitUntil(reading);
-    else await reading;
+  // the free checks, and for runs that matter the AI reading (shadow mode), after the response when the platform allows
+  if (record.kind === "interlink_run") {
+    const checking = checkRun(env, submissionId).catch((error) => console.error("Run checks failed", error));
+    if (env.waitUntil) env.waitUntil(checking);
+    else await checking;
   }
   return json({
     ok: true,
@@ -2400,10 +2400,10 @@ async function submitLeaderboardRecord(request, env) {
 
 
 // ---------------------------------------------------------------- second reading (shadow mode)
-// aLogs reads a run off the screen; the server reads the same whole screens again with Workers AI (env.AI) and
-// compares: score, stars and time from the result screen, each Battle Data card's Avg DPS, BREAK, Damage Taken and
-// Healing. Shadow mode: the outcome (verify_state, migration 0032) is recorded for an administrator to review and
-// never holds a run off the boards. Without the AI binding, or the migration, nothing is read and runs are unaffected.
+// aLogs reads a run off the screen; for the runs that matter (checkRun) the server reads the same whole screens again
+// with Workers AI (env.AI) and compares: score, stars and time from the result screen, each Battle Data card's Avg DPS,
+// BREAK, Damage Taken and Healing. Shadow mode: the outcome (verify_state, migration 0032) is recorded for an
+// administrator to review and never holds a run off the boards. Without the AI binding nothing is read.
 const VERIFY_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 const VERIFY_PROMPTS = Object.freeze({
   result: "This is the end-of-run result screen of the game Aniimo (Holo-Battle Interlink). Read the run's total score, "
@@ -2474,32 +2474,110 @@ function compareReading(row, result, battle) {
   return { checked, differences };
 }
 
-async function secondReadRun(env, submissionId) {
-  if (!env.AI || !env.EVIDENCE) return;
+// Every Interlink run gets the free checks (no AI): the numbers the app read must hang together. Each flag names the
+// rule; a run with flags is listed for review (verify_state "mismatch"). Shadow mode: nothing is held.
+// - stars track score: each star is worth about 1,000, so stars = min(floor(score / 1000), the slot's cap), give or
+//   take one (36,230 with 6 stars fails);
+// - the players' Avg DPS add up to about the team DPS, and to about the meter's DPS when it measured one (within 35%);
+// - no player's Avg DPS is above the whole team's, nor above 3x an even share in a full party (a BREAK-sized number
+//   in a DPS field shows up here);
+// - "cleared" only with the slot's full kill stars.
+const RUN_CHECK_TOLERANCE = 0.35;
+function freeRunChecks(row, cycle) {
+  const flags = [];
+  const slot = cycle ? cycle.bosses.findIndex((boss) => String(boss.id) === String(row.bossId)) : -1;
+  const rule = interlinkStarRule(row.cycle);
+  const cap = slot >= 0 ? rule.caps[slot] : Math.max(...rule.caps);
+  const clear = slot >= 0 ? rule.clear[slot] : Math.min(...rule.clear);
+  if (row.score != null && row.stars != null) {
+    const expected = Math.min(Math.floor(Number(row.score) / 1000), cap);
+    if (Math.abs(Number(row.stars) - expected) > 1) flags.push({ rule: "stars track score", sent: row.stars, expected });
+  }
+  const players = (parseJsonColumn(row.playersJson) || []).filter((player) => Number.isFinite(Number(player?.avgDps)) && player.avgDps !== null);
+  const sum = players.reduce((total, player) => total + Number(player.avgDps), 0);
+  const near = (a, b) => Math.abs(a - b) <= RUN_CHECK_TOLERANCE * Math.max(a, b);
+  if (players.length && Number(row.teamDps) > 0 && !near(sum, Number(row.teamDps))) {
+    flags.push({ rule: "Avg DPS add up to team DPS", sent: row.teamDps, expected: sum });
+  }
+  if (players.length && Number(row.meterDps) > 0 && !near(sum, Number(row.meterDps))) {
+    flags.push({ rule: "Avg DPS add up to the meter's DPS", sent: row.meterDps, expected: sum });
+  }
+  const team = Number(row.teamDps) || 0;
+  const share = players.length >= 4 && team > 0 ? (3 * team) / players.length : Infinity;
+  for (const player of players) {
+    const dps = Number(player.avgDps);
+    if (team > 0 && (dps > team * 1.1 || dps > share)) flags.push({ rule: "Avg DPS plausible", player: player.name || null, sent: dps, teamDps: team });
+  }
+  if (row.cleared === 1 && row.stars != null && Number(row.stars) < clear) flags.push({ rule: "cleared needs full stars", sent: row.stars, expected: clear });
+  return flags;
+}
+
+// The AI reading is for runs that matter: a new personal best for that player, boss and week (a Season Ladder total
+// only changes through those), a run in the top VERIFY_TOP_RANK (default 25) of its boss board, or a run the free
+// checks flagged.
+async function runMatters(env, row, submissionId, flags) {
+  if (flags.length) return "flagged";
+  const best = await env.DB.prepare(
+    `SELECT MAX(score) AS best FROM leaderboard_submissions
+     WHERE discord_id = ? AND cycle = ? AND boss_id = ? AND kind IN ('interlink_run', 'interlink_best') AND submission_id != ?`,
+  ).bind(row.discordId, row.cycle, row.bossId, submissionId).first();
+  if (best?.best == null || Number(row.score) > Number(best.best)) return "personal best";
+  const above = await env.DB.prepare(
+    `SELECT COUNT(*) AS players FROM (SELECT discord_id, MAX(score) AS best FROM leaderboard_submissions
+       WHERE status = 'visible' AND cycle = ? AND boss_id = ? AND kind IN ('interlink_run', 'interlink_best') GROUP BY discord_id)
+     WHERE best > ?`,
+  ).bind(row.cycle, row.bossId, row.score).first();
+  const top = Math.max(0, Number.parseInt(env.VERIFY_TOP_RANK || "25", 10) || 0);
+  return Number(above?.players || 0) < top ? "top of its board" : null;
+}
+
+// At most VERIFY_DAILY_LIMIT AI readings a UTC day (default 120: two screens a run fits inside Workers AI's free
+// 10,000 neurons), counted from the runs read today.
+async function aiReadingsLeft(env) {
+  const limit = Math.max(0, Number.parseInt(env.VERIFY_DAILY_LIMIT || "120", 10) || 0);
+  const day = Math.floor(Date.now() / 86400000) * 86400;
   const row = await env.DB.prepare(
-    `SELECT kind, score, stars, cleared, clear_time_s AS clearTimeS, players_json AS playersJson, extra_json AS extraJson
+    "SELECT COUNT(*) AS used FROM leaderboard_submissions WHERE verify_at >= ? AND json_extract(verify_json, '$.model') IS NOT NULL",
+  ).bind(day).first();
+  return limit - Number(row?.used || 0);
+}
+
+async function checkRun(env, submissionId) {
+  const row = await env.DB.prepare(
+    `SELECT discord_id AS discordId, kind, cycle, boss_id AS bossId, score, stars, cleared, clear_time_s AS clearTimeS,
+       team_dps AS teamDps, meter_dps AS meterDps, players_json AS playersJson, extra_json AS extraJson
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
-  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
-  if (!row || row.kind !== "interlink_run" || !full.evidence) return;
+  if (!row || row.kind !== "interlink_run") return;
   const save = (state, detail) => env.DB.prepare(
     "UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ?, verify_at = ? WHERE submission_id = ?",
   ).bind(state, JSON.stringify(detail), Math.floor(Date.now() / 1000), submissionId).run();
+  const flags = freeRunChecks(row, interlinkCycle(await interlinkCycles(env), row.cycle));
+  const rules = { flags };
   try {
-    await save("pending", { model: VERIFY_MODEL });
+    await save(flags.length ? "mismatch" : null, { rules });
   } catch (error) {
-    console.error("Second reading needs migration 0032", error);
+    console.error("Run checks need migration 0032", error);
+    return;
+  }
+  const full = (parseJsonColumn(row.extraJson) || {}).proofFull || {};
+  if (!env.AI || !env.EVIDENCE || !full.evidence) return;
+  const reason = await runMatters(env, row, submissionId, flags);
+  if (!reason) return;
+  if (await aiReadingsLeft(env) <= 0) {
+    await save(flags.length ? "mismatch" : null, { rules, ai: "skipped: today's limit reached", reason });
     return;
   }
   try {
+    await save("pending", { rules, model: VERIFY_MODEL, reason });
     const result = await readScreen(env, full.evidence, VERIFY_PROMPTS.result);
     const battle = full.battle ? await readScreen(env, full.battle, VERIFY_PROMPTS.battle) : null;
     const { checked, differences } = compareReading(row, result, battle);
-    await save(!checked ? "unreadable" : differences.length ? "mismatch" : "match",
-      { model: VERIFY_MODEL, reading: { result, battle }, checked, differences });
+    const state = flags.length || differences.length ? "mismatch" : checked ? "match" : "unreadable";
+    await save(state, { rules, model: VERIFY_MODEL, reason, reading: { result, battle }, checked, differences });
   } catch (error) {
     console.error("Second reading failed", error);
-    await save("unreadable", { model: VERIFY_MODEL, error: String(error?.message || error).slice(0, 300) });
+    await save(flags.length ? "mismatch" : "unreadable", { rules, model: VERIFY_MODEL, reason, error: String(error?.message || error).slice(0, 300) });
   }
 }
 
