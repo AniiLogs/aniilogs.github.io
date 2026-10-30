@@ -2315,7 +2315,7 @@ function developerModeEnabled() {
 
 function applyDeveloperVisibility() {
   const enabled = developerModeEnabled();
-  if (els.mapMeta) els.mapMeta.hidden = !enabled;
+  if (els.mapMeta) els.mapMeta.hidden = true;           // the audit line lives in Settings → Developer
   if (els.cloudSyncLink) els.cloudSyncLink.hidden = !enabled;
   // Developer overlays follow Developer Mode and the signed-in account: drop them (and reload the active map
   // from its public data) whenever that access changes.
@@ -7634,15 +7634,9 @@ function renderAfpSkills(entry) {
   list.className = "afp-skill-slots";
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Skills");
-  for (let slot = 0; slot < Math.max(AFP_SKILL_SLOTS, skills.length); slot += 1) {
+  const emptySlots = Math.max(0, AFP_SKILL_SLOTS - skills.length);
+  for (let slot = 0; slot < skills.length; slot += 1) {
     const skill = skills[slot];
-    if (!skill) {
-      const empty = document.createElement("div");
-      empty.className = "afp-skill-slot is-empty";
-      empty.textContent = "No skill in this slot";
-      list.append(empty);
-      continue;
-    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "afp-skill-slot";
@@ -7700,6 +7694,13 @@ function renderAfpSkills(entry) {
       afpRerender();
     });
     list.append(button);
+  }
+  // the slots a form leaves unused: one quiet line for all of them
+  if (emptySlots) {
+    const empty = document.createElement("div");
+    empty.className = "afp-skill-slot is-empty";
+    empty.textContent = `${emptySlots} empty skill slot${emptySlots === 1 ? "" : "s"}`;
+    list.append(empty);
   }
   const detail = document.createElement("div");
   detail.className = "afp-skill-detail";

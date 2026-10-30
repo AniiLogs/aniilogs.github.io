@@ -11088,8 +11088,9 @@ html[data-embed="app"] body > footer { display: none !important; }
   color: #111317;
 }
 
-/* ---- Aniimo form page (afp): one fixed grid for every form. Wide screens see the whole form without the page
-   scrolling (long content scrolls inside its own panel); narrower spaces stack the same panels in the same order. */
+/* ---- Aniimo form page (afp): the same panels for every form. The page scrolls as one, each panel at its full
+   height; very tall screens (see "fits the screen" below) see the whole form at once, long content scrolling inside
+   its own panel. Two columns below about 1700px of page width, three above; phones stack. */
 .catalog-aniilog-record {
   container-type: inline-size;
 }
@@ -11138,7 +11139,7 @@ html[data-embed="app"] body > footer { display: none !important; }
 
 .afp-body {
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   overscroll-behavior: contain;
   padding: 10px 12px;
   font-size: 14px;
@@ -11359,12 +11360,11 @@ html[data-embed="app"] body > footer { display: none !important; }
   padding: 1px 4px;
 }
 
-/* Skills: fixed slots and one shared detail area. */
+/* Skills: the slots and one shared detail area. */
 .afp-skills .afp-body {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 8px;
-  overflow: hidden;
   padding: 8px;
 }
 
@@ -11484,7 +11484,7 @@ html[data-embed="app"] body > footer { display: none !important; }
 
 .afp-skill-detail {
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   overscroll-behavior: contain;
 }
 
@@ -11615,12 +11615,28 @@ html[data-embed="app"] body > footer { display: none !important; }
   display: none;
 }
 
-/* Wide: the fixed grid. */
-@container (min-width: 900px) {
+/* Wide: three columns. */
+@container (min-width: 1700px) {
   .afp {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.22fr);
-    grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr);
     grid-template-areas: "stats skills kit" "profile skills tabs";
+    align-items: start;
+  }
+
+  .afp-stats { grid-area: stats; }
+  .afp-skills { grid-area: skills; }
+  .afp-kit { grid-area: kit; }
+  .afp-profile { grid-area: profile; }
+  .afp-tabs { grid-area: tabs; }
+}
+
+/* Desktop (1366x768 up to 1080p and 1440p with the sidebar): two columns, Stats and Profile beside Skills, then
+   Ultimate / Trait beside the Evolution tabs. Each panel keeps its own height. */
+@container (min-width: 900px) and (max-width: 1699.98px) {
+  .afp {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+    grid-template-areas: "stats skills" "profile skills" "kit tabs";
+    align-items: start;
   }
 
   .afp-stats { grid-area: stats; }
@@ -11699,8 +11715,16 @@ html[data-embed="app"] body > footer { display: none !important; }
   }
 }
 
-/* Wide desktop windows: the page fills the catalogue panel without scrolling, and scales up on big screens. */
-@media (min-width: 1280px) and (min-height: 700px) {
+/* Desktop: the form's own header names the page (the Aniilog tab is highlighted above), so no "Aniilog" heading. */
+@media (min-width: 1280px) {
+  .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) > .catalog-heading {
+    display: none;
+  }
+}
+
+/* Fits the screen: on tall screens (about 1150px of height after the big-screen scaling) the page fills the
+   catalogue panel without scrolling, three columns, long content scrolling inside its own panel. */
+@media (min-width: 1280px) and (max-width: 2199.98px) and (min-height: 1150px), (min-width: 2200px) and (max-width: 2899.98px) and (min-height: 1500px), (min-width: 2900px) and (min-height: 2015px) {
   .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) {
     grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
@@ -11726,6 +11750,29 @@ html[data-embed="app"] body > footer { display: none !important; }
 
   .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .afp {
     min-height: 0;
+  }
+
+  @container (min-width: 900px) {
+    .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .afp {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.22fr);
+      grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr);
+      grid-template-areas: "stats skills kit" "profile skills tabs";
+      align-items: stretch;
+    }
+
+    .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .afp-body {
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+
+    .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .afp-skills .afp-body {
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .catalog-panel.is-aniilog-form:not(.is-aniilog-showcase) .afp-skill-detail {
+      overflow: auto;
+    }
   }
 }
 
