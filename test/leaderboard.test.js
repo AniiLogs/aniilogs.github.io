@@ -395,7 +395,7 @@ test("on the platform the checks run after the response (ctx.waitUntil), with ev
   const response = await worker.fetch(new Request("https://api.aniilogs.example/api/leaderboard/submissions", {
     method: "POST", headers: { authorization: `Bearer ${token}` }, body: form }), env, { waitUntil: (promise) => waiting.push(promise) });
   assert.equal(response.status, 201);
-  assert.equal(waiting.length, 1);                                   // answered first; the reading is left running
+  assert.equal(waiting.length, 2);                                   // answered first; the reading and picture retention left running
   await Promise.all(waiting);
   assert.equal(AI.calls, 1);
   assert.equal(sqlite.prepare("SELECT verify_state FROM leaderboard_submissions WHERE client_run_id = ?").get("later").verify_state, "match");
