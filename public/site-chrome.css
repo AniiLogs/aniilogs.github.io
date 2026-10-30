@@ -475,7 +475,6 @@ body.site-chrome-page { padding-top: 58px; }
   html:not([data-embed="app"]) body.site-chrome-page { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
 }
 html[data-embed="app"] body.site-chrome-page { padding-top: 0; }
-html[data-embed="app"] body.site-chrome-page .app-topbar { position: static; }
 
 /* ---- Inside aLogs (?embed=app). The app shows the page tabs and the account, so the site's bar keeps only the
    language and "Open in browser" (an icon), plus the map pages' bell and Settings: a small cluster floating in the
