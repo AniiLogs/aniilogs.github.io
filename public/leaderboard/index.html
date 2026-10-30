@@ -20,11 +20,11 @@
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
-    <link rel="stylesheet" href="/styles.css?v=0.8.1-account-settings">
-    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.0-per-boss">
-    <link rel="stylesheet" href="/site-chrome.css?v=0.1.0">
+    <link rel="stylesheet" href="/styles.css?v=0.13.6-dots-behind">
+    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.1-every-width">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.2-embed-bar">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
-    <script src="/theme-shell.js?v=0.3.1-open-in-browser" defer></script>
+    <script src="/theme-shell.js?v=0.3.2-embed-bar" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
     <script src="/leaderboard/leaderboard.js?v=0.3.2-sim-stages" defer></script>
   </head>
@@ -114,10 +114,12 @@
           <button type="button" role="tab" data-mode-tab="sim" aria-selected="false">Holo-Battle Sim</button>
           <button type="button" role="tab" data-mode-tab="eggheist" aria-selected="false">Egg Heist</button>
         </div>
-        <label class="lb-server" data-server-pick hidden>Server
-          <select data-server-select></select>
-        </label>
-        <div class="lb-tabs lb-board-tabs" role="tablist" aria-label="Board" data-board-tabs></div>
+        <div class="lb-pickers">
+          <label class="lb-server" data-server-pick hidden><span>Server</span>
+            <select data-server-select></select>
+          </label>
+          <div class="lb-tabs lb-board-tabs" role="tablist" aria-label="Board" data-board-tabs></div>
+        </div>
         <div class="lb-interlink" data-interlink hidden></div>
 
         <form class="lb-filters" data-filters>

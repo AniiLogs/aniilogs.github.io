@@ -476,3 +476,73 @@ body.site-chrome-page { padding-top: 58px; }
 }
 html[data-embed="app"] body.site-chrome-page { padding-top: 0; }
 html[data-embed="app"] body.site-chrome-page .app-topbar { position: static; }
+
+/* ---- Inside aLogs (?embed=app). The app shows the page tabs and owns sign-in, so the site's bar keeps only the
+   language, "Open in browser" (an icon) and the account (an icon, no Sign in / Log out), always on the right.
+   Two layouts (theme-shell.js sets data-embed-bar): "slim", a thin row with the game build and data date on the
+   left; "corner", no row at all, the controls floating in the top-right corner. */
+html[data-embed="app"] .app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+html[data-embed="app"] .app-topbar-actions { gap: 6px; }
+html[data-embed="app"] .app-topbar [data-login],
+html[data-embed="app"] .app-topbar [data-logout],
+html[data-embed="app"] .app-topbar [data-delete-account],
+html[data-embed="app"] #topbarSignInLink,
+html[data-embed="app"] #topbarLogoutButton {
+  display: none !important;
+}
+html[data-embed="app"] .app-topbar .account-menu-trigger > span:not(.account-menu-chevron) {
+  display: none;
+}
+html[data-embed="app"] .open-in-browser-link {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+}
+html[data-embed="app"] .open-in-browser-link:hover,
+html[data-embed="app"] .open-in-browser-link:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
+.embed-bar-info { display: none; }
+
+/* Option A, slim row */
+html[data-embed="app"][data-embed-bar="slim"] body .app-topbar {
+  min-height: 44px;
+  padding: 4px 12px;
+}
+html[data-embed="app"][data-embed-bar="slim"] .embed-bar-info {
+  display: block;
+  margin-right: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-embed="app"][data-embed-bar="slim"] .app-shell { inset: 44px 0 0; }
+
+/* Option B, corner cluster */
+html[data-embed="app"][data-embed-bar="corner"] body .app-topbar {
+  position: fixed;
+  top: 8px;
+  right: 14px;
+  left: auto;
+  z-index: 60;
+  min-height: 0;
+  width: auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(var(--panel-rgb), 0.94);
+  box-shadow: 0 8px 22px rgba(var(--background-rgb), 0.35);
+  padding: 4px;
+}
+html[data-embed="app"][data-embed-bar="corner"] .app-shell { inset: 0; }

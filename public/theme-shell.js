@@ -18,6 +18,16 @@
   }
   if (embedded) {
     document.documentElement.dataset.embed = "app";
+    // The bar's layout in the app: "slim" (a thin row: game build and data date on the left, controls on the right) or
+    // "corner" (no row: the controls float in the top-right corner). ?embedbar= picks one for the visit while comparing.
+    let embedBar = pageParams.get("embedbar");
+    try {
+      if (embedBar) window.sessionStorage.setItem("aniilogs:embed-bar", embedBar);
+      else embedBar = window.sessionStorage.getItem("aniilogs:embed-bar");
+    } catch {
+      // no session storage: the default
+    }
+    document.documentElement.dataset.embedBar = embedBar === "corner" ? "corner" : "slim";
     // "Open in browser": the page as it is now, without the app's own parameters (the app opens target="_blank"
     // links in the system browser).
     document.addEventListener("DOMContentLoaded", () => {
@@ -28,7 +38,9 @@
       link.className = "open-in-browser-link";
       link.target = "_blank";
       link.rel = "noopener";
-      link.textContent = "Open in browser";
+      link.title = "Open in browser";
+      link.setAttribute("aria-label", "Open in browser");
+      link.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
       const update = () => {
         const url = new URL(window.location.href);
         ["embed", "uid", "theme", "v"].forEach((name) => url.searchParams.delete(name));
@@ -39,6 +51,15 @@
       link.addEventListener("pointerdown", update);
       link.addEventListener("focus", update);
       actions.prepend(link);
+      // the slim row's left side: which game build the site's data is from, and when that data was published
+      const config = window.ANIILOGS_CONFIG || {};
+      const stamp = String(config.contentRevision || "").match(/^(\d{4})(\d{2})(\d{2})/u);
+      const info = document.createElement("span");
+      info.className = "embed-bar-info";
+      info.textContent = [config.gameBuild ? `Game build ${config.gameBuild}` : "",
+        stamp ? `data ${new Date(Date.UTC(+stamp[1], +stamp[2] - 1, +stamp[3])).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}` : ""]
+        .filter(Boolean).join(" · ");
+      if (info.textContent) actions.parentElement.prepend(info);
     });
   }
 
