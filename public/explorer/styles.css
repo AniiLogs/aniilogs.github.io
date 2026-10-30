@@ -2987,11 +2987,15 @@ ul.team-skill-operations .team-skill-operation {
   overflow: hidden;
 }
 
+/* one row: an equal column per tab (1-3), never wrapping; a narrow phone scrolls the row instead */
 .settings-tabs {
   z-index: 3;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(max-content, 1fr);
   gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
   margin: -4px -4px 2px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel) 96%, transparent);
@@ -3001,6 +3005,8 @@ ul.team-skill-operations .team-skill-operation {
 
 .settings-tab {
   min-height: 40px;
+  padding-inline: 10px;
+  white-space: nowrap;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -3020,6 +3026,10 @@ ul.team-skill-operations .team-skill-operation {
   background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
   color: var(--text);
   box-shadow: inset 0 -3px 0 var(--accent);
+}
+
+@media (max-width: 420px) {
+  .settings-tab { font-size: 12px; padding-inline: 8px; }
 }
 
 .settings-tab-panel {
