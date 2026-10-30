@@ -2409,13 +2409,17 @@ async function submitLeaderboardRecord(request, env) {
 // administrator to review and never holds a run off the boards. Without the AI binding nothing is read.
 const VERIFY_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 const VERIFY_PROMPTS = Object.freeze({
+  // measured on five real runs (stars were missed beside their icon; the time is shown in seconds, "180s")
   result: "This is the end-of-run result screen of the game Aniimo (Holo-Battle Interlink). Read the run's total score, "
-    + "the number of stars earned, and the battle time. Reply with only JSON, no other text: "
-    + '{"score": <integer>, "stars": <integer>, "time": "<m:ss>"}. Use null for anything you cannot read clearly.',
-  battle: "This is the Battle Data screen of the game Aniimo: up to four player cards side by side. For each card, left to "
-    + "right, read the player's name and the numbers labelled Average DPS, BREAK, Damage Taken and Healing. Reply with only "
-    + 'JSON, no other text: {"cards": [{"name": "<text>", "avgDps": <integer>, "break": <integer>, "taken": <integer>, '
-    + '"heal": <integer>}]}. Use null for anything you cannot read clearly.',
+    + "the Challenge Rating number (the number next to the star icon), and the battle time as shown. Reply with only JSON, "
+    + 'no other text: {"score": <integer>, "stars": <integer>, "time": "<as shown, e.g. 180s or 2:45>"}. Use null for '
+    + "anything you cannot read clearly.",
+  // a card's rows are always the same four, in order; a blank-looking row is 0 (read otherwise, the values shift)
+  battle: "This is the Battle Data screen of the game Aniimo: up to four player cards side by side. Each card has exactly "
+    + "four rows in this order: Average DPS, BREAK, Damage Taken, Healing; a row may show 0. For each card, left to right, "
+    + "read the player's name and those four numbers. Reply with only JSON, no other text: {\"cards\": [{\"name\": "
+    + '"<text>", "avgDps": <integer>, "break": <integer>, "taken": <integer>, "heal": <integer>}]}. Use null for anything '
+    + "you cannot read clearly.",
 });
 
 function firstJson(text) {
@@ -2433,7 +2437,10 @@ const readNumber = (value) => {
   const number = Number(String(value ?? "").replace(/[^\d.]/gu, ""));
   return value === null || value === undefined || value === "" || !Number.isFinite(number) ? null : Math.round(number);
 };
+// "2:45", "1:02:03", or seconds as the screen shows them ("180s", 180)
 const readSeconds = (value) => {
+  const seconds = String(value ?? "").trim().match(/^(\d+)\s*s?$/iu);
+  if (seconds) return Number(seconds[1]);
   const match = String(value ?? "").match(/(\d+):(\d{1,2})(?::(\d{1,2}))?/u);
   if (!match) return null;
   return match[3] !== undefined ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : Number(match[1]) * 60 + Number(match[2]);
@@ -2465,16 +2472,23 @@ function compareReading(row, result, battle) {
   const players = parseJsonColumn(row.playersJson) || [];
   const cards = Array.isArray(battle?.cards) ? battle.cards : [];
   const key = (name) => String(name || "").toLocaleLowerCase().replace(/\s+/gu, "");
+  // a card read as shifted (BREAK missing but Healing there: a 0 row skipped, as the old OCR did) isn't compared
+  const suspect = [];
   players.forEach((player, index) => {
+    // by name when the reading has the player's name, else by position (it sometimes returns the card's title)
     const card = cards.find((item) => key(item?.name) && key(item.name) === key(player.name)) || cards[index];
     if (!card) return;
     const label = player.name || `card ${index + 1}`;
+    if (readNumber(card.break) === null && readNumber(card.heal) !== null) {
+      suspect.push(label);
+      return;
+    }
     same(`${label} Avg DPS`, player.avgDps, readNumber(card.avgDps));
     same(`${label} BREAK`, player.breakValue, readNumber(card.break));
     same(`${label} Damage Taken`, player.damageTaken, readNumber(card.taken));
     same(`${label} Healing`, player.heal, readNumber(card.heal));
   });
-  return { checked, differences };
+  return { checked, differences, ...(suspect.length ? { suspect } : {}) };
 }
 
 // Every Interlink run gets the free checks (no AI): the numbers the app read must hang together. Each flag names the
@@ -2583,9 +2597,9 @@ async function aiReadRun(env, submissionId, row, rules, reason) {
     await saveRunCheck(env, submissionId, "pending", { rules, model: VERIFY_MODEL, reason });
     const result = await readScreen(env, full.evidence, VERIFY_PROMPTS.result);
     const battle = full.battle ? await readScreen(env, full.battle, VERIFY_PROMPTS.battle) : null;
-    const { checked, differences } = compareReading(row, result, battle);
+    const { checked, differences, suspect } = compareReading(row, result, battle);
     const state = flags.length || differences.length ? "mismatch" : checked ? "match" : "unreadable";
-    await saveRunCheck(env, submissionId, state, { rules, model: VERIFY_MODEL, reason, reading: { result, battle }, checked, differences });
+    await saveRunCheck(env, submissionId, state, { rules, model: VERIFY_MODEL, reason, reading: { result, battle }, checked, differences, ...(suspect ? { suspect } : {}) });
   } catch (error) {
     console.error("Second reading failed", error);
     await saveRunCheck(env, submissionId, flags.length ? "mismatch" : "unreadable",

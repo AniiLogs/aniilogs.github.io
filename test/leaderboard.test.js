@@ -363,6 +363,27 @@ test("second reading (shadow mode): Workers AI re-reads the whole screens; a mis
   assert.equal((await call(plain, "/api/leaderboard/submissions", { token: await namedToken(plain, SESSIONS.user), method: "POST", form })).status, 201);
 });
 
+test("second reading: times shown as \"180s\" are read, and a shifted Battle Data card is set aside, not a mismatch", async () => {
+  // as measured on real runs: the time comes back as the screen shows it, and a card with a 0 row can come back shifted
+  const AI = { async run(model, input) {
+    return { response: input.prompt.includes("Battle Data")
+      ? '{"cards": [{"name": "Best DPS", "avgDps": null, "break": null, "taken": 577441, "heal": 11397}]}'
+      : '{"score": 20000, "stars": 20, "time": "180s"}' };
+  } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const form = new FormData();
+  form.set("submission", JSON.stringify(run("timed", { cleared: true, clearTimeS: 180 })));
+  for (const part of ["evidence", "evidence_full", "battle", "battle_full"]) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", form })).status, 201);
+  const row = sqlite.prepare("SELECT verify_state AS state, verify_json AS json FROM leaderboard_submissions WHERE client_run_id = 'timed'").get();
+  const check = JSON.parse(row.json);
+  assert.equal(row.state, "match");
+  assert.deepEqual(check.differences, []);
+  assert.equal(check.checked, 3);                                   // score, stars and the 3:00 time
+  assert.deepEqual(check.suspect, ["MinMax"]);                      // the shifted card, matched by position
+});
+
 test("free checks on every run; the AI reading only for runs that matter, and at most VERIFY_DAILY_LIMIT a day", async () => {
   const AI = { calls: 0, async run(model, input) { this.calls += 1; return { response: input.prompt.includes("Battle Data") ? '{"cards": []}' : '{"score": null}' }; } };
   const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev,
