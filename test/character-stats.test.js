@@ -195,3 +195,49 @@ test("the site and the app share Show my online status and the theme, through th
   const response = await app(env, token, "/api/account/preferences", { theme: { id: "meadow" } });
   assert.equal(response.headers.get("access-control-allow-origin"), "*");          // the app's own origin may call it
 });
+
+test("the Profiles page's directory: public profiles only by name, private players online only counted", async () => {
+  const { env, sqlite } = await setup();
+  const directory = async () => (await (await site(env, "/api/profiles/directory")).json());
+  assert.deepEqual(await directory(), { recent: [], online: { players: [], others: 0 } });
+  const now = Math.floor(Date.now() / 1000);
+  sqlite.prepare("UPDATE game_characters SET verified_at = 1, presence_state = 'online', presence_at = ?").run(now);
+  sqlite.prepare("INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at, verified_at, presence_state, presence_at) VALUES (?, ?, ?, 'meter', ?, ?, 1, 'afk', ?)")
+    .run("302000200001", IDS.other, "Hidden", now, now, now);
+  assert.deepEqual((await directory()).online, { players: [], others: 2 });            // both private: a count, no names
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pub12345' WHERE discord_id = ?").run(IDS.owner);
+  const open = await directory();
+  assert.deepEqual(open.recent.map((row) => [row.publicId, row.name]), [["pub12345", "MinMax"]]);   // the character, not the display name
+  assert.deepEqual(open.online, { players: [{ publicId: "pub12345", name: "MinMax", state: "online" }], others: 1 });
+  sqlite.prepare("UPDATE profiles SET findable_by_name = 1 WHERE discord_id = ?").run(IDS.owner);
+  assert.equal((await directory()).recent[0].name, "owner name");                     // opted in: the display name
+  sqlite.prepare("UPDATE game_characters SET presence_at = presence_at - 301").run();
+  assert.deepEqual((await directory()).online, { players: [], others: 0 });            // nothing heard for 5 minutes
+  assert.equal(JSON.stringify(await directory()).includes(IDS.owner), false);
+});
+
+test("the owner arranges the profile's cards; a card added later shows up without a server change", async () => {
+  const { env, sqlite } = await setup();
+  const layout = (body, session = SESSIONS.owner) => site(env, "/api/profile/layout", { session, method: "PUT", body });
+  const overview = async () => (await (await site(env, "/api/profile/overview", { session: SESSIONS.owner })).json());
+  assert.deepEqual((await overview()).layout, { order: [], hidden: [] });                // the site's default
+  assert.equal((await layout({ order: ["sim", "interlink"], hidden: ["photos"] }, "")).status, 401);
+  const saved = await layout({ order: ["sim", "interlink", "fake-new-card", "sim"], hidden: ["photos"] });
+  assert.deepEqual((await saved.json()).layout, { order: ["sim", "interlink", "fake-new-card"], hidden: ["photos"] });
+  assert.deepEqual((await overview()).layout, { order: ["sim", "interlink", "fake-new-card"], hidden: ["photos"] });
+  assert.equal((await layout({ order: ["Bad Id"] })).status, 400);
+  assert.equal((await layout({ order: "sim" })).status, 400);
+  // the public view shows the owner's arrangement; "own" only for the owner
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pub12345' WHERE discord_id = ?").run(IDS.owner);
+  const asOwner = await (await site(env, "/api/profiles/pub12345", { session: SESSIONS.owner })).json();
+  const asOther = await (await site(env, "/api/profiles/pub12345", { session: SESSIONS.other })).json();
+  assert.equal(asOwner.own, true);
+  assert.equal(asOther.own, undefined);
+  assert.deepEqual(asOther.layout.hidden, ["photos"]);
+  assert.equal((await overview()).profile.publicId, "pub12345");
+  // the theme kept beside it; Reset puts the default back
+  await site(env, "/api/account/preferences", { session: SESSIONS.owner, method: "POST", body: { theme: { id: "pawney" } } });
+  assert.deepEqual((await (await layout({ order: [], hidden: [] })).json()).layout, { order: [], hidden: [] });
+  assert.deepEqual((await overview()).layout, { order: [], hidden: [] });
+  assert.equal(JSON.parse(sqlite.prepare("SELECT preferences_json FROM profiles WHERE discord_id = ?").get(IDS.owner).preferences_json).theme.id, "pawney");
+});

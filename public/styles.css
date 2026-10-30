@@ -467,6 +467,50 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
   background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--text); padding: 1.3rem 1.4rem; }
 .profile-signin strong { font-size: 1.1rem; }
 .profile-signin p { margin: 0; color: var(--muted, var(--ink-soft)); }
+/* Owner tools: Edit profile and Arrange cards side by side; the profile link with Copy */
+.profile-owner-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.6rem 1rem; }
+.profile-owner-tools > .profile-edit { flex: 1 1 20rem; }
+.profile-tool-button { min-height: 34px; padding: 0.3rem 0.85rem; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 80%, transparent);
+  color: var(--ink); font: inherit; font-size: 0.85rem; font-weight: 700; cursor: pointer; }
+.profile-tool-button:hover, .profile-tool-button:focus-visible { border-color: var(--teal); color: var(--teal); }
+.profile-tool-button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); color: var(--ink); }
+.profile-tool-button.is-primary { border-color: var(--teal); background: var(--teal); color: var(--cream); }
+.profile-tool-button.is-primary:hover, .profile-tool-button.is-primary:focus-visible { color: var(--cream); filter: brightness(1.08); }
+.profile-share { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; margin: -0.4rem 0 1rem; }
+.profile-share-url { min-width: 0; padding: 0.35rem 0.75rem; border: 1px dashed var(--line); border-radius: 12px; color: var(--ink); font-size: 0.86rem; overflow-wrap: anywhere; user-select: all; }
+.profile-share-url.is-note { border-style: none; padding: 0; color: var(--ink-soft); user-select: text; }
+.profile-share-note { color: var(--teal); font-size: 0.82rem; font-weight: 700; }
+/* Arrange cards: a bar with Reset / Cancel / Save, each card with its handle, arrows and Show/Hide */
+.profile-arrange-bar { position: sticky; top: calc(var(--topbar-height, 64px) + 0.5rem); z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem;
+  margin: 0 0 1rem; padding: 0.8rem 1rem; border: 1px solid var(--teal); border-radius: 18px; background: var(--cream); box-shadow: var(--shadow); }
+.profile-arrange-bar p { flex: 1 1 18rem; margin: 0; color: var(--ink-soft); font-size: 0.88rem; line-height: 1.45; }
+.profile-arrange-bar strong { color: var(--ink); }
+.profile-arrange-actions { display: flex; gap: 0.5rem; }
+.profile-arrange-status { flex-basis: 100%; color: var(--ink-soft); font-size: 0.82rem; }
+.profile-arrange-status:empty { display: none; }
+.profile-overview-grid > .is-arranged-off { display: none; }
+.profile-overview-grid.is-arranging > [data-overview-panel] { display: block; outline: 2px dashed color-mix(in srgb, var(--teal) 45%, transparent); outline-offset: 3px; cursor: grab; }
+.profile-overview-grid.is-arranging > .is-arranged-off { opacity: 0.5; }
+/* a card with nothing to show yet (no photos, boards closed) can still be placed while arranging */
+.profile-overview-grid.is-arranging > [data-overview-panel][hidden] { display: block !important; opacity: 0.6; }
+.profile-overview-grid.is-arranging > [data-overview-panel][hidden]::after { content: "Nothing to show yet"; color: var(--ink-soft); font-size: 0.86rem; }
+.profile-overview-grid.is-arranging > [data-overview-panel][hidden] [data-overview-body] { display: none; }
+.profile-overview-grid.is-arranging > .is-dragging { opacity: 0.35; }
+.profile-card-tools { display: flex; align-items: center; gap: 0.35rem; margin: -0.3rem 0 0.8rem; }
+.profile-card-tools .profile-tool-button { min-width: 34px; padding: 0.2rem 0.6rem; }
+.profile-card-handle { padding: 0 0.3rem; color: var(--ink-soft); font-size: 1.2rem; cursor: grab; user-select: none; }
+.profile-card-hidden-label { margin-left: auto; color: var(--ink-soft); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+/* Online now and Recently joined, under the profile */
+.profile-directory { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; margin-top: 1rem; }
+.profile-directory-list { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.profile-directory-player { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; padding: 0.45rem 0.7rem; border-radius: 12px; color: var(--ink); text-decoration: none; }
+.profile-directory-player:hover, .profile-directory-player:focus-visible { background: color-mix(in srgb, var(--teal) 12%, transparent); }
+.profile-directory-player strong { font-weight: 800; }
+.profile-directory-player small { margin-left: auto; color: var(--ink-soft); font-size: 0.8rem; }
+.profile-directory-player .profile-presence { margin-left: auto; padding: 0.1rem 0.6rem; font-size: 0.75rem; }
+.profile-directory-empty { color: var(--ink-soft); font-size: 0.86rem; }
+.profile-panel .profile-directory-note { margin-top: 0.6rem; }
+.profile-directory-note:empty { display: none; }
 .profile-edit { margin: 0 0 1.25rem; }
 .profile-edit > summary { cursor: pointer; font-weight: 700; color: var(--accent, var(--mint)); }
 .profile-edit > form { margin-top: 0.75rem; max-width: 34rem; }

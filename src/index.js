@@ -1540,7 +1540,7 @@ async function ownProfileOverview(request, env) {
   if (!account) return json({ error: "Authentication required." }, 401);
   const [profile, characters, main] = await Promise.all([
     env.DB.prepare(
-      "SELECT display_name AS displayName, bio, is_public AS isPublic FROM profiles WHERE discord_id = ?",
+      "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, preferences_json AS prefs FROM profiles WHERE discord_id = ?",
     ).bind(account.discordId).first(),
     env.DB.prepare(
       `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt, json_extract(stats_json, '$.level') AS level,
@@ -1570,7 +1570,9 @@ async function ownProfileOverview(request, env) {
       bio: profile?.bio || null,
       avatarUrl: account.avatarUrl,
       isPublic: Number(profile?.isPublic || 0) === 1,
+      ...(Number(profile?.isPublic || 0) === 1 && profile?.publicId ? { publicId: profile.publicId } : {}),
     },
+    layout: storedProfileLayout(profile?.prefs),
     characters: (characters.results || []).map(({ level, gender, server, ...row }) => ({ ...row, ...characterDetails({ level, gender, server }) })),
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     presence: await profilePresence(env, account.discordId),
@@ -1620,6 +1622,86 @@ async function searchProfiles(request, env) {
   return json({ results: [...seen.values()].slice(0, 10) });
 }
 
+// The name a public profile goes by: its display name when its owner lets players find them by it, else its main
+// character's (as mainCharacter picks it). For SQL over profiles p.
+const PUBLIC_NAME_SQL = `COALESCE(CASE WHEN p.findable_by_name = 1 THEN p.display_name END,
+  (SELECT gc.character_name FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.character_name IS NOT NULL
+   ORDER BY gc.game_uid = p.main_game_uid DESC, gc.verified_at IS NOT NULL DESC, gc.last_seen_at DESC LIMIT 1), 'Pathfinder')`;
+
+// GET /api/profiles/directory: the Profiles page's Recently joined (public profiles, newest first) and Online now
+// (public profiles showing their status). Players online with a private profile are only counted, never named.
+async function profilesDirectory(env) {
+  const fresh = Math.floor(Date.now() / 1000) - PRESENCE_FRESH_S;
+  const [recent, online, others] = await Promise.all([
+    env.DB.prepare(
+      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, p.created_at AS joinedAt FROM profiles p
+       WHERE p.is_public = 1 AND p.public_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 8`,
+    ).all(),
+    env.DB.prepare(
+      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name,
+         CASE WHEN EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
+           AND gc.presence_state = 'online') THEN 'online' ELSE 'afk' END AS state
+       FROM profiles p
+       WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND COALESCE(p.show_presence, 1) = 1
+         AND EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
+           AND gc.presence_state IN ('online', 'afk'))
+       ORDER BY state = 'online' DESC, p.updated_at DESC LIMIT 24`,
+    ).bind(fresh).all(),
+    env.DB.prepare(
+      `SELECT COUNT(DISTINCT gc.discord_id) AS count FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id
+       WHERE gc.presence_at > ? AND gc.presence_state IN ('online', 'afk') AND (p.is_public IS NULL OR p.is_public = 0 OR p.public_id IS NULL)`,
+    ).bind(fresh).first(),
+  ]);
+  return json({
+    recent: (recent.results || []).map((row) => ({ publicId: row.publicId, name: row.name, joinedAt: Number(row.joinedAt) || null })),
+    online: { players: online.results || [], others: Number(others?.count || 0) },
+  });
+}
+
+// The profile's cards, as its owner arranged them: { order, hidden } of card ids, kept in profiles.preferences_json.
+// Ids are checked for shape only, so a card the site adds later needs no server change (it goes last until arranged).
+const PROFILE_CARD_ID = /^[a-z][a-z0-9-]{0,31}$/u;
+function cleanProfileLayout(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const list = (value) => (Array.isArray(value) && value.length <= 32 && value.every((id) => PROFILE_CARD_ID.test(String(id)))
+    ? [...new Set(value.map(String))] : null);
+  const order = list(raw.order ?? []);
+  const hidden = list(raw.hidden ?? []);
+  return order && hidden ? { order, hidden } : null;
+}
+function storedProfileLayout(prefsJson) {
+  try {
+    return cleanProfileLayout(JSON.parse(prefsJson || "{}").profileLayout) || { order: [], hidden: [] };
+  } catch {
+    return { order: [], hidden: [] };
+  }
+}
+
+// PUT /api/profile/layout {order, hidden}: the owner's arrangement; empty lists put it back to the site's default.
+async function saveProfileLayout(request, env) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  let body;
+  try {
+    body = await readJsonBody(request, 4096);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const layout = cleanProfileLayout(body);
+  if (!layout) return json({ error: "layout must be { order, hidden }: lists of card ids." }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  const empty = !layout.order.length && !layout.hidden.length;
+  await env.DB.prepare(
+    `INSERT INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at, preferences_json)
+     VALUES (?1, NULL, NULL, 0, ?2, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE json_object('profileLayout', json(?3)) END)
+     ON CONFLICT(discord_id) DO UPDATE SET updated_at = ?2, preferences_json = CASE WHEN ?3 IS NULL
+       THEN json_remove(COALESCE(preferences_json, '{}'), '$.profileLayout')
+       ELSE json_set(COALESCE(preferences_json, '{}'), '$.profileLayout', json(?3)) END`,
+  ).bind(account.discordId, now, empty ? null : JSON.stringify(layout)).run();
+  return json({ layout });
+}
+
 // Search engines: the site's robots.txt names this sitemap, listing the public profiles whose owners leave
 // "List my profile in search engines" on. Only the random public id is in it, never a Discord id or UID.
 async function profilesSitemap(env) {
@@ -1640,9 +1722,11 @@ async function profilesSitemap(env) {
 
 async function publicProfile(request, env, publicId) {
   const profile = await env.DB.prepare(
-    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch FROM profiles WHERE public_id = ? AND is_public = 1",
+    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1",
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
+  // the owner opening their own link: the page shows them their own profile (with Edit) at this address
+  const viewer = bearerToken(request) ? await currentAccount(request, env).catch(() => null) : null;
   const [characters, main] = await Promise.all([
     env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level,
       json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server FROM game_characters
@@ -1668,6 +1752,8 @@ async function publicProfile(request, env, publicId) {
     // the display name only when its owner lets players find them by it; otherwise their main character's name
     profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
     main: main?.name ? { name: main.name } : null,
+    ...(viewer?.discordId === profile.discordId ? { own: true } : {}),
+    layout: storedProfileLayout(profile.prefs),
     characters: (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })),
     presence: await profilePresence(env, profile.discordId),
     leaderboards,
@@ -4509,6 +4595,8 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/overview" && request.method === "GET") return ownProfileOverview(request, env);
   if (url.pathname === "/api/profile/main" && request.method === "PUT") return setMainCharacter(request, env);
   if (url.pathname === "/api/profiles/search" && request.method === "GET") return searchProfiles(request, env);
+  if (url.pathname === "/api/profiles/directory" && request.method === "GET") return profilesDirectory(env);
+  if (url.pathname === "/api/profile/layout" && request.method === "PUT") return saveProfileLayout(request, env);
   if (url.pathname === "/api/sitemap/profiles.xml" && request.method === "GET") return profilesSitemap(env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);

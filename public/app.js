@@ -28,6 +28,8 @@ const profileListedInSearch = document.querySelector("[data-profile-search]");
 const PUBLIC_PROFILE_ID = /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
   ? new URLSearchParams(window.location.search).get("profile")
   : "";
+// true once the server says the profile at ?profile=<id> is the viewer's own
+let ownAtLink = false;
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
@@ -564,6 +566,10 @@ async function loadProfileOverview(publicId = "") {
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const overview = await response.json();
+    if (publicId && overview.own) {
+      showAsOwner();
+      return loadProfileOverview();
+    }
     const avatar = profileOverview.querySelector("[data-overview-avatar]");
     avatar.hidden = !overview.profile?.avatarUrl;
     if (overview.profile?.avatarUrl) avatar.src = overview.profile.avatarUrl;
@@ -612,6 +618,9 @@ async function loadProfileOverview(publicId = "") {
     renderGameStats(overview.gameStats);
     renderCollection(overview.collection, Boolean(publicId));
     renderPhotos(overview.photos, Boolean(publicId));
+    applyCardLayout(overview.layout);
+    showProfileLink(publicId, overview.profile);
+    profileOverview.querySelector("[data-profile-arrange]").hidden = Boolean(publicId);
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
     // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
     if (!PROFILE_VIEW && window.location.hash === "#my-profile") profileOverview.scrollIntoView({ behavior: "instant" });
@@ -646,7 +655,7 @@ profileEditor.addEventListener("submit", async (event) => {
     accountButton.textContent = payload.profile.displayName;
     showVisibility(payload.profile);
     profileStatus.textContent = `Saved · ${profileStatus.textContent}`;
-    if (!profileOverview.hidden && !PUBLIC_PROFILE_ID) void loadProfileOverview();
+    if (!profileOverview.hidden && (!PUBLIC_PROFILE_ID || ownAtLink)) void loadProfileOverview();
   } catch {
     profileStatus.textContent = "Could not save. Nothing changed.";
   } finally {
@@ -797,6 +806,220 @@ if (PROFILE_VIEW) {
   });
   document.addEventListener("click", (event) => { if (!event.target.closest("[data-profile-finder]")) close(); });
 }
+
+// The profile's address: a public profile's link (the address bar shows it on your own too, with Copy link); a
+// private profile has none, and its owner is told where to make one.
+function showProfileLink(publicId, profile) {
+  const share = profileOverview.querySelector("[data-profile-share]");
+  const id = publicId || profile?.publicId || "";
+  const url = share.querySelector("[data-profile-share-url]");
+  const note = share.querySelector("[data-profile-share-note]");
+  share.hidden = !PROFILE_VIEW;
+  share.querySelector("[data-profile-copy]").hidden = !id;
+  note.textContent = "";
+  url.textContent = id ? `${window.location.origin}/?profile=${id}` : "Your profile is private, so it has no link yet. Make it public under Edit profile to get one.";
+  url.classList.toggle("is-note", !id);
+  if (PROFILE_VIEW && !publicId) {
+    // your own profile: its public address in the address bar, or back to the Profiles page once it's private again
+    const address = id ? profileHref({ profile: id }) : profileHref({ view: "profile" });
+    if (`${window.location.pathname}${window.location.search}` !== address) window.history.replaceState(null, "", `${address}${window.location.hash}`);
+  }
+}
+profileOverview.querySelector("[data-profile-copy]").addEventListener("click", async () => {
+  const text = profileOverview.querySelector("[data-profile-share-url]").textContent;
+  const note = profileOverview.querySelector("[data-profile-share-note]");
+  try {
+    await navigator.clipboard.writeText(text);
+    note.textContent = "Link copied";
+  } catch {
+    window.getSelection()?.selectAllChildren(profileOverview.querySelector("[data-profile-share-url]"));
+    note.textContent = "Press Ctrl+C to copy";
+  }
+});
+
+function showAsOwner() {
+  ownAtLink = true;
+  document.querySelector("[data-profile-back]").hidden = true;
+  document.querySelector("[data-profile-edit]").hidden = false;
+  void loadProfileDirectory();
+}
+
+// ---------------------------------------------------------------- the profile's cards (Arrange cards)
+// The cards are the grid's [data-overview-panel] articles: one added to the page joins the arrangement by itself.
+const cardGrid = profileOverview.querySelector(".profile-overview-grid");
+const arrangeBar = profileOverview.querySelector("[data-profile-arrange-bar]");
+const cardPanel = (id) => cardGrid.querySelector(`:scope > [data-overview-panel="${id}"]`);
+const pageCards = () => [...cardGrid.querySelectorAll(":scope > [data-overview-panel]")]
+  .map((panel) => ({ id: panel.dataset.overviewPanel, title: panel.querySelector("h3")?.textContent || panel.dataset.overviewPanel }));
+let savedLayout = { order: [], hidden: [] };
+let draftCards = null;
+
+function placeCards(list) {
+  for (const card of list) {
+    const panel = cardPanel(card.id);
+    panel.classList.toggle("is-arranged-off", card.hidden);
+    cardGrid.append(panel);
+  }
+}
+function applyCardLayout(layout) {
+  savedLayout = layout || { order: [], hidden: [] };
+  if (!draftCards) placeCards(window.AniiProfileCards.arrangeCards(pageCards(), savedLayout));
+}
+
+function arrangeTools(card, index, count) {
+  const tools = element("div", "profile-card-tools");
+  tools.dataset.cardTools = "";
+  const handle = element("span", "profile-card-handle", "⠿");
+  handle.title = "Drag to move";
+  handle.setAttribute("aria-hidden", "true");
+  const button = (label, text, action, disabled = false) => {
+    const node = element("button", "profile-tool-button", text);
+    node.type = "button";
+    node.setAttribute("aria-label", `${label}: ${card.title}`);
+    node.disabled = disabled;
+    node.addEventListener("click", action);
+    return node;
+  };
+  const toggle = button(card.hidden ? "Show" : "Hide", card.hidden ? "Show" : "Hide", () => {
+    draftCards = draftCards.map((item) => (item.id === card.id ? { ...item, hidden: !item.hidden } : item));
+    renderDraft(card.id);
+  });
+  toggle.setAttribute("aria-pressed", String(card.hidden));
+  tools.append(handle,
+    button("Move up", "↑", () => { draftCards = window.AniiProfileCards.moveCard(draftCards, card.id, { step: -1 }); renderDraft(card.id, "up"); }, index === 0),
+    button("Move down", "↓", () => { draftCards = window.AniiProfileCards.moveCard(draftCards, card.id, { step: 1 }); renderDraft(card.id, "down"); }, index === count - 1),
+    toggle);
+  if (card.hidden) tools.append(element("span", "profile-card-hidden-label", "Hidden"));
+  return tools;
+}
+// keeps focus on the button that was used (or its neighbour when it's now disabled at an end)
+function renderDraft(focusId = "", which = "") {
+  placeCards(draftCards);
+  draftCards.forEach((card, index) => {
+    const panel = cardPanel(card.id);
+    panel.querySelector("[data-card-tools]")?.remove();
+    panel.prepend(arrangeTools(card, index, draftCards.length));
+  });
+  if (focusId) {
+    const buttons = [...cardPanel(focusId).querySelectorAll("[data-card-tools] button")];
+    const wanted = { up: buttons[0], down: buttons[1] }[which] || buttons[2];
+    (wanted && !wanted.disabled ? wanted : buttons.find((node) => !node.disabled))?.focus();
+  }
+}
+function setArranging(on) {
+  cardGrid.classList.toggle("is-arranging", on);
+  arrangeBar.hidden = !on;
+  profileOverview.querySelector("[data-profile-arrange]").hidden = on;
+  for (const panel of cardGrid.querySelectorAll(":scope > [data-overview-panel]")) {
+    panel.draggable = on;
+    if (!on) panel.querySelector("[data-card-tools]")?.remove();
+  }
+}
+profileOverview.querySelector("[data-profile-arrange]").addEventListener("click", () => {
+  draftCards = window.AniiProfileCards.arrangeCards(pageCards(), savedLayout);
+  arrangeBar.querySelector("[data-arrange-status]").textContent = "";
+  setArranging(true);
+  renderDraft();
+  arrangeBar.scrollIntoView({ block: "nearest", behavior: "smooth" });
+});
+arrangeBar.querySelector("[data-arrange-reset]").addEventListener("click", () => {
+  draftCards = window.AniiProfileCards.arrangeCards(pageCards(), null);
+  renderDraft();
+});
+arrangeBar.querySelector("[data-arrange-cancel]").addEventListener("click", () => {
+  draftCards = null;
+  setArranging(false);
+  applyCardLayout(savedLayout);
+});
+arrangeBar.querySelector("[data-arrange-save]").addEventListener("click", async (event) => {
+  const status = arrangeBar.querySelector("[data-arrange-status]");
+  const save = event.currentTarget;
+  save.disabled = true;
+  status.textContent = "Saving…";
+  try {
+    const response = await apiFetch("/profile/layout", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(window.AniiProfileCards.layoutOf(draftCards, pageCards())),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.layout) throw new Error(payload.error || `HTTP ${response.status}`);
+    draftCards = null;
+    setArranging(false);
+    applyCardLayout(payload.layout);
+    profileOverview.querySelector("[data-overview-status]").textContent = "Your profile's cards are saved.";
+  } catch {
+    status.textContent = "Could not save. Nothing changed.";
+  } finally {
+    save.disabled = false;
+  }
+});
+// drag and drop (a mouse); the arrows do the same on touch and keyboards
+let draggedCard = "";
+cardGrid.addEventListener("dragstart", (event) => {
+  const panel = event.target.closest?.("[data-overview-panel]");
+  if (!draftCards || !panel) return;
+  draggedCard = panel.dataset.overviewPanel;
+  panel.classList.add("is-dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", draggedCard);
+});
+cardGrid.addEventListener("dragover", (event) => {
+  if (draftCards && draggedCard) event.preventDefault();
+});
+cardGrid.addEventListener("drop", (event) => {
+  const target = event.target.closest?.("[data-overview-panel]");
+  if (!draftCards || !draggedCard || !target) return;
+  event.preventDefault();
+  draftCards = window.AniiProfileCards.moveCard(draftCards, draggedCard, { to: draftCards.findIndex((card) => card.id === target.dataset.overviewPanel) });
+  renderDraft();
+});
+cardGrid.addEventListener("dragend", () => {
+  cardGrid.querySelector(".is-dragging")?.classList.remove("is-dragging");
+  draggedCard = "";
+});
+
+// ---------------------------------------------------------------- Online now and Recently joined
+// Public profiles only, by the name they show publicly; players online with a private profile are just a number.
+async function loadProfileDirectory() {
+  const box = profileOverview.querySelector("[data-profile-directory]");
+  const link = (row) => {
+    const anchor = element("a", "profile-directory-player");
+    anchor.href = profileHref({ profile: row.publicId });
+    anchor.append(element("strong", "", row.name));
+    return anchor;
+  };
+  try {
+    const response = await apiFetch("/profiles/directory");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { recent = [], online = {} } = await response.json();
+    const players = (online.players || []).map((row) => {
+      const item = element("li");
+      const anchor = link(row);
+      const state = element("span", "profile-presence", row.state === "afk" ? "AFK" : "Online");
+      state.dataset.state = row.state;
+      anchor.append(state);
+      item.append(anchor);
+      return item;
+    });
+    box.querySelector("[data-directory-online]").replaceChildren(...(players.length ? players
+      : [element("li", "profile-directory-empty", "No public profiles online right now.")]));
+    const others = Number(online.others || 0);
+    box.querySelector("[data-directory-others]").textContent = others
+      ? `${players.length ? "And " : ""}${others} ${others === 1 ? "player" : "players"} online with a private profile.` : "";
+    box.querySelector("[data-directory-recent]").replaceChildren(...(recent.length ? recent.map((row) => {
+      const item = element("li");
+      const anchor = link(row);
+      if (row.joinedAt) anchor.append(element("small", "", `joined ${new Date(row.joinedAt * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`));
+      item.append(anchor);
+      return item;
+    }) : [element("li", "profile-directory-empty", "No public profiles yet.")]));
+    box.hidden = false;
+  } catch {
+    box.hidden = true;
+  }
+}
+if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) void loadProfileDirectory();
 
 if (!API_URL) {
   for (const link of loginLinks) {

@@ -20,13 +20,14 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.13.8-home-pictures">
+    <link rel="stylesheet" href="/styles.css?v=0.13.9-profiles">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261029-build3846247-damage-ui-r80" defer></script>
     <script src="/theme-shell.js?v=0.3.3-embed-corner" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.10.7-home-pictures" defer></script>
+    <script src="/profile-cards.js?v=0.1.0" defer></script>
+    <script src="/app.js?v=0.10.8-profiles" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -210,10 +211,27 @@
             <p class="profile-overview-characters" data-overview-characters></p>
           </div>
         </header>
+        <div class="profile-share" data-profile-share hidden>
+          <span class="profile-share-url" data-profile-share-url></span>
+          <button class="profile-tool-button" type="button" data-profile-copy>Copy link</button>
+          <span class="profile-share-note" role="status" aria-live="polite" data-profile-share-note></span>
+        </div>
         <p class="profile-overview-status" role="status" aria-live="polite" data-overview-status></p>
-        <details class="profile-edit" data-profile-edit hidden>
-          <summary>Edit profile</summary>
-        </details>
+        <div class="profile-owner-tools">
+          <details class="profile-edit" data-profile-edit hidden>
+            <summary>Edit profile</summary>
+          </details>
+          <button class="profile-tool-button" type="button" data-profile-arrange hidden>Arrange cards</button>
+        </div>
+        <div class="profile-arrange-bar" data-profile-arrange-bar hidden>
+          <p><strong>Arrange your profile.</strong> Drag a card, or use its arrows. Hidden cards stay off your profile for everyone.</p>
+          <div class="profile-arrange-actions">
+            <button class="profile-tool-button" type="button" data-arrange-reset>Reset</button>
+            <button class="profile-tool-button" type="button" data-arrange-cancel>Cancel</button>
+            <button class="profile-tool-button is-primary" type="button" data-arrange-save>Save</button>
+          </div>
+          <span class="profile-arrange-status" role="status" aria-live="polite" data-arrange-status></span>
+        </div>
         <div class="profile-overview-grid">
           <article class="profile-panel" data-overview-panel="interlink">
             <h3>Holo-Battle Interlink</h3>
@@ -236,6 +254,17 @@
           <article class="profile-panel profile-photos" data-overview-panel="photos" hidden>
             <h3>Photos</h3>
             <div data-overview-body></div>
+          </article>
+        </div>
+        <div class="profile-directory" data-profile-directory hidden>
+          <article class="profile-panel">
+            <h3>Online now</h3>
+            <ul class="profile-directory-list" data-directory-online></ul>
+            <p class="profile-directory-note" data-directory-others></p>
+          </article>
+          <article class="profile-panel">
+            <h3>Recently joined</h3>
+            <ul class="profile-directory-list" data-directory-recent></ul>
           </article>
         </div>
         <form class="profile-editor" data-profile-editor hidden>
