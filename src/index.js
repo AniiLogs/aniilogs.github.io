@@ -2957,6 +2957,10 @@ function withProfiles(players, profiles) {
 //   15 stars cleared any boss. From 4000 (20 / 40 / 20) a kill is 20 stars on every boss.
 // - splitBlock: weeks are grouped into splits (the game resets stars) by their id block: 3000-3005 is one split,
 //   4000 starts the next.
+// - seasons: which weeks belong to which season, by week id (the last entry whose fromCycle is at or below the
+//   week's id). The season number the weeks upload carries isn't consistent (week 1002 said season 1, 3000-3002
+//   season 3, 3003-3005 and 4000+ season 1), so the site doesn't use it. Season 1 began with week 3000: Split 1 is
+//   3000-3005, Split 2 started at the 4000 reset. Earlier weeks (test and launch weeks) are "Before Season 1".
 const INTERLINK_RULES = Object.freeze({
   slots: Object.freeze(["Left", "Center", "Right"]),
   slotsConfirmed: true,
@@ -2965,7 +2969,16 @@ const INTERLINK_RULES = Object.freeze({
     Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 20, 20]) }),
   ]),
   splitBlock: 1000,
+  seasons: Object.freeze([
+    Object.freeze({ season: 0, fromCycle: 0, label: "Before Season 1" }),
+    Object.freeze({ season: 1, fromCycle: 3000, label: "Season 1" }),
+  ]),
 });
+
+function interlinkSeasonRule(cycleId) {
+  const id = Number(cycleId) || 0;
+  return INTERLINK_RULES.seasons.filter((rule) => rule.fromCycle <= id).at(-1) || INTERLINK_RULES.seasons[0];
+}
 
 function interlinkStarRule(cycleId) {
   const id = Number(cycleId) || 0;
@@ -2998,6 +3011,7 @@ function interlinkSeasons(list) {
   }
   return [...seasons.values()].sort((a, b) => a.start - b.start).map((season) => ({
     season: season.season, start: season.start, end: season.end,
+    label: INTERLINK_RULES.seasons.find((rule) => rule.season === season.season)?.label || `Season ${season.season}`,
     splits: [...season.splits.values()].sort((a, b) => a.start - b.start).map((split, index) => ({ ...split, label: `Split ${index + 1}` })),
   }));
 }
@@ -3048,7 +3062,9 @@ async function interlinkCycles(env) {
   } catch (error) {
     console.error("Could not read uploaded Interlink weeks", error);
   }
-  return [...byId.values()].sort((a, b) => a.start - b.start);
+  // each week's season from its id (INTERLINK_RULES.seasons), not the uploaded number
+  return [...byId.values()].map((cycle) => ({ ...cycle, season: interlinkSeasonRule(cycle.id).season }))
+    .sort((a, b) => a.start - b.start);
 }
 
 function interlinkCycle(list, id) {

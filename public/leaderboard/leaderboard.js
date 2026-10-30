@@ -705,8 +705,8 @@
       void loadEntries();
     } }, ...[...data.seasons].sort((a, b) => b.end - a.end).flatMap((season) => [
       ...[...season.splits].reverse().map((split) => el("option", { value: `${season.season}|${split.id}`,
-        text: `Season ${season.season} · ${split.label} (${shortDate(split.start)} – ${shortDate(split.end)})` })),
-      el("option", { value: `${season.season}|all`, text: `Season ${season.season} · whole season` }),
+        text: `${season.label || `Season ${season.season}`} · ${split.label} (${shortDate(split.start)} – ${shortDate(split.end)})` })),
+      el("option", { value: `${season.season}|all`, text: `${season.label || `Season ${season.season}`} · whole season` }),
     ]));
     pick.value = `${data.season}|${data.split ?? "all"}`;
     const now = Date.now() / 1000;

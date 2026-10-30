@@ -1166,9 +1166,17 @@ test("Interlink Season Ladder: splits, combined score, total stars, best week", 
   const whole = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
   assert.equal(whole.split, null);
   assert.deepEqual(whole.standings.map((p) => [p.player, p.total, p.weeks]), [["DevOne", 52000, 2], ["UserOne", 35000, 2]]);
-  // the selector's list: season 1's splits in time order (the game data also files week 1002 under season 1)
+  // the selector's list: Season 1 began with week 3000, so its splits are 3000-3005 (Split 1) and the 4000 reset
+  // (Split 2), whatever season number the game data gave a week (it files week 1002 under season 1 and
+  // 3000-3002 under season 3); earlier weeks are "Before Season 1"
   const season1 = whole.seasons.find((s) => s.season === 1);
-  assert.deepEqual(season1.splits.map((s) => [s.id, s.label]), [[1, "Split 1"], [3, "Split 2"], [4, "Split 3"]]);
+  assert.deepEqual(season1.splits.map((s) => [s.id, s.label]), [[3, "Split 1"], [4, "Split 2"]]);
+  assert.equal(season1.label, "Season 1");
+  const before = whole.seasons.find((s) => s.season === 0);
+  assert.equal(before.label, "Before Season 1");
+  assert.ok(before.splits.some((s) => s.id === 1));                    // week 1002 now sits here
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3000")).json();
+  assert.equal(week.cycle.season, 1);                                   // uploaded as season 3, filed under Season 1
   assert.equal(season1.splits.at(-1).start, start);
   assert.ok(whole.updatedAt > 0);
 });
