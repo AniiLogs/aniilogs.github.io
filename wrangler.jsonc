@@ -21,6 +21,9 @@
       "bucket_name": "aniilogs-data-prod"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
     "PUBLIC_SITE_ORIGIN": "https://aniilogs.github.io",
     "DISCORD_CLIENT_ID": "1548899251655020634",

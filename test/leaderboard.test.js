@@ -384,6 +384,25 @@ test("second reading: times shown as \"180s\" are read, and a shifted Battle Dat
   assert.deepEqual(check.suspect, ["MinMax"]);                      // the shifted card, matched by position
 });
 
+test("on the platform the checks run after the response (ctx.waitUntil), with every binding still in reach", async () => {
+  const AI = { calls: 0, async run() { this.calls += 1; return { response: '{"score": 20000, "stars": 20, "time": "180s"}' }; } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const form = new FormData();
+  form.set("submission", JSON.stringify(run("later")));
+  for (const part of ["evidence", "evidence_full"]) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+  const waiting = [];
+  const response = await worker.fetch(new Request("https://api.aniilogs.example/api/leaderboard/submissions", {
+    method: "POST", headers: { authorization: `Bearer ${token}` }, body: form }), env, { waitUntil: (promise) => waiting.push(promise) });
+  assert.equal(response.status, 201);
+  assert.equal(waiting.length, 1);                                   // answered first; the reading is left running
+  await Promise.all(waiting);
+  assert.equal(AI.calls, 1);
+  assert.equal(sqlite.prepare("SELECT verify_state FROM leaderboard_submissions WHERE client_run_id = ?").get("later").verify_state, "match");
+  // the rest of the API works the same through the scoped env
+  assert.equal((await worker.fetch(new Request("https://api.aniilogs.example/api/leaderboard/interlink"), env, { waitUntil() {} })).status, 200);
+});
+
 test("free checks on every run; the AI reading only for runs that matter, and at most VERIFY_DAILY_LIMIT a day", async () => {
   const AI = { calls: 0, async run(model, input) { this.calls += 1; return { response: input.prompt.includes("Battle Data") ? '{"cards": []}' : '{"score": null}' }; } };
   const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev,
