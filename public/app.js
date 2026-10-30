@@ -98,7 +98,7 @@ async function consumeAuthHandoff() {
   window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, result.token);
 }
 
-function showSignedOut(message = "Sign in to sync progress. Profiles are private unless their owner makes them public.") {
+function showSignedOut(message = "") {
   for (const link of loginLinks) link.hidden = false;
   accountMenu.hidden = true;
   accountButton.hidden = true;
@@ -131,7 +131,7 @@ function showSignedIn(account) {
   logoutButton.hidden = false;
   deleteAccountButton.hidden = false;
   settingsShortcut.hidden = true;
-  status.textContent = `Signed in as ${name}. Your profile is private by default.`;
+  status.textContent = "";
   profilePublicRow.hidden = false;
   profileFindableRow.hidden = false;
   profilePresenceRow.hidden = false;
@@ -142,7 +142,7 @@ function showSignedIn(account) {
     document.querySelector("[data-profile-back]").hidden = !PUBLIC_PROFILE_ID;   // on someone else's profile
     document.querySelector("[data-profile-edit]").hidden = Boolean(PUBLIC_PROFILE_ID);
   }
-  if (!PUBLIC_PROFILE_ID) void loadProfileOverview();
+  if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) void loadProfileOverview();   // your profile: on the Profiles page only
 }
 
 profilePublic.addEventListener("change", () => {

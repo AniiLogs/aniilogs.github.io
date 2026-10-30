@@ -20,13 +20,13 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.13.6-dots-behind">
+    <link rel="stylesheet" href="/styles.css?v=0.13.7-home-about">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261029-build3846247-damage-ui-r80" defer></script>
     <script src="/theme-shell.js?v=0.3.3-embed-corner" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.10.5-site-chrome" defer></script>
+    <script src="/app.js?v=0.10.6-home-about" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -96,123 +96,20 @@
     </header>
 
     <main>
-      <section class="hero">
-        <div class="hero-copy-block">
-          <p class="eyebrow"><span aria-hidden="true">✦</span> An adventure log for Aniimo</p>
-          <h1>Every trail tells <span>a story.</span></h1>
-          <p class="hero-copy">Mark what you discover, fill your item journal, and keep your Aniimo adventure together in one bright little corner of the world.</p>
-          <div class="hero-actions">
-            <a class="primary-button" href="/explorer/">Explore the map <span aria-hidden="true">→</span></a>
-            <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
-          </div>
-          <p class="status" data-auth-status>Checking account status…</p>
-          <ul class="trail-tags" aria-label="Planned AniiLogs tools">
-            <li><span class="tag-dot tag-dot-mint"></span> World map</li>
-            <li><span class="tag-dot tag-dot-gold"></span> Item-log</li>
-            <li><span class="tag-dot tag-dot-coral"></span> Player profiles</li>
-          </ul>
-        </div>
-
-        <div class="world-window" aria-label="A playful preview of the future interactive map">
-          <div class="sun" aria-hidden="true"></div>
-          <div class="cloud cloud-one" aria-hidden="true"></div>
-          <div class="cloud cloud-two" aria-hidden="true"></div>
-          <div class="floating-leaf leaf-one" aria-hidden="true"></div>
-          <div class="floating-leaf leaf-two" aria-hidden="true"></div>
-          <div class="map-card">
-            <div class="map-toolbar"><span><i></i> Meadow Reach</span><span class="map-progress">3 / 12 found</span></div>
-            <div class="mini-map" aria-hidden="true">
-              <div class="river"></div>
-              <div class="land land-one"></div>
-              <div class="land land-two"></div>
-              <div class="trail"></div>
-              <span class="map-pin pin-one">✦</span>
-              <span class="map-pin pin-two">●</span>
-              <span class="map-pin pin-three">◆</span>
-              <div class="companion">
-                <span class="ear ear-left"></span><span class="ear ear-right"></span>
-                <span class="eye eye-left"></span><span class="eye eye-right"></span>
-                <span class="companion-spark">✦</span>
-              </div>
-            </div>
-          </div>
-          <div class="found-bubble"><span>✦</span> New discovery!</div>
-        </div>
-      </section>
-
-      <section class="journey-section" aria-labelledby="journey-title">
-        <div class="section-heading">
-          <p class="eyebrow">Your journey, your way</p>
-          <h2 id="journey-title">Pack light. Remember everything.</h2>
-          <p>AniiLogs is starting small, with the tools every Pathfinder reaches for first.</p>
-        </div>
-        <div class="feature-grid" aria-label="AniiLogs features">
-          <article id="map" class="feature-card map-feature">
-            <div class="card-icon map-icon" aria-hidden="true"><span>⌖</span></div>
-            <p class="card-kicker">First destination</p>
-            <h3>Interactive map</h3>
-            <p>Find landmarks, filter discoveries, and remember where your wandering took you.</p>
-            <a class="coming-soon" href="/explorer/"><i></i> Open the map</a>
-            <div class="card-scenery" aria-hidden="true"><span class="scenery-hill hill-back"></span><span class="scenery-hill hill-front"></span><span class="scenery-pin">✦</span></div>
-          </article>
-          <article id="item-log" class="feature-card item-feature">
-            <div class="card-icon item-icon" aria-hidden="true"><span>◇</span></div>
-            <p class="card-kicker">Collector's corner</p>
-            <h3>Item-log</h3>
-            <p>Browse reviewed current-build items, carried treasures, and known sources.</p>
-            <a class="coming-soon" href="/explorer/?view=itemlog"><i></i> Browse the Item-log</a>
-          </article>
-          <article id="profiles" class="feature-card profile-feature">
-            <div class="card-icon profile-icon" aria-hidden="true"><span>☺</span></div>
-            <p class="card-kicker">Make it yours</p>
-            <h3>Pathfinder profiles</h3>
-            <p>Sign in with Discord to sync your progress. Profiles are private unless you make yours public.</p>
-            <span class="coming-soon"><i></i> Private by default</span>
-            <form class="profile-editor" data-profile-editor hidden>
-              <div class="profile-editor-heading">
-                <strong>My profile</strong>
-                <small>Private unless you make it public. Leaderboard entries show either way.</small>
-              </div>
-              <label>
-                <span>Display name</span>
-                <input type="text" name="displayName" maxlength="80" autocomplete="nickname" required data-profile-display-name>
-              </label>
-              <label>
-                <span>About me</span>
-                <textarea name="bio" maxlength="500" rows="3" placeholder="A little about your Aniimo adventure…" data-profile-bio></textarea>
-              </label>
-              <label class="profile-public-toggle" data-profile-public-row hidden>
-                <input type="checkbox" name="isPublic" data-profile-public>
-                <span>Public profile
-                  <small>Anyone with the link sees your character names, about, leaderboard standing and collection progress. Never your Discord account, and your display name only if you tick the box below.</small>
-                </span>
-              </label>
-              <label class="profile-public-toggle" data-profile-findable-row hidden>
-                <input type="checkbox" name="findableByName" data-profile-findable>
-                <span>Let players find me by my display name
-                  <small>Your public profile shows your display name, and the player search matches it. Off: only your character names and UIDs.</small>
-                </span>
-              </label>
-              <label class="profile-public-toggle" data-profile-search-row hidden>
-                <input type="checkbox" name="listedInSearch" data-profile-search>
-                <span>List my profile in search engines
-                  <small>Google and other search engines may show your public profile. Off: they're asked to leave it out.</small>
-                </span>
-              </label>
-              <label class="profile-public-toggle" data-profile-presence-row hidden>
-                <input type="checkbox" name="showPresence" data-profile-presence>
-                <span>Show my online status
-                  <small>Online while Aniimo and the aLogs app are running, AFK after 20 minutes away from the game, Offline otherwise. Off: no status on your profile, and none is kept.</small>
-                </span>
-              </label>
-              <p class="profile-public-link" data-profile-public-link hidden></p>
-              <div class="profile-editor-actions">
-                <button type="submit" data-profile-save>Save profile</button>
-                <span role="status" aria-live="polite" data-profile-status></span>
-              </div>
-            </form>
-          </article>
-        </div>
+      <!-- DRAFT for the owner to rewrite: what AniiLogs is, in plain words, with each tool. -->
+      <section class="home-about" aria-labelledby="home-about-title">
+        <h1 id="home-about-title">AniiLogs</h1>
+        <p class="home-about-intro">AniiLogs is an unofficial, fan-made site for Aniimo. It puts the game's data and players' records in one place.</p>
+        <ul class="home-tools">
+          <li><a href="/explorer/">Interactive Map</a><span>Every region's points of interest, resources, bosses and respawn timers.</span></li>
+          <li><a href="/explorer/?view=aniilog">Aniilog</a><span>Every Aniimo form: stats, skills, traits, evolutions and where to find it.</span></li>
+          <li><a href="/explorer/?view=itemlog">Item-log</a><span>The game's items and where they come from.</span></li>
+          <li><a href="/explorer/?view=checklist">Checklists</a><span>Track what you've caught and collected.</span></li>
+          <li><a href="/explorer/?view=team">Team Builder</a><span>Plan a team, compare stats and work out damage.</span></li>
+          <li><a href="/leaderboard/">Leaderboards</a><span>Holo-Battle Interlink, Holo-Battle Sim and Egg Heist records, read from the game's result screens.</span></li>
+          <li><a href="/companion/">aLogs</a><span>The Windows companion app: a boss DPS meter and Egg Heist overlay that can send your records here.</span></li>
+        </ul>
+        <p class="status" data-auth-status role="status" aria-live="polite"></p>
       </section>
 
       <section class="patch-notes" aria-labelledby="patch-notes-title">
@@ -293,6 +190,49 @@
             <div data-overview-body></div>
           </article>
         </div>
+        <form class="profile-editor" data-profile-editor hidden>
+          <div class="profile-editor-heading">
+            <strong>My profile</strong>
+            <small>Private unless you make it public. Leaderboard entries show either way.</small>
+          </div>
+          <label>
+            <span>Display name</span>
+            <input type="text" name="displayName" maxlength="80" autocomplete="nickname" required data-profile-display-name>
+          </label>
+          <label>
+            <span>About me</span>
+            <textarea name="bio" maxlength="500" rows="3" placeholder="A little about your Aniimo adventure…" data-profile-bio></textarea>
+          </label>
+          <label class="profile-public-toggle" data-profile-public-row hidden>
+            <input type="checkbox" name="isPublic" data-profile-public>
+            <span>Public profile
+              <small>Anyone with the link sees your character names, about, leaderboard standing and collection progress. Never your Discord account, and your display name only if you tick the box below.</small>
+            </span>
+          </label>
+          <label class="profile-public-toggle" data-profile-findable-row hidden>
+            <input type="checkbox" name="findableByName" data-profile-findable>
+            <span>Let players find me by my display name
+              <small>Your public profile shows your display name, and the player search matches it. Off: only your character names and UIDs.</small>
+            </span>
+          </label>
+          <label class="profile-public-toggle" data-profile-search-row hidden>
+            <input type="checkbox" name="listedInSearch" data-profile-search>
+            <span>List my profile in search engines
+              <small>Google and other search engines may show your public profile. Off: they're asked to leave it out.</small>
+            </span>
+          </label>
+          <label class="profile-public-toggle" data-profile-presence-row hidden>
+            <input type="checkbox" name="showPresence" data-profile-presence>
+            <span>Show my online status
+              <small>Online while Aniimo and the aLogs app are running, AFK after 20 minutes away from the game, Offline otherwise. Off: no status on your profile, and none is kept.</small>
+            </span>
+          </label>
+          <p class="profile-public-link" data-profile-public-link hidden></p>
+          <div class="profile-editor-actions">
+            <button type="submit" data-profile-save>Save profile</button>
+            <span role="status" aria-live="polite" data-profile-status></span>
+          </div>
+        </form>
       </section>
     </main>
 
