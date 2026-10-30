@@ -1050,7 +1050,10 @@ function historyLineup(run) {
   fact("Player", mine?.name || "");
   fact("Aniimo", [mine?.aniimo, Number.isInteger(mine?.aniimoLevel) ? `Lv ${mine.aniimoLevel}` : ""].filter(Boolean).join(" · "));
   fact("CP", Number.isInteger(mine?.cp) ? numberFormat.format(mine.cp) : "");
-  fact("Team", (Array.isArray(mine?.team) ? mine.team : []).map((member) => [member.aniimo, Number.isInteger(member.aniimoLevel) ? `Lv ${member.aniimoLevel}` : "",
+  // the whole team only when aLogs read more than the lead (the Party screen names only the lead; the rest are icons,
+  // there in the picture); likewise the buffs only when read
+  const team = Array.isArray(mine?.team) && mine.team.length > 1 ? mine.team : [];
+  fact("Team", team.map((member) => [member.aniimo, Number.isInteger(member.aniimoLevel) ? `Lv ${member.aniimoLevel}` : "",
     Number.isInteger(member.cp) ? `CP ${numberFormat.format(member.cp)}` : ""].filter(Boolean).join(" ")).join(" · "));
   fact("Team buffs", buffs.map((buff) => `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`).join(", "));
   if (!picture) facts.append(element("dd", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));
