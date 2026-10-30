@@ -1018,19 +1018,44 @@ function historyChips(run) {
   if (run.check === "pending") chip("is-pending", "Pending", "Waiting for a check against this run's full screenshots.");
   if (run.newBests?.length) chip("is-best", "New best", "This run beat one of the player's bests when it was captured.");
   if (run.credited) chip("is-credited", "Teammate's capture", "A teammate's aLogs captured this run with this player in the party.");
+  if (run.captures > 1) chip("is-shared", `Captured by ${run.captures} players`, "The same run, sent by more than one player in the party.");
   if (run.hidden) chip("is-hidden", "Hidden", "Hidden from the boards: only you see it here.");
   return chips;
 }
-// a player's lead Aniimo from extra.lineup (aLogs' Party screen: [{ slot, name, ai, self, aniimo, aniimoLevel }], or
-// { lead: { name, level } }): the entry with the player's name, else the same slot
-function lineupLead(run, player, index) {
-  const lineup = Array.isArray(run.lineup) ? run.lineup : [];
-  const named = player?.name && lineup.find((item) => String(item?.name || "").toLowerCase() === String(player.name).toLowerCase());
-  const entry = named || lineup.find((item) => Number(item?.slot) === index + 1) || lineup[index];
-  const lead = entry?.lead ?? entry?.aniimo ?? null;
-  const name = typeof lead === "string" ? lead : lead?.name || "";
-  const level = (typeof lead === "object" && lead ? lead.level : null) ?? entry?.aniimoLevel ?? entry?.level;
-  return name ? `${name}${Number.isInteger(level) ? ` Lv ${level}` : ""}` : "";
+// "Party at the start": the Party screen's last capture before the battle (the leader or anyone could still change
+// things until then). The picture is the proof; beside it, as text, what it shows for the player who sent it (their
+// lead Aniimo, its level and CP, their team comp) and what the whole party shares: the buffs the leader chose.
+function historyLineup(run) {
+  const mine = (Array.isArray(run.lineup) ? run.lineup : []).find((entry) => entry?.self);
+  const buffs = Array.isArray(run.buffs) ? run.buffs : [];
+  const picture = run.hasPartyScreen && !run.proofPrunedAt;
+  if (!mine && !buffs.length && !picture) return null;
+  const panel = element("section", "history-lineup");
+  if (picture) {
+    const base = `${API_URL}/leaderboard/submissions/${encodeURIComponent(run.submissionId)}/evidence?shot=party`;
+    const link = element("a", "history-shot is-party");
+    link.href = base;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = "The Party screen when the battle started: open it";
+    const image = element("img");
+    image.alt = "The Party screen when the battle started";
+    image.loading = "lazy";
+    image.dataset.src = base;
+    link.append(image, element("span", "", "Party screen at the start"));
+    panel.append(link);
+  }
+  const facts = element("dl", "history-lineup-facts");
+  const fact = (label, value) => { if (value) facts.append(element("dt", "", label), element("dd", "", value)); };
+  fact("Player", mine?.name || "");
+  fact("Aniimo", [mine?.aniimo, Number.isInteger(mine?.aniimoLevel) ? `Lv ${mine.aniimoLevel}` : ""].filter(Boolean).join(" · "));
+  fact("CP", Number.isInteger(mine?.cp) ? numberFormat.format(mine.cp) : "");
+  fact("Team", (Array.isArray(mine?.team) ? mine.team : []).map((member) => [member.aniimo, Number.isInteger(member.aniimoLevel) ? `Lv ${member.aniimoLevel}` : "",
+    Number.isInteger(member.cp) ? `CP ${numberFormat.format(member.cp)}` : ""].filter(Boolean).join(" ")).join(" · "));
+  fact("Team buffs", buffs.map((buff) => `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`).join(", "));
+  if (!picture) facts.append(element("dd", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));
+  panel.append(facts);
+  return panel;
 }
 function historyParty(run) {
   let players = (run.players || []).filter((player) => player && (player.name || player.avgDps != null));
@@ -1039,7 +1064,7 @@ function historyParty(run) {
   if (!players.length) return element("p", "history-empty", "No party read for this run.");
   const table = element("table", "history-party");
   const head = element("tr");
-  for (const label of ["", "Player", "Lead", "Avg DPS", "BREAK", "Damage Taken", "Healing"]) head.append(element("th", "", label));
+  for (const label of ["", "Player", "Avg DPS", "BREAK", "Damage Taken", "Healing"]) head.append(element("th", "", label));
   const thead = element("thead");
   thead.append(head);
   const body = element("tbody");
@@ -1054,8 +1079,7 @@ function historyParty(run) {
     if (player.ai) who.append(element("span", "history-chip is-ai", "AI"));
     if (player.self && run.credited) who.append(element("span", "history-chip is-self", "captured it"));   // the teammate whose app sent it
     const number = (value) => element("td", "history-number", value == null ? "–" : numberFormat.format(value));
-    row.append(element("td", "history-slot", `${index + 1}P`), who, element("td", "", lineupLead(run, player, index) || "–"),
-      number(player.avgDps), number(player.breakValue), number(player.damageTaken), number(player.heal));
+    row.append(element("td", "history-slot", `${index + 1}P`), who, number(player.avgDps), number(player.breakValue), number(player.damageTaken), number(player.heal));
     body.append(row);
   });
   table.append(thead, body);
@@ -1107,7 +1131,11 @@ function historyRow(run, { open = false } = {}) {
     if (!details.open || details.dataset.filled) return;
     details.dataset.filled = "1";
     const body = element("div", "history-body");
-    body.append(historyParty(run), historyProof(run));
+    const evidence = element("div", "history-evidence");
+    const lineup = historyLineup(run);
+    if (lineup) evidence.append(lineup);
+    evidence.append(historyProof(run));
+    body.append(historyParty(run), evidence);
     details.append(body);
     for (const picture of body.querySelectorAll("img[data-src]")) {
       picture.addEventListener("error", () => picture.closest("a")?.replaceWith(element("p", "history-empty", "This picture couldn't be loaded.")), { once: true });

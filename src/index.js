@@ -1664,21 +1664,32 @@ async function profilesDirectory(env) {
 // boards stay best-per-player; this is the whole record. It follows the profile: the owner's own, or a public
 // profile's for anyone. Names as on screen, a profile link only for public profiles, never a UID.
 const HISTORY_PAGE = 20;
-// aLogs' Party-screen lineup (extra.lineup) as the site shows it: slot, name, AI, the lead Aniimo and its level.
-// Nothing else - CP stays server-side until the owner decides to show it.
+// aLogs' Party-screen lineup (extra.lineup) as the site passes it on: slot, name and AI for everyone; the lead Aniimo,
+// its level, CP and their team comp only for the player who sent the run (the proof is their screen: the others' are
+// theirs to send).
 function publicLineup(lineup) {
   if (!Array.isArray(lineup)) return null;
   const text = (value) => (typeof value === "string" ? value.slice(0, 40) : undefined);
   const level = (value) => (Number.isInteger(value) && value >= 1 && value <= 999 ? value : undefined);
   return lineup.slice(0, 4).filter((item) => item && typeof item === "object").map((item) => JSON.parse(JSON.stringify({
     slot: level(item.slot), name: text(item.name), ai: typeof item.ai === "boolean" ? item.ai : undefined, self: item.self === true || undefined,
-    aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
+    ...(item.self === true ? {
+      aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
+      cp: Number.isInteger(item.cp) && item.cp >= 0 && item.cp <= 10000000 ? item.cp : undefined,
+      // the team they went in with: [{ aniimo | name, aniimoLevel | level, cp }] or names
+      team: Array.isArray(item.team) ? item.team.slice(0, 6).map((member) => (typeof member === "string" ? { aniimo: text(member) } : {
+        aniimo: text(member?.aniimo) ?? text(member?.name), aniimoLevel: level(member?.aniimoLevel) ?? level(member?.level),
+        cp: Number.isInteger(member?.cp) && member.cp >= 0 && member.cp <= 10000000 ? member.cp : undefined,
+      })).filter((member) => member.aniimo) : undefined,
+    } : {}),
   })));
 }
 const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle, c.boss_id, c.boss_name, c.boss_level, c.score, c.stars,
   c.clear_time_s, c.cleared, c.floors, c.team_dps, c.party_size, c.difficulty, c.trial, c.rank_tier, c.rank_subtier, c.rank_name,
-  c.players_json, c.extra_json, c.evidence_key, c.battle_evidence_key, c.proof_pruned_at, c.verify_state, c.status, c.played_at,
-  c.created_at, COALESCE(c.played_at, c.created_at) AS at`;
+  c.players_json, c.buffs_json, c.extra_json, c.evidence_key, c.battle_evidence_key, c.proof_pruned_at, c.verify_state, c.status, c.played_at,
+  c.created_at, COALESCE(c.played_at, c.created_at) AS at,
+  (SELECT COUNT(*) FROM leaderboard_submissions o WHERE json_extract(c.extra_json, '$.sharedRun') IS NOT NULL
+     AND json_extract(o.extra_json, '$.sharedRun') = json_extract(c.extra_json, '$.sharedRun')) AS captures`;
 
 async function battleHistory(env, discordId, params, { owner }) {
   const uids = ((await env.DB.prepare("SELECT game_uid AS uid FROM game_characters WHERE discord_id = ?").bind(discordId).all()).results || [])
@@ -1694,8 +1705,15 @@ async function battleHistory(env, discordId, params, { owner }) {
         WHERE gc.discord_id = ?1 AND json_extract(pl.value, '$.ai') = 0
           AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1))
       AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions mine WHERE mine.discord_id = ?1 AND mine.kind = 'interlink_run'
-        AND json_extract(mine.extra_json, '$.instanceId') IS NOT NULL
-        AND json_extract(mine.extra_json, '$.instanceId') = json_extract(c.extra_json, '$.instanceId'))` : null;
+        AND ((json_extract(mine.extra_json, '$.instanceId') IS NOT NULL
+          AND json_extract(mine.extra_json, '$.instanceId') = json_extract(c.extra_json, '$.instanceId'))
+         OR (json_extract(mine.extra_json, '$.sharedRun') IS NOT NULL
+          AND json_extract(mine.extra_json, '$.sharedRun') = json_extract(c.extra_json, '$.sharedRun'))))
+      -- one teammate's copy of a shared run is enough
+      AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions twin WHERE twin.kind = 'interlink_run' AND twin.status = 'visible'
+        AND twin.discord_id <> ?1 AND json_extract(c.extra_json, '$.sharedRun') IS NOT NULL
+        AND json_extract(twin.extra_json, '$.sharedRun') = json_extract(c.extra_json, '$.sharedRun') AND twin.submission_id < c.submission_id
+        AND (${uids.map((uid) => `instr(twin.players_json, '"${uid}"') > 0`).join(" OR ")}))` : null;
   const all = `SELECT * FROM (${own}${credited ? ` UNION ALL ${credited}` : ""})`;
   const where = [];
   const binds = [discordId];
@@ -1753,10 +1771,14 @@ async function battleHistory(env, discordId, params, { owner }) {
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles) || [],
         lineup: publicLineup(extra.lineup),
+        // the buffs the party went in with (the leader picks them on the Party screen)
+        buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
         hasEvidence: Boolean(row.evidence_key),
         hasBattleEvidence: Boolean(row.battle_evidence_key),
         hasFullScreens: Object.keys(extra.proofFull || {}),
+        hasPartyScreen: Boolean(extra.proofParty),
+        captures: Math.max(1, Number(row.captures) || 0),     // how many players' apps captured this run
         proofPrunedAt: row.proof_pruned_at || null,
         check: runCheckBadge(row.verify_state),
         ...(owner && row.status !== "visible" ? { hidden: true } : {}),
@@ -1824,13 +1846,14 @@ async function pruneProofs(env, max) {
     const crops = (await env.DB.prepare(
       `SELECT c.submission_id AS submissionId, c.evidence_key AS evidenceKey, c.battle_evidence_key AS battleKey, c.extra_json AS extraJson
        FROM leaderboard_submissions c
-       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL) AND c.proof_pruned_at IS NULL AND c.created_at < ? AND ${NOBODYS_BEST}
+       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL OR json_extract(c.extra_json, '$.proofParty') IS NOT NULL)
+         AND c.proof_pruned_at IS NULL AND c.created_at < ? AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
     ).bind(now - RETENTION.cropsS, max).all()).results || [];
     for (const row of crops) {
       for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
       await env.DB.prepare(`UPDATE leaderboard_submissions SET evidence_key = NULL, battle_evidence_key = NULL, proof_pruned_at = ?,
-        extra_json = json_remove(extra_json, '$.proofFull') WHERE submission_id = ?`).bind(now, row.submissionId).run();
+        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty') WHERE submission_id = ?`).bind(now, row.submissionId).run();
       pruned += 1;
     }
   } catch (error) {
@@ -2147,9 +2170,11 @@ const LEADERBOARD_TOKEN_PREFIX = "alb_";
 const MAX_SUBMISSION_BYTES = 64 * 1024;
 // A run's proof: the app sends JPEGs - the cropped result screen ("evidence", from aLogs B2 at native size, ~0.3-0.6 MB
 // at 4K), the whole screen ("evidence_full", at most 1920 wide, ~0.2-0.4 MB) and the same pair for Battle Data
-// ("battle", "battle_full"). Each image is capped here; anything larger isn't a screenshot from the app.
+// ("battle", "battle_full"), and the Party screen as it was when the battle started ("party": the leader or anyone can
+// still change their Aniimo until then, so it's the last capture). Each image is capped here; anything larger isn't a
+// screenshot from the app.
 const MAX_EVIDENCE_BYTES = 1536 * 1024;
-const EVIDENCE_PARTS = 4;
+const EVIDENCE_PARTS = 5;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -2502,11 +2527,14 @@ async function readSubmissionRequest(request) {
   const evidence = picture("evidence");
   const battle = evidence ? picture("battle") : null;
   // the whole screens the crops came from (aLogs B2 on): kept for a second reading and for review
-  return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null };
+  return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null,
+    party: picture("party") };
 }
 
-// Two app users in one Interlink run both send it: same week, boss, score, stars and time, played and sent within five
-// minutes of each other, and - when both apps read it from the game log - in the same dungeon instance. Only full runs
+// Two app users in one Interlink run both send it: same week and boss, played and sent within five minutes of each
+// other, - when both apps read it from the game log - in the same dungeon instance, and either the same score, stars
+// and time or the same party on the Party screen (the same players in the same slots, at least two of them real
+// players: a misread number then doesn't split one run in two). Only full runs
 // (result screen, timer, party) count: a best score read off the prep screen says nothing about who was in a run.
 // The instance id stays server-side (see leaderboardEntries), so nobody can copy it into a made-up run. Each submission then vouches for the other: the other player's slot in this run's party gets their UID
 // (from their own submission, whose UID only their account can send) and is marked confirmed, and the same the other
@@ -2516,20 +2544,24 @@ async function corroborateRun(env, submissionId) {
   const me = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
        clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson,
-       json_extract(extra_json, '$.instanceId') AS instanceId, server
+       extra_json AS extraJson, json_extract(extra_json, '$.instanceId') AS instanceId, server
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   if (!me || me.kind !== "interlink_run" || me.score == null || !me.gameUid) return;
-  const { results } = await env.DB.prepare(
-    `SELECT submission_id AS id, discord_id AS discordId, game_uid AS gameUid, players_json AS playersJson
+  const { results: nearby } = await env.DB.prepare(
+    `SELECT submission_id AS id, discord_id AS discordId, game_uid AS gameUid, players_json AS playersJson, extra_json AS extraJson,
+       score, stars, clear_time_s AS clearTimeS
      FROM leaderboard_submissions
      WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
-       AND cycle IS ? AND boss_id IS ? AND score = ? AND stars IS ? AND clear_time_s IS ?
+       AND cycle IS ? AND boss_id IS ?
        AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
        AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)
        AND (? IS NULL OR server IS NULL OR server = ?)`,
-  ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.score, me.stars, me.clearTimeS, me.at, CORROBORATE_WINDOW_S,
+  ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.at, CORROBORATE_WINDOW_S,
     me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
+  const myExtra = parseJsonColumn(me.extraJson) || {};
+  const results = (nearby || []).filter((other) => (other.score === me.score && other.stars === me.stars && other.clearTimeS === me.clearTimeS)
+    || sameParty(myExtra.lineup, (parseJsonColumn(other.extraJson) || {}).lineup));
   // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
   const ownName = async (row, players) => players.find((player) => player?.self)?.name
     || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
@@ -2554,6 +2586,32 @@ async function corroborateRun(env, submissionId) {
   if (mineChanged) {
     await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").bind(JSON.stringify(mine), me.id).run();
   }
+  // link the copies as one shared run (server-only extra.sharedRun: the first copy's id), for Battle History
+  if (results.length) {
+    const group = (results.map((other) => (parseJsonColumn(other.extraJson) || {}).sharedRun).find(Boolean)) || myExtra.sharedRun
+      || [me.id, ...results.map((other) => other.id)].sort()[0];
+    for (const id of [me.id, ...results.map((other) => other.id)]) {
+      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_set(COALESCE(extra_json, '{}'), '$.sharedRun', ?) WHERE submission_id = ?")
+        .bind(group, id).run();
+    }
+  }
+}
+
+// Whether two Party screens (extra.lineup) show the same party: every slot both read has the same player (names
+// folded for lookalike letters), both read the same slots, and at least two of them are real players.
+function sameParty(a, b) {
+  const slots = (lineup) => new Map((Array.isArray(lineup) ? lineup : []).filter((entry) => Number.isInteger(entry?.slot) && entry.name)
+    .map((entry) => [entry.slot, { skel: nameSkeleton(entry.name), ai: entry.ai === true }]));
+  const mine = slots(a);
+  const theirs = slots(b);
+  if (mine.size < 2 || mine.size !== theirs.size) return false;
+  let players = 0;
+  for (const [slot, entry] of mine) {
+    const other = theirs.get(slot);
+    if (!other || other.skel !== entry.skel) return false;
+    if (!entry.ai && !other.ai) players += 1;
+  }
+  return players >= 2;
 }
 
 async function submitLeaderboardRecord(request, env) {
@@ -2616,10 +2674,19 @@ async function submitLeaderboardRecord(request, env) {
     await env.EVIDENCE.put(key, part.stream(), { httpMetadata: { contentType: part.type } });
     proofFull[name] = key;
   }
-  if (record.extraJson || Object.keys(proofFull).length) {
+  // the Party screen (server-only extra.proofParty): a re-send with a newer one replaces it
+  let proofParty = (parseJsonColumn(existing?.extraJson) || {}).proofParty || null;
+  if (parsed.party && env.EVIDENCE) {
+    proofParty = `evidence/${account.discordId}/${submissionId}-party.${EVIDENCE_TYPES[parsed.party.type]}`;
+    await env.EVIDENCE.put(proofParty, parsed.party.stream(), { httpMetadata: { contentType: parsed.party.type } });
+  }
+  if (record.extraJson || Object.keys(proofFull).length || proofParty) {
     const extra = parseJsonColumn(record.extraJson) || {};
     delete extra.proofFull;
+    delete extra.proofParty;
+    delete extra.sharedRun;
     if (Object.keys(proofFull).length) extra.proofFull = proofFull;
+    if (proofParty) extra.proofParty = proofParty;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -4092,7 +4159,8 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, lineup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+        ...(proofParty ? { hasPartyScreen: true } : {}),
         ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
       hasBattleEvidence: Boolean(row.battle_evidence_key),
@@ -4175,8 +4243,9 @@ async function moderateSubmission(request, env, submissionId) {
 
 // Every stored picture of a run: the crops and the whole screens.
 function proofKeys(row) {
-  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
-  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle].filter(Boolean);
+  const extra = parseJsonColumn(row?.extraJson) || {};
+  const full = extra.proofFull || {};
+  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty].filter(Boolean);
 }
 
 async function deleteSubmission(request, env, submissionId) {
@@ -4204,7 +4273,8 @@ async function submissionEvidence(request, env, submissionId) {
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
   const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
-  const key = shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle : row?.evidenceKey;
+  const key = shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
+    : shot === "party" ? (parseJsonColumn(row?.extraJson) || {}).proofParty : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {

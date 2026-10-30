@@ -1503,23 +1503,114 @@ test("pictures: a run that's nobody's best keeps full screens 14 days and crops 
   for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
 });
 
-test("aLogs' Party-screen lineup shows each slot's lead Aniimo; CP stays server-side", async () => {
+test("the Party screen's details: the sender's lead Aniimo, CP and team comp, the party's buffs; nobody else's", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);
   const lineup = [
-    { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 },
+    { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60, cp: 12345,
+      team: [{ aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 }, { name: "Celestis", level: 58 }, "Irisalis"] },
     { slot: 2, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
     { slot: 3, name: "Friend", ai: false, aniimo: "Celestis", aniimoLevel: 58, cp: 9999 },
   ];
-  await sendRun(env, token, run("lineup", { extra: { lineup, newBests: [], title: "Pathfinder" } }));
+  const buffs = [{ name: "Fire Resonance", level: 2 }, { name: "Swift Start" }];
+  await sendRun(env, token, run("lineup", { buffs, extra: { lineup, newBests: [], title: "Pathfinder" } }));
   const [listed] = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
   assert.deepEqual(listed.lineup, [
-    { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60 },
-    { slot: 2, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
-    { slot: 3, name: "Friend", ai: false, aniimo: "Celestis", aniimoLevel: 58 },
+    { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60, cp: 12345,
+      team: [{ aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 }, { aniimo: "Celestis", aniimoLevel: 58 }, { aniimo: "Irisalis" }] },
+    { slot: 2, name: "Mario", ai: true },
+    { slot: 3, name: "Friend", ai: false },                                 // a teammate's Aniimo and CP are theirs to send
   ]);
+  assert.deepEqual(listed.buffs, [{ name: "Fire Resonance", level: 2 }, { name: "Swift Start" }]);
+  assert.equal(listed.title, undefined);
   assert.deepEqual(listed.newBests, []);                                   // no "New best" for a run that beat nothing
-  const entries = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json();
-  assert.equal(JSON.stringify(entries).includes("12345"), false);         // not on the public boards' API either
-  assert.equal(JSON.stringify(listed).includes("cp"), false);
+  const entries = JSON.stringify(await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json());
+  assert.equal(entries.includes("9999"), false);                          // nor on the boards' API
+});
+
+test("the Party screen's last capture is the lineup's proof: stored, replaced by a newer one, kept like the crops", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const token = await namedToken(env, SESSIONS.dev);
+  const send = (body, parts) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(body));
+    for (const [part, byte] of parts) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, byte])], { type: "image/jpeg" }), `${part}.jpg`);
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  assert.equal((await send(run("p1"), [["evidence", 1], ["party", 7]])).status, 201);
+  const id = sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = 'p1'").get().id;
+  const shot = async () => new Uint8Array(await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=party`)).arrayBuffer())[3];
+  assert.equal(await shot(), 7);
+  await send(run("p1", { score: 21000 }), [["party", 9]]);                  // the leader changed something: a newer capture
+  assert.equal(await shot(), 9);
+  await send(run("p1", { score: 21000, extra: { proofParty: "evidence/someone-else.jpg" } }), []);   // the app can't name one
+  assert.equal(await shot(), 9);
+  const [listed] = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.equal(listed.hasPartyScreen, true);
+  const entries = JSON.stringify(await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json());
+  assert.equal(entries.includes("-party."), false);                       // never the storage key
+  // deleting the run takes it too
+  await call(env, `/api/leaderboard/submissions/${id}`, { token, method: "DELETE" });
+  assert.equal([...EVIDENCE.objects.keys()].some((key) => key.includes(id)), false);
+});
+
+test("the sender in slot 2: their own section of the Party screen, never slot 1's", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const lineup = [
+    { slot: 1, name: "Leader", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 20000, team: ["Glameep", "Sherro"] },
+    { slot: 2, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000, team: ["Emberpup", "Chirpi"] },
+  ];
+  await sendRun(env, token, run("p2", { extra: { lineup } }));
+  const [listed] = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(listed.lineup, [
+    { slot: 1, name: "Leader", ai: false },
+    { slot: 2, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000, team: [{ aniimo: "Emberpup" }, { aniimo: "Chirpi" }] },
+  ]);
+});
+
+test("one party run sent by two players: matched by the Party screen's slots when a number was misread, shown once", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
+  const userToken = await namedToken(env, SESSIONS.user);     // UserOne 301000000003
+  const lineup = (self) => [
+    { slot: 1, name: "UserOne", ai: false, ...(self === "UserOne" ? { self: true } : {}) },
+    { slot: 2, name: "DevOne", ai: false, ...(self === "DevOne" ? { self: true } : {}) },
+    { slot: 3, name: "Mario", ai: true }, { slot: 4, name: "Flora", ai: true },
+  ];
+  const party = (self) => [{ name: "UserOne", ai: false, self: self === "UserOne" }, { name: "DevOne", ai: false, self: self === "DevOne" }];
+  const at = Math.floor(Date.now() / 1000) - 60;
+  // UserOne's app read 34 stars, DevOne's misread 4: the numbers differ, the Party screens agree
+  await sendRun(env, userToken, run("u-copy", { gameUid: "301000000003", score: 34324, stars: 34, playedAt: at, players: party("UserOne"), extra: { lineup: lineup("UserOne") } }));
+  await sendRun(env, devToken, run("d-copy", { gameUid: "301000000001", score: 34324, stars: 4, playedAt: at + 20, players: party("DevOne"), extra: { lineup: lineup("DevOne") } }));
+  const shared = (id) => (JSON.parse(sqlite.prepare("SELECT extra_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).extra_json) || {}).sharedRun;
+  assert.ok(shared("u-copy"));
+  assert.equal(shared("u-copy"), shared("d-copy"));
+  // each vouched for the other: DevOne's slot in UserOne's copy now carries DevOne's UID (and the other way round)
+  const slot = (id, name) => JSON.parse(sqlite.prepare("SELECT players_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).players_json).find((p) => p.name === name);
+  assert.equal(slot("u-copy", "DevOne").uid, "301000000001");
+  assert.equal(slot("d-copy", "UserOne").uid, "301000000003");
+  // DevOne's history: the run once (their own copy), captured by 2
+  const runs = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(runs.map((r) => [r.credited, r.captures]), [[false, 2]]);
+  // the app can't set the link itself, and the boards' API never shows it
+  await sendRun(env, devToken, run("forged", { gameUid: "301000000001", playedAt: at - 3000, extra: { sharedRun: shared("u-copy") } }));
+  assert.equal(shared("forged"), undefined);
+  assert.equal(JSON.stringify(await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).includes("sharedRun"), false);
+  // another party in the same minutes (a different player in slot 2) isn't the same run
+  await sendRun(env, userToken, run("u-other", { gameUid: "301000000003", score: 30000, stars: 30, playedAt: at + 40, players: party("UserOne"),
+    extra: { lineup: [{ slot: 1, name: "UserOne", ai: false, self: true }, { slot: 2, name: "Stranger", ai: false }] } }));
+  assert.equal(shared("u-other"), undefined);
+});
+
+test("a newer but lower run never replaces the best on the boards; it's added to the history", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  await sendRun(env, token, run("high", { score: 30000, stars: 30, playedAt: 1792700000 }));
+  await sendRun(env, token, run("low", { score: 12000, stars: 12, playedAt: 1792790000 }));
+  const board = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&cycle=3005")).json();
+  assert.deepEqual(board.entries.map((e) => e.score), [30000]);
+  const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(history.map((r) => r.score), [12000, 30000]);          // both, newest first
 });
