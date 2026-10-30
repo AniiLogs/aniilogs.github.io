@@ -2584,14 +2584,20 @@ function compareReading(row, result, battle) {
 // - the players' Avg DPS add up to about the team DPS, and to about the meter's DPS when it measured one (within 35%);
 // - no player's Avg DPS is above the whole team's, nor above 3x an even share in a full party (a BREAK-sized number
 //   in a DPS field shows up here);
-// - "cleared" only with the slot's full kill stars.
+// - "cleared" only with the slot's full kill stars;
+// - the star cap aLogs read from the game (extra.starCap) is the rules' for that boss (else the game changed).
+// The run's own cap, when sent, is the one the stars and the clear are judged by.
 const RUN_CHECK_TOLERANCE = 0.35;
 function freeRunChecks(row, cycle) {
   const flags = [];
   const slot = cycle ? cycle.bosses.findIndex((boss) => String(boss.id) === String(row.bossId)) : -1;
-  const rule = interlinkStarRule(row.cycle);
-  const cap = slot >= 0 ? rule.caps[slot] : Math.max(...rule.caps);
-  const clear = slot >= 0 ? rule.clear[slot] : Math.min(...rule.clear);
+  const sent = sentStarCap(row.extraJson);
+  const { cap, clear, ruleCap } = runStarRule(row.cycle, slot, sent);
+  // the game's cap for this boss isn't what the site's rules say: the game changed (INTERLINK_RULES needs updating)
+  if (sent != null && slot >= 0 && sent !== ruleCap) {
+    flags.push({ rule: "star cap matches the rules", sent, expected: ruleCap });
+    console.warn(`Interlink star cap: week ${row.cycle} boss ${row.bossId} sent ${sent}, the rules say ${ruleCap}`);
+  }
   if (row.score != null && row.stars != null) {
     const expected = Math.min(Math.floor(Number(row.score) / 1000), cap);
     if (Math.abs(Number(row.stars) - expected) > 1) flags.push({ rule: "stars track score", sent: row.stars, expected });
@@ -3360,7 +3366,10 @@ function withProfiles(players, profiles) {
 // result-screen runs or battle-prep bests for that week. Every past week stays viewable.
 
 // The weeks: built in, plus what developer accounts' desktop apps uploaded from the game data (newer patches).
-// Interlink rules that change with game updates, kept in one place so a patch only needs this edited:
+// Interlink rules that change with game updates, kept in one place so a patch only needs this edited. The star caps
+// come from the game's sys_config_data: BossRushMaxStarSideBoss (15 until the 4000 reset, 20 since) and
+// BossRushStarMultiplierMidBoss (2: the center is a side's x2). aLogs reads them with each patch and sends the run's
+// boss cap as extra.starCap; a run whose cap differs from these is flagged ("star cap matches the rules").
 // - slots: what the game calls the three boss positions, in the order a week lists its bosses (cycle.bosses).
 //   slotsConfirmed says whether that order has been checked in the game (the meter reads it: left, middle, right).
 // - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
@@ -3394,6 +3403,22 @@ function interlinkSeasonRule(cycleId) {
 function interlinkStarRule(cycleId) {
   const id = Number(cycleId) || 0;
   return INTERLINK_RULES.starCaps.filter((rule) => rule.fromCycle <= id).at(-1) || INTERLINK_RULES.starCaps[0];
+}
+
+// The cap aLogs sent with the run (extra.starCap), when it's a sane number; else null.
+function sentStarCap(extraJson) {
+  const cap = (parseJsonColumn(extraJson) || {}).starCap;
+  return Number.isInteger(cap) && cap >= 10 && cap <= 100 ? cap : null;
+}
+// A slot's cap and clear for a run: the rules', or the run's own cap when it sent one. A week where a kill is every
+// star (from 4000) takes the sent cap as the clear too; earlier weeks keep their fixed clear (15).
+function runStarRule(cycleId, slot, sentCap) {
+  const rule = interlinkStarRule(cycleId);
+  const ruleCap = slot >= 0 ? rule.caps[slot] : Math.max(...rule.caps);
+  const ruleClear = slot >= 0 ? rule.clear[slot] : Math.min(...rule.clear);
+  const everyStar = slot >= 0 ? ruleClear === ruleCap : rule.clear.every((value, index) => value === rule.caps[index]);
+  if (sentCap == null) return { cap: ruleCap, clear: ruleClear, ruleCap };
+  return { cap: sentCap, clear: everyStar ? sentCap : ruleClear, ruleCap };
 }
 
 function interlinkStarCaps(cycleId) {
@@ -3554,9 +3579,17 @@ function clearedSql(kind, list = []) {
       }
     });
   }
+  // weeks where a kill is every star: a run that sent the game's cap is judged by it
+  const sentCap = "json_extract(s.extra_json, '$.starCap')";
+  const bySent = INTERLINK_RULES.starCaps.map((rule, index) => {
+    if (!rule.clear.every((value, slot) => value === rule.caps[slot])) return null;
+    const next = INTERLINK_RULES.starCaps[index + 1]?.fromCycle;
+    return `WHEN CAST(s.cycle AS INTEGER) >= ${rule.fromCycle}${next != null ? ` AND CAST(s.cycle AS INTEGER) < ${next}` : ""}
+      AND typeof(${sentCap}) = 'integer' AND ${sentCap} BETWEEN 10 AND 100 THEN ${sentCap}`;
+  }).filter(Boolean);
   const byWeek = [...INTERLINK_RULES.starCaps].reverse()
     .map((rule) => `WHEN CAST(s.cycle AS INTEGER) >= ${rule.fromCycle} THEN ${Math.min(...rule.clear)}`);
-  return `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE ${[...bySlot, ...byWeek].join(" ")} ELSE ${Math.min(...INTERLINK_RULES.starCaps[0].clear)} END)`;
+  return `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE ${[...bySent, ...bySlot, ...byWeek].join(" ")} ELSE ${Math.min(...INTERLINK_RULES.starCaps[0].clear)} END)`;
 }
 
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
@@ -3567,7 +3600,7 @@ async function interlinkBests(env, cycles, list, server = null) {
        MAX(s.score) AS score, MAX(s.stars) AS stars,
        MIN(CASE WHEN ${clearedSql("interlink_run", list)} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
        MAX(s.p_dps) AS avgDps, MAX(s.p_break) AS breakValue, MAX(s.p_taken) AS damageTaken, MAX(s.p_heal) AS heal,
-       MAX(s.team_dps) AS teamDps,
+       MAX(s.team_dps) AS teamDps, MIN(json_extract(s.extra_json, '$.starCap')) AS sentCap,
        CASE WHEN s.who LIKE 'name:%' THEN MAX(s.teammate) ELSE
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
@@ -3596,8 +3629,9 @@ async function interlinkBests(env, cycles, list, server = null) {
     // the SQL keeps runs with at least the old 15 stars; that week's rules may ask more for that boss slot
     const cycle = interlinkCycle(list, row.cycle);
     const slot = cycle ? cycle.bosses.findIndex((boss) => boss.id === String(row.bossId)) : -1;
-    const clear = slot >= 0 ? interlinkStarRule(row.cycle).clear[slot] : null;
+    const clear = slot >= 0 ? runStarRule(row.cycle, slot, Number.isInteger(row.sentCap) && row.sentCap >= 10 && row.sentCap <= 100 ? row.sentCap : null).clear : null;
     if (clear && (Number(row.stars) || 0) < clear) row.clearTimeS = null;
+    delete row.sentCap;
     return row;
   });
 }

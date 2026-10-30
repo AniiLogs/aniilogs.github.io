@@ -1076,7 +1076,7 @@ test("developer apps can add Interlink weeks from the game data; others can't", 
 });
 
 test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight's second boss counts as the middle", async () => {
-  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const dev = await desktopToken(env, SESSIONS.dev);
   const bosses = [{ id: "80000110", name: "Omega Left" }, { id: "80000111", name: "Omega Middle" }, { id: "80000112", name: "Omega Right" }];
   const cycles = [
@@ -1113,6 +1113,21 @@ test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight
   // only the middle: another week's second boss is still refused
   assert.equal((await send(SESSIONS.dev, run("m4000", { cycle: "4000", boss: boss("80000119") }))).status, 400);
   assert.equal((await send(SESSIONS.dev, run("m4003b", { cycle: "4003", boss: boss("80000121") }))).status, 400);
+  // the game's own cap, read by aLogs (extra.starCap): if a patch raised a side boss to 25, a kill is 25 stars, and the
+  // run is flagged so the rules get updated
+  assert.equal((await send(SESSIONS.dev, run("cap1", { cycle: "4005", boss: boss("80000110"), stars: 22, score: 23000, clearTimeS: 100, cleared: true, extra: { starCap: 25 } }))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("cap2", { cycle: "4005", boss: boss("80000110"), stars: 25, score: 26000, clearTimeS: 140, cleared: true, extra: { starCap: 25 } }))).status, 201);
+  const raised = await (await call(env, "/api/leaderboard/interlink?cycle=4005")).json();
+  assert.deepEqual(raised.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[25, 140], [22, null]]);
+  const checked = (id) => JSON.parse(sqlite.prepare("SELECT verify_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).verify_json).rules.flags;
+  assert.deepEqual(checked("cap2").map((flag) => [flag.rule, flag.sent, flag.expected]), [["star cap matches the rules", 25, 20]]);
+  assert.ok(checked("cap1").some((flag) => flag.rule === "cleared needs full stars" && flag.expected === 25));
+  // a cap that agrees with the rules, or none, or a silly one: judged by the rules, nothing about the cap
+  assert.equal((await send(SESSIONS.dev, run("cap3", { cycle: "4005", boss: boss("80000112"), stars: 20, score: 21000, clearTimeS: 90, cleared: true, extra: { starCap: 20 } }))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("cap4", { cycle: "4005", boss: boss("80000112"), stars: 20, score: 21000, clearTimeS: 95, cleared: true, extra: { starCap: 5000 } }))).status, 201);
+  assert.deepEqual([...checked("cap3"), ...checked("cap4")], []);
+  const right = (await (await call(env, "/api/leaderboard/interlink?cycle=4005")).json()).bosses[2];
+  assert.deepEqual(right.entries.map((e) => [e.stars, e.clearTimeS]), [[20, 90], [20, 95]]);
 });
 
 test("the desktop app signs in through the player's own browser: one-time code + PKCE secret, never the website's exchange", async () => {
