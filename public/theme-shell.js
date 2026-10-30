@@ -18,16 +18,6 @@
   }
   if (embedded) {
     document.documentElement.dataset.embed = "app";
-    // The bar's layout in the app: "slim" (a thin row: game build and data date on the left, controls on the right) or
-    // "corner" (no row: the controls float in the top-right corner). ?embedbar= picks one for the visit while comparing.
-    let embedBar = pageParams.get("embedbar");
-    try {
-      if (embedBar) window.sessionStorage.setItem("aniilogs:embed-bar", embedBar);
-      else embedBar = window.sessionStorage.getItem("aniilogs:embed-bar");
-    } catch {
-      // no session storage: the default
-    }
-    document.documentElement.dataset.embedBar = embedBar === "corner" ? "corner" : "slim";
     // "Open in browser": the page as it is now, without the app's own parameters (the app opens target="_blank"
     // links in the system browser).
     document.addEventListener("DOMContentLoaded", () => {
@@ -51,15 +41,6 @@
       link.addEventListener("pointerdown", update);
       link.addEventListener("focus", update);
       actions.prepend(link);
-      // the slim row's left side: which game build the site's data is from, and when that data was published
-      const config = window.ANIILOGS_CONFIG || {};
-      const stamp = String(config.contentRevision || "").match(/^(\d{4})(\d{2})(\d{2})/u);
-      const info = document.createElement("span");
-      info.className = "embed-bar-info";
-      info.textContent = [config.gameBuild ? `Game build ${config.gameBuild}` : "",
-        stamp ? `data ${new Date(Date.UTC(+stamp[1], +stamp[2] - 1, +stamp[3])).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}` : ""]
-        .filter(Boolean).join(" · ");
-      if (info.textContent) actions.parentElement.prepend(info);
     });
   }
 
