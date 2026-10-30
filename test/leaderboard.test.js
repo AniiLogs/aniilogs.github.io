@@ -1502,3 +1502,24 @@ test("pictures: a run that's nobody's best keeps full screens 14 days and crops 
   assert.deepEqual([listed.hasEvidence, listed.hasFullScreens, Boolean(listed.proofPrunedAt)], [false, [], true]);
   for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
 });
+
+test("aLogs' Party-screen lineup shows each slot's lead Aniimo; CP stays server-side", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const lineup = [
+    { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 },
+    { slot: 2, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
+    { slot: 3, name: "Friend", ai: false, aniimo: "Celestis", aniimoLevel: 58, cp: 9999 },
+  ];
+  await sendRun(env, token, run("lineup", { extra: { lineup, newBests: [], title: "Pathfinder" } }));
+  const [listed] = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(listed.lineup, [
+    { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60 },
+    { slot: 2, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
+    { slot: 3, name: "Friend", ai: false, aniimo: "Celestis", aniimoLevel: 58 },
+  ]);
+  assert.deepEqual(listed.newBests, []);                                   // no "New best" for a run that beat nothing
+  const entries = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json();
+  assert.equal(JSON.stringify(entries).includes("12345"), false);         // not on the public boards' API either
+  assert.equal(JSON.stringify(listed).includes("cp"), false);
+});

@@ -1021,17 +1021,21 @@ function historyChips(run) {
   if (run.hidden) chip("is-hidden", "Hidden", "Hidden from the boards: only you see it here.");
   return chips;
 }
-// a slot's lead Aniimo from extra.lineup ([{ slot, lead: { name, level } }] or the same by position)
-function lineupLead(run, index) {
+// a player's lead Aniimo from extra.lineup (aLogs' Party screen: [{ slot, name, ai, self, aniimo, aniimoLevel }], or
+// { lead: { name, level } }): the entry with the player's name, else the same slot
+function lineupLead(run, player, index) {
   const lineup = Array.isArray(run.lineup) ? run.lineup : [];
-  const entry = lineup.find((item) => Number(item?.slot) === index + 1) || lineup[index];
+  const named = player?.name && lineup.find((item) => String(item?.name || "").toLowerCase() === String(player.name).toLowerCase());
+  const entry = named || lineup.find((item) => Number(item?.slot) === index + 1) || lineup[index];
   const lead = entry?.lead ?? entry?.aniimo ?? null;
   const name = typeof lead === "string" ? lead : lead?.name || "";
-  const level = (typeof lead === "object" && lead?.level) ?? entry?.level;
+  const level = (typeof lead === "object" && lead ? lead.level : null) ?? entry?.aniimoLevel ?? entry?.level;
   return name ? `${name}${Number.isInteger(level) ? ` Lv ${level}` : ""}` : "";
 }
 function historyParty(run) {
-  const players = (run.players || []).filter((player) => player && (player.name || player.avgDps != null));
+  let players = (run.players || []).filter((player) => player && (player.name || player.avgDps != null));
+  // no Battle Data read: the party from the Party screen (names only)
+  if (!players.length && Array.isArray(run.lineup)) players = run.lineup.filter((item) => item?.name).map(({ name, ai, self }) => ({ name, ai, self }));
   if (!players.length) return element("p", "history-empty", "No party read for this run.");
   const table = element("table", "history-party");
   const head = element("tr");
@@ -1050,7 +1054,7 @@ function historyParty(run) {
     if (player.ai) who.append(element("span", "history-chip is-ai", "AI"));
     if (player.self && run.credited) who.append(element("span", "history-chip is-self", "captured it"));   // the teammate whose app sent it
     const number = (value) => element("td", "history-number", value == null ? "–" : numberFormat.format(value));
-    row.append(element("td", "history-slot", `${index + 1}P`), who, element("td", "", lineupLead(run, index) || "–"),
+    row.append(element("td", "history-slot", `${index + 1}P`), who, element("td", "", lineupLead(run, player, index) || "–"),
       number(player.avgDps), number(player.breakValue), number(player.damageTaken), number(player.heal));
     body.append(row);
   });

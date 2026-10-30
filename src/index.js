@@ -1664,6 +1664,17 @@ async function profilesDirectory(env) {
 // boards stay best-per-player; this is the whole record. It follows the profile: the owner's own, or a public
 // profile's for anyone. Names as on screen, a profile link only for public profiles, never a UID.
 const HISTORY_PAGE = 20;
+// aLogs' Party-screen lineup (extra.lineup) as the site shows it: slot, name, AI, the lead Aniimo and its level.
+// Nothing else - CP stays server-side until the owner decides to show it.
+function publicLineup(lineup) {
+  if (!Array.isArray(lineup)) return null;
+  const text = (value) => (typeof value === "string" ? value.slice(0, 40) : undefined);
+  const level = (value) => (Number.isInteger(value) && value >= 1 && value <= 999 ? value : undefined);
+  return lineup.slice(0, 4).filter((item) => item && typeof item === "object").map((item) => JSON.parse(JSON.stringify({
+    slot: level(item.slot), name: text(item.name), ai: typeof item.ai === "boolean" ? item.ai : undefined, self: item.self === true || undefined,
+    aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
+  })));
+}
 const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle, c.boss_id, c.boss_name, c.boss_level, c.score, c.stars,
   c.clear_time_s, c.cleared, c.floors, c.team_dps, c.party_size, c.difficulty, c.trial, c.rank_tier, c.rank_subtier, c.rank_name,
   c.players_json, c.extra_json, c.evidence_key, c.battle_evidence_key, c.proof_pruned_at, c.verify_state, c.status, c.played_at,
@@ -1741,7 +1752,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles) || [],
-        lineup: Array.isArray(extra.lineup) ? extra.lineup.slice(0, 4) : null,
+        lineup: publicLineup(extra.lineup),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
         hasEvidence: Boolean(row.evidence_key),
         hasBattleEvidence: Boolean(row.battle_evidence_key),
@@ -4081,7 +4092,8 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, ...extra }) => ({ ...extra, ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
+      extra: (({ instanceId: _instance, proofFull, lineup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+        ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
       hasBattleEvidence: Boolean(row.battle_evidence_key),
       check: runCheckBadge(row.verify_state),
