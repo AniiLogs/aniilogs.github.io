@@ -267,6 +267,47 @@ test("Holo-Battle Sim boards: the game's 12 stages, each difficulty ranking Vict
   assert.equal((await (await call(env, "/api/leaderboard/facets?mode=interlink")).json()).simRules, undefined);
 });
 
+test("aLogs B2 sends the cropped proof and the whole screens: all four stored, served, and deleted with the run", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const jpeg = (bytes, mark) => { const data = new Uint8Array(bytes); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const form = new FormData();
+  // the app can't name the stored screens itself: its extra.proofFull is replaced
+  form.set("submission", JSON.stringify(run("b2-run", { extra: { proofBoxes: { evidence: [0.13, 0.06, 0.88, 0.67] }, proofFull: { evidence: "evidence/someone-else.jpg" } } })));
+  // a 4K crop and the screens it came from: ~3.6 MB together, more than the old two-picture limit
+  form.set("evidence", jpeg(900 * 1024, 1), "result.jpg");
+  form.set("evidence_full", jpeg(900 * 1024, 2), "result-full.jpg");
+  form.set("battle", jpeg(900 * 1024, 3), "battle.jpg");
+  form.set("battle_full", jpeg(900 * 1024, 4), "battle-full.jpg");
+  const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  assert.equal(EVIDENCE.objects.size, 4);
+  const shot = async (name) => new Uint8Array(await (await call(env, `/api/leaderboard/submissions/${submissionId}/evidence${name ? `?shot=${name}` : ""}`)).arrayBuffer())[3];
+  assert.deepEqual([await shot(""), await shot("full"), await shot("battle"), await shot("battle_full")], [1, 2, 3, 4]);   // the crop is the proof
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries[0];
+  assert.deepEqual(entry.extra.proofBoxes, { evidence: [0.13, 0.06, 0.88, 0.67] });
+  assert.deepEqual(entry.extra.hasFullScreens, ["evidence", "battle"]);
+  assert.equal(entry.extra.proofFull, undefined);                                     // storage keys stay private
+  // re-sent without the whole screens (an older app): the stored ones stay
+  const again = new FormData();
+  again.set("submission", JSON.stringify(run("b2-run")));
+  again.set("evidence", jpeg(1024, 1), "result.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: again })).status, 200);   // updated
+  assert.equal(await shot("full"), 2);
+  // an older app: the crop alone, as before
+  const old = new FormData();
+  old.set("submission", JSON.stringify(run("old-run", { cycle: "3005", boss: { id: "80000109", name: "Omega Sherro", level: 60 } })));
+  old.set("evidence", jpeg(1024, 9), "result.jpg");
+  const oldSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: old });
+  assert.equal(oldSent.status, 201);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${(await oldSent.json()).submissionId}/evidence?shot=full`)).status, 404);
+  // deleting the run removes every picture of it
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 200);
+  assert.equal(EVIDENCE.objects.size, 1);                                             // only the older run's crop is left
+});
+
 test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });

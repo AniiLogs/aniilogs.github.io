@@ -1827,11 +1827,11 @@ async function deleteOwnAccount(request, env) {
   const discordId = account.discordId;
   if (env.EVIDENCE) {
     const { results } = await env.DB.prepare(
-      `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions
+      `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions
        WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL)`,
     ).bind(discordId).all();
     for (const row of results || []) {
-      for (const key of [row.evidenceKey, row.battleKey]) if (key) await env.EVIDENCE.delete(key);
+      for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
     }
     const photos = await env.DB.prepare("SELECT photo_key AS photoKey FROM profile_photos WHERE discord_id = ?").bind(discordId).all();
     for (const row of photos.results || []) {
@@ -1877,9 +1877,11 @@ const INTERLINK_CYCLES = Object.freeze([
 
 const LEADERBOARD_TOKEN_PREFIX = "alb_";
 const MAX_SUBMISSION_BYTES = 64 * 1024;
-// A run's proof: the app sends a 1280x720 JPEG (real screens ~60-180 KB). The largest a 1280x720 JPEG can be, even at
-// quality 100 and pure noise, is ~1.3 MB: anything over this limit isn't a 720p proof and is refused.
+// A run's proof: the app sends JPEGs - the cropped result screen ("evidence", from aLogs B2 at native size, ~0.3-0.6 MB
+// at 4K), the whole screen ("evidence_full", at most 1920 wide, ~0.2-0.4 MB) and the same pair for Battle Data
+// ("battle", "battle_full"). Each image is capped here; anything larger isn't a screenshot from the app.
 const MAX_EVIDENCE_BYTES = 1536 * 1024;
+const EVIDENCE_PARTS = 4;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -2211,7 +2213,7 @@ async function readSubmissionRequest(request) {
     return { body: await readJsonBody(request, MAX_SUBMISSION_BYTES), evidence: null };
   }
   const declared = Number(request.headers.get("content-length") || 0);
-  if (declared > MAX_SUBMISSION_BYTES + 2 * MAX_EVIDENCE_BYTES + 8192) throw new RangeError("Request body is too large.");
+  if (declared > MAX_SUBMISSION_BYTES + EVIDENCE_PARTS * MAX_EVIDENCE_BYTES + 16384) throw new RangeError("Request body is too large.");
   const form = await request.formData();
   const text = String(form.get("submission") || "");
   if (encoder.encode(text).byteLength > MAX_SUBMISSION_BYTES) throw new RangeError("Submission is too large.");
@@ -2230,7 +2232,9 @@ async function readSubmissionRequest(request) {
     return file;
   };
   const evidence = picture("evidence");
-  return { body, evidence, battle: evidence ? picture("battle") : null };
+  const battle = evidence ? picture("battle") : null;
+  // the whole screens the crops came from (aLogs B2 on): kept for a second reading and for review
+  return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null };
 }
 
 // Two app users in one Interlink run both send it: same week, boss, score, stars and time, played and sent within five
@@ -2321,12 +2325,27 @@ async function submitLeaderboardRecord(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions
+    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
   const submissionId = existing?.submissionId || randomToken(12);
   let evidenceKey = existing?.evidenceKey || null;
   let battleKey = existing?.battleKey || null;
+  // the whole screens: stored beside the crops, and named in the run's server-only extra.proofFull (the app can't
+  // set it: anything it sends there is replaced)
+  const proofFull = { ...((parseJsonColumn(existing?.extraJson) || {}).proofFull || {}) };   // kept when a re-send has none
+  for (const [name, part, suffix] of [["evidence", parsed.evidenceFull, "full"], ["battle", parsed.battleFull, "battle-full"]]) {
+    if (!part || !env.EVIDENCE) continue;
+    const key = `evidence/${account.discordId}/${submissionId}-${suffix}.${EVIDENCE_TYPES[part.type]}`;
+    await env.EVIDENCE.put(key, part.stream(), { httpMetadata: { contentType: part.type } });
+    proofFull[name] = key;
+  }
+  if (record.extraJson || Object.keys(proofFull).length) {
+    const extra = parseJsonColumn(record.extraJson) || {};
+    delete extra.proofFull;
+    if (Object.keys(proofFull).length) extra.proofFull = proofFull;
+    record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
+  }
   if (parsed.battle && env.EVIDENCE) {
     battleKey = `evidence/${account.discordId}/${submissionId}-battle.${EVIDENCE_TYPES[parsed.battle.type]}`;
     await env.EVIDENCE.put(battleKey, parsed.battle.stream(), { httpMetadata: { contentType: parsed.battle.type } });
@@ -3428,7 +3447,7 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, ...extra }) => extra)(parseJsonColumn(row.extra_json) || {}),
+      extra: (({ instanceId: _instance, proofFull, ...extra }) => ({ ...extra, ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
       hasBattleEvidence: Boolean(row.battle_evidence_key),
       status: row.status,
@@ -3507,19 +3526,25 @@ async function moderateSubmission(request, env, submissionId) {
   return json({ ok: true, submissionId, status: body.status });
 }
 
+// Every stored picture of a run: the crops and the whole screens.
+function proofKeys(row) {
+  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
+  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle].filter(Boolean);
+}
+
 async function deleteSubmission(request, env, submissionId) {
   const account = await leaderboardAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
   if (!row) return json({ error: "Submission not found." }, 404);
   if (row.discordId !== account.discordId && !account.developerModeAvailable) {
     return json({ error: "You can only delete your own submissions." }, 403);
   }
   await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
-  for (const key of [row.evidenceKey, row.battleKey]) if (key && env.EVIDENCE) await env.EVIDENCE.delete(key);
+  for (const key of proofKeys(row)) if (env.EVIDENCE) await env.EVIDENCE.delete(key);
   return json({ ok: true });
 }
 
@@ -3528,9 +3553,11 @@ async function deleteSubmission(request, env, submissionId) {
 // name); a hidden entry's only its submitter and developers.
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, status FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
-  const key = new URL(request.url).searchParams.get("shot") === "battle" ? row?.battleKey : row?.evidenceKey;
+  const shot = new URL(request.url).searchParams.get("shot");
+  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
+  const key = shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
