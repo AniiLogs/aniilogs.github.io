@@ -2383,6 +2383,12 @@ async function submitLeaderboardRecord(request, env) {
     record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats, record.trial,
   ).run();
   await corroborateRun(env, submissionId);
+  // the second reading of the whole screens (shadow mode), after the response when the platform allows
+  if (env.AI && parsed.evidenceFull) {
+    const reading = secondReadRun(env, submissionId).catch((error) => console.error("Second reading failed", error));
+    if (env.waitUntil) env.waitUntil(reading);
+    else await reading;
+  }
   return json({
     ok: true,
     submissionId,
@@ -2390,6 +2396,158 @@ async function submitLeaderboardRecord(request, env) {
     evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
     battleEvidenceStored: Boolean(parsed.battle && env.EVIDENCE),
   }, existing ? 200 : 201);
+}
+
+
+// ---------------------------------------------------------------- second reading (shadow mode)
+// aLogs reads a run off the screen; the server reads the same whole screens again with Workers AI (env.AI) and
+// compares: score, stars and time from the result screen, each Battle Data card's Avg DPS, BREAK, Damage Taken and
+// Healing. Shadow mode: the outcome (verify_state, migration 0032) is recorded for an administrator to review and
+// never holds a run off the boards. Without the AI binding, or the migration, nothing is read and runs are unaffected.
+const VERIFY_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
+const VERIFY_PROMPTS = Object.freeze({
+  result: "This is the end-of-run result screen of the game Aniimo (Holo-Battle Interlink). Read the run's total score, "
+    + "the number of stars earned, and the battle time. Reply with only JSON, no other text: "
+    + '{"score": <integer>, "stars": <integer>, "time": "<m:ss>"}. Use null for anything you cannot read clearly.',
+  battle: "This is the Battle Data screen of the game Aniimo: up to four player cards side by side. For each card, left to "
+    + "right, read the player's name and the numbers labelled Average DPS, BREAK, Damage Taken and Healing. Reply with only "
+    + 'JSON, no other text: {"cards": [{"name": "<text>", "avgDps": <integer>, "break": <integer>, "taken": <integer>, '
+    + '"heal": <integer>}]}. Use null for anything you cannot read clearly.',
+});
+
+function firstJson(text) {
+  const start = String(text || "").indexOf("{");
+  const end = String(text || "").lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(String(text).slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+const readNumber = (value) => {
+  const number = Number(String(value ?? "").replace(/[^\d.]/gu, ""));
+  return value === null || value === undefined || value === "" || !Number.isFinite(number) ? null : Math.round(number);
+};
+const readSeconds = (value) => {
+  const match = String(value ?? "").match(/(\d+):(\d{1,2})(?::(\d{1,2}))?/u);
+  if (!match) return null;
+  return match[3] !== undefined ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : Number(match[1]) * 60 + Number(match[2]);
+};
+
+async function readScreen(env, key, prompt) {
+  const object = await env.EVIDENCE.get(key);
+  if (!object) return null;
+  const bytes = new Uint8Array(await new Response(object.body).arrayBuffer());
+  const out = await env.AI.run(VERIFY_MODEL, { prompt, image: [...bytes], max_tokens: 400 });
+  return firstJson(out?.response ?? out?.result?.response ?? out);
+}
+
+// What the second reading found against what the app sent: { checked, differences: [{ field, sent, read }] }.
+// A value the reading couldn't make out isn't a difference; Battle Data cards are matched by name, else by order.
+function compareReading(row, result, battle) {
+  const differences = [];
+  let checked = 0;
+  const same = (field, sent, read, tolerance = 0) => {
+    if (read === null || read === undefined || sent === null || sent === undefined) return;
+    checked += 1;
+    if (Math.abs(Number(sent) - Number(read)) > tolerance) differences.push({ field, sent, read });
+  };
+  if (result) {
+    same("score", row.score, readNumber(result.score));
+    same("stars", row.stars, readNumber(result.stars));
+    if (row.cleared === 1) same("time", row.clearTimeS, readSeconds(result.time), 1);
+  }
+  const players = parseJsonColumn(row.playersJson) || [];
+  const cards = Array.isArray(battle?.cards) ? battle.cards : [];
+  const key = (name) => String(name || "").toLocaleLowerCase().replace(/\s+/gu, "");
+  players.forEach((player, index) => {
+    const card = cards.find((item) => key(item?.name) && key(item.name) === key(player.name)) || cards[index];
+    if (!card) return;
+    const label = player.name || `card ${index + 1}`;
+    same(`${label} Avg DPS`, player.avgDps, readNumber(card.avgDps));
+    same(`${label} BREAK`, player.breakValue, readNumber(card.break));
+    same(`${label} Damage Taken`, player.damageTaken, readNumber(card.taken));
+    same(`${label} Healing`, player.heal, readNumber(card.heal));
+  });
+  return { checked, differences };
+}
+
+async function secondReadRun(env, submissionId) {
+  if (!env.AI || !env.EVIDENCE) return;
+  const row = await env.DB.prepare(
+    `SELECT kind, score, stars, cleared, clear_time_s AS clearTimeS, players_json AS playersJson, extra_json AS extraJson
+     FROM leaderboard_submissions WHERE submission_id = ?`,
+  ).bind(submissionId).first();
+  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
+  if (!row || row.kind !== "interlink_run" || !full.evidence) return;
+  const save = (state, detail) => env.DB.prepare(
+    "UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ?, verify_at = ? WHERE submission_id = ?",
+  ).bind(state, JSON.stringify(detail), Math.floor(Date.now() / 1000), submissionId).run();
+  try {
+    await save("pending", { model: VERIFY_MODEL });
+  } catch (error) {
+    console.error("Second reading needs migration 0032", error);
+    return;
+  }
+  try {
+    const result = await readScreen(env, full.evidence, VERIFY_PROMPTS.result);
+    const battle = full.battle ? await readScreen(env, full.battle, VERIFY_PROMPTS.battle) : null;
+    const { checked, differences } = compareReading(row, result, battle);
+    await save(!checked ? "unreadable" : differences.length ? "mismatch" : "match",
+      { model: VERIFY_MODEL, reading: { result, battle }, checked, differences });
+  } catch (error) {
+    console.error("Second reading failed", error);
+    await save("unreadable", { model: VERIFY_MODEL, error: String(error?.message || error).slice(0, 300) });
+  }
+}
+
+// The review list (administrators and the owner, like log reports): runs whose second reading disagreed (?state=,
+// default mismatch), newest first, with what was sent, what was read and the differences. POST
+// /api/admin/run-checks/<id> {decision: "confirmed" | "rejected"} records the review (shadow mode: the run's place on
+// the boards doesn't change).
+const VERIFY_STATES = Object.freeze(["pending", "match", "mismatch", "unreadable", "confirmed", "rejected"]);
+async function listRunChecks(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  const state = new URL(request.url).searchParams.get("state") || "mismatch";
+  if (!VERIFY_STATES.includes(state)) return json({ error: "Unknown state." }, 400);
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS submissionId, kind, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS,
+       players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, verify_at AS checkedAt, created_at AS sentAt,
+       (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
+        ORDER BY gc.last_seen_at DESC LIMIT 1) AS player
+     FROM leaderboard_submissions s WHERE verify_state = ? ORDER BY verify_at DESC LIMIT 100`,
+  ).bind(state).all();
+  return json({
+    state,
+    runs: (results || []).map(({ playersJson, verifyJson, ...row }) => ({
+      ...row, players: parseJsonColumn(playersJson) || [], check: parseJsonColumn(verifyJson) || {},
+      proof: { crop: `/api/leaderboard/submissions/${row.submissionId}/evidence`, full: `/api/leaderboard/submissions/${row.submissionId}/evidence?shot=full`,
+        battleFull: `/api/leaderboard/submissions/${row.submissionId}/evidence?shot=battle_full` },
+    })),
+  });
+}
+
+async function reviewRunCheck(request, env, submissionId) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try {
+    body = await readJsonBody(request, 512);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  if (!["confirmed", "rejected"].includes(body.decision)) return json({ error: "decision must be confirmed or rejected." }, 400);
+  const row = await env.DB.prepare("SELECT verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ? AND verify_state IS NOT NULL")
+    .bind(submissionId).first();
+  if (!row) return json({ error: "No second reading for this run." }, 404);
+  const check = { ...(parseJsonColumn(row.verifyJson) || {}), review: { by: account.discordId, decision: body.decision, at: Math.floor(Date.now() / 1000) } };
+  await env.DB.prepare("UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ? WHERE submission_id = ?")
+    .bind(body.decision, JSON.stringify(check), submissionId).run();
+  return json({ ok: true, submissionId, state: body.decision });
 }
 
 // ---------------------------------------------------------------- linked game characters
@@ -4233,6 +4391,9 @@ async function api(request, env) {
   const betaRetireMatch = url.pathname.match(/^\/api\/beta\/tests\/([A-Za-z0-9][A-Za-z0-9._-]{0,63})\/retire$/u);
   if (betaRetireMatch && request.method === "POST") return retireBetaTest(request, env, betaRetireMatch[1]);
   if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
+  if (url.pathname === "/api/admin/run-checks" && request.method === "GET") return listRunChecks(request, env);
+  const runCheckMatch = url.pathname.match(/^\/api\/admin\/run-checks\/([A-Za-z0-9_-]{8,40})$/u);
+  if (runCheckMatch && request.method === "POST") return reviewRunCheck(request, env, runCheckMatch[1]);
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);
   const logReportNotesMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})\/notes$/u);
   if (logReportNotesMatch && request.method === "POST") return addLogReportNote(request, env, logReportNotesMatch[1]);
@@ -4256,8 +4417,9 @@ async function handleRequest(request, env) {
 }
 
 export default {
-  fetch(request, env) {
-    return handleRequest(request, env).catch((error) => {
+  fetch(request, env, ctx) {
+    const scoped = ctx?.waitUntil ? Object.assign(Object.create(env), { waitUntil: (promise) => ctx.waitUntil(promise) }) : env;
+    return handleRequest(request, scoped).catch((error) => {
       console.error("AniiLogs request failed", error);
       return json({ error: "Service temporarily unavailable" }, 503);
     });

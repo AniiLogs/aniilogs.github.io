@@ -308,6 +308,53 @@ test("aLogs B2 sends the cropped proof and the whole screens: all four stored, s
   assert.equal(EVIDENCE.objects.size, 1);                                             // only the older run's crop is left
 });
 
+test("second reading (shadow mode): Workers AI re-reads the whole screens; a mismatch is listed for review, never held", async () => {
+  const EVIDENCE = evidenceStore();
+  // a stand-in for Workers AI: the result screen reads score 20000 / 20 stars / 3:00, the Battle Data card MinMax 25913
+  const AI = {
+    calls: 0,
+    async run(model, input) {
+      this.calls += 1;
+      assert.equal(model, "@cf/meta/llama-3.2-11b-vision-instruct");
+      assert.ok(Array.isArray(input.image) && input.image.length > 0);
+      return { response: input.prompt.includes("Battle Data")
+        ? 'Here you go: {"cards": [{"name": "MinMax", "avgDps": "25,913", "break": null, "taken": null, "heal": null}]}'
+        : '{"score": 20000, "stars": 20, "time": "3:00"}' };
+    },
+  };
+  const { env } = await setup({ EVIDENCE, AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const send = (id, overrides) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(id, overrides)));
+    for (const part of ["evidence", "evidence_full", "battle", "battle_full"]) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  assert.equal((await send("same")).status, 201);                                  // the run() defaults: 20000, 20 stars
+  assert.equal((await send("differs", { score: 23456, cycle: "3003", boss: { id: "80000099", name: "Alpha Irisal", level: 60 } })).status, 201);
+  assert.equal(AI.calls, 4);                                                       // two screens per run
+  const list = async (state, session = SESSIONS.dev) => call(env, `/api/admin/run-checks?state=${state}`, { session });
+  assert.equal((await list("mismatch", SESSIONS.user)).status, 403);               // administrators and the owner only
+  const mismatches = (await (await list("mismatch")).json()).runs;
+  assert.deepEqual(mismatches.map((r) => [r.score, r.check.differences]), [[23456, [{ field: "score", sent: 23456, read: 20000 }]]]);
+  assert.match(mismatches[0].proof.full, /\?shot=full$/u);
+  assert.equal((await (await list("match")).json()).runs.length, 1);
+  // shadow mode: the mismatching run still stands on the boards
+  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).total, 2);
+  // an administrator's review is recorded
+  const reviewed = await call(env, `/api/admin/run-checks/${mismatches[0].submissionId}`, { session: SESSIONS.dev, method: "POST", body: { decision: "confirmed" } });
+  assert.equal(reviewed.status, 200);
+  const confirmed = (await (await list("confirmed")).json()).runs;
+  assert.equal(confirmed[0].check.review.decision, "confirmed");
+  // without the AI binding nothing is read
+  const { env: plain } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const form = new FormData();
+  form.set("submission", JSON.stringify(run("no-ai")));
+  form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "e.jpg");
+  form.set("evidence_full", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "f.jpg");
+  assert.equal((await call(plain, "/api/leaderboard/submissions", { token: await namedToken(plain, SESSIONS.user), method: "POST", form })).status, 201);
+});
+
 test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
