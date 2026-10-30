@@ -1109,16 +1109,17 @@ test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight
   assert.equal((await upload({ cycles })).status, 200);
   const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
   const boss = (id) => ({ id, name: "Misread", level: 60 });
-  // week 4000: 15 stars and under the clock is no longer a clear; 20 is
+  // week 4000: 15 stars and under the clock is no longer a clear - it was quit before it could count (invalid: on no
+  // board, only in the player's history); 20 is
   assert.equal((await send(SESSIONS.dev, run("c1", { cycle: "4000", boss: boss("80000110"), stars: 15, score: 15000, clearTimeS: 120, cleared: true }))).status, 201);
   assert.equal((await send(SESSIONS.user, run("c2", { cycle: "4000", boss: boss("80000110"), stars: 20, score: 21000, clearTimeS: 150, cleared: true }))).status, 201);
   const week = await (await call(env, "/api/leaderboard/interlink?cycle=4000")).json();
-  assert.deepEqual(week.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[20, 150], [15, null]]);
-  // the center boss is a kill only at its full 40 stars: 26 stars under the clock is a run ended early, not a clear
+  assert.deepEqual(week.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[20, 150]]);
+  // the center boss is a kill only at its full 40 stars: 26 stars under the clock was quit (invalid)
   assert.equal((await send(SESSIONS.dev, run("k1", { cycle: "4000", boss: boss("80000111"), stars: 26, score: 26000, clearTimeS: 95, cleared: true }))).status, 201);
   assert.equal((await send(SESSIONS.user, run("k2", { cycle: "4000", boss: boss("80000111"), stars: 40, score: 44000, clearTimeS: 170, cleared: true }))).status, 201);
   const center = (await (await call(env, "/api/leaderboard/interlink?cycle=4000")).json());
-  assert.deepEqual(center.bosses[1].entries.map((e) => [e.stars, e.clearTimeS]), [[40, 170], [26, null]]);
+  assert.deepEqual(center.bosses[1].entries.map((e) => [e.stars, e.clearTimeS]), [[40, 170]]);
   assert.deepEqual(center.rules.clearStars, [20, 40, 20]);
   // the same line for the "fastest clear" sort over every run
   const fastest = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&sort=clear_time_s&cycle=4000&boss=80000111&best=0")).json()).entries;
@@ -1137,7 +1138,7 @@ test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight
   assert.equal((await send(SESSIONS.dev, run("cap1", { cycle: "4005", boss: boss("80000110"), stars: 22, score: 23000, clearTimeS: 100, cleared: true, extra: { starCap: 25 } }))).status, 201);
   assert.equal((await send(SESSIONS.user, run("cap2", { cycle: "4005", boss: boss("80000110"), stars: 25, score: 26000, clearTimeS: 140, cleared: true, extra: { starCap: 25 } }))).status, 201);
   const raised = await (await call(env, "/api/leaderboard/interlink?cycle=4005")).json();
-  assert.deepEqual(raised.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[25, 140], [22, null]]);
+  assert.deepEqual(raised.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[25, 140]]);   // 22 at 1:40: quit
   const checked = (id) => JSON.parse(sqlite.prepare("SELECT verify_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).verify_json).rules.flags;
   assert.deepEqual(checked("cap2").map((flag) => [flag.rule, flag.sent, flag.expected]), [["star cap matches the rules", 25, 20]]);
   assert.ok(checked("cap1").some((flag) => flag.rule === "cleared needs full stars" && flag.expected === 25));
@@ -1615,17 +1616,25 @@ test("a newer but lower run never replaces the best on the boards; it's added to
   assert.deepEqual(history.map((r) => r.score), [12000, 30000]);          // both, newest first
 });
 
-test("how a run ended: cleared, ended early (quit, the result screens still appear) or time up", async () => {
+test("how a run ended: cleared, ended early by the leader, time up, or invalid (quit: in the history, on no board)", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);
   const infergon = { boss: { id: "80000107", name: "Omega Infergon", level: 60 } };      // week 3005: 15 stars clear
-  await sendRun(env, token, run("kill", { ...infergon, stars: 15, score: 18000, clearTimeS: 140, cleared: true, playedAt: 1792700300 }));
+  await sendRun(env, token, run("kill", { ...infergon, stars: 15, score: 18000, clearTimeS: 140, cleared: true, playedAt: 1792700400 }));
+  await sendRun(env, token, run("leader-ended", { ...infergon, stars: 15, score: 16000, clearTimeS: 120, cleared: true, playedAt: 1792700300,
+    extra: { endedByLeader: true } }));
   await sendRun(env, token, run("quit", { ...infergon, stars: 9, score: 9500, clearTimeS: 95, cleared: false, playedAt: 1792700200 }));
   await sendRun(env, token, run("timeout", { ...infergon, stars: 12, score: 12500, clearTimeS: 180, cleared: false, playedAt: 1792700100 }));
-  // an app that said "cleared" for a quit run (up to 0.1.21): it's still a run ended early
-  await sendRun(env, token, run("quit-said-cleared", { ...infergon, stars: 6, score: 6400, clearTimeS: 70, cleared: true, playedAt: 1792700000 }));
+  // an app that said "cleared" for a quit run (up to 0.1.21): still invalid
+  await sendRun(env, token, run("quit-said-cleared", { ...infergon, stars: 6, score: 26400, clearTimeS: 70, cleared: true, playedAt: 1792700000 }));
   const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
-  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[18000, "cleared"], [9500, "ended-early"], [12500, "time-up"], [6400, "ended-early"]]);
-  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&sort=played_at")).json()).entries;
-  assert.deepEqual(entries.map((e) => e.outcome).sort(), ["cleared", "ended-early", "ended-early", "time-up"]);
+  assert.deepEqual(history.map((r) => [r.score, r.outcome]),
+    [[18000, "cleared"], [16000, "ended-early"], [9500, "invalid"], [12500, "time-up"], [26400, "invalid"]]);
+  // no board has the invalid runs - not even the highest score (26,400), nor the player's own list
+  const all = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
+  assert.deepEqual(all.map((e) => e.score).sort(), [12500, 16000, 18000]);
+  const best = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries;
+  assert.deepEqual(best.map((e) => e.score), [18000]);
+  const mine = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&mine=1", { session: SESSIONS.dev })).json()).entries;
+  assert.equal(mine.some((e) => e.score === 26400), false);
 });

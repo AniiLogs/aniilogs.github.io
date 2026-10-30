@@ -3,3 +3,6 @@
 -- can say so instead of showing a broken picture.
 ALTER TABLE leaderboard_submissions ADD COLUMN proof_pruned_at INTEGER;
 CREATE INDEX IF NOT EXISTS idx_leaderboard_submissions_history ON leaderboard_submissions (discord_id, created_at DESC);
+-- How an Interlink run ended (cleared, ended-early, time-up, invalid): an invalid run (quit before it could count)
+-- stays in its player's history and off every board.
+ALTER TABLE leaderboard_submissions ADD COLUMN outcome TEXT;

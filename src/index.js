@@ -1440,7 +1440,7 @@ async function boardStandings(env, discordId, kind) {
   const orderBy = (prefix) => (sortKey === "standing"
     ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
     : `${prefix}${sortKey} ${order}`);
-  const where = ["s.kind = ?", "s.status = 'visible'"];
+  const where = ["s.kind = ?", "s.status = 'visible'", ON_BOARDS("s")];
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
@@ -1815,14 +1815,14 @@ const BETTER_INTERLINK = (b, c) => `(COALESCE(${b}.stars, -1) > COALESCE(${c}.st
 const NOBODYS_BEST = `(
   (c.kind = 'interlink_run'
     AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
-      AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND b.submission_id <> c.submission_id AND ${BETTER_INTERLINK("b", "c")})
+      AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id AND ${BETTER_INTERLINK("b", "c")})
     AND NOT EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
       WHERE gc.discord_id <> c.discord_id AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)
         AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
-          AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND ${BETTER_INTERLINK("b", "c")})))
+          AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND ${BETTER_INTERLINK("b", "c")})))
   OR (c.kind = 'sim_run'
     AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'sim_run' AND b.trial IS c.trial
-      AND b.difficulty IS c.difficulty AND b.status = 'visible' AND b.submission_id <> c.submission_id AND b.cleared = 1
+      AND b.difficulty IS c.difficulty AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id AND b.cleared = 1
       AND (COALESCE(c.cleared, 0) = 0 OR b.clear_time_s < c.clear_time_s OR (b.clear_time_s = c.clear_time_s AND b.created_at < c.created_at))))
 ) AND COALESCE(c.verify_state, '') NOT IN ('pending', 'mismatch')`;
 
@@ -2727,6 +2727,11 @@ async function submitLeaderboardRecord(request, env) {
     record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats, record.trial,
   ).run();
   await corroborateRun(env, submissionId);
+  try {
+    await storeRunOutcome(env, submissionId);
+  } catch (error) {
+    console.error("Run outcomes need migration 0033", error);
+  }
   // the free checks, and for runs that matter the AI reading (shadow mode), after the response when the platform allows
   if (record.kind === "interlink_run") {
     // ... and while today's cap has room, up to 2 of the oldest queued runs (so a raised cap or the daily reset
@@ -2894,7 +2899,7 @@ async function runMatters(env, row, submissionId, flags) {
   if (best?.best == null || Number(row.score) > Number(best.best)) return "personal best";
   const above = await env.DB.prepare(
     `SELECT COUNT(*) AS players FROM (SELECT discord_id, MAX(score) AS best FROM leaderboard_submissions
-       WHERE status = 'visible' AND cycle = ? AND boss_id = ? AND kind IN ('interlink_run', 'interlink_best') GROUP BY discord_id)
+       WHERE status = 'visible' AND COALESCE(outcome, '') <> 'invalid' AND cycle = ? AND boss_id = ? AND kind IN ('interlink_run', 'interlink_best') GROUP BY discord_id)
      WHERE best > ?`,
   ).bind(row.cycle, row.bossId, row.score).first();
   const top = Math.max(0, Number.parseInt(env.VERIFY_TOP_RANK || "25", 10) || 0);
@@ -3540,7 +3545,7 @@ const CREDITED_RUNS = `(
   SELECT c.*, c.discord_id AS who, NULL AS teammate, NULL AS teammate_uid,
     (SELECT json_extract(me.value, '$.avgDps') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_dps, (SELECT json_extract(me.value, '$.breakValue') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_break,
     (SELECT json_extract(me.value, '$.damageTaken') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_taken, (SELECT json_extract(me.value, '$.heal') FROM json_each(c.players_json) me WHERE json_extract(me.value, '$.self') = 1) AS p_heal
-  FROM leaderboard_submissions c
+  FROM leaderboard_submissions c WHERE ${ON_BOARDS("c")}
   UNION ALL
   SELECT * FROM (
     SELECT c.*, COALESCE(
@@ -3555,7 +3560,7 @@ const CREDITED_RUNS = `(
       json_extract(pl.value, '$.avgDps') AS p_dps, json_extract(pl.value, '$.breakValue') AS p_break,
       json_extract(pl.value, '$.damageTaken') AS p_taken, json_extract(pl.value, '$.heal') AS p_heal
     FROM leaderboard_submissions c, json_each(c.players_json) pl
-    WHERE c.kind = 'interlink_run' AND json_extract(pl.value, '$.ai') = 0
+    WHERE c.kind = 'interlink_run' AND ${ON_BOARDS("c")} AND json_extract(pl.value, '$.ai') = 0
       AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
       -- older apps don't mark the sender's own slot: skip the slot with the sender's linked character name
       AND json_extract(pl.value, '$.name') <> COALESCE(
@@ -3685,15 +3690,56 @@ function runStarRule(cycleId, slot, sentCap) {
   return { cap: sentCap, clear: everyStar ? sentCap : ruleClear, ruleCap };
 }
 
-// How an Interlink run ended: "cleared" (the kill's stars for its slot that week, or the cap aLogs read), "ended-early"
-// (under the clock without them: someone quit) or "time-up" (the clock ran out). null when the time isn't known.
+// How an Interlink run ended. The game lets the leader end a run early only once the team has every star; otherwise
+// it's a kill (more score) or the clock running out. So:
+// - "cleared": every star for its slot that week (or the cap aLogs read) - a kill;
+// - "ended-early": every star, and the leader ended it (aLogs read the game's "The team leader has ended the
+//   challenge." notice: extra.endedByLeader) - valid, it counts like a clear;
+// - "time-up": the clock ran out without every star;
+// - "invalid": under the clock without every star - someone quit before the run could count. It stays in the
+//   player's own history and off every board.
+// null when the time isn't known.
 function interlinkOutcome(row, weeks) {
   if (row.kind !== "interlink_run" || row.clear_time_s == null) return null;
   const week = interlinkCycle(weeks, row.cycle);
   const slot = week ? week.bosses.findIndex((boss) => String(boss.id) === String(row.boss_id)) : -1;
   const { clear } = runStarRule(row.cycle, slot, sentStarCap(row.extra_json));
-  if ((Number(row.stars) || 0) >= clear && row.cleared !== 0) return "cleared";
-  return Number(row.clear_time_s) < INTERLINK_RULES.durationS ? "ended-early" : "time-up";
+  if ((Number(row.stars) || 0) >= clear) return (parseJsonColumn(row.extra_json) || {}).endedByLeader === true ? "ended-early" : "cleared";
+  return Number(row.clear_time_s) < INTERLINK_RULES.durationS ? "invalid" : "time-up";
+}
+// Keeps a run's outcome column current (after it's stored or re-sent); the boards skip invalid ones.
+function ON_BOARDS(alias) {      // a declaration: CREDITED_RUNS (built at load) uses it
+  return `COALESCE(${alias}.outcome, '') <> 'invalid'`;
+}
+async function storeRunOutcome(env, submissionId) {
+  const row = await env.DB.prepare(
+    "SELECT kind, cycle, boss_id, stars, cleared, clear_time_s, extra_json FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!row || row.kind !== "interlink_run") return;
+  await env.DB.prepare("UPDATE leaderboard_submissions SET outcome = ? WHERE submission_id = ?")
+    .bind(interlinkOutcome(row, await interlinkCycles(env)), submissionId).run();
+}
+// POST /api/admin/run-outcomes {max}: works out the outcome of runs stored before it was kept (once, after 0033)
+async function backfillRunOutcomes(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try { body = await readJsonBody(request, 256); } catch { /* the default */ }
+  const max = Math.min(2000, Math.max(1, Number.parseInt(body?.max ?? "500", 10) || 500));
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id, kind, cycle, boss_id, stars, cleared, clear_time_s, extra_json FROM leaderboard_submissions
+     WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL LIMIT ?`,
+  ).bind(max).all();
+  const weeks = await interlinkCycles(env);
+  const counts = {};
+  for (const row of results || []) {
+    const outcome = interlinkOutcome(row, weeks);
+    counts[outcome] = (counts[outcome] || 0) + 1;
+    await env.DB.prepare("UPDATE leaderboard_submissions SET outcome = ? WHERE submission_id = ?").bind(outcome, row.submission_id).run();
+  }
+  const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM leaderboard_submissions WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL").first();
+  return json({ updated: (results || []).length, counts, left: Number(left?.n || 0) });
 }
 
 function interlinkStarCaps(cycleId) {
@@ -4194,7 +4240,7 @@ async function leaderboardEntries(request, env) {
 async function gameServers(env, mode) {
   const { results } = await env.DB.prepare(
     `SELECT server AS value, COUNT(*) AS count FROM leaderboard_submissions
-     WHERE mode = ? AND status = 'visible' AND server IS NOT NULL GROUP BY server ORDER BY count DESC`,
+     WHERE mode = ? AND status = 'visible' AND COALESCE(outcome, '') <> 'invalid' AND server IS NOT NULL GROUP BY server ORDER BY count DESC`,
   ).bind(mode).all();
   return results || [];
 }
@@ -4205,7 +4251,7 @@ async function leaderboardFacets(request, env) {
   const params = new URL(request.url).searchParams;
   const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "interlink";
   const all = async (sql) => (await env.DB.prepare(sql).bind(mode).all()).results || [];
-  const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible'";
+  const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible' AND COALESCE(outcome, '') <> 'invalid'";
   const difficulties = await all(`SELECT difficulty AS value, COUNT(*) AS count ${visible} AND difficulty IS NOT NULL GROUP BY difficulty ORDER BY difficulty`);
   // Holo-Battle Sim: each trial with the difficulties it has runs on (a board each)
   const trials = mode === "sim" ? await all(`SELECT trial, difficulty, COUNT(*) AS count ${visible} AND trial IS NOT NULL
@@ -4913,6 +4959,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profiles/directory" && request.method === "GET") return profilesDirectory(env);
   if (url.pathname === "/api/profile/layout" && request.method === "PUT") return saveProfileLayout(request, env);
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
+  if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
   const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})\/history$/u);
   if (historyMatch && request.method === "GET") return publicBattleHistory(request, env, historyMatch[1]);
   if (url.pathname === "/api/sitemap/profiles.xml" && request.method === "GET") return profilesSitemap(env);
