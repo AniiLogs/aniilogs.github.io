@@ -958,14 +958,15 @@ async function appAccount(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!account?.viaToken) return json({ authenticated: false }, 401);
   const user = await env.DB.prepare(
-    "SELECT discord_username AS username, discord_global_name AS globalName FROM users WHERE discord_id = ? LIMIT 1",
+    "SELECT discord_username AS username, discord_global_name AS globalName, discord_avatar_hash AS avatar FROM users WHERE discord_id = ? LIMIT 1",
   ).bind(account.discordId).first();
   const beta = await betaTester(account);
   const permissions = account.permissions || [];
   // beta and permissions sit inside account too: aLogs 0.1.28 RC43/RC44 read account.beta and account.permissions
   return json({
     authenticated: true,
-    account: { name: user?.globalName || user?.username || "Discord account", beta, permissions },
+    // avatarUrl: the Discord avatar for the app's account pill (null when the account has none)
+    account: { name: user?.globalName || user?.username || "Discord account", avatarUrl: discordAvatarUrl({ id: account.discordId, avatar: user?.avatar }), beta, permissions },
     beta,
     permissions,
   });

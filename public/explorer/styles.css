@@ -13741,7 +13741,7 @@ details.guide-toc summary {
 }
 
 /* ---- Inside aLogs (?embed=app). The app shows the page tabs and owns sign-in, so the site's bar keeps only the
-   language, "Open in browser" (an icon) and the account (an icon, no Sign in / Log out), always on the right.
+   language and "Open in browser" (an icon), always on the right; the account is in the app's sidebar.
    Two layouts (theme-shell.js sets data-embed-bar): "slim", a thin row with the game build and data date on the
    left; "corner", no row at all, the controls floating in the top-right corner. */
 html[data-embed="app"] .app-topbar {
@@ -13758,8 +13758,8 @@ html[data-embed="app"] #topbarSignInLink,
 html[data-embed="app"] #topbarLogoutButton {
   display: none !important;
 }
-html[data-embed="app"] .app-topbar .account-menu-trigger > span:not(.account-menu-chevron) {
-  display: none;
+html[data-embed="app"] .app-topbar .account-menu {
+  display: none !important;   /* the app's sidebar shows the account (its own Discord pill) */
 }
 html[data-embed="app"] .open-in-browser-link {
   display: inline-grid;

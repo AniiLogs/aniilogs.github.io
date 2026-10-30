@@ -98,6 +98,7 @@ test("the app account says who is a beta tester and what they may manage", async
   assert.equal((await account("player")).beta, false);
   // the same two inside account, where installed aLogs (RC43/RC44) reads them
   assert.equal(owner.account.beta, true);
+  assert.equal(owner.account.avatarUrl, null);                 // no Discord avatar on file: null (the app shows the logo)
   assert.deepEqual(owner.account.permissions, owner.permissions);
   assert.equal(tester.account.beta, true);
   assert.deepEqual(tester.account.permissions, []);

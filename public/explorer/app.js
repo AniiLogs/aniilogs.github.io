@@ -2207,7 +2207,8 @@ function configureTopbarAccount(account = null) {
   configureAccountMenuExtras(authenticated ? account : null);
   const actions = document.querySelector(".app-topbar-actions");
   const popover = els.topbarAccountMenu.querySelector(".account-menu-popover");
-  if (authenticated) popover.insertBefore(els.settingsButton, els.topbarLogoutButton);
+  // inside aLogs the account menu is hidden (the app shows the account), so Settings stays in the bar
+  if (authenticated && document.documentElement.dataset.embed !== "app") popover.insertBefore(els.settingsButton, els.topbarLogoutButton);
   else actions.insertBefore(els.settingsButton, els.topbarSignInLink);
   els.topbarAccountMenu.querySelector("summary").setAttribute(
     "aria-label",
