@@ -500,6 +500,59 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
 .profile-card-tools .profile-tool-button { min-width: 34px; padding: 0.2rem 0.6rem; }
 .profile-card-handle { padding: 0 0.3rem; color: var(--ink-soft); font-size: 1.2rem; cursor: grab; user-select: none; }
 .profile-card-hidden-label { margin-left: auto; color: var(--ink-soft); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+/* Battle History: the card's 5 newest and the full view (?history=1). Rows open to the party and the pictures. */
+.profile-history-list { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.history-run details { border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--paper, var(--cream)) 55%, transparent); }
+.history-run details[open] { border-color: color-mix(in srgb, var(--teal) 55%, var(--line)); }
+.history-run summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.2rem 0.8rem; padding: 0.55rem 0.8rem; cursor: pointer; list-style: none; }
+.history-run summary::-webkit-details-marker { display: none; }
+.history-title { display: grid; min-width: 0; }
+.history-title strong { overflow: hidden; color: var(--ink); font-size: 0.92rem; text-overflow: ellipsis; white-space: nowrap; }
+.history-title small { color: var(--ink-soft); font-size: 0.76rem; }
+.history-numbers { color: var(--ink); font-size: 0.84rem; font-weight: 700; text-align: right; white-space: nowrap; }
+.history-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; grid-column: 1 / -1; }
+.history-chips:empty { display: none; }
+.history-chip { display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px; background: color-mix(in srgb, var(--ink-soft) 16%, transparent);
+  color: var(--ink-soft); font-size: 0.7rem; font-weight: 800; letter-spacing: 0.02em; }
+.history-chip.is-verified { background: color-mix(in srgb, #3ddc84 20%, transparent); color: color-mix(in srgb, #3ddc84 70%, var(--ink)); }
+.history-chip.is-best { background: color-mix(in srgb, #f5b942 22%, transparent); color: color-mix(in srgb, #f5b942 55%, var(--ink)); }
+.history-chip.is-credited { background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--teal); }
+.history-player .history-chip { margin-left: 0.4rem; }
+.history-body { display: grid; gap: 0.8rem; padding: 0 0.8rem 0.8rem; }
+.history-party-wrap { overflow-x: auto; }
+.history-party { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.history-party th { padding: 0.3rem 0.5rem; color: var(--teal); font-size: 0.68rem; font-weight: 900; letter-spacing: 0.08em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.history-party td { padding: 0.35rem 0.5rem; border-top: 1px solid var(--line); color: var(--ink); white-space: nowrap; }
+.history-party .history-number { text-align: right; font-variant-numeric: tabular-nums; }
+.history-party th:nth-child(n+4) { text-align: right; }
+.history-slot { color: var(--ink-soft); font-weight: 800; }
+.history-player a { color: var(--ink); font-weight: 800; }
+.history-proof { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.history-shot { display: grid; gap: 0.25rem; width: min(100%, 260px); color: var(--ink-soft); font-size: 0.76rem; font-weight: 700; text-decoration: none; }
+.history-shot img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--ink-soft) 10%, transparent); }
+.history-shot:hover img, .history-shot:focus-visible img { border-color: var(--teal); }
+.history-empty { margin: 0; color: var(--ink-soft); font-size: 0.82rem; }
+.history-see-all { display: inline-block; margin-top: 0.7rem; color: var(--teal); font-weight: 800; }
+.profile-history-list.is-compact .history-run summary { grid-template-columns: minmax(0, 1fr); padding: 0.45rem 0.7rem; }
+.profile-history-list.is-compact .history-numbers { text-align: left; }
+.profile-history-full { margin-top: 0.5rem; }
+.profile-history-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.profile-history-head h3 { margin: 0; color: var(--ink); font-size: 1.4rem; }
+.profile-history-intro { margin: 0.4rem 0 0.9rem; color: var(--ink-soft); font-size: 0.88rem; }
+.profile-history-filters { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; margin-bottom: 0.9rem; }
+.profile-history-filters label { display: grid; gap: 0.2rem; color: var(--ink-soft); font-size: 0.75rem; font-weight: 800; }
+.profile-history-filters select { min-width: 12rem; min-height: 36px; padding: 0.3rem 0.6rem; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--cream); color: var(--ink); font: inherit; font-size: 0.86rem; }
+.profile-history-status { color: var(--ink-soft); font-size: 0.86rem; }
+.profile-history-status:empty { display: none; }
+body.profile-history-view .profile-overview-grid, body.profile-history-view .profile-owner-tools,
+body.profile-history-view .profile-arrange-bar, body.profile-history-view [data-profile-directory] { display: none !important; }
+@media (max-width: 560px) {
+  .history-run summary { grid-template-columns: minmax(0, 1fr); }
+  .history-numbers { text-align: left; }
+  .profile-history-filters select { min-width: 0; width: 100%; }
+  .profile-history-filters label { flex: 1 1 100%; }
+}
 /* Online now and Recently joined, under the profile */
 .profile-directory { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; margin-top: 1rem; }
 .profile-directory-list { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }

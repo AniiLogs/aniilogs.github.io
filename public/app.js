@@ -621,6 +621,7 @@ async function loadProfileOverview(publicId = "") {
     renderPhotos(overview.photos, Boolean(publicId));
     applyCardLayout(overview.layout);
     showProfileLink(publicId, overview.profile);
+    showBattleHistory(publicId);
     profileOverview.querySelector("[data-profile-arrange]").hidden = Boolean(publicId);
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
     // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
@@ -741,7 +742,7 @@ if (authResult) {
 // Only the profile shows (no home page above it), with a player search at the top: names or UIDs of public profiles.
 function profileHref(params) {
   const next = new URLSearchParams(window.location.search);    // keeps ?embed=app, theme and uid in the app
-  for (const key of ["profile", "view", "auth"]) next.delete(key);
+  for (const key of ["profile", "view", "auth", "history"]) next.delete(key);
   for (const [key, value] of Object.entries(params)) next.set(key, value);
   return `/?${next}`;
 }
@@ -981,6 +982,208 @@ cardGrid.addEventListener("dragend", () => {
   draggedCard = "";
 });
 
+// ---------------------------------------------------------------- Battle History
+// Every run aLogs captured for this player (and runs a teammate's app captured with them in the party), newest first:
+// the 5 newest on the profile's card, all of them at ?history=1 with filters. Pictures load when a run is opened.
+const HISTORY_VIEW = PROFILE_VIEW && new URLSearchParams(window.location.search).get("history") === "1";
+const historyFull = profileOverview.querySelector("[data-history-full]");
+let historyPath = "";
+let historyNext = null;
+const historyLink = (on) => {
+  const next = new URLSearchParams(window.location.search);
+  if (on) next.set("history", "1"); else next.delete("history");
+  return `/?${next}`;
+};
+const shortDate = (seconds) => new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const weekLabel = (week) => (week?.start ? `Week of ${shortDate(week.start)}` : "");
+
+function historyTitle(run) {
+  if (run.mode === "sim") return [run.trialName || "Holo-Battle Sim", run.difficulty].filter(Boolean).join(" · ");
+  if (run.mode === "eggheist") return run.rank?.name ? `Egg Heist · ${run.rank.name}` : "Egg Heist";
+  return run.boss?.name || "Holo-Battle Interlink";
+}
+function historyNumbers(run) {
+  const parts = [];
+  if (run.mode === "interlink" && run.score != null) parts.push(`${numberFormat.format(run.score)} pts`);
+  if (run.mode === "eggheist" && run.score != null) parts.push(`${numberFormat.format(run.score)} pts`);
+  if (run.stars != null && run.mode === "interlink") parts.push(`★ ${run.stars}`);
+  if (run.clearTimeS != null) parts.push(run.cleared ? `cleared in ${clockTime(run.clearTimeS)}` : run.mode === "interlink" ? "no clear" : clockTime(run.clearTimeS));
+  if (run.floors != null) parts.push(`${run.floors} floors`);
+  return parts.join(" · ");
+}
+function historyChips(run) {
+  const chips = [];
+  const chip = (cls, text, title = "") => { const node = element("span", `history-chip ${cls}`, text); if (title) node.title = title; chips.push(node); };
+  if (run.check === "verified") chip("is-verified", "Verified", "Checked: the site read this run's full screenshots again and they agree.");
+  if (run.check === "pending") chip("is-pending", "Pending", "Waiting for a check against this run's full screenshots.");
+  if (run.newBests?.length) chip("is-best", "New best", "This run beat one of the player's bests when it was captured.");
+  if (run.credited) chip("is-credited", "Teammate's capture", "A teammate's aLogs captured this run with this player in the party.");
+  if (run.hidden) chip("is-hidden", "Hidden", "Hidden from the boards: only you see it here.");
+  return chips;
+}
+// a slot's lead Aniimo from extra.lineup ([{ slot, lead: { name, level } }] or the same by position)
+function lineupLead(run, index) {
+  const lineup = Array.isArray(run.lineup) ? run.lineup : [];
+  const entry = lineup.find((item) => Number(item?.slot) === index + 1) || lineup[index];
+  const lead = entry?.lead ?? entry?.aniimo ?? null;
+  const name = typeof lead === "string" ? lead : lead?.name || "";
+  const level = (typeof lead === "object" && lead?.level) ?? entry?.level;
+  return name ? `${name}${Number.isInteger(level) ? ` Lv ${level}` : ""}` : "";
+}
+function historyParty(run) {
+  const players = (run.players || []).filter((player) => player && (player.name || player.avgDps != null));
+  if (!players.length) return element("p", "history-empty", "No party read for this run.");
+  const table = element("table", "history-party");
+  const head = element("tr");
+  for (const label of ["", "Player", "Lead", "Avg DPS", "BREAK", "Damage Taken", "Healing"]) head.append(element("th", "", label));
+  const thead = element("thead");
+  thead.append(head);
+  const body = element("tbody");
+  players.forEach((player, index) => {
+    const row = element("tr");
+    const who = element("td", "history-player");
+    if (player.profileId && !player.ai) {
+      const link = element("a", "", player.name);
+      link.href = profileHref({ profile: player.profileId });
+      who.append(link);
+    } else who.append(document.createTextNode(player.name || `Player ${index + 1}`));
+    if (player.ai) who.append(element("span", "history-chip is-ai", "AI"));
+    if (player.self && run.credited) who.append(element("span", "history-chip is-self", "captured it"));   // the teammate whose app sent it
+    const number = (value) => element("td", "history-number", value == null ? "–" : numberFormat.format(value));
+    row.append(element("td", "history-slot", `${index + 1}P`), who, element("td", "", lineupLead(run, index) || "–"),
+      number(player.avgDps), number(player.breakValue), number(player.damageTaken), number(player.heal));
+    body.append(row);
+  });
+  table.append(thead, body);
+  const wrap = element("div", "history-party-wrap");
+  wrap.append(table);
+  return wrap;
+}
+function historyProof(run) {
+  const box = element("div", "history-proof");
+  if (run.proofPrunedAt) {
+    box.append(element("p", "history-empty", "The pictures of this run are no longer kept (it isn't a best; pictures of other runs are kept 90 days). Its numbers stay."));
+    return box;
+  }
+  const shots = [["", "Result", run.hasEvidence, "full"], ["battle", "Battle Data", run.hasBattleEvidence, "battle_full"]].filter(([, , has]) => has);
+  if (!shots.length) { box.append(element("p", "history-empty", "No pictures with this run.")); return box; }
+  for (const [shot, label, , full] of shots) {
+    const base = `${API_URL}/leaderboard/submissions/${encodeURIComponent(run.submissionId)}/evidence`;
+    const link = element("a", "history-shot");
+    const fullKey = full === "full" ? "evidence" : "battle";
+    link.href = run.hasFullScreens?.includes(fullKey) ? `${base}?shot=${full}` : `${base}${shot ? `?shot=${shot}` : ""}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = run.hasFullScreens?.includes(fullKey) ? `${label}: open the whole screenshot` : `${label}: open the picture`;
+    const picture = element("img");
+    picture.alt = `${label} screen of this run`;
+    picture.loading = "lazy";
+    picture.decoding = "async";
+    picture.dataset.src = `${base}${shot ? `?shot=${shot}` : ""}`;
+    link.append(picture, element("span", "", label));
+    box.append(link);
+  }
+  return box;
+}
+function historyRow(run, { open = false } = {}) {
+  const item = element("li", "history-run");
+  item.id = `run-${run.submissionId}`;
+  const details = element("details");
+  const summary = element("summary");
+  const title = element("span", "history-title");
+  title.append(element("strong", "", historyTitle(run)));
+  const when = [weekLabel(run.week), run.playedAt ? new Date(run.playedAt * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""].filter(Boolean).join(" · ");
+  title.append(element("small", "", when));
+  const numbers = element("span", "history-numbers", historyNumbers(run));
+  const chips = element("span", "history-chips");
+  chips.append(...historyChips(run));
+  summary.append(title, numbers, chips);
+  details.append(summary);
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.dataset.filled) return;
+    details.dataset.filled = "1";
+    const body = element("div", "history-body");
+    body.append(historyParty(run), historyProof(run));
+    details.append(body);
+    for (const picture of body.querySelectorAll("img[data-src]")) {
+      picture.addEventListener("error", () => picture.closest("a")?.replaceWith(element("p", "history-empty", "This picture couldn't be loaded.")), { once: true });
+      picture.src = picture.dataset.src;
+    }
+  });
+  details.open = open;
+  item.append(details);
+  return item;
+}
+
+async function fetchHistory(params) {
+  const response = await apiFetch(`${historyPath}?${params}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+// the card on the profile: the 5 newest, and See all
+async function loadHistoryCard() {
+  const body = overviewBody("history");
+  body.replaceChildren(element("p", "", "Loading…"));
+  try {
+    const { runs = [] } = await fetchHistory(new URLSearchParams({ limit: "5" }));
+    if (!runs.length) { body.replaceChildren(element("p", "", "No runs captured yet. aLogs adds every run it sees here.")); return; }
+    const list = element("ol", "profile-history-list is-compact");
+    list.append(...runs.map((run) => historyRow(run)));
+    const more = element("a", "history-see-all", "See all");
+    more.href = historyLink(true);
+    body.replaceChildren(list, more);
+  } catch {
+    body.replaceChildren(element("p", "", "Battle History couldn't be loaded right now."));
+  }
+}
+// the full view: filters, a page at a time
+async function loadHistoryPage(reset) {
+  const list = historyFull.querySelector("[data-history-list]");
+  const status = historyFull.querySelector("[data-history-status]");
+  const more = historyFull.querySelector("[data-history-more]");
+  const params = new URLSearchParams();
+  for (const select of historyFull.querySelectorAll("[data-history-filter]")) if (select.value) params.set(select.dataset.historyFilter, select.value);
+  if (!reset && historyNext) params.set("before", historyNext);
+  if (reset) list.replaceChildren();
+  status.textContent = "Loading…";
+  more.hidden = true;
+  try {
+    const page = await fetchHistory(params);
+    if (page.filters && !historyFull.dataset.filtersReady) {
+      historyFull.dataset.filtersReady = "1";
+      const fill = (name, items) => {
+        const select = historyFull.querySelector(`[data-history-filter="${name}"]`);
+        select.append(...items.map(([value, label]) => { const option = element("option", "", label); option.value = value; return option; }));
+        select.closest("label").hidden = items.length < 2;
+      };
+      const modeNames = { interlink: "Holo-Battle Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist" };
+      fill("mode", page.filters.modes.map((row) => [row.value, `${modeNames[row.value] || row.value} (${row.count})`]));
+      fill("boss", page.filters.bosses.map((row) => [row.id, `${row.name || row.id} (${row.count})`]));
+      fill("cycle", page.filters.weeks.map((row) => [row.value, `${weekLabel(row) || `Week ${row.value}`} (${row.count})`]));
+    }
+    list.append(...page.runs.map((run) => historyRow(run, { open: window.location.hash === `#run-${run.submissionId}` })));
+    historyNext = page.next;
+    more.hidden = !historyNext;
+    status.textContent = list.children.length ? "" : "No runs match these filters.";
+    if (reset && window.location.hash.startsWith("#run-")) document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "center" });
+  } catch {
+    status.textContent = "Battle History couldn't be loaded right now.";
+  }
+}
+function showBattleHistory(publicId) {
+  historyPath = publicId ? `/profiles/${encodeURIComponent(publicId)}/history` : "/profile/history";
+  if (HISTORY_VIEW) {
+    historyFull.hidden = false;
+    historyFull.querySelector("[data-history-back]").href = historyLink(false);
+    if (!historyFull.dataset.started) { historyFull.dataset.started = "1"; void loadHistoryPage(true); }
+  } else void loadHistoryCard();
+}
+if (HISTORY_VIEW) {
+  document.body.classList.add("profile-history-view");
+  for (const select of historyFull.querySelectorAll("[data-history-filter]")) select.addEventListener("change", () => { historyNext = null; void loadHistoryPage(true); });
+  historyFull.querySelector("[data-history-more]").addEventListener("click", () => void loadHistoryPage(false));
+}
+
 // ---------------------------------------------------------------- Online now and Recently joined
 // Public profiles only, by the name they show publicly; players online with a private profile are just a number.
 async function loadProfileDirectory() {
@@ -1021,7 +1224,7 @@ async function loadProfileDirectory() {
     box.hidden = true;
   }
 }
-if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) void loadProfileDirectory();
+if (PROFILE_VIEW && !PUBLIC_PROFILE_ID && !HISTORY_VIEW) void loadProfileDirectory();
 
 if (!API_URL) {
   for (const link of loginLinks) {

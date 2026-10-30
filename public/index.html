@@ -20,14 +20,14 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.13.9-profiles">
+    <link rel="stylesheet" href="/styles.css?v=0.14.0-battle-history">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261029-build3846247-damage-ui-r80" defer></script>
     <script src="/theme-shell.js?v=0.3.3-embed-corner" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
     <script src="/profile-cards.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.10.8-profiles" defer></script>
+    <script src="/app.js?v=0.11.0-battle-history" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -251,11 +251,30 @@
             <ul class="profile-game-stats" data-overview-stats aria-label="In-game collection" hidden></ul>
             <div data-overview-body></div>
           </article>
+          <article class="profile-panel profile-history" data-overview-panel="history">
+            <h3>Battle History</h3>
+            <div data-overview-body></div>
+          </article>
           <article class="profile-panel profile-photos" data-overview-panel="photos" hidden>
             <h3>Photos</h3>
             <div data-overview-body></div>
           </article>
         </div>
+        <section class="profile-history-full" aria-labelledby="history-title" data-history-full hidden>
+          <div class="profile-history-head">
+            <h3 id="history-title">Battle History</h3>
+            <a class="profile-tool-button" href="/?view=profile" data-history-back>Back to the profile</a>
+          </div>
+          <p class="profile-history-intro">Every run captured by aLogs, newest first, including runs a teammate's app captured with this player in the party. The leaderboards keep only each player's best.</p>
+          <div class="profile-history-filters">
+            <label><span>Mode</span><select data-history-filter="mode"><option value="">All modes</option></select></label>
+            <label><span>Boss</span><select data-history-filter="boss"><option value="">All bosses</option></select></label>
+            <label><span>Week</span><select data-history-filter="cycle"><option value="">All weeks</option></select></label>
+          </div>
+          <ol class="profile-history-list" data-history-list></ol>
+          <p class="profile-history-status" role="status" aria-live="polite" data-history-status></p>
+          <button class="profile-tool-button" type="button" data-history-more hidden>Load more</button>
+        </section>
         <div class="profile-directory" data-profile-directory hidden>
           <article class="profile-panel">
             <h3>Online now</h3>
