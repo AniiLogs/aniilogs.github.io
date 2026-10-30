@@ -20,13 +20,13 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.13.7-home-about">
+    <link rel="stylesheet" href="/styles.css?v=0.13.8-home-pictures">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261029-build3846247-damage-ui-r80" defer></script>
     <script src="/theme-shell.js?v=0.3.3-embed-corner" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.10.6-home-about" defer></script>
+    <script src="/app.js?v=0.10.7-home-pictures" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -98,16 +98,63 @@
     <main>
       <!-- DRAFT for the owner to rewrite: what AniiLogs is, in plain words, with each tool. -->
       <section class="home-about" aria-labelledby="home-about-title">
-        <h1 id="home-about-title">AniiLogs</h1>
-        <p class="home-about-intro">AniiLogs is an unofficial, fan-made site for Aniimo. It puts the game's data and players' records in one place.</p>
+        <div class="home-banner">
+          <img class="home-banner-art" data-content-src="assets/maps/breezy-plains-current-preview.webp" alt="" decoding="async" fetchpriority="high">
+          <div class="home-banner-copy">
+            <h1 id="home-about-title">AniiLogs</h1>
+            <p class="home-about-intro">AniiLogs is an unofficial, fan-made site for Aniimo. It puts the game's data and players' records in one place.</p>
+          </div>
+        </div>
         <ul class="home-tools">
-          <li><a href="/explorer/">Interactive Map</a><span>Every region's points of interest, resources, bosses and respawn timers.</span></li>
-          <li><a href="/explorer/?view=aniilog">Aniilog</a><span>Every Aniimo form: stats, skills, traits, evolutions and where to find it.</span></li>
-          <li><a href="/explorer/?view=itemlog">Item-log</a><span>The game's items and where they come from.</span></li>
-          <li><a href="/explorer/?view=checklist">Checklists</a><span>Track what you've caught and collected.</span></li>
-          <li><a href="/explorer/?view=team">Team Builder</a><span>Plan a team, compare stats and work out damage.</span></li>
-          <li><a href="/leaderboard/">Leaderboards</a><span>Holo-Battle Interlink, Holo-Battle Sim and Egg Heist records, read from the game's result screens.</span></li>
-          <li><a href="/companion/">aLogs</a><span>The Windows companion app: a boss DPS meter and Egg Heist overlay that can send your records here.</span></li>
+          <li class="home-tool">
+            <a href="/explorer/">
+              <span class="home-tool-art"><img class="home-tool-map" data-content-src="assets/maps/breezy-plains-current-preview.webp" alt="" loading="lazy" decoding="async"></span>
+              <strong>Interactive Map</strong>
+              <span>Every region's points of interest, resources, bosses and respawn timers.</span>
+            </a>
+          </li>
+          <li class="home-tool">
+            <a href="/explorer/?view=aniilog">
+              <span class="home-tool-art"><span class="home-tool-icons"><img data-content-src="assets/icons/10051__UI_Icon_PlayerHead_10051__Sprite_4523725359648485303.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/icons/10011__UI_Icon_PlayerHead_10011__Sprite_8053425132958543335.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/icons/10213__UI_Icon_PlayerHead_10213__Sprite_-5918577038411447120.png" alt="" loading="lazy" decoding="async"></span></span>
+              <strong>Aniilog</strong>
+              <span>Every Aniimo form: stats, skills, traits, evolutions and where to find it.</span>
+            </a>
+          </li>
+          <li class="home-tool">
+            <a href="/explorer/?view=itemlog">
+              <span class="home-tool-art"><span class="home-tool-icons"><img data-content-src="assets/item-icons-3528012/ui_item_540201.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/item-icons-3528012/ui_item_GrabEgg_TreasureChest_Rainbow.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/item-icons-3528012/ui_item_4001041.png" alt="" loading="lazy" decoding="async"></span></span>
+              <strong>Item-log</strong>
+              <span>The game's items and where they come from.</span>
+            </a>
+          </li>
+          <li class="home-tool">
+            <a href="/explorer/?view=checklist">
+              <span class="home-tool-art"><span class="home-tool-icons"><img data-content-src="assets/icons/10181__UI_Icon_PlayerHead_10181__Sprite_867679712418300091.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/icons/UI_PetHead_1058301__Sprite_6313879244047964687.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/icons/10233__UI_Icon_PlayerHead_10233__Sprite_3131855429094027750.png" alt="" loading="lazy" decoding="async"></span></span>
+              <strong>Checklists</strong>
+              <span>Track what you've caught and collected.</span>
+            </a>
+          </li>
+          <li class="home-tool">
+            <a href="/explorer/?view=team">
+              <span class="home-tool-art"><span class="home-tool-icons"><img data-content-src="assets/icons/10052__UI_Icon_PlayerHead_10052__Sprite_8516703367405325771.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/icons/1019402__UI_Icon_PlayerHead_1019402__Sprite_6298652656631570041.png" alt="" loading="lazy" decoding="async"><img data-content-src="assets/icons/10011__UI_Icon_PlayerHead_10011__Sprite_8053425132958543335.png" alt="" loading="lazy" decoding="async"></span></span>
+              <strong>Team Builder</strong>
+              <span>Plan a team, compare stats and work out damage.</span>
+            </a>
+          </li>
+          <li class="home-tool">
+            <a href="/leaderboard/">
+              <span class="home-tool-art"><span class="home-tool-icons"><img data-content-src="assets/eggheist/rank-7-small.png" alt="" loading="lazy" decoding="async"></span></span>
+              <strong>Leaderboards</strong>
+              <span>Holo-Battle Interlink, Holo-Battle Sim and Egg Heist records, read from the game's result screens.</span>
+            </a>
+          </li>
+          <li class="home-tool">
+            <a href="/companion/">
+              <span class="home-tool-art"><span class="home-tool-icons"><img src="/icons/alogs-icon-192.png" alt="" loading="lazy" decoding="async" width="96" height="96"></span></span>
+              <strong>aLogs</strong>
+              <span>The Windows companion app: a boss DPS meter and Egg Heist overlay that can send your records here.</span>
+            </a>
+          </li>
         </ul>
         <p class="status" data-auth-status role="status" aria-live="polite"></p>
       </section>
@@ -122,6 +169,7 @@
             <span class="patch-note-title">Site update: Whisperwake Isles (game build 3846247)</span>
             <time class="patch-note-date" datetime="2026-10-29">October 29, 2026</time>
           </summary>
+          <figure class="patch-note-art"><img data-content-src="assets/maps/whisperwake-isles-3846247-preview.webp" alt="" loading="lazy" decoding="async"><figcaption>Whisperwake Isles</figcaption></figure>
           <ul>
             <li><strong>Whisperwake Isles across the site:</strong> a new map, 42 new Aniimo forms, duels, Alphas and Omega Jeburst.</li>
             <li><strong>Collection:</strong> 9 new Season 1 Keepsakes.</li>

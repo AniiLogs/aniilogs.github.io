@@ -228,20 +228,50 @@ h1 span { color: var(--coral); white-space: nowrap; }
 .status { min-height: 1.4rem; margin: 1.1rem 0 0; color: var(--ink-soft); font-size: 0.84rem; }
 
 /* Home page "What's new": one collapsible note per site update, newest first. */
-/* Home: what AniiLogs is, with each tool (plain text the owner rewrites), then the site updates. */
-.home-about { max-width: 860px; margin: 0 auto; padding: clamp(2rem, 6vw, 4rem) 0 2.5rem; }
-.home-about h1 { margin: 0 0 0.6rem; color: var(--ink); font-size: clamp(2rem, 4vw, 2.8rem); }
-.home-about-intro { margin: 0 0 1.4rem; color: var(--ink-soft); font-size: 1.05rem; line-height: 1.6; }
-.home-tools { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
-.home-tools li { display: grid; grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr); align-items: baseline; gap: 0.3rem 1rem;
-  padding: 0.7rem 1rem; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--cream) 70%, transparent); }
-.home-tools a { color: var(--ink); font-weight: 800; text-decoration: none; }
-.home-tools a:hover, .home-tools a:focus-visible { color: var(--teal); text-decoration: underline; }
-.home-tools span { color: var(--ink-soft); line-height: 1.5; }
+/* Home: what AniiLogs is, on a map banner, then a picture card per tool, then the site updates. */
+.home-about { max-width: 1080px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) 0 2.5rem; }
+.home-banner { position: relative; display: grid; align-items: end; min-height: clamp(220px, 34vw, 360px); margin-bottom: 1.4rem; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 26px; background: var(--cream); box-shadow: var(--shadow); }
+.home-banner-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 45%; }
+.home-banner::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to top, color-mix(in srgb, var(--cream) 94%, transparent) 0%, color-mix(in srgb, var(--cream) 70%, transparent) 38%, transparent 75%); }
+.home-banner-copy { position: relative; z-index: 1; padding: clamp(1.1rem, 3vw, 2rem); }
+.home-about h1 { margin: 0 0 0.4rem; color: var(--ink); font-size: clamp(2rem, 4vw, 2.8rem); }
+.home-about-intro { max-width: 46rem; margin: 0; color: var(--ink); font-size: 1.05rem; line-height: 1.6; }
+.home-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: 0.9rem; margin: 0; padding: 0; list-style: none; }
+.home-tool a { display: grid; grid-template-rows: auto auto 1fr; gap: 0.35rem; height: 100%; padding: 0 0 1rem; overflow: hidden; color: inherit; text-decoration: none;
+  border: 1px solid var(--line); border-radius: 20px; background: var(--cream); box-shadow: var(--shadow); transition: transform 140ms ease, border-color 140ms ease; }
+.home-tool a:hover, .home-tool a:focus-visible { transform: translateY(-2px); border-color: var(--teal); }
+.home-tool-art { display: grid; place-items: center; height: 120px; overflow: hidden; margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--teal) 14%, var(--cream)); }
+.home-tool-map { width: 100%; height: 100%; object-fit: cover; object-position: 40% 30%; }
+.home-tool-icons { display: flex; align-items: center; justify-content: center; gap: 0.4rem; width: 100%; padding: 0 0.7rem; }
+.home-tool-icons img { width: clamp(48px, 28%, 84px); aspect-ratio: 1; height: auto; object-fit: contain; filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.25)); }
+.home-tool strong, .home-tool a > span:last-child { padding: 0 1rem; }
+.home-tool strong { color: var(--ink); font-size: 1.08rem; }
+.home-tool a:hover strong, .home-tool a:focus-visible strong { color: var(--teal); }
+.home-tool a > span:last-child { color: var(--ink-soft); line-height: 1.5; }
 .home-about .status:empty { display: none; }
+.patch-note-art { margin: 1rem 0 0; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; }
+.patch-note-art img { display: block; width: 100%; height: clamp(140px, 24vw, 220px); object-fit: cover; }
+.patch-note-art figcaption { padding: 0.45rem 0.9rem; color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; }
+.patch-note-art:not(:has(img)) { display: none; }
 @media (max-width: 560px) {
-  .home-tools li { grid-template-columns: minmax(0, 1fr); }
+  /* phone: the banner picture above its text, and each tool a row with its picture on the left */
+  .home-banner { min-height: 0; }
+  .home-banner-art { position: static; height: 150px; }
+  .home-banner::after { display: none; }
+  .home-banner-copy { padding: 0.9rem 1rem 1.1rem; }
+  .home-tools { gap: 0.6rem; }
+  .home-tool a { grid-template-columns: 92px minmax(0, 1fr); grid-template-rows: auto 1fr; gap: 0.2rem 0.8rem; padding: 0; }
+  .home-tool-art { grid-row: 1 / 3; height: 100%; min-height: 92px; margin: 0; border-bottom: 0; border-right: 1px solid var(--line); }
+  .home-tool-icons { padding: 0.4rem; }
+  .home-tool-icons img { width: 64px; }
+  .home-tool-icons img:not(:first-child) { display: none; }   /* one picture per row on a phone */
+  .home-tool strong { padding: 0.75rem 0.9rem 0 0; }
+  .home-tool a > span:last-child { padding: 0 0.9rem 0.75rem 0; font-size: 0.92rem; }
 }
+@media (prefers-reduced-motion: reduce) { .home-tool a { transition: none; } }
 .patch-notes { padding: 0 0 6rem; }
 .patch-notes .section-heading { margin-bottom: 1.5rem; }
 .patch-notes .section-heading h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); }   /* below the page title (.home-about h1) */

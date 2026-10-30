@@ -394,6 +394,14 @@ function renderEggHeist(boards) {
   else body.replaceChildren(standingList("Season standing", rows));
 }
 
+// Home page pictures from the reviewed content release (a missing one leaves its card's text).
+for (const picture of document.querySelectorAll("img[data-content-src]")) {
+  const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+  if (!base) { picture.remove(); continue; }
+  picture.addEventListener("error", () => picture.remove(), { once: true });
+  picture.src = `${base}/${picture.dataset.contentSrc}${siteConfig.contentRevision ? `?v=${siteConfig.contentRevision}` : ""}`;
+}
+
 // Photos the player took in Aniimo, uploaded from the aLogs app. Each shows what the game recorded with it: when, the
 // character, the Aniimo in it (linked to their Aniilog entries) and where (the map it's on).
 const contentData = new Map();
