@@ -2630,6 +2630,13 @@ async function drainRunChecksNow(request, env) {
   return json({ read, queued: Number(left?.queued || 0), readingsLeftToday: Math.max(0, await aiReadingsLeft(env)) });
 }
 
+// The public badge for a run's check (shadow mode): "verified" when the AI reading agreed or an administrator
+// confirmed it, "pending" while it waits for a check or is under review (a disagreement is never shown publicly),
+// none for a run that didn't need the AI reading or was rejected (left to the administrators).
+function runCheckBadge(state) {
+  return state === "match" || state === "confirmed" ? "verified" : state === "pending" || state === "mismatch" ? "pending" : null;
+}
+
 // The review list (administrators and the owner, like log reports): runs whose second reading disagreed (?state=,
 // default mismatch), newest first, with what was sent, what was read and the differences. POST
 // /api/admin/run-checks/<id> {decision: "confirmed" | "rejected"} records the review (shadow mode: the run's place on
@@ -3571,6 +3578,23 @@ async function interlinkBoards(request, env) {
     row.proofIds = proofs.get(`${row.discordId}|${row.cycle}|${row.bossId}`) || {};
     row.proofId = row.proofIds.score || null;
   }
+  // each best's check badge, from the run behind it: { score: "verified", dps: "pending", ... }
+  const proofRunIds = [...new Set(rows.flatMap((row) => Object.values(row.proofIds)))];
+  const badges = new Map();
+  try {
+    for (let i = 0; i < proofRunIds.length; i += 90) {
+      const chunk = proofRunIds.slice(i, i + 90);
+      const { results } = await env.DB.prepare(
+        `SELECT submission_id AS id, verify_state AS state FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
+      ).bind(...chunk).all();
+      for (const result of results || []) badges.set(result.id, runCheckBadge(result.state));
+    }
+  } catch (error) {
+    console.error("Run check badges need migration 0032", error);
+  }
+  for (const row of rows) {
+    row.checks = Object.fromEntries(Object.entries(row.proofIds).map(([metric, id]) => [metric, badges.get(id) || null]).filter(([, badge]) => badge));
+  }
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
     if (!bossIds.includes(String(row.bossId))) { bossIds.push(String(row.bossId)); }
@@ -3735,6 +3759,7 @@ async function leaderboardEntries(request, env) {
       extra: (({ instanceId: _instance, proofFull, ...extra }) => ({ ...extra, ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
       hasBattleEvidence: Boolean(row.battle_evidence_key),
+      check: runCheckBadge(row.verify_state),
       status: row.status,
       playedAt: row.played_at,
       submittedAt: row.created_at,

@@ -216,6 +216,14 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   .lb-pager { gap: 0.5rem; }
 }
 
+/* The run check's badge: Verified (read again and agrees) or Pending (waiting for that check) */
+.lb-check { display: inline-block; margin-left: 6px; border-radius: 999px; font-size: 0.68em; font-weight: 800; letter-spacing: 0.02em;
+  padding: 1px 7px; vertical-align: middle; cursor: help; white-space: nowrap; }
+.lb-check.is-verified { background: color-mix(in srgb, #3ddc84 20%, transparent); color: color-mix(in srgb, #3ddc84 75%, var(--text)); }
+.lb-check.is-pending { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+.lb-check-legend .lb-check { margin: 0 2px 0 0; }
+.lb-proof-tabs .lb-check { align-self: center; margin-left: auto; font-size: 0.8rem; }
+
 /* Interlink: Per Boss (three boards, one a phone at a time) and Season Ladder */
 .lb-interlink { --lb-left: #6fa8ff; --lb-center: #f2a93b; --lb-right: #c792ff; display: grid; gap: 0.8rem; margin-bottom: 0.8rem; }
 .lb-interlink[hidden] { display: none; }

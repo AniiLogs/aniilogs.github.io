@@ -339,6 +339,14 @@ test("second reading (shadow mode): Workers AI re-reads the whole screens; a mis
   assert.deepEqual(mismatches.map((r) => [r.score, r.check.differences]), [[23456, [{ field: "score", sent: 23456, read: 20000 }]]]);
   assert.match(mismatches[0].proof.full, /\?shot=full$/u);
   assert.equal((await (await list("match")).json()).runs.length, 1);
+  // public badges: the agreeing run is Verified, the disagreeing one only Pending (never "mismatch" in public)
+  const boardCheck = async (cycle) => (await (await call(env, `/api/leaderboard/interlink?cycle=${cycle}`)).json())
+    .bosses.flatMap((b) => b.entries).find((e) => e.proofId)?.checks;
+  assert.deepEqual(await boardCheck("3005"), { score: "verified" });
+  assert.equal((await boardCheck("3003")).score, "pending");
+  const publicList = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
+  assert.deepEqual(publicList.map((e) => e.check).sort(), ["pending", "verified"]);
+  assert.equal(JSON.stringify(publicList).includes("mismatch"), false);
   // shadow mode: the mismatching run still stands on the boards
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).total, 2);
   // an administrator's review is recorded

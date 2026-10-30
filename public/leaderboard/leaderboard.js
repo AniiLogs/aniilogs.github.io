@@ -438,10 +438,10 @@
     }
     return proofImages.get(key);
   }
-  function proofButton(submissionId) {
+  function proofButton(submissionId, check = null) {
     if (!submissionId) return null;
     const button = el("button", { type: "button", class: "lb-proof", title: "Hover to see this run's screenshot, click to keep it open",
-      "aria-label": "View this run's screenshot", onclick: () => { hideProofPreview(); openProof(submissionId); } });
+      "aria-label": "View this run's screenshot", onclick: () => { hideProofPreview(); openProof(submissionId, check); } });
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
     // hover (mouse or pen only: a tap goes straight to the click)
     button.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") showProofPreview(submissionId); });
@@ -469,7 +469,7 @@
     const preview = document.querySelector(".lb-proof-preview");
     if (preview) preview.hidden = true;
   }
-  async function openProof(submissionId) {
+  async function openProof(submissionId, check = null) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
     if (!dialog) {
       dialog = el("dialog", { class: "lb-proof-dialog" },
@@ -499,6 +499,10 @@
       dialog.insertBefore(tabs, body);
     }
     for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.onclick = () => show(tab.dataset.proofShot);
+    // the run check's badge beside the tabs
+    tabs.querySelector(".lb-check")?.remove();
+    const badge = checkBadge(check);
+    if (badge) tabs.append(badge);
     await show("summary");
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
@@ -560,9 +564,18 @@
     return el("p", { class: "lb-updated", title: "When the newest run on these boards reached AniiLogs" },
       el("i", { "aria-hidden": "true" }), `Updated ${when} (${ago})`);
   }
-  function playerName(entry, proofId) {
+  // The run check's badge (shadow mode: nothing is held either way)
+  const CHECK_BADGES = Object.freeze({
+    verified: { text: "Verified", title: "Checked: the site read this run's full screenshots again and they agree." },
+    pending: { text: "Pending", title: "Waiting for a check against this run's full screenshots." },
+  });
+  function checkBadge(check) {
+    const badge = CHECK_BADGES[check];
+    return badge ? el("span", { class: `lb-check is-${check}`, title: badge.title, text: badge.text }) : null;
+  }
+  function playerName(entry, proofId, check = null) {
     return el("span", { class: "lb-who-name" }, profileName(entry.player, entry.profileId, {}, entry.uid),
-      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), proofButton(proofId));
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), checkBadge(check), proofButton(proofId, check));
   }
   function bossHead(boss, className, detail = "") {
     return el("div", { class: className },
@@ -585,7 +598,7 @@
     select.value = ladder.id;
     const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
-      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId), el("small", { text: clearText(entry) })),
+      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score), el("small", { text: clearText(entry) })),
       el("span", { class: "lb-val", text: ladder.value(entry) }),
       stars(entry.stars)));
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id,
@@ -642,7 +655,9 @@
         class: SLOT_CLASSES[boss.slotIndex], onclick: () => { state.slot = boss.slotIndex; showSlot(); },
       }, boss.slot, el("small", { text: boss.name.replace(/^(Alpha|Omega) /u, "") })))),
       el("div", { class: "lb-bosses" }, data.bosses.map(bossBoard)),
-      el("p", { class: "lb-note", text: "Only what the result screens show: score, stars, clear time, team DPS and each player's Avg DPS, BREAK damage and healing." }));
+      el("p", { class: "lb-note", text: "Only what the result screens show: score, stars, clear time, team DPS and each player's Avg DPS, BREAK damage and healing." }),
+      el("p", { class: "lb-note lb-check-legend" }, checkBadge("verified"), " checked against the run's full screenshots · ",
+        checkBadge("pending"), " waiting for that check · no badge: no check needed (not a personal best or a top run)"));
     els.tableWrap.hidden = true;
     els.summary.textContent = "";
   }
@@ -678,7 +693,7 @@
       columns.map((column, index) => el("th", { scope: "col", class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null, text: column.label }))));
     els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId)),
+      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score)),
       columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null }, column.value(entry)))))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
