@@ -628,13 +628,13 @@
   }
   function renderPerBoss(data) {
     const caps = data.rules?.starCaps || [];
-    const clear = [...new Set(data.rules?.clearStars || [])];
+    const clear = data.rules?.clearStars || [];
     const slotted = data.bosses.filter((boss) => boss.slotIndex != null);
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" }, weekNav(data), updatedLine(data.updatedAt)),
       el("p", { class: "lb-rules" },
         caps.length ? el("span", {}, el("b", { text: "Max stars " }), caps.join(" / ")) : null,
-        clear.length === 1 ? el("span", { text: `A kill is ${clear[0]} stars` }) : null,
+        clear.length ? el("span", { text: `A kill is ${new Set(clear).size === 1 ? clear[0] : clear.join(" / ")} stars` }) : null,
         el("span", { text: "Best run per player per boss" }),
         el("span", { text: "Ranked by score; pick another ladder in each board's menu" })),
       el("div", { class: "lb-slot-switch", role: "tablist", "aria-label": "Boss" }, ...slotted.map((boss) => el("button", {

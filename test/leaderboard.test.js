@@ -930,6 +930,15 @@ test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight
   assert.equal((await send(SESSIONS.user, run("c2", { cycle: "4000", boss: boss("80000110"), stars: 20, score: 21000, clearTimeS: 150, cleared: true }))).status, 201);
   const week = await (await call(env, "/api/leaderboard/interlink?cycle=4000")).json();
   assert.deepEqual(week.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[20, 150], [15, null]]);
+  // the center boss is a kill only at its full 40 stars: 26 stars under the clock is a run ended early, not a clear
+  assert.equal((await send(SESSIONS.dev, run("k1", { cycle: "4000", boss: boss("80000111"), stars: 26, score: 26000, clearTimeS: 95, cleared: true }))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("k2", { cycle: "4000", boss: boss("80000111"), stars: 40, score: 44000, clearTimeS: 170, cleared: true }))).status, 201);
+  const center = (await (await call(env, "/api/leaderboard/interlink?cycle=4000")).json());
+  assert.deepEqual(center.bosses[1].entries.map((e) => [e.stars, e.clearTimeS]), [[40, 170], [26, null]]);
+  assert.deepEqual(center.rules.clearStars, [20, 40, 20]);
+  // the same line for the "fastest clear" sort over every run
+  const fastest = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&sort=clear_time_s&cycle=4000&boss=80000111&best=0")).json()).entries;
+  assert.deepEqual(fastest.map((e) => [e.stars, e.clearTimeS]), [[40, 170]]);
   // the second middle boss: from the upload (as one boss or a list), or the game's ids when the week has none
   for (const [cycle, id] of [["4003", "80000119"], ["4004", "80000121"], ["4005", "80000123"]]) {
     assert.equal((await send(SESSIONS.dev, run(`m${cycle}`, { cycle, boss: boss(id), score: 18000 }))).status, 201);

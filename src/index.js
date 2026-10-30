@@ -1443,7 +1443,7 @@ async function boardStandings(env, discordId, kind) {
   const where = ["s.kind = ?", "s.status = 'visible'"];
   if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push(clearedSql(kind));
+  if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
   if (kind === "eggheist_season") where.push("s.cycle IS NOT NULL");
   // a run whose boss wasn't recognised can't stand on a boss's board (it was a second row beside the real one)
   if (kind === "interlink_run" || kind === "interlink_best") where.push("s.boss_id IS NOT NULL");
@@ -2954,7 +2954,7 @@ function withProfiles(players, profiles) {
 //   slotsConfirmed says whether that order has been checked in the game (the meter reads it: left, middle, right).
 // - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
 //   early from there); the last entry whose fromCycle is at or below the week's id applies. Weeks before 4000:
-//   15 stars cleared any boss. From 4000 (20 / 40 / 20) a kill is 20 stars on every boss.
+//   15 stars cleared any boss. From 4000 a kill is every star: 20 / 40 / 20 (the center boss needs 40).
 // - splitBlock: weeks are grouped into splits (the game resets stars) by their id block: 3000-3005 is one split,
 //   4000 starts the next.
 // - seasons: which weeks belong to which season, by week id (the last entry whose fromCycle is at or below the
@@ -2966,7 +2966,7 @@ const INTERLINK_RULES = Object.freeze({
   slotsConfirmed: true,
   starCaps: Object.freeze([
     Object.freeze({ fromCycle: 0, caps: Object.freeze([15, 30, 15]), clear: Object.freeze([15, 15, 15]) }),
-    Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 20, 20]) }),
+    Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 40, 20]) }),
   ]),
   splitBlock: 1000,
   seasons: Object.freeze([
@@ -3128,15 +3128,24 @@ async function uploadInterlinkCycles(request, env) {
   return json({ ok: true, stored: cycles.length });
 }
 
-// An Interlink run is a clear only with the full stars for a kill: 15 before week 4000, 20 from week 4000 (the game
-// offers ending early from there). A run quit early also finishes under the clock, with fewer stars, and app
-// versions up to 0.1.21 sent those as cleared.
-const INTERLINK_CLEAR_STARS = Object.freeze({ before: 15, fromCycle: 4000, from: 20 });
-function clearedSql(kind) {
-  const { before, fromCycle, from } = INTERLINK_CLEAR_STARS;
-  return kind === "interlink_run"
-    ? `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE WHEN CAST(s.cycle AS INTEGER) >= ${fromCycle} THEN ${from} ELSE ${before} END)`
-    : "COALESCE(s.cleared, 1) = 1";
+// An Interlink run is a clear only with the stars for a kill (INTERLINK_RULES.starCaps' clear): the game offers
+// ending early from there. A run quit early also finishes under the clock, with fewer stars, and app versions up to
+// 0.1.21 sent those as cleared. The stars depend on the boss's slot that week (from 4000 the center needs 40), so
+// list (the weeks, interlinkCycles) names each week's bosses; a week it doesn't list gets that rule's lowest line.
+function clearedSql(kind, list = []) {
+  if (kind !== "interlink_run") return "COALESCE(s.cleared, 1) = 1";
+  const bySlot = [];
+  for (const cycle of list) {
+    const clear = interlinkStarRule(cycle.id).clear;
+    cycle.bosses.forEach((boss, slot) => {
+      if (clear[slot] !== Math.min(...clear) && /^\d+$/u.test(String(cycle.id)) && /^\d+$/u.test(String(boss.id))) {
+        bySlot.push(`WHEN s.cycle = '${cycle.id}' AND s.boss_id = '${boss.id}' THEN ${clear[slot]}`);
+      }
+    });
+  }
+  const byWeek = [...INTERLINK_RULES.starCaps].reverse()
+    .map((rule) => `WHEN CAST(s.cycle AS INTEGER) >= ${rule.fromCycle} THEN ${Math.min(...rule.clear)}`);
+  return `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE ${[...bySlot, ...byWeek].join(" ")} ELSE ${Math.min(...INTERLINK_RULES.starCaps[0].clear)} END)`;
 }
 
 // Best score per player per (week, boss), with each player's in-game name and public profile id (if public).
@@ -3145,7 +3154,7 @@ async function interlinkBests(env, cycles, list, server = null) {
   const { results } = await env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, MAX(s.boss_name) AS bossName,
        MAX(s.score) AS score, MAX(s.stars) AS stars,
-       MIN(CASE WHEN ${clearedSql("interlink_run")} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
+       MIN(CASE WHEN ${clearedSql("interlink_run", list)} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END) AS clearTimeS,
        MAX(s.p_dps) AS avgDps, MAX(s.p_break) AS breakValue, MAX(s.p_taken) AS damageTaken, MAX(s.p_heal) AS heal,
        MAX(s.team_dps) AS teamDps,
        CASE WHEN s.who LIKE 'name:%' THEN MAX(s.teammate) ELSE
@@ -3352,7 +3361,7 @@ async function leaderboardEntries(request, env) {
   if (sortKey === "standing" || (sortKey === "score" && kind === "eggheist_season")) where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
   else if (sortKey !== "player" && sortKey !== "played_at") where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push(clearedSql(kind));
+  if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
   // One row per player (their best on each boss) unless every submission is requested.
