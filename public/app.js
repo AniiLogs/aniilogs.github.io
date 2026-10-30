@@ -148,19 +148,25 @@ function showSignedIn(account) {
   if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) void loadProfileOverview();   // your profile: on the Profiles page only
 }
 
-profilePublic.addEventListener("change", () => {
-  profileFindable.disabled = !profilePublic.checked;
-  profileListedInSearch.disabled = !profilePublic.checked;
-});
+// Who can see the profile: Public (everything), Custom (the parts ticked) or Private (only its owner)
+const profileParts = document.querySelector("[data-profile-parts]");
+function syncVisibilityControls() {
+  const shown = profilePublic.value !== "private";
+  profileFindable.disabled = !shown;
+  profileListedInSearch.disabled = !shown;
+  profileParts.hidden = profilePublic.value !== "custom";
+}
+profilePublic.addEventListener("change", syncVisibilityControls);
 
 function showVisibility(profile) {
-  profilePublic.checked = Boolean(profile.isPublic);
+  profilePublic.value = profile.visibility || (profile.isPublic ? "public" : "private");
+  for (const box of profileParts.querySelectorAll("input[type=checkbox]")) box.checked = (profile.publicParts || []).includes(box.value);
+  syncVisibilityControls();
   profileFindable.checked = Boolean(profile.findableByName);
-  profileFindable.disabled = !profile.isPublic;
   profileListedInSearch.checked = profile.listedInSearch !== false;
-  profileListedInSearch.disabled = !profile.isPublic;
   profileShowPresence.checked = profile.showPresence !== false;
-  profileStatus.textContent = profile.isPublic ? "Public · anyone with the link can see it" : "Private · visible only to you";
+  profileStatus.textContent = { public: "Public · anyone with the link can see it", custom: "Custom · anyone with the link sees the parts you picked",
+    private: "Private · visible only to you" }[profilePublic.value];
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
   if (profile.isPublic && profile.publicId) {
     const link = element("a", "", `${window.location.origin}/?profile=${profile.publicId}`);
@@ -171,7 +177,7 @@ function showVisibility(profile) {
 
 async function loadPrivateProfile(fallbackName = "") {
   profileEditor.hidden = false;
-  profileStatus.textContent = "Loading your private profile…";
+  profileStatus.textContent = "Loading your profile…";
   try {
     const response = await apiFetch("/profile");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -183,7 +189,7 @@ async function loadPrivateProfile(fallbackName = "") {
   } catch {
     profileEditor.hidden = true;
     profileStatus.textContent = "";
-    status.textContent = "Signed in, but your private profile could not be loaded.";
+    status.textContent = "Signed in, but your profile could not be loaded.";
   }
 }
 
@@ -576,7 +582,8 @@ async function loadProfileOverview(publicId = "") {
     if (overview.profile?.avatarUrl) avatar.src = overview.profile.avatarUrl;
     profileOverview.querySelector("[data-overview-name]").textContent = overview.profile?.displayName || "My profile";
     profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
-      : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
+      : overview.profile?.visibility === "custom" ? "Custom · anyone with your link sees the parts you picked"
+        : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
     profileOverview.querySelector("[data-overview-bio]").textContent = overview.profile?.bio || "";
     if (publicId) {
       const who = overview.profile?.displayName || "Pathfinder";
@@ -618,10 +625,15 @@ async function loadProfileOverview(publicId = "") {
     }
     renderGameStats(overview.gameStats);
     renderCollection(overview.collection, Boolean(publicId));
+    // someone else's profile shows only its public parts (Custom); the server sends nothing for the others
+    const parts = publicId && Array.isArray(overview.parts) ? overview.parts : null;
+    for (const [panel, part] of [["collection", "collection"], ["history", "history"]]) {
+      if (parts) profileOverview.querySelector(`[data-overview-panel="${panel}"]`).hidden = !parts.includes(part);
+    }
     renderPhotos(overview.photos, Boolean(publicId));
     applyCardLayout(overview.layout);
     showProfileLink(publicId, overview.profile);
-    showBattleHistory(publicId);
+    if (!parts || parts.includes("history")) showBattleHistory(publicId);
     profileOverview.querySelector("[data-profile-arrange]").hidden = Boolean(publicId);
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
     // The section was hidden when the page loaded, so a #my-profile link could not land on it then.
@@ -643,7 +655,11 @@ profileEditor.addEventListener("submit", async (event) => {
   profileSaveButton.disabled = true;
   profileStatus.textContent = "Saving…";
   // Visibility is only sent when the public switch is offered (developer preview); otherwise it stays as it is.
-  const visibility = profilePublicRow.hidden ? {} : { isPublic: profilePublic.checked, findableByName: profileFindable.checked, showPresence: profileShowPresence.checked, listedInSearch: profileListedInSearch.checked };
+  const visibility = profilePublicRow.hidden ? {} : {
+    visibility: profilePublic.value,
+    ...(profilePublic.value === "custom" ? { publicParts: [...profileParts.querySelectorAll("input:checked")].map((box) => box.value) } : {}),
+    findableByName: profileFindable.checked, showPresence: profileShowPresence.checked, listedInSearch: profileListedInSearch.checked,
+  };
   try {
     const response = await apiFetch("/profile", {
       method: "PATCH",
@@ -1253,7 +1269,7 @@ async function loadProfileDirectory() {
       : [element("li", "profile-directory-empty", "No public profiles online right now.")]));
     const others = Number(online.others || 0);
     box.querySelector("[data-directory-others]").textContent = others
-      ? `${players.length ? "And " : ""}${others} ${others === 1 ? "player" : "players"} online with a private profile.` : "";
+      ? `${players.length ? "And " : ""}${others} ${others === 1 ? "player" : "players"} online who keep their profile out of these lists.` : "";
     box.querySelector("[data-directory-recent]").replaceChildren(...(recent.length ? recent.map((row) => {
       const item = element("li");
       const anchor = link(row);

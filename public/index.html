@@ -196,7 +196,7 @@
         </div>
         <div class="profile-signin" data-profile-signin hidden>
           <strong>Sign in to see your profile.</strong>
-          <p>Your profile is private until you make it public. You can still look up anyone whose profile is public with the search above.</p>
+          <p>Profiles are public by default, and you choose who sees yours (Public, Custom or Private) under Edit profile. You can look up anyone whose profile is public with the search above.</p>
           <a class="secondary-button" href="/api/auth/discord/start" data-login>Continue with Discord</a>
         </div>
         <header class="profile-overview-header">
@@ -289,7 +289,7 @@
         <form class="profile-editor" data-profile-editor hidden>
           <div class="profile-editor-heading">
             <strong>My profile</strong>
-            <small>Private unless you make it public. Leaderboard entries show either way.</small>
+            <small>Public by default: pick Public, Custom or Private below. Leaderboard entries show either way.</small>
           </div>
           <label>
             <span>Display name</span>
@@ -299,12 +299,26 @@
             <span>About me</span>
             <textarea name="bio" maxlength="500" rows="3" placeholder="A little about your Aniimo adventure…" data-profile-bio></textarea>
           </label>
-          <label class="profile-public-toggle" data-profile-public-row hidden>
-            <input type="checkbox" name="isPublic" data-profile-public>
-            <span>Public profile
-              <small>Anyone with the link sees your character names, about, leaderboard standing and collection progress. Never your Discord account, and your display name only if you tick the box below.</small>
-            </span>
-          </label>
+          <div class="profile-visibility" data-profile-public-row hidden>
+            <label>
+              <span>Who can see my profile</span>
+              <select name="visibility" data-profile-public>
+                <option value="public">Public: anyone with the link</option>
+                <option value="custom">Custom: only the parts I pick</option>
+                <option value="private">Private: only me</option>
+              </select>
+            </label>
+            <small>Never your Discord account, and your display name only if you tick the box below. Your runs on the leaderboards are public either way.</small>
+            <fieldset class="profile-parts" data-profile-parts hidden>
+              <legend>Public parts</legend>
+              <label><input type="checkbox" value="standings"> Leaderboard standing</label>
+              <label><input type="checkbox" value="history"> Battle History</label>
+              <label><input type="checkbox" value="collection"> Collection</label>
+              <label><input type="checkbox" value="photos"> Photos</label>
+              <label><input type="checkbox" value="about"> About me and characters</label>
+              <label><input type="checkbox" value="directory"> Show me in Online now, Recently joined and the player search</label>
+            </fieldset>
+          </div>
           <label class="profile-public-toggle" data-profile-findable-row hidden>
             <input type="checkbox" name="findableByName" data-profile-findable>
             <span>Let players find me by my display name

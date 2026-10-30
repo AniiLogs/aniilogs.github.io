@@ -598,11 +598,13 @@ async function completeDiscordLogin(request, env) {
       now,
     ).run();
     await env.DB.prepare(
-      `INSERT OR IGNORE INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at)
-       VALUES (?, ?, NULL, 0, ?, ?)`,
+      // Public by default (the owner picks Private or Custom in Edit profile), at a random link id
+      `INSERT OR IGNORE INTO profiles (discord_id, display_name, bio, is_public, public_id, created_at, updated_at)
+       VALUES (?, ?, NULL, 1, ?, ?, ?)`,
     ).bind(
       String(user.id),
       String(user.global_name || user.username).slice(0, 80),
+      shareId() + shareId().slice(0, 4),
       now,
       now,
     ).run();
@@ -1304,14 +1306,31 @@ async function getMapShare(id, env) {
   return json({ selection: JSON.parse(row.selectionJson), expiresAt: Number(row.expiresAt) });
 }
 
+// What a profile shows to others. Public: every part. Private: nothing (the page is "not found"). Custom: the parts
+// its owner ticked. The owner always sees all of it. Online status keeps its own switch (Show my online status).
+const PROFILE_PARTS = Object.freeze(["standings", "history", "collection", "photos", "about", "directory"]);
+function profileVisibility(isPublic, prefsJson) {
+  if (Number(isPublic) !== 1) return { mode: "private", parts: [] };
+  let visibility = null;
+  try { visibility = JSON.parse(prefsJson || "{}").visibility; } catch { visibility = null; }
+  if (visibility?.mode !== "custom") return { mode: "public", parts: [...PROFILE_PARTS] };
+  return { mode: "custom", parts: PROFILE_PARTS.filter((part) => (visibility.parts || []).includes(part)) };
+}
+// SQL: a profile that shows in Online now, Recently joined, the player search and the sitemap (alias p)
+const LISTED_PROFILE = `(p.is_public = 1 AND p.public_id IS NOT NULL
+  AND (COALESCE(json_extract(p.preferences_json, '$.visibility.mode'), 'public') <> 'custom'
+    OR EXISTS (SELECT 1 FROM json_each(COALESCE(p.preferences_json, '{}'), '$.visibility.parts') WHERE value = 'directory')))`;
+
 async function ownProfile(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
   const row = await env.DB.prepare(
-    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, listed_in_search AS listedInSearch, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
+    "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, listed_in_search AS listedInSearch, preferences_json AS prefs, updated_at AS updatedAt FROM profiles WHERE discord_id = ?",
   ).bind(account.discordId).first();
   const isPublic = Number(row?.isPublic || 0) === 1;
-  return json({ profile: { ...row, isPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null } });
+  const { prefs, ...shown } = row || {};
+  const { mode, parts } = profileVisibility(row?.isPublic, prefs);
+  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1341,13 +1360,20 @@ async function updateOwnProfile(request, env) {
   if (body.listedInSearch !== undefined && typeof body.listedInSearch !== "boolean") {
     return json({ error: "listedInSearch must be true or false." }, 400);
   }
-  // Private by default: a profile only becomes public when its owner sends isPublic: true, and editing the name or
-  // bio never changes its visibility. A public profile gets a random id for its link (never the Discord id).
-  // Being found by the display name is a separate opt-in (off by default), and only matters while the profile is public.
+  if (body.visibility !== undefined && !["public", "private", "custom"].includes(body.visibility)) {
+    return json({ error: "visibility must be public, private or custom." }, 400);
+  }
+  if (body.publicParts !== undefined && (!Array.isArray(body.publicParts) || !body.publicParts.every((part) => PROFILE_PARTS.includes(part)))) {
+    return json({ error: `publicParts must list some of: ${PROFILE_PARTS.join(", ")}.` }, 400);
+  }
+  // Public by default (Public, Private or Custom; editing the name or bio never changes it). A public profile has a
+  // random id for its link (never the Discord id). Being found by the display name is a separate opt-in (off by
+  // default), and only matters while the profile is public.
   const current = await env.DB.prepare(
     "SELECT is_public AS isPublic, public_id AS publicId, findable_by_name AS findableByName, show_presence AS showPresence, listed_in_search AS listedInSearch FROM profiles WHERE discord_id = ?",
   ).bind(account.discordId).first();
-  const isPublic = typeof body.isPublic === "boolean" ? body.isPublic : Number(current?.isPublic || 0) === 1;
+  const isPublic = body.visibility ? body.visibility !== "private"
+    : typeof body.isPublic === "boolean" ? body.isPublic : Number(current?.isPublic || 0) === 1;
   const findableByName = typeof body.findableByName === "boolean" ? body.findableByName : Number(current?.findableByName || 0) === 1;
   const showPresence = typeof body.showPresence === "boolean" ? body.showPresence : Number(current?.showPresence ?? 1) === 1;
   const listedInSearch = typeof body.listedInSearch === "boolean" ? body.listedInSearch : Number(current?.listedInSearch ?? 1) === 1;
@@ -1359,7 +1385,15 @@ async function updateOwnProfile(request, env) {
   if (!showPresence) {     // turned off: what was kept goes too
     await env.DB.prepare("UPDATE game_characters SET presence_state = NULL, presence_at = NULL WHERE discord_id = ?").bind(account.discordId).run();
   }
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
+  // Custom: the parts it shows (kept in preferences_json); Public or Private drop the list
+  if (body.visibility) {
+    const custom = body.visibility === "custom" ? JSON.stringify({ mode: "custom", parts: PROFILE_PARTS.filter((part) => (body.publicParts || []).includes(part)) }) : null;
+    await env.DB.prepare(`UPDATE profiles SET preferences_json = CASE WHEN ? IS NULL THEN json_remove(COALESCE(preferences_json, '{}'), '$.visibility')
+      ELSE json_set(COALESCE(preferences_json, '{}'), '$.visibility', json(?)) END WHERE discord_id = ?`).bind(custom, custom, account.discordId).run();
+  }
+  const saved = await env.DB.prepare("SELECT preferences_json AS prefs FROM profiles WHERE discord_id = ?").bind(account.discordId).first();
+  const { mode, parts } = profileVisibility(isPublic ? 1 : 0, saved?.prefs);
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1528,8 +1562,8 @@ async function setMainCharacter(request, env) {
     .bind(gameUid, account.discordId).first()) return json({ error: "That character isn't linked to this account." }, 404);
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
-    `INSERT INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at, main_game_uid)
-     VALUES (?, NULL, NULL, 0, ?, ?, ?)
+    `INSERT INTO profiles (discord_id, display_name, bio, is_public, public_id, created_at, updated_at, main_game_uid)
+     VALUES (?, NULL, NULL, 1, lower(hex(randomblob(8))), ?, ?, ?)
      ON CONFLICT(discord_id) DO UPDATE SET main_game_uid = excluded.main_game_uid, updated_at = excluded.updated_at`,
   ).bind(account.discordId, now, now, gameUid).run();
   return json({ ok: true, main: await mainCharacter(env, account.discordId) });
@@ -1570,6 +1604,7 @@ async function ownProfileOverview(request, env) {
       bio: profile?.bio || null,
       avatarUrl: account.avatarUrl,
       isPublic: Number(profile?.isPublic || 0) === 1,
+      visibility: profileVisibility(profile?.isPublic, profile?.prefs).mode,
       ...(Number(profile?.isPublic || 0) === 1 && profile?.publicId ? { publicId: profile.publicId } : {}),
     },
     layout: storedProfileLayout(profile?.prefs),
@@ -1596,7 +1631,7 @@ async function searchProfiles(request, env) {
   const { results } = await env.DB.prepare(
     `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid
      FROM game_characters gc JOIN profiles p ON p.discord_id = gc.discord_id
-     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND gc.character_name IS NOT NULL
+     WHERE ${LISTED_PROFILE} AND gc.character_name IS NOT NULL
        AND ${byUid ? "gc.game_uid LIKE ?" : "LOWER(gc.character_name) LIKE ? ESCAPE '\\'"}
      ORDER BY gc.last_seen_at DESC LIMIT 30`,
   ).bind(byUid ? `${q}%` : like).all();
@@ -1605,7 +1640,7 @@ async function searchProfiles(request, env) {
        (SELECT json_group_array(json_object('name', gc.character_name, 'gameUid', gc.game_uid)) FROM game_characters gc
         WHERE gc.discord_id = p.discord_id AND gc.character_name IS NOT NULL) AS charactersJson
      FROM profiles p
-     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ? ESCAPE '\\'
+     WHERE ${LISTED_PROFILE} AND p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ? ESCAPE '\\'
      ORDER BY p.updated_at DESC LIMIT 10`,
   ).bind(like).all();
   const seen = new Map();
@@ -1635,21 +1670,21 @@ async function profilesDirectory(env) {
   const [recent, online, others] = await Promise.all([
     env.DB.prepare(
       `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, p.created_at AS joinedAt FROM profiles p
-       WHERE p.is_public = 1 AND p.public_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 8`,
+       WHERE ${LISTED_PROFILE} ORDER BY p.created_at DESC LIMIT 8`,
     ).all(),
     env.DB.prepare(
       `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name,
          CASE WHEN EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
            AND gc.presence_state = 'online') THEN 'online' ELSE 'afk' END AS state
        FROM profiles p
-       WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND COALESCE(p.show_presence, 1) = 1
+       WHERE ${LISTED_PROFILE} AND COALESCE(p.show_presence, 1) = 1
          AND EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
            AND gc.presence_state IN ('online', 'afk'))
        ORDER BY state = 'online' DESC, p.updated_at DESC LIMIT 24`,
     ).bind(fresh).all(),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT gc.discord_id) AS count FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id
-       WHERE gc.presence_at > ? AND gc.presence_state IN ('online', 'afk') AND (p.is_public IS NULL OR p.is_public = 0 OR p.public_id IS NULL)`,
+       WHERE gc.presence_at > ? AND gc.presence_state IN ('online', 'afk') AND NOT COALESCE(${LISTED_PROFILE}, 0)`,
     ).bind(fresh).first(),
   ]);
   return json({
@@ -1799,8 +1834,8 @@ async function ownBattleHistory(request, env) {
   return json(await battleHistory(env, account.discordId, new URL(request.url).searchParams, { owner: true }));
 }
 async function publicBattleHistory(request, env, publicId) {
-  const profile = await env.DB.prepare("SELECT discord_id AS discordId FROM profiles WHERE public_id = ? AND is_public = 1").bind(publicId).first();
-  if (!profile) return json({ error: "Profile not found." }, 404);
+  const profile = await env.DB.prepare("SELECT discord_id AS discordId, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1").bind(publicId).first();
+  if (!profile || !profileVisibility(1, profile.prefs).parts.includes("history")) return json({ error: "Profile not found." }, 404);
   if (!leaderboardPublic(env)) return json({ runs: [], next: null, filters: { modes: [], bosses: [], weeks: [] } });
   return json(await battleHistory(env, profile.discordId, new URL(request.url).searchParams, { owner: false }));
 }
@@ -1899,8 +1934,8 @@ async function saveProfileLayout(request, env) {
   const now = Math.floor(Date.now() / 1000);
   const empty = !layout.order.length && !layout.hidden.length;
   await env.DB.prepare(
-    `INSERT INTO profiles (discord_id, display_name, bio, is_public, created_at, updated_at, preferences_json)
-     VALUES (?1, NULL, NULL, 0, ?2, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE json_object('profileLayout', json(?3)) END)
+    `INSERT INTO profiles (discord_id, display_name, bio, is_public, public_id, created_at, updated_at, preferences_json)
+     VALUES (?1, NULL, NULL, 1, lower(hex(randomblob(8))), ?2, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE json_object('profileLayout', json(?3)) END)
      ON CONFLICT(discord_id) DO UPDATE SET updated_at = ?2, preferences_json = CASE WHEN ?3 IS NULL
        THEN json_remove(COALESCE(preferences_json, '{}'), '$.profileLayout')
        ELSE json_set(COALESCE(preferences_json, '{}'), '$.profileLayout', json(?3)) END`,
@@ -1913,8 +1948,8 @@ async function saveProfileLayout(request, env) {
 async function profilesSitemap(env) {
   const origin = configuredPublicSiteOrigin(env) || "https://aniilogs.github.io";
   const rows = await env.DB.prepare(
-    `SELECT public_id AS publicId, updated_at AS updatedAt FROM profiles
-     WHERE is_public = 1 AND public_id IS NOT NULL AND listed_in_search = 1 ORDER BY updated_at DESC LIMIT 5000`,
+    `SELECT p.public_id AS publicId, p.updated_at AS updatedAt FROM profiles p
+     WHERE ${LISTED_PROFILE} AND p.listed_in_search = 1 ORDER BY p.updated_at DESC LIMIT 5000`,
   ).all();
   const urls = (rows.results || []).filter((row) => /^[A-Za-z0-9]{8,24}$/u.test(String(row.publicId))).map((row) => {
     const lastmod = Number(row.updatedAt) > 0 ? `<lastmod>${new Date(Number(row.updatedAt) * 1000).toISOString().slice(0, 10)}</lastmod>` : "";
@@ -1933,6 +1968,8 @@ async function publicProfile(request, env, publicId) {
   if (!profile) return json({ error: "Profile not found." }, 404);
   // the owner opening their own link: the page shows them their own profile (with Edit) at this address
   const viewer = bearerToken(request) ? await currentAccount(request, env).catch(() => null) : null;
+  const { parts } = profileVisibility(1, profile.prefs);
+  const shows = (part) => parts.includes(part);
   const [characters, main] = await Promise.all([
     env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level,
       json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server FROM game_characters
@@ -1948,7 +1985,7 @@ async function publicProfile(request, env, publicId) {
     completed = [];
   }
   let leaderboards = null;
-  if (leaderboardPublic(env)) {
+  if (leaderboardPublic(env) && shows("standings")) {
     const kinds = Object.keys(LEADERBOARD_KINDS);
     const standings = await Promise.all(kinds.map((kind) => boardStandings(env, profile.discordId, kind)));
     leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index].map(({ gameUid, ...entry }) => entry)]));
@@ -1956,16 +1993,17 @@ async function publicProfile(request, env, publicId) {
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
-    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: profile.bio || null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
+    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: shows("about") ? profile.bio || null : null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
     main: main?.name ? { name: main.name } : null,
     ...(viewer?.discordId === profile.discordId ? { own: true } : {}),
+    parts,                                 // the parts this profile shows (the page leaves out the rest)
     layout: storedProfileLayout(profile.prefs),
-    characters: (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })),
+    characters: shows("about") ? (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })) : [],
     presence: await profilePresence(env, profile.discordId),
     leaderboards,
-    photos: await profilePhotos(env, profile.discordId, false),
-    gameStats: await characterStats(env, main),
-    collection: collectionSummary(completed, await releaseChecklist(env)),
+    photos: shows("photos") ? await profilePhotos(env, profile.discordId, false) : [],
+    gameStats: shows("collection") ? await characterStats(env, main) : null,
+    collection: shows("collection") ? collectionSummary(completed, await releaseChecklist(env)) : null,
   });
 }
 

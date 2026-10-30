@@ -1638,3 +1638,48 @@ test("how a run ended: cleared, ended early by the leader, time up, or invalid (
   const mine = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&mine=1", { session: SESSIONS.dev })).json()).entries;
   assert.equal(mine.some((e) => e.score === 26400), false);
 });
+
+test("profile visibility: Public shows every part, Custom only the ticked ones, Private nothing - the owner always sees all", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  await sendRun(env, token, run("v1"));
+  const save = (body) => call(env, "/api/profile", { session: SESSIONS.dev, method: "PATCH", body: { displayName: "Dev", bio: "about me", ...body } });
+  const publicId = (await (await save({ visibility: "public" })).json()).profile.publicId;
+  const view = async () => (await call(env, `/api/profiles/${publicId}`)).json();
+  const listed = async () => (await (await call(env, "/api/profiles/directory")).json()).recent.map((row) => row.publicId);
+  const found = async () => (await (await call(env, "/api/profiles/search?q=DevOne")).json()).results.map((row) => row.publicId);
+  // Public: everything
+  let shown = await view();
+  assert.deepEqual(shown.parts, ["standings", "history", "collection", "photos", "about", "directory"]);
+  assert.equal(shown.profile.bio, "about me");
+  assert.ok(shown.leaderboards);
+  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 200);
+  assert.deepEqual([await listed(), await found()], [[publicId], [publicId]]);
+  // Custom: everything private but Battle History and leaderboard standing
+  const custom = await (await save({ visibility: "custom", publicParts: ["history", "standings"] })).json();
+  assert.deepEqual([custom.profile.visibility, custom.profile.publicParts], ["custom", ["standings", "history"]]);
+  shown = await view();
+  assert.deepEqual(shown.parts, ["standings", "history"]);
+  assert.equal(shown.profile.bio, null);                                   // about: private
+  assert.deepEqual([shown.characters, shown.photos, shown.collection], [[], [], null]);
+  assert.ok(shown.leaderboards);                                           // standings: public
+  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 200);
+  assert.deepEqual([await listed(), await found()], [[], []]);            // not in the directory or the search
+  // Custom without Battle History: its link is "not found"
+  await save({ visibility: "custom", publicParts: ["standings"] });
+  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 404);
+  // the owner still sees all of it
+  assert.equal((await call(env, "/api/profile/history", { session: SESSIONS.dev })).status, 200);
+  const own = await (await call(env, "/api/profile", { session: SESSIONS.dev })).json();
+  assert.deepEqual([own.profile.visibility, own.profile.publicParts], ["custom", ["standings"]]);
+  // Private: no page at all
+  await save({ visibility: "private" });
+  assert.equal((await call(env, `/api/profiles/${publicId}`)).status, 404);
+  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 404);
+  // back to Public: the same link, everything again, and the Custom list is gone
+  await save({ visibility: "public" });
+  assert.deepEqual((await view()).parts.length, 6);
+  assert.equal(JSON.parse(sqlite.prepare("SELECT preferences_json FROM profiles WHERE discord_id = ?").get(IDS.dev).preferences_json || "{}").visibility, undefined);
+  assert.equal((await save({ visibility: "secret" })).status, 400);
+  assert.equal((await save({ visibility: "custom", publicParts: ["everything"] })).status, 400);
+});

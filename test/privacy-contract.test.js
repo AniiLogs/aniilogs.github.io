@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
@@ -13,10 +14,11 @@ const landing = await readFile(new URL("../public/index.html", import.meta.url),
 const landingApp = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
 const privacy = await readFile(new URL("../public/privacy.html", import.meta.url), "utf8");
 
-test("profiles are private by default and only an explicit opt-in publishes them", () => {
-  assert.match(accountMigration, /is_public INTEGER NOT NULL DEFAULT 0/u);
-  assert.match(source, /INSERT OR IGNORE INTO profiles[\s\S]*VALUES \(\?, \?, NULL, 0, \?, \?\)/u);
-  assert.match(source, /typeof body\.isPublic === "boolean" \? body\.isPublic : Number\(current\?\.isPublic \|\| 0\) === 1/u);
+test("profiles are public by default; their owner picks Private or Custom, and the server enforces it", () => {
+  const migration0033 = readFileSync(new URL("../migrations/0033_battle_history.sql", import.meta.url), "utf8");
+  assert.match(source, /INSERT OR IGNORE INTO profiles[\s\S]*VALUES \(\?, \?, NULL, 1, \?, \?, \?\)/u);   // new accounts: public
+  assert.match(migration0033, /UPDATE profiles SET is_public = 1/u);                                    // existing ones too
+  assert.ok(source.includes('const PROFILE_PARTS = Object.freeze(["standings", "history", "collection", "photos", "about", "directory"])'));
   assert.match(source, /WHERE public_id = \? AND is_public = 1/u);
   assert.doesNotMatch(source, /\/api\/profiles\/\(\d/u);
   assert.match(landing, /data-profile-editor hidden/u);
@@ -60,7 +62,8 @@ test("the public site discloses its unofficial status and links its privacy poli
   assert.match(landing, /href="\/privacy\.html"/u);
   assert.match(privacy, /not affiliated with Aniimo or its developers/u);
   assert.match(privacy, /Discord sign-in requests only the <strong>identify<\/strong> scope/u);
-  assert.match(privacy, /Profiles are private by default/u);
+  assert.match(privacy, /Profiles are public by default, and you choose who sees yours/u);
+  assert.match(privacy, /A part you keep private is never sent to anyone else/u);
   assert.match(privacy, /Leaderboard entries are public/u);
   assert.match(privacy, /Map share links expire after 3 hours/u);
 });
