@@ -141,8 +141,9 @@ function showSignedIn(account) {
   void loadPrivateProfile(name);
   if (PROFILE_VIEW) {
     document.querySelector("[data-profile-signin]").hidden = true;
-    document.querySelector("[data-profile-back]").hidden = !PUBLIC_PROFILE_ID;   // on someone else's profile
-    document.querySelector("[data-profile-edit]").hidden = Boolean(PUBLIC_PROFILE_ID);
+    // on someone else's profile (your own link shows your own: showAsOwner)
+    document.querySelector("[data-profile-back]").hidden = !PUBLIC_PROFILE_ID || ownAtLink;
+    document.querySelector("[data-profile-edit]").hidden = Boolean(PUBLIC_PROFILE_ID) && !ownAtLink;
   }
   if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) void loadProfileOverview();   // your profile: on the Profiles page only
 }
@@ -849,7 +850,8 @@ function showAsOwner() {
 const cardGrid = profileOverview.querySelector(".profile-overview-grid");
 const arrangeBar = profileOverview.querySelector("[data-profile-arrange-bar]");
 const cardPanel = (id) => cardGrid.querySelector(`:scope > [data-overview-panel="${id}"]`);
-const pageCards = () => [...cardGrid.querySelectorAll(":scope > [data-overview-panel]")]
+// the site's own order, as the page lists the cards (read once: arranging moves them)
+const siteCards = [...cardGrid.querySelectorAll(":scope > [data-overview-panel]")]
   .map((panel) => ({ id: panel.dataset.overviewPanel, title: panel.querySelector("h3")?.textContent || panel.dataset.overviewPanel }));
 let savedLayout = { order: [], hidden: [] };
 let draftCards = null;
@@ -863,7 +865,7 @@ function placeCards(list) {
 }
 function applyCardLayout(layout) {
   savedLayout = layout || { order: [], hidden: [] };
-  if (!draftCards) placeCards(window.AniiProfileCards.arrangeCards(pageCards(), savedLayout));
+  if (!draftCards) placeCards(window.AniiProfileCards.arrangeCards(siteCards, savedLayout));
 }
 
 function arrangeTools(card, index, count) {
@@ -916,14 +918,14 @@ function setArranging(on) {
   }
 }
 profileOverview.querySelector("[data-profile-arrange]").addEventListener("click", () => {
-  draftCards = window.AniiProfileCards.arrangeCards(pageCards(), savedLayout);
+  draftCards = window.AniiProfileCards.arrangeCards(siteCards, savedLayout);
   arrangeBar.querySelector("[data-arrange-status]").textContent = "";
   setArranging(true);
   renderDraft();
   arrangeBar.scrollIntoView({ block: "nearest", behavior: "smooth" });
 });
 arrangeBar.querySelector("[data-arrange-reset]").addEventListener("click", () => {
-  draftCards = window.AniiProfileCards.arrangeCards(pageCards(), null);
+  draftCards = window.AniiProfileCards.arrangeCards(siteCards, null);
   renderDraft();
 });
 arrangeBar.querySelector("[data-arrange-cancel]").addEventListener("click", () => {
@@ -940,7 +942,7 @@ arrangeBar.querySelector("[data-arrange-save]").addEventListener("click", async 
     const response = await apiFetch("/profile/layout", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(window.AniiProfileCards.layoutOf(draftCards, pageCards())),
+      body: JSON.stringify(window.AniiProfileCards.layoutOf(draftCards, siteCards)),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.layout) throw new Error(payload.error || `HTTP ${response.status}`);
