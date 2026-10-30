@@ -544,8 +544,10 @@
   const BOARD_ROWS = 10;                                  // a boss board's top rows; "View all" pages the rest
   const FULL_ROWS = 25;
   const SLOT_CLASSES = ["is-left", "is-center", "is-right"];
-  // A run's time, kept short for phones: the clear time, or "No clear" (time ran out, or no kill recorded)
+  // A run's time, kept short for phones: the clear time, or "No clear" (time ran out, or no kill recorded); a single
+  // run that was quit before the clock ran out says so
   function clearText(entry) {
+    if (entry.outcome === "ended-early") return `Ended early (${duration(entry.clearTimeS)})`;
     return entry.clearTimeS == null ? "No clear" : duration(entry.clearTimeS);
   }
   function shortDate(unix) {

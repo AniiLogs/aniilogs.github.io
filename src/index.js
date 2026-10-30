@@ -1763,6 +1763,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         stars: row.stars,
         clearTimeS: row.clear_time_s,
         cleared: row.cleared == null ? null : Boolean(row.cleared),
+        outcome: interlinkOutcome(row, weekList),
         floors: row.floors,
         teamDps: row.team_dps,
         partySize: row.party_size,
@@ -3635,6 +3636,8 @@ function withProfiles(players, profiles) {
 // - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
 //   early from there); the last entry whose fromCycle is at or below the week's id applies. Weeks before 4000:
 //   15 stars cleared any boss. From 4000 a kill is every star: 20 / 40 / 20 (the center boss needs 40).
+// - durationS: a fight's clock (sys_config_data BossRushCombatDuration, 180). A run that ends before it without the
+//   kill's stars was quit early - the game still shows its result and Battle Data screens.
 // - splitBlock: weeks are grouped into splits (the game resets stars) by their id block: 3000-3005 is one split,
 //   4000 starts the next.
 // - seasons: which weeks belong to which season, by week id (the last entry whose fromCycle is at or below the
@@ -3648,6 +3651,7 @@ const INTERLINK_RULES = Object.freeze({
     Object.freeze({ fromCycle: 0, caps: Object.freeze([15, 30, 15]), clear: Object.freeze([15, 15, 15]) }),
     Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 40, 20]) }),
   ]),
+  durationS: 180,
   splitBlock: 1000,
   seasons: Object.freeze([
     Object.freeze({ season: 0, fromCycle: 0, label: "Before Season 1" }),
@@ -3679,6 +3683,17 @@ function runStarRule(cycleId, slot, sentCap) {
   const everyStar = slot >= 0 ? ruleClear === ruleCap : rule.clear.every((value, index) => value === rule.caps[index]);
   if (sentCap == null) return { cap: ruleCap, clear: ruleClear, ruleCap };
   return { cap: sentCap, clear: everyStar ? sentCap : ruleClear, ruleCap };
+}
+
+// How an Interlink run ended: "cleared" (the kill's stars for its slot that week, or the cap aLogs read), "ended-early"
+// (under the clock without them: someone quit) or "time-up" (the clock ran out). null when the time isn't known.
+function interlinkOutcome(row, weeks) {
+  if (row.kind !== "interlink_run" || row.clear_time_s == null) return null;
+  const week = interlinkCycle(weeks, row.cycle);
+  const slot = week ? week.bosses.findIndex((boss) => String(boss.id) === String(row.boss_id)) : -1;
+  const { clear } = runStarRule(row.cycle, slot, sentStarCap(row.extra_json));
+  if ((Number(row.stars) || 0) >= clear && row.cleared !== 0) return "cleared";
+  return Number(row.clear_time_s) < INTERLINK_RULES.durationS ? "ended-early" : "time-up";
 }
 
 function interlinkStarCaps(cycleId) {
@@ -4112,6 +4127,7 @@ async function leaderboardEntries(request, env) {
   ).bind(...binds, limit, offset).all();
   const profiles = await partyProfiles(env, results || []);
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
+  const weeks = kind === "interlink_run" ? await interlinkCycles(env) : [];
   return json({
     kind,
     sort: sortKey,
@@ -4141,6 +4157,7 @@ async function leaderboardEntries(request, env) {
       stars: row.stars,
       clearTimeS: row.clear_time_s,
       cleared: row.cleared == null ? null : Boolean(row.cleared),
+      outcome: interlinkOutcome(row, weeks),
       floors: row.floors,
       teamDps: row.team_dps,
       avgDps: row.p_dps ?? null,

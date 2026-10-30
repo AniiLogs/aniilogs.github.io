@@ -516,6 +516,7 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
   color: var(--ink-soft); font-size: 0.7rem; font-weight: 800; letter-spacing: 0.02em; }
 .history-chip.is-verified { background: color-mix(in srgb, #3ddc84 20%, transparent); color: color-mix(in srgb, #3ddc84 70%, var(--ink)); }
 .history-chip.is-best { background: color-mix(in srgb, #f5b942 22%, transparent); color: color-mix(in srgb, #f5b942 55%, var(--ink)); }
+.history-chip.is-early { background: color-mix(in srgb, #f0525a 18%, transparent); color: color-mix(in srgb, #f0525a 70%, var(--ink)); }
 .history-chip.is-credited { background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--teal); }
 .history-player .history-chip { margin-left: 0.4rem; }
 .history-body { display: grid; gap: 0.8rem; padding: 0 0.8rem 0.8rem; }

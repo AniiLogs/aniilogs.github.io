@@ -1614,3 +1614,18 @@ test("a newer but lower run never replaces the best on the boards; it's added to
   const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
   assert.deepEqual(history.map((r) => r.score), [12000, 30000]);          // both, newest first
 });
+
+test("how a run ended: cleared, ended early (quit, the result screens still appear) or time up", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const infergon = { boss: { id: "80000107", name: "Omega Infergon", level: 60 } };      // week 3005: 15 stars clear
+  await sendRun(env, token, run("kill", { ...infergon, stars: 15, score: 18000, clearTimeS: 140, cleared: true, playedAt: 1792700300 }));
+  await sendRun(env, token, run("quit", { ...infergon, stars: 9, score: 9500, clearTimeS: 95, cleared: false, playedAt: 1792700200 }));
+  await sendRun(env, token, run("timeout", { ...infergon, stars: 12, score: 12500, clearTimeS: 180, cleared: false, playedAt: 1792700100 }));
+  // an app that said "cleared" for a quit run (up to 0.1.21): it's still a run ended early
+  await sendRun(env, token, run("quit-said-cleared", { ...infergon, stars: 6, score: 6400, clearTimeS: 70, cleared: true, playedAt: 1792700000 }));
+  const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[18000, "cleared"], [9500, "ended-early"], [12500, "time-up"], [6400, "ended-early"]]);
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&sort=played_at")).json()).entries;
+  assert.deepEqual(entries.map((e) => e.outcome).sort(), ["cleared", "ended-early", "ended-early", "time-up"]);
+});

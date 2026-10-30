@@ -1007,7 +1007,11 @@ function historyNumbers(run) {
   if (run.mode === "interlink" && run.score != null) parts.push(`${numberFormat.format(run.score)} pts`);
   if (run.mode === "eggheist" && run.score != null) parts.push(`${numberFormat.format(run.score)} pts`);
   if (run.stars != null && run.mode === "interlink") parts.push(`★ ${run.stars}`);
-  if (run.clearTimeS != null) parts.push(run.cleared ? `cleared in ${clockTime(run.clearTimeS)}` : run.mode === "interlink" ? "no clear" : clockTime(run.clearTimeS));
+  // an Interlink run: cleared, quit before the clock ran out (the result screens still appear), or the clock ran out
+  if (run.outcome === "cleared") parts.push(`cleared in ${clockTime(run.clearTimeS)}`);
+  else if (run.outcome === "ended-early") parts.push(`ended early at ${clockTime(run.clearTimeS)}`);
+  else if (run.outcome === "time-up") parts.push("time up");
+  else if (run.clearTimeS != null) parts.push(run.cleared ? `cleared in ${clockTime(run.clearTimeS)}` : run.mode === "interlink" ? "no clear" : clockTime(run.clearTimeS));
   if (run.floors != null) parts.push(`${run.floors} floors`);
   return parts.join(" · ");
 }
@@ -1017,6 +1021,7 @@ function historyChips(run) {
   if (run.check === "verified") chip("is-verified", "Verified", "Checked: the site read this run's full screenshots again and they agree.");
   if (run.check === "pending") chip("is-pending", "Pending", "Waiting for a check against this run's full screenshots.");
   if (run.newBests?.length) chip("is-best", "New best", "This run beat one of the player's bests when it was captured.");
+  if (run.outcome === "ended-early") chip("is-early", "Ended early", "The run ended before the clock ran out without the kill: someone quit.");
   if (run.credited) chip("is-credited", "Teammate's capture", "A teammate's aLogs captured this run with this player in the party.");
   if (run.captures > 1) chip("is-shared", `Captured by ${run.captures} players`, "The same run, sent by more than one player in the party.");
   if (run.hidden) chip("is-hidden", "Hidden", "Hidden from the boards: only you see it here.");
