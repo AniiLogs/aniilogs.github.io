@@ -383,13 +383,24 @@ test("free checks on every run; the AI reading only for runs that matter, and at
   const odd = JSON.parse(state("odd").json).rules.flags.map((flag) => flag.rule);
   assert.equal(state("odd").state, "mismatch");
   assert.ok(odd.includes("stars track score") && odd.includes("Avg DPS plausible") && odd.includes("Avg DPS add up to team DPS"));
-  // the daily cap (2 readings): a third run that matters isn't read today
-  await send("pb2", { score: 25000, stars: 20, cycle: "3003", boss: { id: "80000099", name: "Alpha Irisal", level: 60 }, players: [] });
-  await send("pb3", { score: 25000, stars: 20, cycle: "3003", boss: { id: "80000102", name: "Alpha Panpanta", level: 60 }, players: [] });
+  // the daily cap (2 readings): a third run that matters waits in the queue ("pending", still on the boards)
+  await send("pb2", { score: 15500, stars: 15, cycle: "3003", boss: { id: "80000099", name: "Alpha Irisal", level: 60 }, players: [] });
+  await send("pb3", { score: 25500, stars: 25, cycle: "3003", boss: { id: "80000102", name: "Alpha Panpanta", level: 60 }, players: [] });
   assert.equal(AI.calls, 4);
-  assert.match(JSON.parse(state("pb3").json).ai, /today's limit/u);
-  // shadow mode: every run still on the boards
-  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).total, 5);
+  assert.deepEqual([state("pb3").state, JSON.parse(state("pb3").json).queued], ["pending", true]);
+  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).total, 5);   // shadow mode
+  // the cap raised: the next run that comes in also reads the oldest queued one
+  env.VERIFY_DAILY_LIMIT = "10";
+  await send("ordinary2", { score: 18000, stars: 18 });
+  assert.equal(AI.calls, 6);
+  assert.notEqual(state("pb3").state, "pending");
+  // an administrator can drain the queue now (within the cap); here nothing is left
+  assert.equal((await call(env, "/api/admin/run-checks/drain", { session: SESSIONS.user, method: "POST", body: {} })).status, 403);
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'pending', verify_json = ? WHERE client_run_id = 'pb2'")
+    .run(JSON.stringify({ rules: { flags: [] }, reason: "personal best", queued: true }));
+  const drained = await (await call(env, "/api/admin/run-checks/drain", { session: SESSIONS.dev, method: "POST", body: { max: 5 } })).json();
+  assert.deepEqual([drained.read, drained.queued], [1, 0]);
+  assert.equal(AI.calls, 8);
 });
 
 test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {

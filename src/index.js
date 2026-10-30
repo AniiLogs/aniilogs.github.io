@@ -2385,7 +2385,10 @@ async function submitLeaderboardRecord(request, env) {
   await corroborateRun(env, submissionId);
   // the free checks, and for runs that matter the AI reading (shadow mode), after the response when the platform allows
   if (record.kind === "interlink_run") {
-    const checking = checkRun(env, submissionId).catch((error) => console.error("Run checks failed", error));
+    // ... and while today's cap has room, up to 2 of the oldest queued runs (so a raised cap or the daily reset
+    // works through the queue by itself)
+    const checking = checkRun(env, submissionId).then(() => drainRunChecks(env, 2))
+      .catch((error) => console.error("Run checks failed", error));
     if (env.waitUntil) env.waitUntil(checking);
     else await checking;
   }
@@ -2542,20 +2545,20 @@ async function aiReadingsLeft(env) {
   return limit - Number(row?.used || 0);
 }
 
+const RUN_CHECK_COLUMNS = `SELECT discord_id AS discordId, kind, cycle, boss_id AS bossId, score, stars, cleared,
+  clear_time_s AS clearTimeS, team_dps AS teamDps, meter_dps AS meterDps, players_json AS playersJson, extra_json AS extraJson,
+  verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?`;
+const saveRunCheck = (env, submissionId, state, detail) => env.DB.prepare(
+  "UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ?, verify_at = ? WHERE submission_id = ?",
+).bind(state, JSON.stringify(detail), Math.floor(Date.now() / 1000), submissionId).run();
+
 async function checkRun(env, submissionId) {
-  const row = await env.DB.prepare(
-    `SELECT discord_id AS discordId, kind, cycle, boss_id AS bossId, score, stars, cleared, clear_time_s AS clearTimeS,
-       team_dps AS teamDps, meter_dps AS meterDps, players_json AS playersJson, extra_json AS extraJson
-     FROM leaderboard_submissions WHERE submission_id = ?`,
-  ).bind(submissionId).first();
+  const row = await env.DB.prepare(RUN_CHECK_COLUMNS).bind(submissionId).first();
   if (!row || row.kind !== "interlink_run") return;
-  const save = (state, detail) => env.DB.prepare(
-    "UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ?, verify_at = ? WHERE submission_id = ?",
-  ).bind(state, JSON.stringify(detail), Math.floor(Date.now() / 1000), submissionId).run();
   const flags = freeRunChecks(row, interlinkCycle(await interlinkCycles(env), row.cycle));
   const rules = { flags };
   try {
-    await save(flags.length ? "mismatch" : null, { rules });
+    await saveRunCheck(env, submissionId, flags.length ? "mismatch" : null, { rules });
   } catch (error) {
     console.error("Run checks need migration 0032", error);
     return;
@@ -2565,20 +2568,66 @@ async function checkRun(env, submissionId) {
   const reason = await runMatters(env, row, submissionId, flags);
   if (!reason) return;
   if (await aiReadingsLeft(env) <= 0) {
-    await save(flags.length ? "mismatch" : null, { rules, ai: "skipped: today's limit reached", reason });
+    // over today's cap: queued (still ranked, "not checked yet"); read when there's room - after the 00:00 UTC
+    // reset or a higher VERIFY_DAILY_LIMIT, by the next runs that come in or an administrator's drain
+    await saveRunCheck(env, submissionId, flags.length ? "mismatch" : "pending", { rules, reason, queued: true });
     return;
   }
+  await aiReadRun(env, submissionId, row, rules, reason);
+}
+
+async function aiReadRun(env, submissionId, row, rules, reason) {
+  const flags = rules.flags || [];
+  const full = (parseJsonColumn(row.extraJson) || {}).proofFull || {};
   try {
-    await save("pending", { rules, model: VERIFY_MODEL, reason });
+    await saveRunCheck(env, submissionId, "pending", { rules, model: VERIFY_MODEL, reason });
     const result = await readScreen(env, full.evidence, VERIFY_PROMPTS.result);
     const battle = full.battle ? await readScreen(env, full.battle, VERIFY_PROMPTS.battle) : null;
     const { checked, differences } = compareReading(row, result, battle);
     const state = flags.length || differences.length ? "mismatch" : checked ? "match" : "unreadable";
-    await save(state, { rules, model: VERIFY_MODEL, reason, reading: { result, battle }, checked, differences });
+    await saveRunCheck(env, submissionId, state, { rules, model: VERIFY_MODEL, reason, reading: { result, battle }, checked, differences });
   } catch (error) {
     console.error("Second reading failed", error);
-    await save(flags.length ? "mismatch" : "unreadable", { rules, model: VERIFY_MODEL, reason, error: String(error?.message || error).slice(0, 300) });
+    await saveRunCheck(env, submissionId, flags.length ? "mismatch" : "unreadable",
+      { rules, model: VERIFY_MODEL, reason, error: String(error?.message || error).slice(0, 300) });
   }
+}
+
+// Reads the oldest queued runs while today's cap has room: up to max of them. Returns how many were read.
+async function drainRunChecks(env, max) {
+  if (!env.AI || !env.EVIDENCE) return 0;
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS submissionId FROM leaderboard_submissions
+     WHERE json_extract(verify_json, '$.queued') = 1 ORDER BY verify_at ASC LIMIT ?`,
+  ).bind(Math.max(0, max)).all();
+  let read = 0;
+  for (const { submissionId } of results || []) {
+    if (await aiReadingsLeft(env) <= 0) break;
+    const row = await env.DB.prepare(RUN_CHECK_COLUMNS).bind(submissionId).first();
+    const queued = parseJsonColumn(row?.verifyJson) || {};
+    if (!row || !queued.queued) continue;
+    await aiReadRun(env, submissionId, row, queued.rules || { flags: [] }, queued.reason || "queued");
+    read += 1;
+  }
+  return read;
+}
+
+// POST /api/admin/run-checks/drain {max} (administrators and the owner): read up to max (default 20, at most 100)
+// of the oldest queued runs now, within today's cap. -> { read, queued: how many still wait }
+async function drainRunChecksNow(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try {
+    body = await readJsonBody(request, 256);
+  } catch {
+    // an empty body: the default
+  }
+  const max = Math.min(100, Math.max(1, Number.parseInt(body?.max ?? "20", 10) || 20));
+  const read = await drainRunChecks(env, max);
+  const left = await env.DB.prepare("SELECT COUNT(*) AS queued FROM leaderboard_submissions WHERE json_extract(verify_json, '$.queued') = 1").first();
+  return json({ read, queued: Number(left?.queued || 0), readingsLeftToday: Math.max(0, await aiReadingsLeft(env)) });
 }
 
 // The review list (administrators and the owner, like log reports): runs whose second reading disagreed (?state=,
@@ -4470,6 +4519,7 @@ async function api(request, env) {
   if (betaRetireMatch && request.method === "POST") return retireBetaTest(request, env, betaRetireMatch[1]);
   if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
   if (url.pathname === "/api/admin/run-checks" && request.method === "GET") return listRunChecks(request, env);
+  if (url.pathname === "/api/admin/run-checks/drain" && request.method === "POST") return drainRunChecksNow(request, env);
   const runCheckMatch = url.pathname.match(/^\/api\/admin\/run-checks\/([A-Za-z0-9_-]{8,40})$/u);
   if (runCheckMatch && request.method === "POST") return reviewRunCheck(request, env, runCheckMatch[1]);
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);
