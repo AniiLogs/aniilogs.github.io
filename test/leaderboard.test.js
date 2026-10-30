@@ -1683,3 +1683,15 @@ test("profile visibility: Public shows every part, Custom only the ticked ones, 
   assert.equal((await save({ visibility: "secret" })).status, 400);
   assert.equal((await save({ visibility: "custom", publicParts: ["everything"] })).status, 400);
 });
+
+test("aLogs B2's Party screen as sent: the lead with level and CP, teammates by name, Season Buffs and an unsure offering", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const lineup = [{ slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60, cp: 12345,
+    team: [{ aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 }, { aniimo: "Somniwing" }, { aniimo: "Tromber" }] }];
+  const buffs = [{ id: 6023, name: "Joint Defense", level: 3 }, { id: 6012, name: "Coordinated Offensive", level: 2 }, { name: "Spark Offering or Ember Offering" }];
+  assert.equal((await sendRun(env, token, run("b2", { buffs, extra: { lineup } }))).status, 201);
+  const [listed] = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(listed.lineup[0].team, [{ aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 }, { aniimo: "Somniwing" }, { aniimo: "Tromber" }]);
+  assert.deepEqual(listed.buffs, [{ name: "Joint Defense", level: 3 }, { name: "Coordinated Offensive", level: 2 }, { name: "Spark Offering or Ember Offering" }]);
+});
