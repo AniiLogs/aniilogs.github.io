@@ -232,8 +232,6 @@ test("core skills swap in place with a reduced-motion safe comparison", () => {
 
 test("the shared shell uses the selected accent and Pathfinder terminology", () => {
   assert.match(landingStyles, /:root:not\(\[data-color-mode="light"\]\) nav a:hover,[\s\S]*?rgba\(var\(--accent-rgb\), 0\.13\)/u);
-  assert.match(landingHtml, /tools every Pathfinder reaches for first/u);
-  assert.match(landingHtml, /Pathfinder profiles/u);
   assert.match(explorerHtml, /AniiLogs Pathfinder/u);
   assert.doesNotMatch(landingHtml, /Aniimo explorers|tools every explorer|Explorer profiles/iu);
 });

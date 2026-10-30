@@ -98,7 +98,7 @@ async function consumeAuthHandoff() {
   window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, result.token);
 }
 
-function showSignedOut(message = "Sign in to sync progress. Profiles are private unless their owner makes them public.") {
+function showSignedOut(message = "") {
   for (const link of loginLinks) link.hidden = false;
   accountMenu.hidden = true;
   accountButton.hidden = true;
@@ -131,7 +131,7 @@ function showSignedIn(account) {
   logoutButton.hidden = false;
   deleteAccountButton.hidden = false;
   settingsShortcut.hidden = true;
-  status.textContent = `Signed in as ${name}. Your profile is private by default.`;
+  status.textContent = "";
   profilePublicRow.hidden = false;
   profileFindableRow.hidden = false;
   profilePresenceRow.hidden = false;
@@ -142,7 +142,7 @@ function showSignedIn(account) {
     document.querySelector("[data-profile-back]").hidden = !PUBLIC_PROFILE_ID;   // on someone else's profile
     document.querySelector("[data-profile-edit]").hidden = Boolean(PUBLIC_PROFILE_ID);
   }
-  if (!PUBLIC_PROFILE_ID) void loadProfileOverview();
+  if (PROFILE_VIEW && !PUBLIC_PROFILE_ID) void loadProfileOverview();   // your profile: on the Profiles page only
 }
 
 profilePublic.addEventListener("change", () => {
@@ -392,6 +392,14 @@ function renderEggHeist(boards) {
   });
   if (!rows.length) body.replaceChildren(element("p", "", "No Egg Heist season rank yet."));
   else body.replaceChildren(standingList("Season standing", rows));
+}
+
+// Home page pictures from the reviewed content release (a missing one leaves its card's text).
+for (const picture of document.querySelectorAll("img[data-content-src]")) {
+  const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+  if (!base) { picture.remove(); continue; }
+  picture.addEventListener("error", () => picture.remove(), { once: true });
+  picture.src = `${base}/${picture.dataset.contentSrc}${siteConfig.contentRevision ? `?v=${siteConfig.contentRevision}` : ""}`;
 }
 
 // Photos the player took in Aniimo, uploaded from the aLogs app. Each shows what the game recorded with it: when, the
