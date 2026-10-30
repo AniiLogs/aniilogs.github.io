@@ -1658,6 +1658,177 @@ async function profilesDirectory(env) {
   });
 }
 
+// ---------------------------------------------------------------- Battle History
+// Every record a player has: the ones they sent, newest first, plus Interlink runs a teammate's app sent with this
+// player's proven UID in the party (as CREDITED_RUNS credits them; a run both sent shows once, as their own). The
+// boards stay best-per-player; this is the whole record. It follows the profile: the owner's own, or a public
+// profile's for anyone. Names as on screen, a profile link only for public profiles, never a UID.
+const HISTORY_PAGE = 20;
+const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle, c.boss_id, c.boss_name, c.boss_level, c.score, c.stars,
+  c.clear_time_s, c.cleared, c.floors, c.team_dps, c.party_size, c.difficulty, c.trial, c.rank_tier, c.rank_subtier, c.rank_name,
+  c.players_json, c.extra_json, c.evidence_key, c.battle_evidence_key, c.proof_pruned_at, c.verify_state, c.status, c.played_at,
+  c.created_at, COALESCE(c.played_at, c.created_at) AS at`;
+
+async function battleHistory(env, discordId, params, { owner }) {
+  const uids = ((await env.DB.prepare("SELECT game_uid AS uid FROM game_characters WHERE discord_id = ?").bind(discordId).all()).results || [])
+    .map((row) => String(row.uid)).filter((uid) => /^\d{4,24}$/u.test(uid)).slice(0, 10);
+  const own = `SELECT ${HISTORY_COLUMNS}, 0 AS credited FROM leaderboard_submissions c
+    WHERE c.discord_id = ?1 AND c.kind <> 'interlink_week'${owner ? "" : " AND c.status = 'visible'"}`;
+  // a teammate's copy: only through a UID of this account's that's proven (or confirmed in that party), and not a
+  // run this player also sent themselves (same game instance)
+  const credited = uids.length ? `SELECT ${HISTORY_COLUMNS}, 1 AS credited FROM leaderboard_submissions c
+    WHERE c.kind = 'interlink_run' AND c.status = 'visible' AND c.discord_id <> ?1
+      AND (${uids.map((uid) => `instr(c.players_json, '"${uid}"') > 0`).join(" OR ")})
+      AND EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
+        WHERE gc.discord_id = ?1 AND json_extract(pl.value, '$.ai') = 0
+          AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1))
+      AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions mine WHERE mine.discord_id = ?1 AND mine.kind = 'interlink_run'
+        AND json_extract(mine.extra_json, '$.instanceId') IS NOT NULL
+        AND json_extract(mine.extra_json, '$.instanceId') = json_extract(c.extra_json, '$.instanceId'))` : null;
+  const all = `SELECT * FROM (${own}${credited ? ` UNION ALL ${credited}` : ""})`;
+  const where = [];
+  const binds = [discordId];
+  const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "";
+  if (mode) { where.push(`mode = ?${binds.push(mode)}`); }
+  const boss = String(params.get("boss") || "");
+  if (/^[A-Za-z0-9_-]{1,40}$/u.test(boss)) where.push(`boss_id = ?${binds.push(boss)}`);
+  const cycle = String(params.get("cycle") || "");
+  if (/^[A-Za-z0-9_.-]{1,24}$/u.test(cycle)) where.push(`cycle = ?${binds.push(cycle)}`);
+  const filtered = `${all}${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
+  // the page after "<at>.<submissionId>" (newest first)
+  const before = String(params.get("before") || "").match(/^(\d{1,12})\.([A-Za-z0-9_-]{8,40})$/u);
+  const page = before
+    ? `SELECT * FROM (${filtered}) WHERE at < ?${binds.push(Number(before[1]))} OR (at = ?${binds.length} AND submission_id < ?${binds.push(before[2])})`
+    : filtered;
+  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || String(HISTORY_PAGE), 10) || HISTORY_PAGE, 1), 50);
+  const { results } = await env.DB.prepare(`${page} ORDER BY at DESC, submission_id DESC LIMIT ${limit + 1}`).bind(...binds).all();
+  const rows = (results || []).slice(0, limit);
+  const profiles = await partyProfiles(env, rows);
+  // a week's dates, for its label ("Week of Oct 28")
+  const weekList = await interlinkCycles(env);
+  const weekDates = (id) => { const week = interlinkCycle(weekList, id); return week ? { start: week.start, end: week.end } : {}; };
+  // the filter menus (first page only): what this player's record has
+  let filters;
+  if (!before) {
+    const facet = async (sql) => (await env.DB.prepare(sql).bind(discordId).all()).results || [];
+    const [modes, bosses, weeks] = await Promise.all([
+      facet(`SELECT mode AS value, COUNT(*) AS count FROM (${all}) GROUP BY mode ORDER BY count DESC`),
+      facet(`SELECT boss_id AS id, MAX(boss_name) AS name, COUNT(*) AS count FROM (${all}) WHERE boss_id IS NOT NULL GROUP BY boss_id ORDER BY name`),
+      facet(`SELECT cycle AS value, COUNT(*) AS count FROM (${all}) WHERE cycle IS NOT NULL AND mode = 'interlink' GROUP BY cycle ORDER BY CAST(cycle AS INTEGER) DESC`),
+    ]);
+    filters = { modes, bosses, weeks: weeks.map((row) => ({ ...row, ...weekDates(row.value) })) };
+  }
+  const last = rows.at(-1);
+  return {
+    runs: rows.map((row) => {
+      const extra = parseJsonColumn(row.extra_json) || {};
+      return {
+        submissionId: row.submission_id,
+        credited: Boolean(row.credited),      // from a teammate's copy of the run
+        kind: row.kind,
+        mode: row.mode,
+        cycle: row.cycle,
+        week: row.cycle ? weekDates(row.cycle) : null,
+        boss: row.boss_id ? { id: row.boss_id, name: row.boss_name, level: row.boss_level } : null,
+        score: row.score,
+        stars: row.stars,
+        clearTimeS: row.clear_time_s,
+        cleared: row.cleared == null ? null : Boolean(row.cleared),
+        floors: row.floors,
+        teamDps: row.team_dps,
+        partySize: row.party_size,
+        difficulty: row.difficulty || null,
+        trialName: row.trial ? simStageName(row.trial, row.difficulty) : null,
+        rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
+        players: withProfiles(parseJsonColumn(row.players_json), profiles) || [],
+        lineup: Array.isArray(extra.lineup) ? extra.lineup.slice(0, 4) : null,
+        newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
+        hasEvidence: Boolean(row.evidence_key),
+        hasBattleEvidence: Boolean(row.battle_evidence_key),
+        hasFullScreens: Object.keys(extra.proofFull || {}),
+        proofPrunedAt: row.proof_pruned_at || null,
+        check: runCheckBadge(row.verify_state),
+        ...(owner && row.status !== "visible" ? { hidden: true } : {}),
+        playedAt: row.played_at || row.created_at,
+      };
+    }),
+    next: (results || []).length > limit && last ? `${last.at}.${last.submission_id}` : null,
+    ...(filters ? { filters } : {}),
+  };
+}
+
+// GET /api/profile/history (your own) and GET /api/profiles/<publicId>/history (a public profile's)
+async function ownBattleHistory(request, env) {
+  const account = await currentAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!leaderboardAllowed(account, env)) return json({ runs: [], next: null, filters: { modes: [], bosses: [], weeks: [] } });
+  return json(await battleHistory(env, account.discordId, new URL(request.url).searchParams, { owner: true }));
+}
+async function publicBattleHistory(request, env, publicId) {
+  const profile = await env.DB.prepare("SELECT discord_id AS discordId FROM profiles WHERE public_id = ? AND is_public = 1").bind(publicId).first();
+  if (!profile) return json({ error: "Profile not found." }, 404);
+  if (!leaderboardPublic(env)) return json({ runs: [], next: null, filters: { modes: [], bosses: [], weeks: [] } });
+  return json(await battleHistory(env, profile.discordId, new URL(request.url).searchParams, { owner: false }));
+}
+
+// Picture retention. A run that is nobody's current best keeps its full screens 14 days and its crops 90 days; a
+// current best (for its sender, or for a teammate it credits) and a run under review keep everything, and every run
+// keeps its numbers. Pages has no scheduled runs, so a few go after each submission (pruneProofs(env, max)).
+// "Best" errs on keeping: a teammate's best is judged against the runs that teammate sent.
+const RETENTION = Object.freeze({ fullScreensS: 14 * 86400, cropsS: 90 * 86400 });
+const BETTER_INTERLINK = (b, c) => `(COALESCE(${b}.stars, -1) > COALESCE(${c}.stars, -1) OR (COALESCE(${b}.stars, -1) = COALESCE(${c}.stars, -1)
+  AND (COALESCE(${b}.score, -1) > COALESCE(${c}.score, -1) OR (COALESCE(${b}.score, -1) = COALESCE(${c}.score, -1) AND ${b}.created_at < ${c}.created_at))))`;
+const NOBODYS_BEST = `(
+  (c.kind = 'interlink_run'
+    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
+      AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND b.submission_id <> c.submission_id AND ${BETTER_INTERLINK("b", "c")})
+    AND NOT EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
+      WHERE gc.discord_id <> c.discord_id AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)
+        AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
+          AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND ${BETTER_INTERLINK("b", "c")})))
+  OR (c.kind = 'sim_run'
+    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'sim_run' AND b.trial IS c.trial
+      AND b.difficulty IS c.difficulty AND b.status = 'visible' AND b.submission_id <> c.submission_id AND b.cleared = 1
+      AND (COALESCE(c.cleared, 0) = 0 OR b.clear_time_s < c.clear_time_s OR (b.clear_time_s = c.clear_time_s AND b.created_at < c.created_at))))
+) AND COALESCE(c.verify_state, '') NOT IN ('pending', 'mismatch')`;
+
+async function pruneProofs(env, max) {
+  if (!env.EVIDENCE) return 0;
+  const now = Math.floor(Date.now() / 1000);
+  let pruned = 0;
+  try {
+    // the whole screens after 14 days
+    const full = (await env.DB.prepare(
+      `SELECT c.submission_id AS submissionId, c.extra_json AS extraJson FROM leaderboard_submissions c
+       WHERE json_extract(c.extra_json, '$.proofFull') IS NOT NULL AND c.created_at < ? AND ${NOBODYS_BEST}
+       ORDER BY c.created_at ASC LIMIT ?`,
+    ).bind(now - RETENTION.fullScreensS, max).all()).results || [];
+    for (const row of full) {
+      for (const key of Object.values((parseJsonColumn(row.extraJson) || {}).proofFull || {})) await env.EVIDENCE.delete(key);
+      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_remove(extra_json, '$.proofFull') WHERE submission_id = ?")
+        .bind(row.submissionId).run();
+      pruned += 1;
+    }
+    // the crops after 90 days
+    const crops = (await env.DB.prepare(
+      `SELECT c.submission_id AS submissionId, c.evidence_key AS evidenceKey, c.battle_evidence_key AS battleKey, c.extra_json AS extraJson
+       FROM leaderboard_submissions c
+       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL) AND c.proof_pruned_at IS NULL AND c.created_at < ? AND ${NOBODYS_BEST}
+       ORDER BY c.created_at ASC LIMIT ?`,
+    ).bind(now - RETENTION.cropsS, max).all()).results || [];
+    for (const row of crops) {
+      for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
+      await env.DB.prepare(`UPDATE leaderboard_submissions SET evidence_key = NULL, battle_evidence_key = NULL, proof_pruned_at = ?,
+        extra_json = json_remove(extra_json, '$.proofFull') WHERE submission_id = ?`).bind(now, row.submissionId).run();
+      pruned += 1;
+    }
+  } catch (error) {
+    if (/proof_pruned_at/u.test(String(error?.message))) { console.error("Picture retention needs migration 0033", error); return 0; }
+    throw error;
+  }
+  return pruned;
+}
+
 // The profile's cards, as its owner arranged them: { order, hidden } of card ids, kept in profiles.preferences_json.
 // Ids are checked for shape only, so a card the site adds later needs no server change (it goes last until arranged).
 const PROFILE_CARD_ID = /^[a-z][a-z0-9-]{0,31}$/u;
@@ -2414,6 +2585,14 @@ async function submitLeaderboardRecord(request, env) {
     `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
+  // at most DAILY_RUN_LIMIT (default 300) new records an account a UTC day: far above real play (a run is 3 minutes),
+  // so only a broken or abusive sender meets it. Re-sends of a record already stored don't count.
+  if (!existing) {
+    const limit = Math.max(1, Number.parseInt(env.DAILY_RUN_LIMIT || "300", 10) || 300);
+    const today = await env.DB.prepare("SELECT COUNT(*) AS sent FROM leaderboard_submissions WHERE discord_id = ? AND created_at >= ?")
+      .bind(account.discordId, Math.floor(Date.now() / 86400000) * 86400).first();
+    if (Number(today?.sent || 0) >= limit) return json({ error: `At most ${limit} records a day; try again after 00:00 UTC.` }, 429);
+  }
   const submissionId = existing?.submissionId || randomToken(12);
   let evidenceKey = existing?.evidenceKey || null;
   let battleKey = existing?.battleKey || null;
@@ -2478,6 +2657,9 @@ async function submitLeaderboardRecord(request, env) {
     if (env.waitUntil) env.waitUntil(checking);
     else await checking;
   }
+  const pruning = pruneProofs(env, 4).catch((error) => console.error("Picture retention failed", error));
+  if (env.waitUntil) env.waitUntil(pruning);
+  else await pruning;
   return json({
     ok: true,
     submissionId,
@@ -4631,6 +4813,9 @@ async function api(request, env) {
   if (url.pathname === "/api/profiles/search" && request.method === "GET") return searchProfiles(request, env);
   if (url.pathname === "/api/profiles/directory" && request.method === "GET") return profilesDirectory(env);
   if (url.pathname === "/api/profile/layout" && request.method === "PUT") return saveProfileLayout(request, env);
+  if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
+  const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})\/history$/u);
+  if (historyMatch && request.method === "GET") return publicBattleHistory(request, env, historyMatch[1]);
   if (url.pathname === "/api/sitemap/profiles.xml" && request.method === "GET") return profilesSitemap(env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);

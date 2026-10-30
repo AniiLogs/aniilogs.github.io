@@ -1388,3 +1388,117 @@ test("Interlink Season Ladder: splits, combined score, total stars, best week", 
   assert.equal(season1.splits.at(-1).start, start);
   assert.ok(whole.updatedAt > 0);
 });
+
+// ---------------------------------------------------------------- Battle History
+const historyOf = async (env, path, session) => (await call(env, path, { session })).json();
+const sendRun = (env, token, body, screens = []) => {
+  if (!screens.length) return call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const form = new FormData();
+  form.set("submission", JSON.stringify(body));
+  for (const part of screens) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+  return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+};
+
+test("Battle History: every record newest first, a page at a time, filtered by mode, boss and week", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  for (let i = 0; i < 23; i += 1) {
+    const boss = i % 2 ? { id: "80000109", name: "Omega Sherro", level: 60 } : { id: "80000107", name: "Omega Infergon", level: 60 };
+    assert.equal((await sendRun(env, token, run(`h${i}`, { boss, score: 10000 + i, stars: 10, playedAt: 1792700000 + i * 60 }))).status, 201);
+  }
+  await sendRun(env, token, { kind: "sim_run", clientRunId: "sim1", trial: "Training of Water", difficulty: "Hard", cleared: true, clearTimeS: 400, playedAt: 1792800000 });
+  const first = await historyOf(env, "/api/profile/history", SESSIONS.dev);
+  assert.equal(first.runs.length, 20);
+  assert.equal(first.runs[0].kind, "sim_run");                                  // newest first
+  assert.deepEqual(first.runs.slice(1, 3).map((r) => r.score), [10022, 10021]);
+  assert.deepEqual(first.filters.modes.map((m) => [m.value, m.count]), [["interlink", 23], ["sim", 1]]);
+  assert.deepEqual(first.filters.bosses.map((b) => b.name), ["Omega Infergon", "Omega Sherro"]);
+  assert.deepEqual(first.filters.weeks.map((w) => w.value), ["3005"]);
+  const second = await historyOf(env, `/api/profile/history?before=${encodeURIComponent(first.next)}`, SESSIONS.dev);
+  assert.deepEqual(second.runs.map((r) => r.score), [10003, 10002, 10001, 10000]);
+  assert.equal(second.next, null);
+  assert.equal(second.filters, undefined);
+  const sherro = await historyOf(env, "/api/profile/history?mode=interlink&boss=80000109&cycle=3005", SESSIONS.dev);
+  assert.equal(sherro.runs.length, 11);
+  assert.ok(sherro.runs.every((r) => r.boss.id === "80000109"));
+  assert.equal((await call(env, "/api/profile/history")).status, 401);
+});
+
+test("Battle History follows the profile, credits teammates' copies by proven UID, and never shows a UID", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);       // DevOne, 301000000001
+  const userToken = await namedToken(env, SESSIONS.user);     // UserOne, 301000000003
+  // UserOne's app captured a run with DevOne in the party (UID shown), and one with a name only
+  const party = [{ name: "UserOne", self: true, avgDps: 9000 }, { name: "DevOne", uid: "301000000001", ai: false, avgDps: 12000 },
+    { name: "Mario", ai: true }];
+  await sendRun(env, userToken, run("with-dev", { players: party, playedAt: 1792700100, extra: { instanceId: "inst-1" } }));
+  await sendRun(env, userToken, run("name-only", { players: [{ name: "UserOne", self: true }, { name: "DevOne", ai: false }], playedAt: 1792700200 }));
+  await sendRun(env, devToken, run("dev-own", { playedAt: 1792700000 }));
+  const devHistory = async () => (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  // not proven yet: only DevOne's own run
+  assert.deepEqual((await devHistory()).map((r) => r.credited), [false]);
+  sqlite.prepare("UPDATE game_characters SET verified_at = 1 WHERE game_uid = ?").run("301000000001");
+  const proven = await devHistory();
+  assert.deepEqual(proven.map((r) => [r.score, r.credited]), [[20000, true], [20000, false]]);
+  assert.deepEqual(proven[0].players.map((p) => p.name), ["UserOne", "DevOne", "Mario"]);
+  assert.equal(JSON.stringify(proven).includes("301000000"), false);           // no UID anywhere
+  // DevOne's app sent the same game instance too: it shows once, as their own
+  await sendRun(env, devToken, run("dev-same", { players: party.map((p) => ({ ...p, self: p.name === "DevOne" })), playedAt: 1792700100, extra: { instanceId: "inst-1" } }));
+  assert.deepEqual((await devHistory()).map((r) => r.credited), [false, false]);
+  // private profile: no public history; public: everyone sees it, hidden runs only in the owner's view
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01' WHERE discord_id = ?").run(IDS.dev);
+  sqlite.prepare("UPDATE leaderboard_submissions SET status = 'hidden' WHERE client_run_id = 'dev-own'").run();
+  assert.equal((await historyOf(env, "/api/profiles/pubdev01/history")).runs.length, 1);
+  assert.deepEqual((await devHistory()).map((r) => Boolean(r.hidden)), [false, true]);
+  sqlite.prepare("UPDATE profiles SET is_public = 0 WHERE discord_id = ?").run(IDS.dev);
+  assert.equal((await call(env, "/api/profiles/pubdev01/history")).status, 404);
+});
+
+test("at most DAILY_RUN_LIMIT new records an account a day; re-sends still go through", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true", DAILY_RUN_LIMIT: "3" });
+  const token = await namedToken(env, SESSIONS.dev);
+  for (const id of ["d1", "d2", "d3"]) assert.equal((await sendRun(env, token, run(id))).status, 201);
+  const over = await sendRun(env, token, run("d4"));
+  assert.equal(over.status, 429);
+  assert.match((await over.json()).error, /00:00 UTC/u);
+  assert.notEqual((await sendRun(env, token, run("d2", { score: 25000 }))).status, 429);   // the same record again
+});
+
+test("pictures: a run that's nobody's best keeps full screens 14 days and crops 90; bests and runs under review keep all", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const devToken = await namedToken(env, SESSIONS.dev);
+  const userToken = await namedToken(env, SESSIONS.user);
+  sqlite.prepare("UPDATE game_characters SET verified_at = 1").run();
+  const screens = ["evidence", "battle", "evidence_full", "battle_full"];
+  await sendRun(env, devToken, run("best", { score: 30000, stars: 25 }), screens);
+  await sendRun(env, devToken, run("worse", { score: 20000, stars: 20 }), screens);
+  await sendRun(env, devToken, run("review", { score: 10000, stars: 10 }), screens);
+  await sendRun(env, userToken, run("user-best", { score: 40000, stars: 30 }), screens);
+  // not UserOne's best, but better than anything DevOne (in the party, UID proven) sent: DevOne's best, so it stays
+  await sendRun(env, userToken, run("teammates-best", { score: 35000, stars: 28,
+    players: [{ name: "UserOne", self: true }, { name: "DevOne", uid: "301000000001", ai: false }] }), screens);
+  const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch' WHERE client_run_id = 'review'").run();
+  const age = (days) => sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ?").run(Math.floor(Date.now() / 1000) - days * 86400);
+  const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
+    .map((key) => (/-(battle-)?full\./u.test(key) ? "full" : "crop")).sort();
+  let n = 0;
+  const prune = async () => { for (let i = 0; i < 3; i += 1) await sendRun(env, devToken, run(`trigger-${n += 1}`, { cycle: "3004", boss: { id: "80000099", name: "Alpha Irisal", level: 1 } })); };
+  age(10);
+  await prune();
+  assert.equal(pictures("worse").length, 4);                              // under 14 days: everything
+  age(20);
+  await prune();
+  assert.deepEqual(pictures("worse"), ["crop", "crop"]);                 // nobody's best: the full screens go
+  for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
+  age(100);
+  await prune();
+  assert.deepEqual(pictures("worse"), []);
+  const worse = sqlite.prepare("SELECT evidence_key, battle_evidence_key, proof_pruned_at, score FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
+  assert.deepEqual([worse.evidence_key, worse.battle_evidence_key, worse.score], [null, null, 20000]);   // the numbers stay
+  assert.ok(worse.proof_pruned_at > 0);
+  const listed = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs.find((r) => r.submissionId === id("worse"));
+  assert.deepEqual([listed.hasEvidence, listed.hasFullScreens, Boolean(listed.proofPrunedAt)], [false, [], true]);
+  for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
+});
