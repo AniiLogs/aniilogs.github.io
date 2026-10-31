@@ -2167,6 +2167,10 @@ ul.team-skill-operations .team-skill-operation {
   cursor: pointer;
 }
 
+.map-select.aniimo-picker-input {
+  cursor: text;
+}
+
 .map-select:hover,
 .map-select:focus-visible {
   border-color: var(--accent);
