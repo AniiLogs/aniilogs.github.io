@@ -5629,6 +5629,8 @@ function renderCatalogCategoryToolbar(view) {
   const categories = catalogCategoriesForView(view);
 
   if (view === "itemlog") {
+    // The long lists type-to-filter (aniimo-picker.js); the select stays the source of truth.
+    const searchable = (select) => window.AniilogsPicker?.makeCombobox(select, { placeholder: "Type to filter", emptyText: "No matches" })?.wrap || select;
     const refreshItemlogFilters = () => {
       state.catalogIndexScroll[view] = 0;
       const visibleEntries = catalogEntriesForView(view);
@@ -5681,7 +5683,7 @@ function renderCatalogCategoryToolbar(view) {
       normalizeItemlogFilterForEntries(itemlogEntriesForCategory(select.value, allEntries));
       refreshItemlogFilters();
     });
-    group.append(label, select);
+    group.append(label, searchable(select));
 
     const sourceLabel = document.createElement("p");
     sourceLabel.className = "catalog-category-label catalog-category-label--source";
@@ -5732,7 +5734,7 @@ function renderCatalogCategoryToolbar(view) {
       }
       refreshItemlogFilters();
     });
-    group.append(sourceLabel, sourceSelect);
+    group.append(sourceLabel, searchable(sourceSelect));
 
     if (state.itemlogFilters.source === "rv-expedition") {
       const expeditionSources = categoryEntries.flatMap(itemlogExpeditionSources);
@@ -5787,7 +5789,7 @@ function renderCatalogCategoryToolbar(view) {
         state.itemlogFilters.tier = tierSelect.value;
         refreshItemlogFilters();
       });
-      group.append(parkLabel, parkSelect, tierLabel, tierSelect);
+      group.append(parkLabel, searchable(parkSelect), tierLabel, tierSelect);
     }
     return group;
   }

@@ -13984,6 +13984,8 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
     min-height: 44px;
     display: flex;
     align-items: center;
+    /* Flex drops the spaces next to the highlighted <mark> runs without this. */
+    white-space: pre-wrap;
   }
 }
 
