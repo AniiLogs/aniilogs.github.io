@@ -415,6 +415,9 @@
       value: formId,
       label: formLabel(entryForForm(formId), data.forms[formId]),
       group: entryForForm(formId)?.surface_label || "",
+      // Extra words the picker's filter matches: elements and the Aniilog number.
+      search: [...(data.forms[formId].elements || []).map((id) => element(id)?.name),
+        entryForForm(formId)?.aniilog_number].filter(Boolean).join(" "),
       sort: order.get(formId) ?? Number.MAX_SAFE_INTEGER,
     }));
     rows.sort((left, right) => left.sort - right.sort);
@@ -1015,6 +1018,7 @@
       const item = document.createElement("option");
       item.value = option.value;
       item.textContent = option.label;
+      if (option.search) item.dataset.search = option.search;
       item.selected = option.value === member.formId;
       if (!option.group) {
         select.append(item);
@@ -1038,7 +1042,13 @@
       persist();
       render();
     });
-    card.append(header, identity, select);
+    // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
+    const picker = window.AniilogsPicker?.enhance(select);
+    if (picker) {
+      picker.wrap.addEventListener("click", (event) => event.stopPropagation());
+      picker.wrap.addEventListener("keydown", (event) => event.stopPropagation());
+    }
+    card.append(header, identity, picker ? picker.wrap : select);
     return card;
   }
 

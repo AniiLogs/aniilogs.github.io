@@ -395,9 +395,9 @@
     return wrap;
   }
 
-  function aniimoSelect(options, side, rerender) {
+  function aniimoSelect(options, side, rerender, label = "Aniimo") {
     const select = el("select", "duel-aniimo-select");
-    select.setAttribute("aria-label", "Aniimo");
+    select.setAttribute("aria-label", label);
     const blank = el("option", "", "Pick an Aniimo");
     blank.value = "";
     select.append(blank);
@@ -413,6 +413,8 @@
         if (!entry) continue;
         const option = el("option", "", options.formLabel(entry, options.data.forms?.[formId]));
         option.value = formId;
+        // Extra words the picker's filter matches: elements and the Aniilog number.
+        option.dataset.search = [...(entry.elements || []).map((item) => item.name), entry.aniilog_number].filter(Boolean).join(" ");
         option.selected = formId === String(side.formId) && (label === "Your team" || !team.includes(formId));
         group.append(option);
       }
@@ -428,7 +430,8 @@
         side.potential = Math.round(clamp(member.potential ?? 0, 0, 20, 0));
       }
     }));
-    return select;
+    // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
+    return window.AniilogsPicker?.enhance(select, { placeholder: "Type a name, form or element" })?.wrap || select;
   }
 
   function renderSide(options, key, title, rerender) {
@@ -444,7 +447,7 @@
       icon.loading = "lazy";
       head.prepend(icon);
     }
-    card.append(head, aniimoSelect(options, side, rerender));
+    card.append(head, aniimoSelect(options, side, rerender, title));
     const fields = el("div", "duel-side-fields");
     fields.append(
       numberField("Level", side.level, { min: 1, max: options.aniilog.stat_growth?.level_cap || 70 }, change(rerender, (target) => {

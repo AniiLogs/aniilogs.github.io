@@ -13843,3 +13843,83 @@ html[data-embed="app"] .open-in-browser-link {
 html[data-embed="app"] .open-in-browser-link:hover,
 html[data-embed="app"] .open-in-browser-link:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
 html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
+
+/* ---- Type-to-filter Aniimo pickers (aniimo-picker.js): the text box takes the select's own classes. */
+.aniimo-picker {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.aniimo-picker-native {
+  display: none;
+}
+
+.aniimo-picker-input {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.aniimo-picker-list {
+  /* Placed by aniimo-picker.js (left, top or bottom, width, max-height) so scrolling panels don't clip it. */
+  position: fixed;
+  z-index: 1000;
+  max-height: 320px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  list-style: none;
+}
+
+.aniimo-picker-list[hidden] {
+  display: none;
+}
+
+.aniimo-picker-group {
+  padding: 8px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.aniimo-picker-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.aniimo-picker-option:hover,
+.aniimo-picker-option.is-active {
+  background: rgba(var(--accent-rgb), 0.18);
+}
+
+.aniimo-picker-option[aria-selected="true"] {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.aniimo-picker-empty {
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+/* Touch screens: 16px text so phones don't zoom in on focus, and bigger rows to tap. */
+@media (pointer: coarse) {
+  .aniimo-picker-input {
+    font-size: 16px;
+  }
+
+  .aniimo-picker-option {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
