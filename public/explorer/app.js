@@ -13232,6 +13232,13 @@ function luminMapMetadata(spawn) {
     };
   }
   if (spawn.marker_type === "lumin_amber") {
+    // A Lumin puzzle's reward chest: the in-game map marks the puzzle (reward_of), not the Amber.
+    if (spawn.in_game_map_mark === false && spawn.reward_of) {
+      return {
+        source: "Lumin puzzle reward",
+        guide: "Appears when you finish the puzzle in its \"Reward of\" row. The in-game map marks that puzzle, not this Amber.",
+      };
+    }
     // Placed from the game's chest record; no in-game map mark points at it.
     if (spawn.in_game_map_mark === false) {
       return {
