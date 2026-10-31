@@ -14344,8 +14344,9 @@ async function loadMapData(mapId, token) {
 }
 
 function updateMapTabs() {
-  const select = els.mapTabs.querySelector(".map-select");
+  const select = els.mapTabs.querySelector("select.map-select");
   if (select && select.value !== state.activeMapId) select.value = state.activeMapId;
+  state.mapPicker?.refresh();
 }
 
 function updateMapOverlayState() {
@@ -14418,6 +14419,8 @@ function renderMapTabs() {
   select.addEventListener("change", () => switchMap(select.value));
   field.append(label, select);
   els.mapTabs.replaceChildren(field);
+  // Type to filter the maps (group names match too); the select stays underneath and fires "change".
+  state.mapPicker = window.AniilogsPicker?.makeCombobox(select, { placeholder: "Type a map name", emptyText: "No map matches" }) || null;
   updateMapTabs();
 }
 
