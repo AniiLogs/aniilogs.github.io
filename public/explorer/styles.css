@@ -13843,6 +13843,12 @@ html[data-embed="app"] .open-in-browser-link {
 html[data-embed="app"] .open-in-browser-link:hover,
 html[data-embed="app"] .open-in-browser-link:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
 html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
+/* The Team Builder header (its page tabs) sits at the top right beside the sidebar, under that cluster: leave it
+   the cluster's width (four 34px buttons, gaps and padding, about 176px) plus a gap. Narrow screens stack the header
+   below the sidebar, away from the corner. */
+@media (min-width: 821px) {
+  html[data-embed="app"] .team-panel .team-builder-header { padding-right: 196px; }
+}
 
 /* ---- Type-to-filter Aniimo pickers (aniimo-picker.js): the text box takes the select's own classes. */
 .aniimo-picker {
