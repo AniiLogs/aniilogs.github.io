@@ -62,7 +62,7 @@ if (!explorerConfig.includes("https://aniilogs-api.pages.dev/api/content/release
 if (!workerSource.includes('env.CONTENT_RELEASE_ENABLED || ""')) {
   throw new Error("R2 content gateway is not fail-closed behind explicit release approval.");
 }
-if (!privacy.includes("Profiles are private by default") || !privacy.includes("Deleting your account")) {
+if (!privacy.includes("Profiles are public by default") || !privacy.includes("Deleting your account")) {
   throw new Error("Public privacy and deletion disclosure is missing.");
 }
 await stat(resolve(root, "migrations", "0001_discord_accounts.sql"));
