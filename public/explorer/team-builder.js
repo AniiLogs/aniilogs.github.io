@@ -127,7 +127,19 @@
     const member = { formId: String(value?.formId || ""), activeSkills };
     // Stats tab inputs (also read by the 1v1 tab); unset means level cap and no potential.
     if (Number.isFinite(Number(value?.level)) && value?.level !== null && value?.level !== "") member.level = Math.round(Number(value.level));
-    if (Number.isFinite(Number(value?.potential)) && value?.potential !== null && value?.potential !== "") member.potential = Math.round(Number(value.potential));
+    // Potential: one number per stat (older saves stored one number for all six).
+    if (value?.potential && typeof value.potential === "object") {
+      member.potential = Object.fromEntries(Object.entries(value.potential)
+        .filter(([stat, points]) => ["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"].includes(stat) && Number.isFinite(Number(points)))
+        .map(([stat, points]) => [stat, Math.min(20, Math.max(0, Math.round(Number(points))))]));
+    } else if (Number.isFinite(Number(value?.potential)) && value?.potential !== null && value?.potential !== "") {
+      member.potential = Math.round(Number(value.potential));
+    }
+    if (value?.perfect === true) member.perfect = true;
+    if (Array.isArray(value?.formResearch)) member.formResearch = value.formResearch.map(String).filter((id) => /^\d+$/u.test(id));
+    if (value?.starUp && Number(value.starUp.stage) > 0) {
+      member.starUp = { stage: Math.round(Number(value.starUp.stage)), level: Math.max(0, Math.round(Number(value.starUp.level) || 0)) };
+    }
     // Stats tab card calculator: personality letters (one per pair) and one held item with its level.
     if (Array.isArray(value?.personality)) member.personality = value.personality.map(String).filter((letter) => /^[EISNTFJP]$/u.test(letter)).slice(0, 4);
     if (value?.heldItem && Number.isFinite(Number(value.heldItem.itemId))) {
@@ -415,6 +427,9 @@
       value: formId,
       label: formLabel(entryForForm(formId), data.forms[formId]),
       group: entryForForm(formId)?.surface_label || "",
+      // Extra words the picker's filter matches: elements and the Aniilog number.
+      search: [...(data.forms[formId].elements || []).map((id) => element(id)?.name),
+        entryForForm(formId)?.aniilog_number].filter(Boolean).join(" "),
       sort: order.get(formId) ?? Number.MAX_SAFE_INTEGER,
     }));
     rows.sort((left, right) => left.sort - right.sort);
@@ -1015,6 +1030,7 @@
       const item = document.createElement("option");
       item.value = option.value;
       item.textContent = option.label;
+      if (option.search) item.dataset.search = option.search;
       item.selected = option.value === member.formId;
       if (!option.group) {
         select.append(item);
@@ -1038,7 +1054,13 @@
       persist();
       render();
     });
-    card.append(header, identity, select);
+    // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
+    const picker = window.AniilogsPicker?.enhance(select);
+    if (picker) {
+      picker.wrap.addEventListener("click", (event) => event.stopPropagation());
+      picker.wrap.addEventListener("keydown", (event) => event.stopPropagation());
+    }
+    card.append(header, identity, picker ? picker.wrap : select);
     return card;
   }
 
@@ -1523,7 +1545,7 @@
   const CARD_STATS = Object.freeze(["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"]);
 
   // The game's stat card for this member (damage-model.js statTotals): base stats from level and potential, then
-  // personality and held item, and CP. Resonance and collection bonuses aren't included.
+  // personality, Star Up, held item and Form Research bonuses, and CP.
   function renderCardCalculator(member, entry) {
     const model = window.AniilogsDamage;
     const growth = aniilog?.stat_growth;
@@ -1554,47 +1576,26 @@
     });
     box.append(pairs);
 
-    const form = data?.forms?.[member.formId];
-    const items = (form?.recommended?.held_items || []).flatMap((item) => item.tiers.map((tier) => ({ ...tier, name: item.name })));
-    const itemRow = el("div", "team-card-item");
-    const itemSelect = el("select", "team-select");
-    itemSelect.setAttribute("aria-label", "Held item");
-    const none = el("option", "", "No held item");
-    none.value = "";
-    itemSelect.append(none);
-    items.forEach((tier) => {
-      const option = el("option", "", `${tier.name} (${tier.quality_label || `quality ${tier.quality}`})`);
-      option.value = String(tier.item_id);
-      option.selected = String(tier.item_id) === member.heldItem?.itemId;
-      itemSelect.append(option);
-    });
-    itemSelect.addEventListener("change", () => {
-      member.heldItem = itemSelect.value ? { itemId: itemSelect.value, level: member.heldItem?.level || 0 } : undefined;
-      if (!member.heldItem) delete member.heldItem;
-      persist();
-      render();
-    });
-    const levels = Object.keys(data?.held_item_levels || {}).map(Number).filter(Number.isFinite);
-    const maxItemLevel = levels.length ? Math.max(...levels) : 0;
-    itemRow.append(el("label", "team-field", ""));
-    itemRow.firstChild.append(el("span", "team-field-label", "Held item"), itemSelect);
-    if (member.heldItem && maxItemLevel) {
-      itemRow.append(numberField(`Item level (0–${maxItemLevel})`, member.heldItem.level || 0, 0, maxItemLevel, (next) => {
-        member.heldItem = { ...member.heldItem, level: next };
-        persist();
-        render();
+    const cap = Number(growth.level_cap) || 70;
+    const editor = window.AniilogsPotentialEditor;
+    const options = editor ? editor.totalsOptions(member, cap) : {
+      level: clampInt(member.level ?? cap, 1, cap, cap), potential: member.potential ?? 0, personality: member.personality || [],
+    };
+    const totals = model.statTotals(data, aniilog, member.formId, options);
+    // Per-stat potential, Star Up and held item (potential-editor.js), saved on the member.
+    if (editor) {
+      box.append(editor.render({
+        data, aniilog, formId: member.formId, build: member, totals,
+        onChange: (next) => {
+          for (const key of ["potential", "starUp", "heldItem", "perfect", "formResearch"]) {
+            if (next[key] === null || next[key] === undefined) delete member[key];
+            else member[key] = next[key];
+          }
+          persist();
+          render();
+        },
       }));
     }
-    box.append(itemRow);
-
-    const cap = Number(growth.level_cap) || 70;
-    const maxPotential = Number(growth.attribute_points_max) || 20;
-    const totals = model.statTotals(data, aniilog, member.formId, {
-      level: clampInt(member.level ?? cap, 1, cap, cap),
-      potential: clampInt(member.potential ?? 0, 0, maxPotential, 0),
-      personality: member.personality || [],
-      heldItems: member.heldItem ? [{ itemId: member.heldItem.itemId, level: member.heldItem.level || 0 }] : [],
-    });
     if (!totals) return box;
     const table = el("table", "team-stats-table team-card-table");
     const head = el("tr");
@@ -1618,7 +1619,7 @@
       cp.append(el("strong", "", "CP "), totals.cp.toLocaleString());
       box.append(cp);
     }
-    box.append(el("p", "team-data-note", "Card total = base × (1 + potential, personality and held-item percentages) + flat bonuses, as the game adds them up. Not included: resonance and collection bonuses, and held-item talents."));
+    box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. Not included: held-item talents."));
     return box;
   }
 
@@ -1629,15 +1630,10 @@
     const calculator = window.AniilogsDamage?.statTotals && entry?.stats?.length;
     if (calculator && growth) {
       const cap = Number(growth.level_cap) || 70;
-      const maxPotential = Number(growth.attribute_points_max) || 20;
       const level = clampInt(member.level ?? cap, 1, cap, cap);
-      const potential = clampInt(member.potential ?? 0, 0, maxPotential, 0);
-      section.append(sectionHeading("Stats", `Level ${level}, potential ${potential}`));
+      section.append(sectionHeading("Stats", `Level ${level}`));
       const inputs = el("div", "team-stats-inputs");
-      inputs.append(
-        numberField(`Level (1–${cap})`, level, 1, cap, (next) => { member.level = next; persist(); render(); }),
-        numberField(`Potential, each stat (0–${maxPotential})`, potential, 0, maxPotential, (next) => { member.potential = next; persist(); render(); }),
-      );
+      inputs.append(numberField(`Level (1–${cap})`, level, 1, cap, (next) => { member.level = next; persist(); render(); }));
       section.append(inputs);
       const card = renderCardCalculator(member, entry);
       if (card) {
@@ -1652,7 +1648,8 @@
     const cap = Number(growth.level_cap) || 70;
     const maxPotential = Number(growth.attribute_points_max) || 20;
     const level = clampInt(member.level ?? cap, 1, cap, cap);
-    const potential = clampInt(member.potential ?? 0, 0, maxPotential, 0);
+    // Without the calculator only one potential number applies to every stat.
+    const potential = typeof member.potential === "object" ? 0 : clampInt(member.potential ?? 0, 0, maxPotential, 0);
     section.append(sectionHeading("Stats", `Level ${level}, potential ${potential}`));
     const inputs = el("div", "team-stats-inputs");
     inputs.append(
@@ -1968,7 +1965,8 @@
       members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
       // The level and potential set on each member’s Stats tab (unset level = the cap).
       memberStats: Object.fromEntries(model.members.filter((member) => member?.formId)
-        .map((member) => [String(member.formId), { level: member.level, potential: member.potential }])),
+        .map((member) => [String(member.formId), { level: member.level, potential: member.potential, starUp: member.starUp,
+          heldItem: member.heldItem, personality: member.personality, perfect: member.perfect, formResearch: member.formResearch }])),
       formLabel,
       contentUrl: host.contentUrl,
       developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),

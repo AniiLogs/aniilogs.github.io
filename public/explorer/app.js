@@ -7516,7 +7516,15 @@ function renderAfpStats(entry) {
   // Growth: a level slider and a potential level per stat; the table shows key levels and the chosen one.
   const settings = afpGrowthState();
   const cap = growth.level_cap || 70;
-  const maxPotential = (growth.potentials?.max_level || 20) + (growth.potentials?.extra_max_level || 0);
+  // Potential per stat: your own (rolled + Capability Awakening) up to max_level (pet_prop_level_max, 20), plus
+  // extra potential. The game allows up to extra_max_level extra (pet_config_data.newPropExtraMaxLv, 10), but the
+  // game files only give +4 from Star Up stage 7 (pet_resonance_property_data, group 110: +1/+2/+4 at stages
+  // 5/6/7, not added together) and +2 from one Epic or Legendary held item at item level 10 (core_carry_data
+  // energyEffects). So 24 is the most without a held item and 26 with one.
+  const ownMax = growth.potentials?.max_level || 20;
+  const STAR_UP_EXTRA = 4;
+  const HELD_ITEM_EXTRA = 2;
+  const maxPotential = Math.min(ownMax + (growth.potentials?.extra_max_level ?? 10), ownMax + STAR_UP_EXTRA + HELD_ITEM_EXTRA);
   const controls = document.createElement("div");
   controls.className = "afp-growth-controls";
   const levelLabel = document.createElement("label");
@@ -7540,7 +7548,7 @@ function renderAfpStats(entry) {
   const presetLabel = document.createElement("span");
   presetLabel.textContent = "All potentials";
   presets.append(presetLabel);
-  [0, 10, growth.potentials?.max_level || 20, maxPotential].forEach((points) => {
+  [0, 10, ownMax, ownMax + STAR_UP_EXTRA, maxPotential].forEach((points) => {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = String(points);
@@ -7605,7 +7613,7 @@ function renderAfpStats(entry) {
     });
     const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
     earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
-    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more (up to ${maxPotential} per stat). Values are before Resonance, gear, talents and buffs. Formulas from the game scripts.`));
+    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat; Star Up stage 7 adds 4 more (${ownMax + STAR_UP_EXTRA}) and an Epic or Legendary held item at level 10 adds 2 to its stat (${maxPotential}). Values are before Star Up's and held items' other stat bonuses, talents and buffs. Formulas from the game scripts.`));
   }
   renderTable();
   void earned;
@@ -13158,6 +13166,13 @@ function luminMapMetadata(spawn) {
     };
   }
   if (spawn.marker_type === "lumin_amber") {
+    // Placed from the game's chest record; no in-game map mark points at it.
+    if (spawn.in_game_map_mark === false) {
+      return {
+        source: "Amber without an in-game map marker",
+        guide: "The in-game map does not mark this Amber; its position comes from the game's scene data.",
+      };
+    }
     return {
       source: "Map-marked Amber",
       guide: "The current map marker does not identify whether this Amber is ordinary, guarded, or ecosystem-based.",

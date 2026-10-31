@@ -13843,3 +13843,193 @@ html[data-embed="app"] .open-in-browser-link {
 html[data-embed="app"] .open-in-browser-link:hover,
 html[data-embed="app"] .open-in-browser-link:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
 html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
+/* The Team Builder header (its page tabs) sits at the top right beside the sidebar, under that cluster: leave it
+   the cluster's width (four 34px buttons, gaps and padding, about 176px) plus a gap. Narrow screens stack the header
+   below the sidebar, away from the corner. */
+@media (min-width: 821px) {
+  html[data-embed="app"] .team-panel .team-builder-header { padding-right: 196px; }
+}
+
+/* ---- Type-to-filter Aniimo pickers (aniimo-picker.js): the text box takes the select's own classes. */
+.aniimo-picker {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.aniimo-picker-native {
+  display: none;
+}
+
+.aniimo-picker-input {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.aniimo-picker-list {
+  /* Placed by aniimo-picker.js (left, top or bottom, width, max-height) so scrolling panels don't clip it. */
+  position: fixed;
+  z-index: 1000;
+  max-height: 320px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  list-style: none;
+}
+
+.aniimo-picker-list[hidden] {
+  display: none;
+}
+
+.aniimo-picker-group {
+  padding: 8px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.aniimo-picker-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.aniimo-picker-option:hover,
+.aniimo-picker-option.is-active {
+  background: rgba(var(--accent-rgb), 0.18);
+}
+
+.aniimo-picker-option[aria-selected="true"] {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.aniimo-picker-empty {
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+/* Touch screens: 16px text so phones don't zoom in on focus, and bigger rows to tap. */
+@media (pointer: coarse) {
+  .aniimo-picker-input {
+    font-size: 16px;
+  }
+
+  .aniimo-picker-option {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+/* ---- Potential, Star Up and held item editor (potential-editor.js), Team Builder Stats and 1v1 sides. */
+.potential-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.potential-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.potential-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.potential-field-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.potential-select,
+.potential-number {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
+.potential-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.potential-table th,
+.potential-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.potential-table th:first-child {
+  text-align: left;
+}
+
+.potential-table thead th {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.potential-table .potential-number {
+  width: 4.5em;
+  padding: 4px 6px;
+  text-align: right;
+}
+
+.potential-extra {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.potential-none {
+  color: var(--muted);
+}
+
+.potential-total {
+  font-weight: 800;
+}
+
+.potential-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (pointer: coarse) {
+  .potential-number,
+  .potential-select {
+    font-size: 16px;
+  }
+}
+
+.potential-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: end;
+  min-height: 34px;
+  font-size: 13px;
+}

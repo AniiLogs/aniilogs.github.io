@@ -15,12 +15,17 @@
   });
   // Stat -> its percent and flat attribute keys (attribute_group_data 201-206 / 235 and AttributeConst).
   const STAT_KEYS = Object.freeze({
-    HP: { p: "hp_max_p", fix: "hp_max_fix" },
-    ATK: { p: "atk_p", fix: "atk_fix" },
-    "P.DEF": { p: "def_p", fix: "def_fix" },
-    REGEN: { p: "ep_regen_force_p", fix: "ep_regen_force_fix" },
-    "M.DEF": { p: "def_mag_p", fix: "def_mag_fix" },
-    BREAK: { p: "bp_atk_p", fix: "bp_atk_fix" },
+    HP: { v: "hp_max_v", p: "hp_max_p", fix: "hp_max_fix", conv: "hp_max_conv" },
+    ATK: { v: "atk_v", p: "atk_p", fix: "atk_fix", conv: "atk_conv" },
+    "P.DEF": { v: "def_v", p: "def_p", fix: "def_fix", conv: "def_conv" },
+    REGEN: { v: "ep_regen_force_v", p: "ep_regen_force_p", fix: "ep_regen_force_fix", conv: "ep_regen_force_conv" },
+    "M.DEF": { v: "def_mag_v", p: "def_mag_p", fix: "def_mag_fix", conv: "def_mag_conv" },
+    BREAK: { v: "bp_atk_v", p: "bp_atk_p", fix: "bp_atk_fix", conv: "bp_atk_conv" },
+  });
+  // Extra potential per stat (attribute_group_data 110-116; mergeAttributeMap adds them to iLvEx).
+  const POTENTIAL_KEYS = Object.freeze({
+    pet_individual_point_hp: "HP", pet_individual_point_atk: "ATK", pet_individual_point_def: "P.DEF",
+    pet_individual_point_ep_regen_force: "REGEN", pet_individual_point_def_mag: "M.DEF", pet_individual_point_bp_atk: "BREAK",
   });
 
   // Which damage term an attribute feeds, whose value counts (the attacker's or the defender's) and how
@@ -55,7 +60,7 @@
   });
   const ELEMENT_KEY = /^dmg_([a-z]+)_(add|dec)_ratio$/u;
   const STAT_KEY_BY_ATTR = Object.freeze(Object.fromEntries(Object.entries(STAT_KEYS)
-    .flatMap(([stat, keys]) => [[keys.p, { stat, part: "p" }], [keys.fix, { stat, part: "fix" }]])));
+    .flatMap(([stat, keys]) => Object.entries(keys).map(([part, key]) => [key, { stat, part }]))));
 
   function bracketOf(key) {
     if (BRACKETS[key]) return BRACKETS[key];
@@ -85,60 +90,96 @@
       * levelValue * formula.scale);
   }
 
-  // A pet's six stats the way PetAttributeCalcUtils adds them up: base value (species points, level,
-  // potential) x (1 + every percent bonus) + flat bonuses. Percent bonuses: potential (+4% per 4 levels,
-  // pet_attr_convert_data), personality traits, held items (x (1 + the item level's enhance ratio)).
+  // A pet's six stats the way PetAttributeCalcUtils adds them up (exact unless noted):
+  //   stat = (formula value + flat base bonuses) x (1 + % bonuses) + flat bonuses + conversions
+  // The formula value uses the stat's total potential: your own (rolled + awakened, up to 20,
+  // BaseProperty.indLv) plus extra potential from other sources (iLvEx: Star Up, held-item tiers), and
+  // the +4% per 4 potential uses the same total. Sources: personality traits; Star Up (resonance) stage
+  // and level; held items (base stat x (1 + level's enhance ratio), per-pet-level conversions, tiers
+  // switched on at item level 10 / 15); Form Research bonuses (each researched form of the species adds its
+  // entry to every Aniimo of that species, form.form_research). Not modelled: held-item talents.
   // Species points: the game uses a pet's own species points when the server sends them
   // (Utils.getBasePropertySpeciesPoint); otherwise pet_data's plus the property template's bonus. The
   // site has no owned pets, so pet_data's are the default (as on the Aniimo page) and useTemplate adds
-  // the template bonus. Not modelled: held-item talents and energy effects,
-  // resonance and collection bonuses.
-  // options: { level, potential: number | {stat: n}, personality: [letter], heldItems: [{ itemId, level }],
-  //            species: {stat: points}, useTemplate, extra: [{ key, value, source }],
-  //            coreUpgraded, formsCollected, rainbowForms, resonanceCp }  (the last four only feed CP)
+  // the template bonus.
+  // options: { level, potential: number | {stat: own points}, personality: [letter], starUp: { stage, level },
+  //            heldItems: [{ itemId, level }], species: {stat: points}, useTemplate, extra: [{ key, value, source }],
+  //            coreUpgraded, formsCollected, rainbowForms }  (the last three only feed CP)
+  // Returns { level, base, total, potential: {stat: { own, star_up, held_items, other, total }}, bonus,
+  //           modifiers: {combat attribute: value} from those sources, cp }.
   function statTotals(data, aniilog, formId, options = {}) {
     const entry = aniilog?.entries?.find((row) => String(row.form_id) === String(formId));
     const form = data?.forms?.[formId];
     const growth = aniilog?.stat_growth;
     if (!entry || !form || !growth) return null;
     const level = Math.min(Math.max(Math.round(Number(options.level) || growth.level_cap), 1), growth.level_cap);
-    const potentialOf = (stat) => Math.min(Math.max(Math.round(Number(typeof options.potential === "object"
+    const ownPotential = (stat) => Math.min(Math.max(Math.round(Number(typeof options.potential === "object"
       ? options.potential?.[stat] : options.potential) || 0), 0), growth.attribute_points_max);
     const species = statRows(entry);
     const template = options.useTemplate ? form.stat_template?.species_bonus || {} : {};
-    const bonus = Object.fromEntries(STATS.map((stat) => [stat, { p: 0, fix: 0, sources: [] }]));
-    const add = (key, value, source) => {
+    const bonus = Object.fromEntries(STATS.map((stat) => [stat, { v: 0, p: 0, fix: 0, conv: 0, sources: [] }]));
+    const potential = Object.fromEntries(STATS.map((stat) => [stat, { own: ownPotential(stat), star_up: 0, held_items: 0, other: 0 }]));
+    const modifiers = {};
+    // Where an attribute lands: a stat part, a stat's extra potential, or a combat modifier.
+    const add = (key, value, source, kind = "other") => {
+      if (!Number.isFinite(value)) return;
+      const potentialStat = POTENTIAL_KEYS[key];
+      if (potentialStat) {
+        potential[potentialStat][kind] += value;
+        return;
+      }
       const target = STAT_KEY_BY_ATTR[key];
-      if (!target || !Number.isFinite(value)) return;
-      bonus[target.stat][target.part] += value;
-      bonus[target.stat].sources.push({ source, key, value });
+      if (target) {
+        bonus[target.stat][target.part] += value;
+        bonus[target.stat].sources.push({ source, key, value });
+      } else if (bracketOf(key)) {
+        modifiers[key] = (modifiers[key] || 0) + value;
+      }
     };
     const traits = data.personality?.traits || [];
     (options.personality || []).forEach((letter) => {
       const trait = traits.find((row) => row.letter === letter);
       trait?.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value, `Personality: ${trait.name}`)));
     });
+    const star = data.star_up?.[options.starUp?.stage]?.[options.starUp?.level ?? 0];
+    star?.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value, `Star Up ${options.starUp.stage}`, "star_up")));
     (options.heldItems || []).forEach(({ itemId, level: itemLevel }) => {
-      const tier = Object.values(data.forms).flatMap((row) => row.recommended?.held_items || [])
-        .flatMap((item) => item.tiers.map((t) => ({ ...t, name: item.name }))).find((t) => String(t.item_id) === String(itemId));
-      const ratio = data.held_item_levels?.[itemLevel]?.enhance_ratio || 0;
-      tier?.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value * (1 + ratio), `Held item: ${tier.name}`)));
+      const item = data.held_item_catalog?.[itemId];
+      if (!item) return;
+      const levelNumber = Number(itemLevel) || 0;
+      const ratio = data.held_item_levels?.[levelNumber]?.enhance_ratio || 0;
+      const source = `Held item: ${item.name}`;
+      item.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value * (1 + ratio), source, "held_items")));
+      // propConversions {"level", <attr>_conv, rate}: + rate per pet level (e.g. 0.7 BREAK per level).
+      item.conversions.filter((row) => row.from === "level").forEach((row) => add(row.key, row.rate * level, source, "held_items"));
+      item.tiers.filter((tier) => levelNumber >= tier.level && !tier.need_energy)
+        .forEach((tier) => tier.buffs.forEach((buffRow) => buffRow.attributes.forEach((attribute) => add(attribute.key, attribute.value, source, "held_items"))));
+    });
+    // Form Research: options.formResearch lists the researched form ids (PetAttributeCalcUtils.getFormCollectEntryAttributeMap).
+    (options.formResearch || []).forEach((researched) => {
+      const row = (form.form_research || []).find((entry) => String(entry.form_id) === String(researched));
+      if (row) add(row.key, row.value, `Form Research: ${row.form_label || row.form_id}`);
     });
     (options.extra || []).forEach(({ key, value, source }) => add(key, value, source || "Other"));
-    const result = { level, base: {}, total: {}, bonus, template_species: template, potential: {} };
+    const result = { level, base: {}, total: {}, potential: {}, bonus, modifiers, template_species: template };
     STATS.forEach((stat) => {
       const points = Number.isFinite(options.species?.[stat]) ? options.species[stat] : (species[stat] ?? NaN) + (template[stat] || 0);
-      const potential = potentialOf(stat);
-      result.potential[stat] = potential;
-      const base = baseValue(growth, stat, points, level, potential);
+      const parts = potential[stat];
+      const totalPotential = parts.own + parts.star_up + parts.held_items + parts.other;
+      result.potential[stat] = { ...parts, total: totalPotential };
+      const base = baseValue(growth, stat, points, level, totalPotential);
       const step = growth.potentials?.percent_steps?.[stat] || growth.potentials?.percent_steps?.[Object.keys(STAT_ALIASES).find((old) => STAT_ALIASES[old] === stat)];
-      const potentialPercent = step ? Math.floor(potential / step.every) * step.percent : 0;
+      const potentialPercent = step ? Math.floor(totalPotential / step.every) * step.percent : 0;
+      const b = bonus[stat];
       result.base[stat] = base;
-      // Shown rounded down (inferred: the game's display rounding is not in the client scripts).
+      // Shown rounded up: the client scripts don't say, but rounding up reproduced all five stats it could
+      // check on a real Lv 65 Fulmintis card (rounding down or to nearest did not).
       result.total[stat] = base === null ? null
-        : Math.floor(base * (1 + potentialPercent + bonus[stat].p) + bonus[stat].fix);
+        : Math.ceil((base + b.v) * (1 + potentialPercent + b.p) + b.fix + b.conv - 1e-9);
     });
-    result.cp = combatPower(data, form, species, level, result.potential, options);
+    // CP counts only your own potential (Utils.getCpValue reads indLv) and the Star Up step's CP.
+    result.cp = combatPower(data, form, species, level, Object.fromEntries(STATS.map((stat) => [stat, potential[stat].own])),
+      { ...options, resonanceCp: star?.cp ?? options.resonanceCp });
     return result;
   }
 
@@ -158,9 +199,9 @@
       return sum + (row ? row.cp * (recommended.has(stat) ? row.recommended_rate : 1) : 0);
     }, 0);
     const heldItemCp = (options.heldItems || []).reduce((sum, { itemId, level: itemLevel }) => {
-      const tier = Object.values(data.forms).flatMap((row) => row.recommended?.held_items || [])
-        .flatMap((item) => item.tiers).find((t) => String(t.item_id) === String(itemId));
-      return sum + (tier ? tier.cp + tier.cp_per_level * (Number(itemLevel) || 0) : 0);
+      const item = data.held_item_catalog?.[itemId] || Object.values(data.forms).flatMap((row) => row.recommended?.held_items || [])
+        .flatMap((group) => group.tiers).find((t) => String(t.item_id) === String(itemId));
+      return sum + (item ? item.cp + item.cp_per_level * (Number(itemLevel) || 0) : 0);
     }, 0);
     const core = options.coreUpgraded ? 1 : 0;
     const calcLevel = Math.min(80, Math.max(1, level));

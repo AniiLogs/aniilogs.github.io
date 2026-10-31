@@ -103,3 +103,51 @@ test("stat-scaled buff values follow base x min(max, min + stat x rate)", () => 
   assert.equal(D.scaledValue(guard, { "P.DEF": 900 }), 120);
   assert.equal(Math.round(D.scaledValue({ ...waltz, factor: -1 }, { ATK: 0 }) * 1000) / 1000, -0.28);
 });
+
+test("stat totals use own potential plus Star Up and held-item potential, and CP counts only your own", () => {
+  const growth = {
+    level_cap: 70, attribute_points_max: 20, attribute_point_bonus: 0.008,
+    level_value: { per_level: 6, base: 35, extra_from_level: 60, extra_levels: 10, extra_weight: 1.8 },
+    stats: { HP: { offset: 20, divisor: 120, scale: 20, extra: true }, ATK: { offset: 0, divisor: 120, scale: 1, extra: true },
+      "P.DEF": { offset: 0, divisor: 80, scale: 0.5, extra: true }, "M.DEF": { offset: 0, divisor: 80, scale: 0.5, extra: true },
+      REGEN: { offset: 0, divisor: 90, scale: 0.5, extra: false }, BREAK: { offset: 0, divisor: 100, scale: 1, extra: false } },
+    potentials: { percent_steps: Object.fromEntries(["HP", "ATK", "P.DEF", "M.DEF", "REGEN", "BREAK"].map((stat) => [stat, { every: 4, percent: 0.04 }])) },
+  };
+  const aniilog = { stat_growth: growth, entries: [{ form_id: "1", stats: [["HP", 100], ["ATK", 100], ["P.DEF", 50], ["M.DEF", 50], ["REGEN", 50], ["BREAK", 50]].map(([label, value]) => ({ label, value })) }] };
+  const allSix = ["pet_individual_point_atk", "pet_individual_point_hp", "pet_individual_point_def", "pet_individual_point_def_mag", "pet_individual_point_ep_regen_force", "pet_individual_point_bp_atk"];
+  const data = {
+    forms: { 1: { stat_template: {} } },
+    potential_cp: Array.from({ length: 21 }, (_, level) => ({ cp: 6 * level, recommended_rate: 2 })),
+    star_up: { 6: { 6: { cp: 0, stats: [{ keys: allSix, value: 2 }, { keys: ["atk_v"], value: 80 }] } } },
+    held_item_levels: { 10: { enhance_ratio: 0.5 } },
+    held_item_catalog: { 9: { name: "Horn", stats: [], conversions: [], cp: 0, cp_per_level: 0,
+      tiers: [{ level: 10, need_energy: 0, buffs: [{ attributes: [{ key: "pet_individual_point_bp_atk", value: 2 }] }] }] } },
+  };
+  const result = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20, BREAK: 20 }, starUp: { stage: 6, level: 6 }, heldItems: [{ itemId: 9, level: 10 }] });
+  assert.equal(result.potential.ATK.total, 22);
+  assert.equal(result.potential.BREAK.total, 24);
+  assert.equal(result.potential.BREAK.held_items, 2);
+  assert.equal(result.potential.HP.total, 2);
+  // ATK: (formula at potential 22 + 80 Star Up flat) x (1 + 5 x 4%), rounded up
+  const base = D.baseValue(growth, "ATK", 100, 65, 22);
+  assert.equal(result.total.ATK, Math.ceil((base + 80) * 1.2 - 1e-9));
+  const ownOnly = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20, BREAK: 20 } });
+  assert.equal(result.cp, ownOnly.cp);
+});
+
+test("a researched form's Form Research bonus adds to every form of the species", () => {
+  const growth = {
+    level_cap: 70, attribute_points_max: 20, attribute_point_bonus: 0.008,
+    level_value: { per_level: 6, base: 35, extra_from_level: 60, extra_levels: 10, extra_weight: 1.8 },
+    stats: { ATK: { offset: 0, divisor: 120, scale: 1, extra: true } },
+    potentials: { percent_steps: { ATK: { every: 4, percent: 0.04 } } },
+  };
+  const aniilog = { stat_growth: growth, entries: [{ form_id: "1", stats: [{ label: "ATK", value: 100 }] }] };
+  const data = { forms: { 1: { stat_template: {}, form_research: [{ form_id: 2, form_label: "Prismana Form", key: "atk_p", label: "ATK", value: 0.02 }] } } };
+  const without = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20 } });
+  const researched = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20 }, formResearch: ["2"] });
+  const base = D.baseValue(growth, "ATK", 100, 65, 20);
+  assert.equal(without.total.ATK, Math.ceil(base * 1.2 - 1e-9));
+  assert.equal(researched.total.ATK, Math.ceil(base * 1.22 - 1e-9));
+  assert.equal(researched.bonus.ATK.sources[0].source, "Form Research: Prismana Form");
+});
