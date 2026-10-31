@@ -1661,6 +1661,21 @@ test("how a run ended: cleared, ended early by the leader, time up, or invalid (
   assert.equal(mine.some((e) => e.score === 26400), false);
 });
 
+test("runs stored before outcomes were kept get theirs by themselves: the first read fills them, with no sign-in", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const infergon = { boss: { id: "80000107", name: "Omega Infergon", level: 60 } };
+  await sendRun(env, token, run("old-kill", { ...infergon, stars: 15, score: 18000, clearTimeS: 140, cleared: true, playedAt: 1792700400 }));
+  await sendRun(env, token, run("old-quit", { ...infergon, stars: 6, score: 26400, clearTimeS: 70, cleared: true, playedAt: 1792700000 }));
+  sqlite.exec("UPDATE leaderboard_submissions SET outcome = NULL");       // as stored before 0033
+  // a freshly started worker, and a signed-out visitor opening the boards
+  const fresh = Object.assign(Object.create(env), { DB: Object.create(env.DB) });
+  const best = (await (await call(fresh, "/api/leaderboard/entries?kind=interlink_run")).json()).entries;
+  assert.deepEqual(best.map((e) => e.score), [18000]);                    // the old quit run is off the board at once
+  assert.deepEqual(sqlite.prepare("SELECT client_run_id, outcome FROM leaderboard_submissions ORDER BY client_run_id").all().map((r) => [r.client_run_id, r.outcome]),
+    [["old-kill", "cleared"], ["old-quit", "invalid"]]);
+});
+
 test("profile visibility: Public shows every part, Custom only the ticked ones, Private nothing - the owner always sees all", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);

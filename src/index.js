@@ -3785,7 +3785,31 @@ async function storeRunOutcome(env, submissionId) {
   await env.DB.prepare("UPDATE leaderboard_submissions SET outcome = ? WHERE submission_id = ?")
     .bind(interlinkOutcome(row, await interlinkCycles(env)), submissionId).run();
 }
-// POST /api/admin/run-outcomes {max}: works out the outcome of runs stored before it was kept (once, after 0033)
+// Runs stored before the outcome column existed (or whose write failed) get theirs by themselves: the first API read
+// in each worker fills up to 500 before it answers, so the boards never show an old invalid run, and once nothing is
+// left that worker stops looking. No sign-in, no manual step.
+const OUTCOMES_FILLED = new WeakSet();
+async function fillRunOutcomes(env, max = 500) {
+  if (!env.DB || OUTCOMES_FILLED.has(env.DB)) return null;
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id, kind, cycle, boss_id, stars, cleared, clear_time_s, extra_json FROM leaderboard_submissions
+     WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL LIMIT ?`,
+  ).bind(max + 1).all();
+  const rows = (results || []).slice(0, max);
+  const counts = {};
+  if (rows.length) {
+    const weeks = await interlinkCycles(env);
+    await env.DB.batch(rows.map((row) => {
+      const outcome = interlinkOutcome(row, weeks);
+      counts[outcome] = (counts[outcome] || 0) + 1;
+      return env.DB.prepare("UPDATE leaderboard_submissions SET outcome = ? WHERE submission_id = ?").bind(outcome, row.submission_id);
+    }));
+  }
+  const left = Math.max(0, (results || []).length - rows.length);
+  if (!left) OUTCOMES_FILLED.add(env.DB);
+  return { updated: rows.length, counts, left };
+}
+// POST /api/admin/run-outcomes {max}: the same fill on demand (not needed: reads do it)
 async function backfillRunOutcomes(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
@@ -3793,19 +3817,10 @@ async function backfillRunOutcomes(request, env) {
   let body = {};
   try { body = await readJsonBody(request, 256); } catch { /* the default */ }
   const max = Math.min(2000, Math.max(1, Number.parseInt(body?.max ?? "500", 10) || 500));
-  const { results } = await env.DB.prepare(
-    `SELECT submission_id, kind, cycle, boss_id, stars, cleared, clear_time_s, extra_json FROM leaderboard_submissions
-     WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL LIMIT ?`,
-  ).bind(max).all();
-  const weeks = await interlinkCycles(env);
-  const counts = {};
-  for (const row of results || []) {
-    const outcome = interlinkOutcome(row, weeks);
-    counts[outcome] = (counts[outcome] || 0) + 1;
-    await env.DB.prepare("UPDATE leaderboard_submissions SET outcome = ? WHERE submission_id = ?").bind(outcome, row.submission_id).run();
-  }
+  OUTCOMES_FILLED.delete(env.DB);
+  const filled = await fillRunOutcomes(env, max);
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM leaderboard_submissions WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL").first();
-  return json({ updated: (results || []).length, counts, left: Number(left?.n || 0) });
+  return json({ updated: filled.updated, counts: filled.counts, left: Number(left?.n || 0) });
 }
 
 function interlinkStarCaps(cycleId) {
@@ -5105,7 +5120,10 @@ async function api(request, env) {
 
 async function handleRequest(request, env) {
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api/")) return corsResponse(request, env, await api(request, env));
+  if (url.pathname.startsWith("/api/")) {
+    try { await fillRunOutcomes(env); } catch (error) { if (env.DB) OUTCOMES_FILLED.add(env.DB); console.error("Run outcomes need migration 0033", error); }
+    return corsResponse(request, env, await api(request, env));
+  }
   const asset = await env.ASSETS.fetch(request);
   const headers = securityHeaders(new Headers(asset.headers), url.hostname === "127.0.0.1" || url.hostname === "localhost");
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
