@@ -7551,7 +7551,7 @@ function renderAfpStats(entry) {
   // extra potential. The game allows up to extra_max_level extra (pet_config_data.newPropExtraMaxLv, 10), but the
   // game files only give +4 from Star Up stage 7 (pet_resonance_property_data, group 110: +1/+2/+4 at stages
   // 5/6/7, not added together) and +2 from one Epic or Legendary held item at item level 10 (core_carry_data
-  // energyEffects). So every stat stops at 24, and only the stat the chosen held item boosts reaches 26.
+  // energyEffects). So every stat stops at 24, and the stats the chosen held item boosts reach 24 + its potential.
   const ownMax = growth.potentials?.max_level || 20;
   const STAR_UP_EXTRA = 4;
   const typedMax = Math.min(ownMax + (growth.potentials?.extra_max_level ?? 10), ownMax + STAR_UP_EXTRA);
@@ -7683,7 +7683,7 @@ function renderAfpStats(entry) {
     });
     const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
     earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
-    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat, and Star Up stage 7 adds 4 more, so each stat stops at ${typedMax}. Only the stat an Epic or Legendary held item boosts (at item level 10) gets 2 more, up to ${typedMax + 2}; the +2 shows beside it. Values are before Star Up's other stat bonuses, personality, talents and buffs; a held item you pick is included (its +N shows beside the value). Formulas from the game scripts.`));
+    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat, and Star Up stage 7 adds 4 more, so each stat stops at ${typedMax}. An Epic or Legendary held item (at item level 10) adds 2 more to the stat it boosts, up to ${typedMax + 2} (Giant Tortoise Shell boosts both P.DEF and M.DEF); the +2 shows beside it. Values are before Star Up's other stat bonuses, personality, talents and buffs; a held item you pick is included (its +N shows beside the value). Formulas from the game scripts.`));
   }
   renderTable();
   void earned;
