@@ -1619,7 +1619,7 @@
       cp.append(el("strong", "", "CP "), totals.cp.toLocaleString());
       box.append(cp);
     }
-    box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. Not included: held-item talents."));
+    box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at its rarity's top level (Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
     return box;
   }
 

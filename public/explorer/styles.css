@@ -14041,6 +14041,26 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
   }
 }
 
+.held-item-field {
+  grid-column: 1 / -1;
+}
+
+.held-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.held-item-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .potential-check {
   display: flex;
   align-items: center;

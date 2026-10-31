@@ -21,7 +21,7 @@
   }
 
   // Returns { wrap, input, list, close }, or null when the select is missing or already enhanced.
-  function enhance(select, { placeholder = "Type a name, form or element" } = {}) {
+  function enhance(select, { placeholder = "Type a name, form or element", emptyText = "No Aniimo match" } = {}) {
     if (!select || select.dataset.pickerEnhanced) return null;
     select.dataset.pickerEnhanced = "true";
     const id = `aniimo-picker-${nextId += 1}`;
@@ -58,9 +58,11 @@
     const showSelected = () => { input.value = select.value ? selectedText() : ""; };
 
     // The list is fixed to the window so a scrolling sidebar can't clip it: under the box, or above it
-    // when there's more room there.
+    // when there's more room there. While open it sits in <body>: a panel with CSS containment (the Team
+    // Builder's map-panel has contain: layout paint) would otherwise offset the fixed list and cut it off.
     function place() {
       if (list.hidden) return;
+      if (!input.isConnected) { close(); return; }
       const box = input.getBoundingClientRect();
       const below = window.innerHeight - box.bottom - 8;
       const above = box.top - 8;
@@ -80,6 +82,7 @@
       window.removeEventListener("scroll", onMove, true);
       window.removeEventListener("resize", onMove);
       list.hidden = true;
+      if (list.parentNode !== wrap) wrap.insertBefore(list, select);
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
       active = -1;
@@ -126,10 +129,11 @@
         const empty = document.createElement("li");
         empty.className = "aniimo-picker-empty";
         empty.setAttribute("role", "presentation");
-        empty.textContent = "No Aniimo match";
+        empty.textContent = emptyText;
         list.append(empty);
       }
       if (list.hidden) {
+        document.body.append(list);
         window.addEventListener("scroll", onMove, true);
         window.addEventListener("resize", onMove);
       }

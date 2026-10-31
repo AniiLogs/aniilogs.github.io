@@ -29,7 +29,7 @@
   }
 
   // statTotals options for a build. With `data`, the held item counts only as the shared picker shows it
-  // (held-item-picker.js: Legendary, at the top item level).
+  // (held-item-picker.js: at its rarity's top item level).
   function totalsOptions(build, cap = 70, data = null) {
     const held = data && window.AniilogsHeldItems ? window.AniilogsHeldItems.normalize(data, build?.heldItem) : build?.heldItem;
     return {
@@ -108,7 +108,7 @@
       sources.append(field("Star Up level", selectInput(stageLevels.map((value) => ({ value, label: `Level ${value}` })),
         Number(build.starUp.level) || 0, (value) => update({ starUp: { stage, level: Number(value) } }), "Star Up level")));
     }
-    // Held item: the shared Legendary-only picker, always at the top item level.
+    // Held item: the shared picker (every item, each rarity at its top level, optional "Legendary only").
     if (window.AniilogsHeldItems) {
       sources.append(window.AniilogsHeldItems.render({ data, formId, itemId: build?.heldItem?.itemId || "",
         onChange: (heldItem) => update({ heldItem }) }));

@@ -7593,7 +7593,7 @@ function renderAfpStats(entry) {
   const earnedNote = document.createElement("p");
   earnedNote.className = "afp-growth-note";
   controls.append(levelLabel, presets);
-  // Held item: the Team Builder's Legendary-only picker (held-item-picker.js), once the Team Builder data is in.
+  // Held item: the Team Builder's picker (held-item-picker.js), once the Team Builder data is in.
   if (!state.afpTeamData) loadAfpTeamData();
   if (state.afpTeamData?.held_item_catalog && window.AniilogsHeldItems) {
     settings.heldItem = window.AniilogsHeldItems.normalize(state.afpTeamData, settings.heldItem);

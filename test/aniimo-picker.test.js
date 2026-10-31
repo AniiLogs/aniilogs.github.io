@@ -19,3 +19,8 @@ test("both 1v1 sides use the picker, with elements and the Aniilog number as sea
   assert.match(duel, /window\.AniilogsPicker\?\.enhance\(select/u);
   assert.match(duel, /option\.dataset\.search = \[\.\.\.\(entry\.elements \|\| \[\]\)\.map\(\(item\) => item\.name\), entry\.aniilog_number\]/u);
 });
+
+test("the open list moves to <body> so a contained panel can't offset or clip it", () => {
+  assert.match(picker, /document\.body\.append\(list\)/u);
+  assert.match(picker, /if \(list\.parentNode !== wrap\) wrap\.insertBefore\(list, select\)/u);
+});
