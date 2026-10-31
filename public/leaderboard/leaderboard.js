@@ -209,6 +209,19 @@
     for (const option of options) select.append(el("option", { value: option.value, text: option.label }));
     if ([...select.options].some((option) => option.value === pending)) select.value = pending;
     delete select.dataset.pending;
+    const picker = pickers.get(select);
+    if (picker) { picker.input.placeholder = emptyLabel; picker.refresh(); }
+  }
+  // The long or growing lists (week or season, boss, trial, rogue buff) get the site's type-to-filter box
+  // (/explorer/aniimo-picker.js). The select stays the source of truth: a pick sets it and fires "change", and code
+  // that fills or sets one calls its picker's refresh().
+  const pickers = new Map();
+  function enhanceFilters() {
+    for (const name of ["cycle", "boss", "trial", "buff"]) {
+      const select = els.filters.elements[name];
+      const picker = window.AniilogsPicker?.makeCombobox(select, { placeholder: select.options[0]?.text || "Type to filter", emptyText: "No matches" });
+      if (picker) pickers.set(select, picker);
+    }
   }
   function renderControls() {
     $("[data-mode-note]").hidden = state.mode !== "eggheist";
@@ -311,6 +324,7 @@
     f.difficulty.replaceChildren(...levels.map((name) => el("option", { value: name, text: name })));
     f.difficulty.value = levels.includes(level) ? level : [...levels].reverse().find((name) => withRuns.includes(name)) || levels.at(-1);
     delete f.difficulty.dataset.pending;
+    pickers.get(f.trial)?.refresh();
   }
   function simStageOf(seasonId, stageId) {
     return state.facets?.simRules?.seasons?.find((item) => String(item.season) === seasonId)?.stages.find((item) => item.id === stageId) || null;
@@ -927,15 +941,19 @@
     void loadEntries();
   });
   let searchTimer = 0;
-  els.filters.addEventListener("input", (event) => {
-    if (event.target === els.sort) return;
-    if (event.target === els.filters.elements.trial) fillSimPickers();   // that trial's own difficulties
+  const onFilter = (target) => {
+    if (target === els.sort) return;
+    if (target === els.filters.elements.trial) fillSimPickers();   // that trial's own difficulties
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => {
       state.offset = 0;
       void loadEntries();
-    }, event.target.type === "search" ? 300 : 0);
-  });
+    }, target.type === "search" ? 300 : 0);
+  };
+  enhanceFilters();
+  // typing in a picker's box only filters its list; the pick itself arrives as the select's "change"
+  els.filters.addEventListener("input", (event) => { if (!event.target.classList.contains("aniimo-picker-input")) onFilter(event.target); });
+  els.filters.addEventListener("change", (event) => { if (pickers.has(event.target)) onFilter(event.target); });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
   // a board opened with "View all" pages by FULL_ROWS, the record boards by PAGE_SIZE
