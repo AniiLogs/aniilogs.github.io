@@ -369,6 +369,9 @@ footer a { font-weight: 800; text-decoration: none; }
 .profile-avatar { flex: none; width: 64px; height: 64px; border: 3px solid var(--lavender); border-radius: 50%; object-fit: cover; }
 .profile-overview-bio, .profile-overview-characters { margin: 0.2rem 0 0; color: var(--ink-soft); line-height: 1.5; }
 .profile-overview-characters { font-size: 0.82rem; }
+.profile-exp { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.45rem; vertical-align: middle; white-space: nowrap; font-size: 0.74rem; }
+.profile-exp-bar { position: relative; display: inline-block; width: 5.5rem; height: 0.35rem; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--teal) 16%, transparent); }
+.profile-exp-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--teal); }
 .profile-overview-status { min-height: 1.2em; margin: 0 0 0.8rem; color: var(--ink-soft); font-size: 0.82rem; }
 .profile-overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; }
 .profile-panel { min-width: 0; padding: 1.2rem 1.3rem; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--cream) 88%, transparent); color: var(--ink); }

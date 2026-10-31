@@ -602,18 +602,34 @@ async function loadProfileOverview(publicId = "") {
     presence.dataset.state = overview.presence || "";
     presence.textContent = label || "";
     const mainName = overview.main?.name;
-    const characters = (overview.characters || []).map((character) => {
-      // name, gender mark, level and server, as far as the desktop app has seen them
-      const name = [
-        `${character.name || `UID ${character.gameUid}`}${{ female: " ♀", male: " ♂" }[character.gender] || ""}`,
-        Number.isInteger(character.level) ? `Lv ${character.level}` : "",
-        character.server || "",
-      ].filter(Boolean).join(" · ");
-      return mainName && character.name === mainName ? `${name} (main)` : name;
+    const characterLine = profileOverview.querySelector("[data-overview-characters]");
+    characterLine.replaceChildren();
+    (overview.characters || []).forEach((character, index) => {
+      // name, gender mark, level (with the EXP into it, from the game's EXP card) and server, as far as the desktop
+      // app has seen them
+      const name = `${character.name || `UID ${character.gameUid}`}${{ female: " ♀", male: " ♂" }[character.gender] || ""}`;
+      const entry = element("span", "profile-character");
+      entry.append(document.createTextNode(index ? ", " : "Characters: "), document.createTextNode(name));
+      if (Number.isInteger(character.level)) entry.append(document.createTextNode(` · Lv ${character.level}`));
+      if (Number.isInteger(character.exp) && character.expNeeded > 0) {
+        const exp = element("span", "profile-exp");
+        const bar = element("span", "profile-exp-bar");
+        bar.setAttribute("role", "progressbar");
+        bar.setAttribute("aria-label", `EXP toward level ${(character.level || 0) + 1}`);
+        bar.setAttribute("aria-valuemin", "0");
+        bar.setAttribute("aria-valuemax", String(character.expNeeded));
+        bar.setAttribute("aria-valuenow", String(character.exp));
+        const fill = element("span");
+        fill.style.width = `${Math.min(100, (character.exp / character.expNeeded) * 100).toFixed(1)}%`;
+        bar.append(fill);
+        exp.append(bar, element("span", "", `${numberFormat.format(character.exp)} / ${numberFormat.format(character.expNeeded)} EXP`));
+        entry.append(exp);
+      }
+      if (character.server) entry.append(document.createTextNode(` · ${character.server}`));
+      if (mainName && character.name === mainName) entry.append(document.createTextNode(" (main)"));
+      characterLine.append(entry);
     });
-    profileOverview.querySelector("[data-overview-characters]").textContent = characters.length
-      ? `Characters: ${characters.join(", ")}`
-      : publicId ? "" : "No game characters linked yet. The desktop app links yours when it sees you in game.";
+    if (!characterLine.childNodes.length && !publicId) characterLine.textContent = "No game characters linked yet. The desktop app links yours when it sees you in game.";
     // Board standing follows the leaderboard gate; the server sends none while the owner can't read the boards.
     for (const panel of ["interlink", "sim", "eggheist"]) {
       profileOverview.querySelector(`[data-overview-panel="${panel}"]`).hidden = !overview.leaderboards;

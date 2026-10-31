@@ -1577,7 +1577,8 @@ async function ownProfileOverview(request, env) {
       "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, preferences_json AS prefs FROM profiles WHERE discord_id = ?",
     ).bind(account.discordId).first(),
     env.DB.prepare(
-      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt, json_extract(stats_json, '$.level') AS level,
+      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt, json_extract(stats_json, '$.level') AS level, json_extract(stats_json, '$.exp') AS exp,
+         json_extract(stats_json, '$.expNeeded') AS expNeeded,
          json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server
        FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
     ).bind(account.discordId).all(),
@@ -1608,7 +1609,7 @@ async function ownProfileOverview(request, env) {
       ...(Number(profile?.isPublic || 0) === 1 && profile?.publicId ? { publicId: profile.publicId } : {}),
     },
     layout: storedProfileLayout(profile?.prefs),
-    characters: (characters.results || []).map(({ level, gender, server, ...row }) => ({ ...row, ...characterDetails({ level, gender, server }) })),
+    characters: (characters.results || []).map(({ level, gender, server, exp, expNeeded, ...row }) => ({ ...row, ...characterDetails({ level, gender, server, exp, expNeeded }) })),
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     presence: await profilePresence(env, account.discordId),
     leaderboards,
@@ -1999,7 +2000,8 @@ async function publicProfile(request, env, publicId) {
   const { parts } = profileVisibility(1, profile.prefs);
   const shows = (part) => parts.includes(part);
   const [characters, main] = await Promise.all([
-    env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level,
+    env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level, json_extract(stats_json, '$.exp') AS exp,
+         json_extract(stats_json, '$.expNeeded') AS expNeeded,
       json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server FROM game_characters
       WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC`)
       .bind(profile.discordId).all(),
@@ -3234,6 +3236,7 @@ async function linkCharacter(request, env) {
 // their own Profile, and the character's level (from the EXP card the game shows when you gain EXP), gender (the mark
 // after the name on the Profile screen) and server (as the game's settings name it, e.g. "Aniimo-Americas"). Only for
 // a character this account proved from the game, and only whole numbers in range. Each send updates what it has.
+// The EXP card also gives the progress into that level: exp of expNeeded, kept only as a pair (exp <= expNeeded).
 const CHARACTER_STATS = Object.freeze(["aniimoPoint", "sparklingAniimo", "stylePoints", "prismanaAniimo", "level"]);
 const CHARACTER_STAT_MAX = 10_000_000;
 const CHARACTER_LEVEL_MAX = 200;
@@ -3259,6 +3262,13 @@ export function cleanCharacterStats(raw) {
     if (key === "level" && (value < 1 || value > CHARACTER_LEVEL_MAX)) return null;
     out[key] = value;
   }
+  // EXP into the level: only as a pair (a lone one is dropped), whole numbers, exp no more than the level needs
+  const whole = (value) => Number.isInteger(value) && value >= 0 && value <= CHARACTER_STAT_MAX;
+  if (raw.exp != null && raw.expNeeded != null) {
+    if (!whole(raw.exp) || !whole(raw.expNeeded) || raw.expNeeded < 1 || raw.exp > raw.expNeeded) return null;
+    out.exp = raw.exp;
+    out.expNeeded = raw.expNeeded;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -3275,7 +3285,7 @@ async function saveCharacterStats(request, env) {
   const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
   const stats = cleanCharacterStats(body.stats);
   if (!gameUid) return json({ error: "A numeric game UID is required." }, 400);
-  if (!stats) return json({ error: "Stats must be whole numbers (aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo, level), gender female or male, server a name." }, 400);
+  if (!stats) return json({ error: "Stats must be whole numbers (aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo, level; exp with expNeeded, exp no more than expNeeded), gender female or male, server a name." }, 400);
   const owned = await env.DB.prepare(
     "SELECT verified_at AS verifiedAt, stats_json AS statsJson FROM game_characters WHERE game_uid = ? AND discord_id = ?",
   ).bind(gameUid, account.discordId).first();
@@ -3283,6 +3293,11 @@ async function saveCharacterStats(request, env) {
   let saved = null;
   try { saved = owned.statsJson ? cleanCharacterStats(JSON.parse(owned.statsJson)) : null; } catch { saved = null; }
   const merged = { ...saved, ...stats };        // the level and the Profile screen's numbers arrive separately
+  // a new level without its EXP: the old level's EXP no longer applies
+  if (stats.level !== undefined && stats.exp === undefined && stats.level !== saved?.level) {
+    delete merged.exp;
+    delete merged.expNeeded;
+  }
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare("UPDATE game_characters SET stats_json = ?, stats_at = ? WHERE game_uid = ? AND discord_id = ?")
     .bind(JSON.stringify(merged), now, gameUid, account.discordId).run();
@@ -3392,6 +3407,7 @@ function characterDetails(row) {
     ...(Number.isInteger(row.level) ? { level: row.level } : {}),
     ...(CHARACTER_GENDERS.includes(row.gender) ? { gender: row.gender } : {}),
     ...(typeof row.server === "string" && row.server ? { server: row.server } : {}),
+    ...(Number.isInteger(row.exp) && Number.isInteger(row.expNeeded) && row.expNeeded > 0 ? { exp: row.exp, expNeeded: row.expNeeded } : {}),
   };
 }
 
