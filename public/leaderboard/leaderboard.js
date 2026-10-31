@@ -180,9 +180,11 @@
     const fields = board().fields;
     for (const name of ["cycle", "boss", "level", "difficulty", "trial", "party", "buff"]) {
       let value = els.filters.elements[name]?.value;
-      if (name === "trial") value = String(value || "").split("|").pop();   // "<stage>|<element>": the API takes the element
+      if (name === "trial") value = String(value || "").split("|").pop();   // "<season>|<stage>|<element>": the API takes the element
       if (value && fields.includes(name)) params.set(name, value);
     }
+    const season = fields.includes("trial") ? String(els.filters.elements.trial.value || "").split("|")[0] : "";
+    if (season) params.set("cycle", season);                             // Sim: each season its own boards
     const player = els.filters.elements.player.value.trim();
     if (player) params.set("player", player);
     if (fields.includes("cleared") && els.filters.elements.cleared.checked) params.set("cleared", "1");
@@ -275,36 +277,44 @@
     fillSelect(f.buff, (facets.buffs || []).map((row) => ({ value: row.name, label: `${row.name} (${row.count})` })), "Any buff");
     fillSimPickers();
   }
-  // Holo-Battle Sim: one board per stage and difficulty. The Trial picker lists the game's stages from the API's rules,
-  // grouped (Basic Training: Training of Grass / Water / Fire; Elemental Crucible: Crucible of …), each option's value
-  // "<stage>|<element>"; Difficulty lists that stage's difficulties (the hardest one with runs, unless one was picked).
+  // Holo-Battle Sim: one board per season, stage and difficulty. The Trial picker lists the game's stages from the API's
+  // rules, newest season first and grouped (Season 2 · Training: Earth / Lightning / Dark Training; Season 1 · Basic
+  // Training: Training of Grass / Water / Fire; Season 1 · Elemental Crucible: Crucible of …), each option's value
+  // "<season>|<stage>|<element>"; Difficulty lists that stage's difficulties (the hardest one with runs, unless one was
+  // picked).
   function fillSimPickers() {
     const f = els.filters.elements;
-    const rules = state.facets?.simRules;
-    if (state.mode !== "sim" || !rules?.stages?.length) return;
+    const seasons = state.facets?.simRules?.seasons;
+    if (state.mode !== "sim" || !seasons?.length) return;
     const pendingElement = f.trial.dataset.pending;
     const pendingLevel = f.difficulty.dataset.pending;
-    const chosen = pendingElement
-      ? `${(rules.stages.find((stage) => stage.difficulties.includes(pendingLevel)) || rules.stages[0]).id}|${pendingElement}`
-      : f.trial.value;
-    f.trial.replaceChildren(...rules.stages.map((stage) => el("optgroup", { label: stage.label },
-      rules.elements.map((element) => el("option", { value: `${stage.id}|${element}`,
-        text: `${stage.name.replace("{element}", element)}${stage.alias ? ` (${stage.alias.replace("{element}", element)})` : ""}` })))));
+    const pendingSeason = new URLSearchParams(window.location.search).get("cycle");
+    const season = pendingElement && (seasons.find((item) => String(item.season) === pendingSeason && item.elements.includes(pendingElement))
+      || seasons.find((item) => item.elements.includes(pendingElement)));
+    const stage = season && (season.stages.find((item) => item.difficulties.includes(pendingLevel)) || season.stages[0]);
+    const chosen = season ? `${season.season}|${stage.id}|${pendingElement}` : f.trial.value;
+    f.trial.replaceChildren(...seasons.flatMap((item) => item.stages.map((stage) => el("optgroup", { label: `Season ${item.season} · ${stage.label}` },
+      item.elements.map((element) => el("option", { value: `${item.season}|${stage.id}|${element}`,
+        text: `${stage.name.replace("{element}", element)}${stage.alias ? ` (${stage.alias.replace("{element}", element)})` : ""}` }))))));
     f.trial.value = [...f.trial.options].some((option) => option.value === chosen) ? chosen : f.trial.options[0].value;
     delete f.trial.dataset.pending;
-    const [stageId, element] = f.trial.value.split("|");
-    const levels = rules.stages.find((stage) => stage.id === stageId).difficulties;
-    const withRuns = (state.facets.trials || []).filter((row) => row.trial === element && levels.includes(row.difficulty)).map((row) => row.difficulty);
+    const [seasonId, stageId, element] = f.trial.value.split("|");
+    const levels = simStageOf(seasonId, stageId).difficulties;
+    const withRuns = (state.facets.trials || []).filter((row) => String(row.season) === seasonId && row.trial === element && levels.includes(row.difficulty))
+      .map((row) => row.difficulty);
     const level = pendingLevel ?? f.difficulty.value;
     f.difficulty.replaceChildren(...levels.map((name) => el("option", { value: name, text: name })));
     f.difficulty.value = levels.includes(level) ? level : [...levels].reverse().find((name) => withRuns.includes(name)) || levels.at(-1);
     delete f.difficulty.dataset.pending;
   }
-  // the board's name for the summary: "Training of Water - Hard"
+  function simStageOf(seasonId, stageId) {
+    return state.facets?.simRules?.seasons?.find((item) => String(item.season) === seasonId)?.stages.find((item) => item.id === stageId) || null;
+  }
+  // the board's name for the summary: "Earth Training - Trial"
   function simBoardName() {
     const f = els.filters.elements;
-    const [stageId, element] = String(f.trial.value || "").split("|");
-    const stage = state.facets?.simRules?.stages?.find((item) => item.id === stageId);
+    const [seasonId, stageId, element] = String(f.trial.value || "").split("|");
+    const stage = simStageOf(seasonId, stageId);
     return stage && element ? `${stage.name.replace("{element}", element)}${f.difficulty.value ? ` - ${f.difficulty.value}` : ""}` : "";
   }
 
