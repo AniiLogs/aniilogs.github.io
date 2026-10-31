@@ -32,8 +32,8 @@
 
   function loadSettings() {
     const defaults = {
-      you: { formId: "", level: 70, potential: 0 },
-      foe: { formId: "", level: 70, potential: 0 },
+      you: { formId: "", level: 70, potential: 0, starUp: null, heldItem: null, personality: [] },
+      foe: { formId: "", level: 70, potential: 0, starUp: null, heldItem: null, personality: [] },
       startHp: 100,
       broken: false,
       brokenBonus: 0,
@@ -125,9 +125,7 @@
   // otherwise the Aniimo page's growth formula.
   function sideStats(aniilog, data, entry, side) {
     const model = window.AniilogsDamage;
-    const totals = model?.statTotals && data?.forms?.[String(entry?.form_id)]
-      ? model.statTotals(data, aniilog, String(entry.form_id), { level: side.level, potential: side.potential })
-      : null;
+    const totals = sideTotals(aniilog, data, entry, side);
     if (totals) {
       return {
         HP: totals.total.HP, Attack: totals.total.ATK, Defense: totals.total["P.DEF"], "EP Regen": totals.total.REGEN,
@@ -135,10 +133,30 @@
       };
     }
     const stats = {};
+    const potential = typeof side.potential === "object" ? 0 : side.potential;
     for (const row of entry?.stats || []) {
-      stats[row.label] = grownStat(aniilog.stat_growth, row.label, Number(row.value), side.level, side.potential);
+      stats[row.label] = grownStat(aniilog.stat_growth, row.label, Number(row.value), side.level, potential);
     }
     return stats;
+  }
+
+  // A side's build (level, per-stat potential, Star Up, held item, personality) through statTotals.
+  function sideTotals(aniilog, data, entry, side) {
+    const model = window.AniilogsDamage;
+    if (!model?.statTotals || !data?.forms?.[String(entry?.form_id)]) return null;
+    const cap = aniilog.stat_growth?.level_cap || 70;
+    const options = window.AniilogsPotentialEditor?.totalsOptions(side, cap) || { level: side.level, potential: side.potential };
+    return model.statTotals(data, aniilog, String(entry.form_id), options);
+  }
+
+  // A team member's Stats-tab build, copied onto a 1v1 side.
+  function copyBuild(side, member, cap) {
+    side.level = Math.round(clamp(member?.level ?? cap, 1, cap, cap));
+    side.potential = member?.potential ?? 0;
+    side.starUp = member?.starUp || null;
+    side.heldItem = member?.heldItem || null;
+    side.personality = member?.personality || [];
+    side.perfect = Boolean(member?.perfect);
   }
 
   // --- Elements -------------------------------------------------------------------------------------
@@ -424,11 +442,7 @@
       side.formId = target.value;
       // A team member brings the level and potential from its Stats tab.
       const member = options.memberStats?.[target.value];
-      if (member) {
-        const cap = options.aniilog.stat_growth?.level_cap || 70;
-        side.level = Math.round(clamp(member.level ?? cap, 1, cap, cap));
-        side.potential = Math.round(clamp(member.potential ?? 0, 0, 20, 0));
-      }
+      if (member) copyBuild(side, member, options.aniilog.stat_growth?.level_cap || 70);
     }));
     // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
     return window.AniilogsPicker?.enhance(select, { placeholder: "Type a name, form or element" })?.wrap || select;
@@ -453,11 +467,21 @@
       numberField("Level", side.level, { min: 1, max: options.aniilog.stat_growth?.level_cap || 70 }, change(rerender, (target) => {
         side.level = Math.round(clamp(target.value, 1, options.aniilog.stat_growth?.level_cap || 70, 70));
       })),
-      numberField("Potential", side.potential, { min: 0, max: 20, suffix: "per stat" }, change(rerender, (target) => {
-        side.potential = Math.round(clamp(target.value, 0, 20, 0));
-      })),
     );
     card.append(fields);
+    // Per-stat potential, Star Up and held item (potential-editor.js).
+    const editor = window.AniilogsPotentialEditor;
+    if (editor && model.entry) {
+      card.append(editor.render({
+        data: options.data, aniilog: options.aniilog, formId: String(side.formId), build: side,
+        totals: sideTotals(options.aniilog, options.data, model.entry, side),
+        onChange: (next) => {
+          Object.assign(side, { potential: next.potential, starUp: next.starUp ?? null, heldItem: next.heldItem ?? null, perfect: Boolean(next.perfect) });
+          saveSettings();
+          rerender();
+        },
+      }));
+    }
     if (model.entry) {
       const chips = el("div", "duel-elements");
       for (const id of model.elements) {
@@ -657,10 +681,7 @@
     const formId = options.members?.[0];
     if (settings.you.formId || !formId) return;
     settings.you.formId = formId;
-    const member = options.memberStats?.[formId];
-    const cap = options.aniilog.stat_growth?.level_cap || 70;
-    settings.you.level = Math.round(clamp(member?.level ?? cap, 1, cap, cap));
-    settings.you.potential = Math.round(clamp(member?.potential ?? 0, 0, 20, 0));
+    copyBuild(settings.you, options.memberStats?.[formId], options.aniilog.stat_growth?.level_cap || 70);
   }
 
   // --- Buffs and debuffs from your team ------------------------------------------------------------
@@ -687,7 +708,8 @@
       if (!casterStats.has(key)) {
         const cap = options.aniilog.stat_growth?.level_cap || 70;
         const source = key === you ? settings.you : options.memberStats?.[key] || {};
-        const totals = model.statTotals?.(options.data, options.aniilog, key, { level: source.level ?? cap, potential: source.potential ?? 0 });
+        const build = window.AniilogsPotentialEditor?.totalsOptions(source, cap) || { level: source.level ?? cap, potential: source.potential ?? 0 };
+        const totals = model.statTotals?.(options.data, options.aniilog, key, build);
         casterStats.set(key, totals?.total || null);
       }
       return casterStats.get(key);

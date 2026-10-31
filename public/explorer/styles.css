@@ -13923,3 +13923,107 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
     align-items: center;
   }
 }
+
+/* ---- Potential, Star Up and held item editor (potential-editor.js), Team Builder Stats and 1v1 sides. */
+.potential-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.potential-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.potential-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.potential-field-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.potential-select,
+.potential-number {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
+.potential-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.potential-table th,
+.potential-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.potential-table th:first-child {
+  text-align: left;
+}
+
+.potential-table thead th {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.potential-table .potential-number {
+  width: 4.5em;
+  padding: 4px 6px;
+  text-align: right;
+}
+
+.potential-extra {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.potential-none {
+  color: var(--muted);
+}
+
+.potential-total {
+  font-weight: 800;
+}
+
+.potential-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (pointer: coarse) {
+  .potential-number,
+  .potential-select {
+    font-size: 16px;
+  }
+}
+
+.potential-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: end;
+  min-height: 34px;
+  font-size: 13px;
+}
