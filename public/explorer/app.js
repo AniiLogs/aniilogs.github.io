@@ -13158,6 +13158,13 @@ function luminMapMetadata(spawn) {
     };
   }
   if (spawn.marker_type === "lumin_amber") {
+    // Placed from the game's chest record; no in-game map mark points at it.
+    if (spawn.in_game_map_mark === false) {
+      return {
+        source: "Amber without an in-game map marker",
+        guide: "The in-game map does not mark this Amber; its position comes from the game's scene data.",
+      };
+    }
     return {
       source: "Map-marked Amber",
       guide: "The current map marker does not identify whether this Amber is ordinary, guarded, or ecosystem-based.",
