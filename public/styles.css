@@ -547,6 +547,7 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
 .history-lineup-facts { flex: 1 1 16rem; min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.35rem 0.9rem; margin: 0; align-content: start; font-size: 0.86rem; }
 .history-lineup-facts dt { color: var(--teal); font-size: 0.7rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 0.15rem; }
 .history-lineup-facts dd { margin: 0; color: var(--ink); }
+.history-lineup-team { display: block; margin-top: 0.15rem; color: var(--ink-soft); font-size: 0.8rem; }
 .history-lineup-facts dd.history-empty { grid-column: 1 / -1; color: var(--ink-soft); }
 .history-shot { display: grid; gap: 0.25rem; width: min(100%, 260px); color: var(--ink-soft); font-size: 0.76rem; font-weight: 700; text-decoration: none; }
 .history-shot img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--ink-soft) 10%, transparent); }

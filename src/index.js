@@ -1699,25 +1699,38 @@ async function profilesDirectory(env) {
 // boards stay best-per-player; this is the whole record. It follows the profile: the owner's own, or a public
 // profile's for anyone. Names as on screen, a profile link only for public profiles, never a UID.
 const HISTORY_PAGE = 20;
-// aLogs' Party-screen lineup (extra.lineup) as the site passes it on: slot, name and AI for everyone; the lead Aniimo,
-// its level, CP and their team comp only for the player who sent the run (the proof is their screen: the others' are
-// theirs to send).
+// aLogs' Party-screen lineup (extra.lineup) as the site passes it on: for every player, slot, name, AI, and when read
+// their lead Aniimo, its level, CP and team comp; self marks the player who sent the run.
 function publicLineup(lineup) {
   if (!Array.isArray(lineup)) return null;
   const text = (value) => (typeof value === "string" ? value.slice(0, 40) : undefined);
   const level = (value) => (Number.isInteger(value) && value >= 1 && value <= 999 ? value : undefined);
   return lineup.slice(0, 4).filter((item) => item && typeof item === "object").map((item) => JSON.parse(JSON.stringify({
     slot: level(item.slot), name: text(item.name), ai: typeof item.ai === "boolean" ? item.ai : undefined, self: item.self === true || undefined,
-    ...(item.self === true ? {
-      aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
-      cp: Number.isInteger(item.cp) && item.cp >= 0 && item.cp <= 10000000 ? item.cp : undefined,
-      // the team they went in with: [{ aniimo | name, aniimoLevel | level, cp }] or names
-      team: Array.isArray(item.team) ? item.team.slice(0, 6).map((member) => (typeof member === "string" ? { aniimo: text(member) } : {
-        aniimo: text(member?.aniimo) ?? text(member?.name), aniimoLevel: level(member?.aniimoLevel) ?? level(member?.level),
-        cp: Number.isInteger(member?.cp) && member.cp >= 0 && member.cp <= 10000000 ? member.cp : undefined,
-      })).filter((member) => member.aniimo) : undefined,
-    } : {}),
+    // every player's lead, its level and CP, and the team they went in with (public, the owner's decision)
+    aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
+    cp: Number.isInteger(item.cp) && item.cp >= 0 && item.cp <= 10000000 ? item.cp : undefined,
+    // [{ aniimo | name, aniimoLevel | level, cp }] or names
+    team: Array.isArray(item.team) ? item.team.slice(0, 6).map((member) => (typeof member === "string" ? { aniimo: text(member) } : {
+      aniimo: text(member?.aniimo) ?? text(member?.name), aniimoLevel: level(member?.aniimoLevel) ?? level(member?.level),
+      cp: Number.isInteger(member?.cp) && member.cp >= 0 && member.cp <= 10000000 ? member.cp : undefined,
+    })).filter((member) => member.aniimo) : undefined,
   })));
+}
+// A shared run's lineup filled in from every copy of it: each player's details from the copy that read them, the
+// player's own copy first (their app saw their own panel best), then any other.
+function mergedLineup(own, copies) {
+  if (!own) return own;
+  const detail = (entry) => Boolean(entry?.aniimo || entry?.team?.length || Number.isInteger(entry?.cp));
+  const same = (a, b) => (a.slot != null && a.slot === b.slot) || (a.name && a.name === b.name);
+  return own.map((entry) => {
+    if (entry.ai) return entry;
+    const others = copies.flatMap((lineup) => lineup || []).filter((other) => same(entry, other) && detail(other));
+    const best = (entry.self && detail(entry) ? entry : null) || others.find((other) => other.self) || (detail(entry) ? entry : null) || others[0];
+    if (!best || best === entry) return entry;
+    const { aniimo, aniimoLevel, cp, team } = best;
+    return JSON.parse(JSON.stringify({ ...entry, aniimo, aniimoLevel, cp, team }));
+  });
 }
 const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle, c.boss_id, c.boss_name, c.boss_level, c.score, c.stars,
   c.clear_time_s, c.cleared, c.floors, c.team_dps, c.party_size, c.difficulty, c.trial, c.rank_tier, c.rank_subtier, c.rank_name,
@@ -1782,10 +1795,25 @@ async function battleHistory(env, discordId, params, { owner }) {
     ]);
     filters = { modes, bosses, weeks: weeks.map((row) => ({ ...row, ...weekDates(row.value) })) };
   }
+  // the other copies of shared runs (sent by teammates), for the players their apps read
+  const shared = [...new Set(rows.map((row) => parseJsonColumn(row.extra_json)?.sharedRun).filter((id) => typeof id === "string"))];
+  const copiesOf = new Map();
+  if (shared.length) {
+    const { results: copies } = await env.DB.prepare(
+      `SELECT submission_id, json_extract(extra_json, '$.sharedRun') AS shared, json_extract(extra_json, '$.lineup') AS lineup
+       FROM leaderboard_submissions WHERE json_extract(extra_json, '$.sharedRun') IN (${shared.map(() => "?").join(", ")})`,
+    ).bind(...shared).all();
+    for (const copy of copies || []) {
+      const list = copiesOf.get(copy.shared) || [];
+      list.push({ id: copy.submission_id, lineup: publicLineup(parseJsonColumn(copy.lineup)) });
+      copiesOf.set(copy.shared, list);
+    }
+  }
   const last = rows.at(-1);
   return {
     runs: rows.map((row) => {
       const extra = parseJsonColumn(row.extra_json) || {};
+      const copies = (copiesOf.get(extra.sharedRun) || []).filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup);
       return {
         submissionId: row.submission_id,
         credited: Boolean(row.credited),      // from a teammate's copy of the run
@@ -1806,7 +1834,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles) || [],
-        lineup: publicLineup(extra.lineup),
+        lineup: mergedLineup(publicLineup(extra.lineup), copies),
         // the buffs the party went in with (the leader picks them on the Party screen)
         buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,

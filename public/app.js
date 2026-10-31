@@ -1046,13 +1046,14 @@ function historyChips(run) {
   return chips;
 }
 // "Party at the start": the Party screen's last capture before the battle (the leader or anyone could still change
-// things until then). The picture is the proof; beside it, as text, what it shows for the player who sent it (their
-// lead Aniimo, its level and CP, their team comp) and what the whole party shares: the buffs the leader chose.
+// things until then). The picture is the proof; beside it, as text, each player's lead Aniimo, its level and CP and
+// their team comp (whichever teammate's copy read them), and what the whole party shares: the buffs the leader chose.
 function historyLineup(run) {
-  const mine = (Array.isArray(run.lineup) ? run.lineup : []).find((entry) => entry?.self);
+  const read = (entry) => entry && !entry.ai && (entry.aniimo || Number.isInteger(entry.cp) || entry.team?.length > 1);
+  const players = (Array.isArray(run.lineup) ? run.lineup : []).filter(read);
   const buffs = Array.isArray(run.buffs) ? run.buffs : [];
   const picture = run.hasPartyScreen && !run.proofPrunedAt;
-  if (!mine && !buffs.length && !picture) return null;
+  if (!players.length && !buffs.length && !picture) return null;
   const panel = element("section", "history-lineup");
   if (picture) {
     const base = `${API_URL}/leaderboard/submissions/${encodeURIComponent(run.submissionId)}/evidence?shot=party`;
@@ -1069,15 +1070,20 @@ function historyLineup(run) {
     panel.append(link);
   }
   const facts = element("dl", "history-lineup-facts");
-  const fact = (label, value) => { if (value) facts.append(element("dt", "", label), element("dd", "", value)); };
-  fact("Player", mine?.name || "");
-  fact("Aniimo", [mine?.aniimo, Number.isInteger(mine?.aniimoLevel) ? `Lv ${mine.aniimoLevel}` : ""].filter(Boolean).join(" · "));
-  fact("CP", Number.isInteger(mine?.cp) ? numberFormat.format(mine.cp) : "");
-  // the whole team only when aLogs read more than the lead (the Party screen names only the lead; the rest are icons,
-  // there in the picture); likewise the buffs only when read
-  const team = Array.isArray(mine?.team) && mine.team.length > 1 ? mine.team : [];
-  fact("Team", team.map((member) => [member.aniimo, Number.isInteger(member.aniimoLevel) ? `Lv ${member.aniimoLevel}` : "",
-    Number.isInteger(member.cp) ? `CP ${numberFormat.format(member.cp)}` : ""].filter(Boolean).join(" ")).join(" · "));
+  const fact = (label, ...lines) => {
+    lines = lines.filter(Boolean);
+    if (!lines.length) return;
+    const value = element("dd");
+    lines.forEach((line, index) => value.append(index ? element("span", "history-lineup-team", line) : document.createTextNode(line)));
+    facts.append(element("dt", "", label), value);
+  };
+  const aniimo = (entry) => [entry.aniimo, Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "",
+    Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : ""].filter(Boolean).join(" ");
+  for (const player of players) {
+    // the whole team only when aLogs read more than the lead (the rest are icons, there in the picture)
+    const team = Array.isArray(player.team) && player.team.length > 1 ? player.team : [];
+    fact(player.name || (player.slot ? `${player.slot}P` : "Player"), aniimo(player), team.length ? `Team: ${team.map(aniimo).join(" · ")}` : "");
+  }
   fact("Team buffs", buffs.map((buff) => `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`).join(", "));
   if (!picture) facts.append(element("dd", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));
   panel.append(facts);

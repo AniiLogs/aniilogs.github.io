@@ -1504,7 +1504,7 @@ test("pictures: a run that's nobody's best keeps full screens 14 days and crops 
   for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
 });
 
-test("the Party screen's details: the sender's lead Aniimo, CP and team comp, the party's buffs; nobody else's", async () => {
+test("the Party screen's details: every player's lead Aniimo, CP and team comp, the party's buffs", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);
   const lineup = [
@@ -1519,14 +1519,12 @@ test("the Party screen's details: the sender's lead Aniimo, CP and team comp, th
   assert.deepEqual(listed.lineup, [
     { slot: 1, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 60, cp: 12345,
       team: [{ aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 }, { aniimo: "Celestis", aniimoLevel: 58 }, { aniimo: "Irisalis" }] },
-    { slot: 2, name: "Mario", ai: true },
-    { slot: 3, name: "Friend", ai: false },                                 // a teammate's Aniimo and CP are theirs to send
+    { slot: 2, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
+    { slot: 3, name: "Friend", ai: false, aniimo: "Celestis", aniimoLevel: 58, cp: 9999 },   // teammates' details are public too
   ]);
   assert.deepEqual(listed.buffs, [{ name: "Fire Resonance", level: 2 }, { name: "Swift Start" }]);
   assert.equal(listed.title, undefined);
   assert.deepEqual(listed.newBests, []);                                   // no "New best" for a run that beat nothing
-  const entries = JSON.stringify(await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json());
-  assert.equal(entries.includes("9999"), false);                          // nor on the boards' API
 });
 
 test("the Party screen's last capture is the lineup's proof: stored, replaced by a newer one, kept like the crops", async () => {
@@ -1556,7 +1554,7 @@ test("the Party screen's last capture is the lineup's proof: stored, replaced by
   assert.equal([...EVIDENCE.objects.keys()].some((key) => key.includes(id)), false);
 });
 
-test("the sender in slot 2: their own section of the Party screen, never slot 1's", async () => {
+test("the sender in slot 2: self marks their section; slot 1's details stay slot 1's", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);
   const lineup = [
@@ -1566,9 +1564,33 @@ test("the sender in slot 2: their own section of the Party screen, never slot 1'
   await sendRun(env, token, run("p2", { extra: { lineup } }));
   const [listed] = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
   assert.deepEqual(listed.lineup, [
-    { slot: 1, name: "Leader", ai: false },
+    { slot: 1, name: "Leader", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 20000, team: [{ aniimo: "Glameep" }, { aniimo: "Sherro" }] },
     { slot: 2, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000, team: [{ aniimo: "Emberpup" }, { aniimo: "Chirpi" }] },
   ]);
+});
+
+test("a shared run's lineup: each player's details from whichever copy read them, their own copy first", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
+  const userToken = await namedToken(env, SESSIONS.user);     // UserOne 301000000003
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const party = (self) => [{ name: "UserOne", ai: false, self: self === "UserOne" }, { name: "DevOne", ai: false, self: self === "DevOne" }];
+  // UserOne's app read only UserOne; DevOne's read both, but misread UserOne's CP
+  await sendRun(env, userToken, run("u-copy", { gameUid: "301000000003", playedAt: at, players: party("UserOne"), extra: { lineup: [
+    { slot: 1, name: "UserOne", ai: false, self: true, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
+    { slot: 2, name: "DevOne", ai: false },
+  ] } }));
+  await sendRun(env, devToken, run("d-copy", { gameUid: "301000000001", playedAt: at + 20, players: party("DevOne"), extra: { lineup: [
+    { slot: 1, name: "UserOne", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 2000 },
+    { slot: 2, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000, team: [{ aniimo: "Emberpup" }, { aniimo: "Chirpi" }] },
+  ] } }));
+  const expected = [
+    { slot: 1, name: "UserOne", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
+    { slot: 2, name: "DevOne", ai: false, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000, team: [{ aniimo: "Emberpup" }, { aniimo: "Chirpi" }] },
+  ];
+  const lineupOf = async (session) => (await historyOf(env, "/api/profile/history", session)).runs[0].lineup.map(({ self: _self, ...entry }) => entry);
+  assert.deepEqual(await lineupOf(SESSIONS.user), expected);              // DevOne's details filled in from DevOne's copy
+  assert.deepEqual(await lineupOf(SESSIONS.dev), expected);               // UserOne's CP from UserOne's own copy, not the misread
 });
 
 test("one party run sent by two players: matched by the Party screen's slots when a number was misread, shown once", async () => {
