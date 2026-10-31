@@ -7551,11 +7551,10 @@ function renderAfpStats(entry) {
   // extra potential. The game allows up to extra_max_level extra (pet_config_data.newPropExtraMaxLv, 10), but the
   // game files only give +4 from Star Up stage 7 (pet_resonance_property_data, group 110: +1/+2/+4 at stages
   // 5/6/7, not added together) and +2 from one Epic or Legendary held item at item level 10 (core_carry_data
-  // energyEffects). So 24 is the most without a held item and 26 with one.
+  // energyEffects). So every stat stops at 24, and only the stat the chosen held item boosts reaches 26.
   const ownMax = growth.potentials?.max_level || 20;
   const STAR_UP_EXTRA = 4;
-  const HELD_ITEM_EXTRA = 2;
-  const maxPotential = Math.min(ownMax + (growth.potentials?.extra_max_level ?? 10), ownMax + STAR_UP_EXTRA + HELD_ITEM_EXTRA);
+  const typedMax = Math.min(ownMax + (growth.potentials?.extra_max_level ?? 10), ownMax + STAR_UP_EXTRA);
   const controls = document.createElement("div");
   controls.className = "afp-growth-controls";
   const levelLabel = document.createElement("label");
@@ -7579,7 +7578,7 @@ function renderAfpStats(entry) {
   const presetLabel = document.createElement("span");
   presetLabel.textContent = "All potentials";
   presets.append(presetLabel);
-  [0, 10, ownMax, ownMax + STAR_UP_EXTRA, maxPotential].forEach((points) => {
+  [0, 10, ownMax, typedMax].forEach((points) => {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = String(points);
@@ -7621,10 +7620,13 @@ function renderAfpStats(entry) {
       head.append(cell);
     });
     table.append(head);
-    // The held item's potential tier counts toward the same cap, so typed potential leaves room for it.
-    const itemPotential = afpHeldItemGains(entry, stats, settings.potentials, level, settings.heldItem, ownMax) || {};
-    const pointsFor = (stat) => Math.min(settings.potentials[stat.label] || 0, maxPotential - (itemPotential[stat.label]?.potential || 0));
-    const capped = Object.fromEntries(stats.map((stat) => [stat.label, pointsFor(stat)]));
+    // Saved potential is your own plus Star Up (up to 24); the held item's potential tier adds on top of its
+    // stat only, so that stat's box shows and takes up to 26. A saved value over 24 (or an item switched away)
+    // is clamped here.
+    stats.forEach((stat) => {
+      settings.potentials[stat.label] = Math.max(0, Math.min(typedMax, Math.round(Number(settings.potentials[stat.label]) || 0)));
+    });
+    const capped = Object.fromEntries(stats.map((stat) => [stat.label, settings.potentials[stat.label]]));
     const gainsByLevel = settings.heldItem
       ? Array.from({ length: cap }, (_, index) => afpHeldItemGains(entry, stats, capped, index + 1, settings.heldItem, ownMax))
       : [];
@@ -7639,22 +7641,24 @@ function renderAfpStats(entry) {
       name.scope = "row";
       name.textContent = stat.display;
       const potentialCell = document.createElement("td");
+      // The box shows the stat's whole potential: your own plus Star Up, plus the held item's tier on its stat.
+      const fromItem = item?.potential || 0;
       const input = document.createElement("input");
       input.type = "number";
-      input.min = "0";
-      input.max = String(maxPotential - (item?.potential || 0));
-      input.value = String(points);
+      input.min = String(fromItem);
+      input.max = String(typedMax + fromItem);
+      input.value = String(points + fromItem);
       input.setAttribute("aria-label", `${stat.display} potential level`);
       input.addEventListener("change", () => {
-        settings.potentials[stat.label] = Math.max(0, Math.min(maxPotential - (item?.potential || 0), Math.round(Number(input.value) || 0)));
+        settings.potentials[stat.label] = Math.max(0, Math.min(typedMax, Math.round(Number(input.value) || 0) - fromItem));
         renderTable();
       });
       potentialCell.append(input);
-      if (item?.potential) {
+      if (fromItem) {
         const extra = document.createElement("span");
         extra.className = "afp-item-gain";
-        extra.textContent = `+${item.potential}`;
-        extra.title = "Potential from the held item (past your own cap)";
+        extra.textContent = `+${fromItem}`;
+        extra.title = `${fromItem} of this from the held item, so this stat can reach ${typedMax + fromItem}`;
         potentialCell.append(extra);
       }
       const curveCell = document.createElement("td");
@@ -7679,7 +7683,7 @@ function renderAfpStats(entry) {
     });
     const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
     earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
-    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat; Star Up stage 7 adds 4 more (${ownMax + STAR_UP_EXTRA}) and an Epic or Legendary held item at level 10 adds 2 to its stat (${maxPotential}). Values are before Star Up's other stat bonuses, personality, talents and buffs; a held item you pick is included (its +N shows beside the value). Formulas from the game scripts.`));
+    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat, and Star Up stage 7 adds 4 more, so each stat stops at ${typedMax}. Only the stat an Epic or Legendary held item boosts (at item level 10) gets 2 more, up to ${typedMax + 2}; the +2 shows beside it. Values are before Star Up's other stat bonuses, personality, talents and buffs; a held item you pick is included (its +N shows beside the value). Formulas from the game scripts.`));
   }
   renderTable();
   void earned;
