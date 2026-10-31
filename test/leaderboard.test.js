@@ -294,6 +294,37 @@ test("Holo-Battle Sim Season 2: Earth, Lightning and Dark Training up to Trial, 
     [["2", "Earth Training", "Trial", "Training"], ["2", "Lightning Training", "Hard", "Training"], ["1", "Training of Water", "Normal", "Basic Training"]]);
 });
 
+test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, transformation and gizmos on the boards, a board per style", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
+  const setupOf = (style) => ({
+    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20), level: -4 }, { level: 9 }],
+    mvpShares: { damage: 61.5, taken: 30, healing: 500 },
+    style, core: "Fervor Mask", transform: "Scorchhowl", coins: 8550, secret: "dropped",
+    gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }, { rarity: "Rare" }] }, { series: "Valor", count: 2 }],
+  });
+  const run = (id, style, time, extraSetup = setupOf(style)) => ({ kind: "sim_run", clientRunId: id, trial: "Earth Training", difficulty: "Trial",
+    clearTimeS: time, cleared: true, partySize: 1, playedAt: 1793000000, extra: { setup: extraSetup } });
+  assert.equal((await send(SESSIONS.dev, run("v1", "Valor", 600))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("e1", "Energy", 580))).status, 201);
+  assert.equal((await send(SESSIONS.dev2, run("u1", "Sneaky", 570, { style: "Sneaky", picked: [{ name: "Spark", series: "Surge", rarity: "Common" }] }))).status, 201);
+  const board = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&cycle=2&trial=Earth&difficulty=Trial${query}`)).json()).entries;
+  const all = await board("");
+  assert.deepEqual(all.map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);
+  assert.deepEqual(all[2].extra.setup, {
+    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20).slice(0, 40) }],
+    mvpShares: { damage: 61.5, taken: 30 }, style: "Valor", core: "Fervor Mask", transform: "Scorchhowl",
+    gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }] }, { series: "Valor", count: 2 }], coins: 8550,
+  });
+  // a style that isn't one of the game's is left out; unmatched gizmo icons come as picked
+  assert.deepEqual(all[0].extra.setup, { picked: [{ name: "Spark", series: "Surge", rarity: "Common" }] });
+  assert.deepEqual((await board("&style=Valor")).map((e) => e.player), ["DevOne"]);
+  assert.deepEqual((await board("&style=Sneaky")).map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);   // not a style: no filter
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
+  assert.deepEqual(facets.simRules.styles, ["Energy", "Surge", "Defense", "Vitality", "Ironclad", "Valor", "Wealth"]);
+  assert.deepEqual(facets.styles.map((row) => [row.value, row.count]).sort(), [["Energy", 1], ["Valor", 1]]);
+});
+
 test("Holo-Battle Sim runs stored before seasons were kept get Season 1 by themselves", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);

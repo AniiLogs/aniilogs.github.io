@@ -1718,6 +1718,36 @@ function publicLineup(lineup) {
     })).filter((member) => member.aniimo) : undefined,
   })));
 }
+// aLogs' Holo-Battle Sim setup (extra.setup, from the Victory screen and the gizmo row) as the boards pass it on: the
+// team (MVP marked) and the MVP's shares, the Training Style, core and Alpha Transformation, each gizmo series with
+// its count and the gizmos picked (or `picked` alone when the row's icons weren't matched), and the coins. Any part
+// can be missing; only text and numbers in range go out.
+function publicSimSetup(setup) {
+  if (!setup || typeof setup !== "object" || Array.isArray(setup)) return null;
+  const text = (value, max = 40) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined);
+  const whole = (value, max) => (Number.isInteger(value) && value >= 0 && value <= max ? value : undefined);
+  const list = (value, max) => (Array.isArray(value) ? value.slice(0, max).filter((item) => item && typeof item === "object") : []);
+  const gizmo = (item) => ({ name: text(item.name, 60), series: text(item.series, 24), rarity: text(item.rarity, 20) });
+  const shares = setup.mvpShares && typeof setup.mvpShares === "object" ? setup.mvpShares : {};
+  const share = (value) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined);
+  const clean = JSON.parse(JSON.stringify({
+    team: list(setup.team, 5).map((member) => ({ name: text(member.name), level: whole(member.level, 999) || undefined, mvp: member.mvp === true || undefined }))
+      .filter((member) => member.name),
+    mvpShares: { damage: share(shares.damage), taken: share(shares.taken), healing: share(shares.healing) },
+    style: SIM_RULES.styles.includes(setup.style) ? setup.style : undefined,
+    core: text(setup.core),
+    transform: text(setup.transform),
+    gizmos: list(setup.gizmos, 12).map((row) => ({ series: text(row.series, 24), count: whole(row.count, 99),
+      picked: list(row.picked, 30).map(({ series: _series, ...item }) => gizmo(item)).filter((item) => item.name) })).filter((row) => row.series),
+    picked: list(setup.picked, 40).map(gizmo).filter((item) => item.name),
+    coins: whole(setup.coins, 1e9),
+  }));
+  for (const [key, value] of Object.entries(clean)) {
+    if ((Array.isArray(value) && !value.length) || (value && typeof value === "object" && !Object.keys(value).length)) delete clean[key];
+  }
+  for (const row of clean.gizmos || []) if (!row.picked.length) delete row.picked;
+  return Object.keys(clean).length ? clean : null;
+}
 // A shared run's lineup filled in from every copy of it: each player's details from the copy that read them, the
 // player's own copy first (their app saw their own panel best), then any other.
 function mergedLineup(own, copies) {
@@ -2298,6 +2328,8 @@ const SIM_RULES = Object.freeze({
     ]),
   ]),
   aliases: Object.freeze({ Common: "Normal" }),                                     // Season 1's English Normal
+  // the Training Styles, the tabs of the game's own Holo-Battle Sim leaderboard (rank_base_data 30001-30003)
+  styles: Object.freeze(["Energy", "Surge", "Defense", "Vitality", "Ironclad", "Valor", "Wealth"]),
   confirmed: true,
 });
 // "Training of Water", "Trial of Fire", "Crucible of Fire", "Earth Training" or just "Fire": the element, or null
@@ -3608,6 +3640,12 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
       binds.push(value);
     }
   }
+  // Holo-Battle Sim: one Training Style, as the game's own leaderboard tabs them (from aLogs' extra.setup)
+  const style = String(params.get("style") || "");
+  if (SIM_RULES.styles.includes(style)) {
+    where.push("json_extract(s.extra_json, '$.setup.style') = ?");
+    binds.push(style);
+  }
   const integers = [["level", "s.boss_level"], ["party", "s.party_size"]];
   for (const [name, column] of integers) {
     const value = Number(params.get(name));
@@ -4356,7 +4394,8 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+        ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
         ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
@@ -4398,6 +4437,8 @@ async function leaderboardFacets(request, env) {
     all(`SELECT kind AS value, COUNT(*) AS count ${visible} GROUP BY kind`),
     mode === "sim" ? all(`SELECT buffs_json AS buffs ${visible} AND buffs_json IS NOT NULL LIMIT 2000`) : Promise.resolve([]),
   ]);
+  const styles = mode === "sim" ? await all(`SELECT json_extract(extra_json, '$.setup.style') AS value, COUNT(*) AS count ${visible}
+    AND json_extract(extra_json, '$.setup.style') IS NOT NULL GROUP BY value ORDER BY count DESC`) : [];
   const buffCounts = new Map();
   for (const row of buffRows) {
     for (const buff of parseJsonColumn(row.buffs) || []) {
@@ -4415,6 +4456,7 @@ async function leaderboardFacets(request, env) {
     trials: trials.map((row) => ({ ...row, name: simStageName(row.trial, row.difficulty, row.season),
       group: simStage(row.difficulty, simSeasonOf(row.trial, null, row.season))?.label || null })),
     simRules: mode === "sim" ? SIM_RULES : undefined,
+    styles: mode === "sim" ? styles.filter((row) => SIM_RULES.styles.includes(row.value)) : undefined,
     kinds,
     buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     sorts: Object.keys(LEADERBOARD_SORTS),

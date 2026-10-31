@@ -15,7 +15,8 @@
     ],
     sim: [
       // one board per trial and difficulty, read from the Victory screen ("Battle time 00:08:22 Training of Water - Hard")
-      { kind: "sim_run", label: "Trials", sorts: ["clear_time_s"], fields: ["trial", "difficulty", "party", "buff"] },
+      // and, as the game's own leaderboard tabs them, one Training Style (from aLogs' setup read)
+      { kind: "sim_run", label: "Trials", sorts: ["clear_time_s"], fields: ["trial", "difficulty", "style", "party", "buff"] },
     ],
     // From the desktop meter: the Rank Info screen (season standing) and each match's end screen (Matches)
     eggheist: [
@@ -54,7 +55,9 @@
       { label: "Battle time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Trial", value: (e) => e.trialName || e.trial || "—" },
       { label: "Difficulty", value: (e) => e.difficulty || "—" },
-      { label: "Buffs", value: (e) => number(e.buffs?.length) },
+      { label: "Style", value: (e) => e.extra?.setup?.style || "—" },
+      // each gizmo series with its count ("Energy 6 · Valor 2"); runs from before the setup was read: their buff count
+      { label: "Gizmos", value: (e) => gizmoSeries(e.extra?.setup) || number(e.buffs?.length) },
       { label: "Party", value: (e) => number(e.partySize) },
       { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
@@ -148,7 +151,7 @@
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
     state.season = params.get("season") || ""; state.split = params.get("split") || ""; state.rank = params.get("rank") === "stars" ? "stars" : "score";
     state.server = params.get("server") || "";
-    for (const name of ["cycle", "boss", "level", "difficulty", "trial", "party", "buff", "player"]) {
+    for (const name of ["cycle", "boss", "level", "difficulty", "trial", "style", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
       if (field && field.tagName === "INPUT") field.value = params.get(name) || "";
@@ -178,7 +181,7 @@
     if (state.sort) params.set("sort", state.sort);
     if (state.order) params.set("order", state.order);
     const fields = board().fields;
-    for (const name of ["cycle", "boss", "level", "difficulty", "trial", "party", "buff"]) {
+    for (const name of ["cycle", "boss", "level", "difficulty", "trial", "style", "party", "buff"]) {
       let value = els.filters.elements[name]?.value;
       if (name === "trial") value = String(value || "").split("|").pop();   // "<season>|<stage>|<element>": the API takes the element
       if (value && fields.includes(name)) params.set(name, value);
@@ -275,6 +278,8 @@
     if (f.difficulty) fillSelect(f.difficulty, (facets.difficulties || []).map((row) => ({ value: row.value, label: row.value })), "Any difficulty");
     fillSelect(f.party, facets.partySizes.map((row) => ({ value: row.value, label: row.value === 1 ? "Solo" : `${row.value} players` })), "Any size");
     fillSelect(f.buff, (facets.buffs || []).map((row) => ({ value: row.name, label: `${row.name} (${row.count})` })), "Any buff");
+    const styleCounts = new Map((facets.styles || []).map((row) => [row.value, row.count]));
+    fillSelect(f.style, (facets.simRules?.styles || []).map((name) => ({ value: name, label: styleCounts.has(name) ? `${name} (${styleCounts.get(name)})` : name })), "Any style");
     fillSimPickers();
   }
   // Holo-Battle Sim: one board per season, stage and difficulty. The Trial picker lists the game's stages from the API's
@@ -348,6 +353,29 @@
     if (state.order) return state.order;
     return state.sort === "clear_time_s" || state.sort === "player" ? "asc" : "desc";
   }
+  function gizmoSeries(setup) {
+    return (setup?.gizmos || []).map((row) => (row.count == null ? row.series : `${row.series} ${row.count}`)).join(" · ");
+  }
+  // a Holo-Battle Sim run's setup, as aLogs read it from the Victory screen and the gizmo row: text only
+  function simSetup(setup) {
+    if (!setup) return null;
+    const facts = [["Training Style", setup.style], ["Core", setup.core], ["Alpha Transformation", setup.transform],
+      ["Coins", setup.coins == null ? null : number(setup.coins)], ["Gizmos", gizmoSeries(setup)]].filter(([, value]) => value);
+    const shares = [["damage", "Damage"], ["taken", "Damage taken"], ["healing", "Healing"]]
+      .filter(([key]) => setup.mvpShares?.[key] != null).map(([key, label]) => `${label} ${number(setup.mvpShares[key])}%`);
+    const picked = (setup.gizmos || []).some((row) => row.picked?.length)
+      ? (setup.gizmos || []).filter((row) => row.picked?.length).map((row) => el("li", {}, el("strong", { text: `${row.series}: ` }),
+        row.picked.map((item) => `${item.name}${item.rarity ? ` (${item.rarity})` : ""}`).join(", ")))
+      : (setup.picked || []).map((item) => el("li", { text: `${item.series ? `${item.series} · ` : ""}${item.name}${item.rarity ? ` (${item.rarity})` : ""}` }));
+    return el("div", { class: "lb-setup" },
+      el("strong", { text: "Setup" }),
+      setup.team?.length ? el("ol", { class: "lb-setup-team" }, setup.team.map((member) => el("li", {},
+        el("span", { text: `${member.name}${member.level ? ` Lv ${member.level}` : ""}` }),
+        member.mvp ? el("span", { class: "lb-mark lb-mvp", text: "MVP" }) : null))) : null,
+      shares.length ? el("p", { class: "lb-facts", text: `MVP share: ${shares.join(" · ")}` }) : null,
+      facts.length ? el("dl", { class: "lb-setup-facts" }, facts.flatMap(([label, value]) => [el("dt", { text: label }), el("dd", { text: value })])) : null,
+      picked.length ? el("details", { class: "lb-setup-picked" }, el("summary", { text: "Picked gizmos" }), el("ul", {}, picked)) : null);
+  }
   function detailRow(entry, span) {
     const parts = [];
     if (entry.players?.length) {
@@ -363,6 +391,8 @@
         el("thead", {}, el("tr", {}, ["Player", "Highlight", "Avg DPS", "BREAK", "Damage taken", "Healing"].map((text) => el("th", { text })))),
         el("tbody", {}, rows)));
     }
+    const setup = simSetup(entry.extra?.setup);
+    if (setup) parts.push(setup);
     if (entry.buffs?.length) {
       parts.push(el("div", { class: "lb-buffs" }, el("strong", { text: "Rogue buffs" }),
         el("ol", {}, entry.buffs.map((buff) => el("li", { text: `${buff.floor ? `F${buff.floor} · ` : ""}${buff.name}${buff.level ? ` Lv ${buff.level}` : ""}` })))));

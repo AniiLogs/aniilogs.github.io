@@ -109,6 +109,15 @@
 .lb-players { width: auto; border-collapse: collapse; margin-bottom: 0.8rem; font-size: 0.8rem; }
 .lb-players th, .lb-players td { border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); padding: 0.3rem 0.8rem 0.3rem 0; text-align: left; }
 .lb-buffs ol { columns: 2 14rem; margin: 0.4rem 0 0.8rem; padding-left: 1.2rem; }
+.lb-setup { position: sticky; left: 0; max-width: min(100%, calc(100vw - 4rem)); margin-bottom: 0.8rem; font-size: 0.8rem; }
+.lb-setup-team { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin: 0.4rem 0; padding-left: 1.2rem; }
+.lb-setup-team li { padding-right: 0.2rem; }
+.lb-mvp { cursor: default; }
+.lb-setup-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.2rem 0.8rem; margin: 0.4rem 0; }
+.lb-setup-facts dt { color: var(--muted); }
+.lb-setup-facts dd { margin: 0; overflow-wrap: anywhere; }
+.lb-setup-picked summary { cursor: pointer; }
+.lb-setup-picked ul { columns: 2 16rem; margin: 0.4rem 0 0; padding-left: 1.2rem; }
 .lb-facts { margin: 0 0 0.6rem; color: var(--muted); font-size: 0.8rem; }
 .lb-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .lb-actions button { min-height: 0; font-size: 0.8rem; padding: 0.4rem 0.9rem; }
