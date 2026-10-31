@@ -96,7 +96,8 @@
   // BaseProperty.indLv) plus extra potential from other sources (iLvEx: Star Up, held-item tiers), and
   // the +4% per 4 potential uses the same total. Sources: personality traits; Star Up (resonance) stage
   // and level; held items (base stat x (1 + level's enhance ratio), per-pet-level conversions, tiers
-  // switched on at item level 10 / 15). Not modelled: held-item talents, collection bonuses.
+  // switched on at item level 10 / 15); Form Research bonuses (each researched form of the species adds its
+  // entry to every Aniimo of that species, form.form_research). Not modelled: held-item talents.
   // Species points: the game uses a pet's own species points when the server sends them
   // (Utils.getBasePropertySpeciesPoint); otherwise pet_data's plus the property template's bonus. The
   // site has no owned pets, so pet_data's are the default (as on the Aniimo page) and useTemplate adds
@@ -153,6 +154,11 @@
       item.conversions.filter((row) => row.from === "level").forEach((row) => add(row.key, row.rate * level, source, "held_items"));
       item.tiers.filter((tier) => levelNumber >= tier.level && !tier.need_energy)
         .forEach((tier) => tier.buffs.forEach((buffRow) => buffRow.attributes.forEach((attribute) => add(attribute.key, attribute.value, source, "held_items"))));
+    });
+    // Form Research: options.formResearch lists the researched form ids (PetAttributeCalcUtils.getFormCollectEntryAttributeMap).
+    (options.formResearch || []).forEach((researched) => {
+      const row = (form.form_research || []).find((entry) => String(entry.form_id) === String(researched));
+      if (row) add(row.key, row.value, `Form Research: ${row.form_label || row.form_id}`);
     });
     (options.extra || []).forEach(({ key, value, source }) => add(key, value, source || "Other"));
     const result = { level, base: {}, total: {}, potential: {}, bonus, modifiers, template_species: template };

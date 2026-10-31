@@ -1,6 +1,7 @@
 // Potential, Star Up and held item for one Aniimo, shared by the Team Builder Stats tab and the 1v1 sides.
 // A "build" is { level, potential: { HP, ATK, "P.DEF", REGEN, "M.DEF", BREAK } (or one number for all),
-// starUp: { stage, level } | null, heldItem: { itemId, level } | null, personality: [letters] }.
+// starUp: { stage, level } | null, heldItem: { itemId, level } | null, personality: [letters],
+// formResearch: [researched form ids] }.
 // Each stat's potential is your own (rolled + Capability Awakening, 0-20) plus extra from Star Up and the
 // held item's tiers, which go past 20; stats use the total (damage-model.js statTotals).
 (() => {
@@ -38,6 +39,7 @@
       // "Perfect" quality: species points with the property template's bonus (e.g. +15 HP / P.DEF / M.DEF).
       // Inferred: it reproduced a real Lv 65 Perfect Fulmintis card exactly; not shown in the game's code.
       useTemplate: Boolean(build?.perfect),
+      formResearch: Array.isArray(build?.formResearch) ? build.formResearch.map(String) : [],
     };
   }
 
@@ -96,7 +98,7 @@
     // Star Up stage and level (pet_resonance_property_data), and the held item with its level.
     const stages = Object.keys(data?.star_up || {}).map(Number).sort((a, b) => a - b);
     const stage = Number(build?.starUp?.stage) || 0;
-    const stageLevels = stage ? Object.keys(data.star_up[stage] || {}).map(Number).sort((a, b) => a - b) : [];
+    const stageLevels = stage ? Object.keys(data?.star_up?.[stage] || {}).map(Number).sort((a, b) => a - b) : [];
     const sources = el("div", "potential-sources");
     sources.append(field("Star Up", selectInput([{ value: 0, label: "None" }, ...stages.map((value) => ({ value, label: `Stage ${value}` }))],
       stage, (value) => update({ starUp: Number(value) ? { stage: Number(value), level: 0 } : null }), "Star Up stage")));
@@ -130,6 +132,23 @@
     perfectLabel.title = "Adds the species bonus the game keeps for this Aniimo's quality. It matched a real Perfect Fulmintis card; not confirmed in the game's code.";
     perfectLabel.append(perfect, el("span", "", "Perfect quality"));
     sources.append(perfectLabel);
+    // Form Research bonuses: each researched form of this species gives every one of its forms a stat bonus.
+    const researched = new Set((build?.formResearch || []).map(String));
+    for (const row of data?.forms?.[formId]?.form_research || []) {
+      const check = el("input");
+      check.type = "checkbox";
+      check.checked = researched.has(String(row.form_id));
+      check.addEventListener("change", () => {
+        const next = new Set(researched);
+        if (check.checked) next.add(String(row.form_id)); else next.delete(String(row.form_id));
+        update({ formResearch: [...next] });
+      });
+      const label = el("label", "potential-check");
+      label.title = "Form Research Bonus: once this form is researched, every form of this Aniimo gets the bonus.";
+      const percent = Math.abs(row.value) < 1 ? `${Math.round(row.value * 1000) / 10}%` : String(row.value);
+      label.append(check, el("span", "", `${row.form_label || "Form"} researched (${row.label} +${percent})`));
+      sources.append(label);
+    }
     box.append(sources);
 
     // Per stat: your own potential (0-20) and what Star Up and the held item add on top.

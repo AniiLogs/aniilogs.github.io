@@ -134,3 +134,20 @@ test("stat totals use own potential plus Star Up and held-item potential, and CP
   const ownOnly = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20, BREAK: 20 } });
   assert.equal(result.cp, ownOnly.cp);
 });
+
+test("a researched form's Form Research bonus adds to every form of the species", () => {
+  const growth = {
+    level_cap: 70, attribute_points_max: 20, attribute_point_bonus: 0.008,
+    level_value: { per_level: 6, base: 35, extra_from_level: 60, extra_levels: 10, extra_weight: 1.8 },
+    stats: { ATK: { offset: 0, divisor: 120, scale: 1, extra: true } },
+    potentials: { percent_steps: { ATK: { every: 4, percent: 0.04 } } },
+  };
+  const aniilog = { stat_growth: growth, entries: [{ form_id: "1", stats: [{ label: "ATK", value: 100 }] }] };
+  const data = { forms: { 1: { stat_template: {}, form_research: [{ form_id: 2, form_label: "Prismana Form", key: "atk_p", label: "ATK", value: 0.02 }] } } };
+  const without = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20 } });
+  const researched = D.statTotals(data, aniilog, "1", { level: 65, potential: { ATK: 20 }, formResearch: ["2"] });
+  const base = D.baseValue(growth, "ATK", 100, 65, 20);
+  assert.equal(without.total.ATK, Math.ceil(base * 1.2 - 1e-9));
+  assert.equal(researched.total.ATK, Math.ceil(base * 1.22 - 1e-9));
+  assert.equal(researched.bonus.ATK.sources[0].source, "Form Research: Prismana Form");
+});

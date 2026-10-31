@@ -157,6 +157,7 @@
     side.heldItem = member?.heldItem || null;
     side.personality = member?.personality || [];
     side.perfect = Boolean(member?.perfect);
+    side.formResearch = member?.formResearch || [];
   }
 
   // --- Elements -------------------------------------------------------------------------------------
@@ -476,7 +477,7 @@
         data: options.data, aniilog: options.aniilog, formId: String(side.formId), build: side,
         totals: sideTotals(options.aniilog, options.data, model.entry, side),
         onChange: (next) => {
-          Object.assign(side, { potential: next.potential, starUp: next.starUp ?? null, heldItem: next.heldItem ?? null, perfect: Boolean(next.perfect) });
+          Object.assign(side, { potential: next.potential, starUp: next.starUp ?? null, heldItem: next.heldItem ?? null, perfect: Boolean(next.perfect), formResearch: next.formResearch || [] });
           saveSettings();
           rerender();
         },

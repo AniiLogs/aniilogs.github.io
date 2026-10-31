@@ -136,6 +136,7 @@
       member.potential = Math.round(Number(value.potential));
     }
     if (value?.perfect === true) member.perfect = true;
+    if (Array.isArray(value?.formResearch)) member.formResearch = value.formResearch.map(String).filter((id) => /^\d+$/u.test(id));
     if (value?.starUp && Number(value.starUp.stage) > 0) {
       member.starUp = { stage: Math.round(Number(value.starUp.stage)), level: Math.max(0, Math.round(Number(value.starUp.level) || 0)) };
     }
@@ -1544,7 +1545,7 @@
   const CARD_STATS = Object.freeze(["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"]);
 
   // The game's stat card for this member (damage-model.js statTotals): base stats from level and potential, then
-  // personality and held item, and CP. Resonance and collection bonuses aren't included.
+  // personality, Star Up, held item and Form Research bonuses, and CP.
   function renderCardCalculator(member, entry) {
     const model = window.AniilogsDamage;
     const growth = aniilog?.stat_growth;
@@ -1586,7 +1587,7 @@
       box.append(editor.render({
         data, aniilog, formId: member.formId, build: member, totals,
         onChange: (next) => {
-          for (const key of ["potential", "starUp", "heldItem", "perfect"]) {
+          for (const key of ["potential", "starUp", "heldItem", "perfect", "formResearch"]) {
             if (next[key] === null || next[key] === undefined) delete member[key];
             else member[key] = next[key];
           }
@@ -1618,7 +1619,7 @@
       cp.append(el("strong", "", "CP "), totals.cp.toLocaleString());
       box.append(cp);
     }
-    box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up and held-item percentages) + flat bonuses, as the game adds them up, rounded up. Not included: collection bonuses and held-item talents."));
+    box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. Not included: held-item talents."));
     return box;
   }
 
@@ -1965,7 +1966,7 @@
       // The level and potential set on each member’s Stats tab (unset level = the cap).
       memberStats: Object.fromEntries(model.members.filter((member) => member?.formId)
         .map((member) => [String(member.formId), { level: member.level, potential: member.potential, starUp: member.starUp,
-          heldItem: member.heldItem, personality: member.personality, perfect: member.perfect }])),
+          heldItem: member.heldItem, personality: member.personality, perfect: member.perfect, formResearch: member.formResearch }])),
       formLabel,
       contentUrl: host.contentUrl,
       developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),
