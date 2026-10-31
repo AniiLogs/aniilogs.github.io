@@ -565,8 +565,10 @@ body.profile-page #my-profile { margin-top: 1.5rem; }
 .profile-history-intro { margin: 0.4rem 0 0.9rem; color: var(--ink-soft); font-size: 0.88rem; }
 .profile-history-filters { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; margin-bottom: 0.9rem; }
 .profile-history-filters label { display: grid; gap: 0.2rem; color: var(--ink-soft); font-size: 0.75rem; font-weight: 800; }
-.profile-history-filters select { min-width: 12rem; min-height: 36px; padding: 0.3rem 0.6rem; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--cream); color: var(--ink); font: inherit; font-size: 0.86rem; }
+.profile-history-filters select, .profile-history-filters .aniimo-picker-input { min-width: 12rem; min-height: 36px; padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--cream); color: var(--ink); font: inherit; font-size: 0.86rem; }
+.profile-history-filters .aniimo-picker-input::placeholder { color: var(--ink); opacity: 1; }
+.profile-history-filters .aniimo-picker-input:focus::placeholder { color: var(--ink-soft); }
 .profile-history-status { color: var(--ink-soft); font-size: 0.86rem; }
 .profile-history-status:empty { display: none; }
 body.profile-history-view .profile-overview-grid, body.profile-history-view .profile-owner-tools,
@@ -574,7 +576,7 @@ body.profile-history-view .profile-arrange-bar, body.profile-history-view [data-
 @media (max-width: 560px) {
   .history-run summary { grid-template-columns: minmax(0, 1fr); }
   .history-numbers { text-align: left; }
-  .profile-history-filters select { min-width: 0; width: 100%; }
+  .profile-history-filters select, .profile-history-filters .aniimo-picker-input { min-width: 0; width: 100%; }
   .profile-history-filters label { flex: 1 1 100%; }
 }
 /* Online now and Recently joined, under the profile */
@@ -597,4 +599,126 @@ body.profile-history-view .profile-arrange-bar, body.profile-history-view [data-
 @media (max-width: 560px) {
   .site-header .brand-name,
   .theme-picker-copy { display: none; }
+}
+
+/* ---- Type-to-filter pickers (/explorer/aniimo-picker.js) for the pages outside /explorer/: a copy of the rules in
+   /explorer/styles.css, keep the two in step. The text box takes the select's own classes. */
+.aniimo-picker {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.aniimo-picker-native {
+  display: none;
+}
+
+.aniimo-picker-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 30px !important;
+  text-overflow: ellipsis;
+}
+
+.aniimo-picker-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 24px;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.aniimo-picker-clear:hover {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+}
+
+.aniimo-picker-clear[hidden] {
+  display: none;
+}
+
+.aniimo-picker-option mark {
+  padding: 0;
+  border-radius: 2px;
+  background: rgba(var(--accent-rgb), 0.3);
+  color: inherit;
+}
+
+.aniimo-picker-list {
+  /* Placed by aniimo-picker.js (left, top or bottom, width, max-height) so scrolling panels don't clip it. */
+  position: fixed;
+  z-index: 1000;
+  max-height: 320px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  list-style: none;
+}
+
+.aniimo-picker-list[hidden] {
+  display: none;
+}
+
+.aniimo-picker-group {
+  padding: 8px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.aniimo-picker-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.aniimo-picker-option:hover,
+.aniimo-picker-option.is-active {
+  background: rgba(var(--accent-rgb), 0.18);
+}
+
+.aniimo-picker-option.is-disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.aniimo-picker-option[aria-selected="true"] {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.aniimo-picker-empty {
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+/* Touch screens: 16px text so phones don't zoom in on focus, and bigger rows to tap. */
+@media (pointer: coarse) {
+  .aniimo-picker-input {
+    font-size: 16px;
+  }
+
+  .aniimo-picker-option {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
 }

@@ -1240,6 +1240,11 @@ async function loadHistoryPage(reset) {
       fill("mode", page.filters.modes.map((row) => [row.value, `${modeNames[row.value] || row.value} (${row.count})`]));
       fill("boss", page.filters.bosses.map((row) => [row.id, `${row.name || row.id} (${row.count})`]));
       fill("cycle", page.filters.weeks.map((row) => [row.value, `${weekLabel(row) || `Week ${row.value}`} (${row.count})`]));
+      // the long lists get the site's type-to-filter box (/explorer/aniimo-picker.js); a pick fires the select's "change"
+      for (const name of ["boss", "cycle"]) {
+        const select = historyFull.querySelector(`[data-history-filter="${name}"]`);
+        window.AniilogsPicker?.makeCombobox(select, { placeholder: select.options[0]?.text || "Type to filter", emptyText: "No matches" });
+      }
     }
     list.append(...page.runs.map((run) => historyRow(run, { open: window.location.hash === `#run-${run.submissionId}` })));
     historyNext = page.next;

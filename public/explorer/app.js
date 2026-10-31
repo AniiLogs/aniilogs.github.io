@@ -5439,6 +5439,9 @@ function renderAniilogTierRuleBuilder(group, options, placeholder) {
     if (typeSelect.value) addAniilogTierFilter(group, `${typeSelect.value}:${tierSelect.value || "any"}`);
   });
   row.append(typeSelect, tierSelect, add);
+  // Elements is the long list here: it gets the site's type-to-filter box (aniimo-picker.js); the select stays the
+  // source of truth and still fires "change". The short lists (classes, stages, skills, area) stay plain.
+  if (group === "elements") window.AniilogsPicker?.makeCombobox(typeSelect, { placeholder: "Element", emptyText: "No matches" });
   wrapper.append(row, renderAniilogActiveRules(group, aniilogTierRuleOptions(groups)));
   return wrapper;
 }
