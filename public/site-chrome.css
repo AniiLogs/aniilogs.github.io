@@ -467,6 +467,21 @@ html[data-embed="app"] .theme-picker-label {
    page (sticky) and the bottom tabs need room at the end. The settings gear is a link here (the settings panel
    lives in the explorer). */
 body.site-chrome-page { padding-top: 58px; }
+/* Wide screens: the page scrolls in the space under the bar, so its scrollbar starts below the bar like the map pages'
+   (.app-shell) instead of running up beside it. Every page with the site's bar gets this from body.site-chrome-page. */
+@media (min-width: 821px) {
+  html:not([data-embed="app"]):has(> body.site-chrome-page) { height: 100%; overflow: hidden; }
+  html:not([data-embed="app"]) body.site-chrome-page {
+    position: fixed;
+    inset: calc(58px * var(--ui-scale, 1)) 0 0;
+    min-height: 0;
+    padding-top: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+  }
+  html:not([data-embed="app"]) body.site-chrome-page .profile-arrange-bar { top: 0.5rem; }
+}
 .settings-icon { width: 22px; height: 22px; stroke-width: 2.15; }
 .settings-gear-button { box-sizing: border-box; border: 1px solid transparent; border-radius: 999px; text-decoration: none; }
 .app-topbar nav a { text-decoration: none; }
