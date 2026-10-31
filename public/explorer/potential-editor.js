@@ -77,7 +77,7 @@
       }
     }
     select.addEventListener("change", () => onChange(select.value));
-    return select;
+    return window.AniilogsPicker?.enhance(select, { placeholder: "Type to filter", emptyText: "No matches" })?.wrap || select;
   }
 
   function optionNode(item, value) {

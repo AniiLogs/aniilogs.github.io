@@ -305,4 +305,37 @@
   window.AniiLogsTheme = Object.freeze({ PRESETS, apply, bindControls, readPreferences, syncControls, share });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindShell, { once: true });
   else bindShell();
+
+  // A tab left open (or restored from history) after a deploy keeps its old HTML, and with it the old ?v=
+  // scripts and styles. Compare them with a fresh copy of the page and reload once when the site has moved on,
+  // so nobody needs Ctrl+F5. Scripts the page adds later are ignored: only the fresh page's tags are looked up.
+  const versioned = (doc) => [...doc.querySelectorAll("script[src], link[rel=stylesheet][href]")]
+    .map((node) => new URL(node.getAttribute("src") || node.getAttribute("href"), window.location.href))
+    .filter((url) => url.origin === window.location.origin && url.searchParams.has("v"))
+    .map((url) => url.href);
+  let checkedAt = 0;
+  async function reloadIfStale() {
+    if (Date.now() - checkedAt < 5 * 60 * 1000) return;
+    checkedAt = Date.now();
+    try {
+      const response = await fetch(window.location.href, { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) return;
+      const fresh = versioned(new DOMParser().parseFromString(await response.text(), "text/html"));
+      const current = new Set(versioned(document));
+      const missing = fresh.filter((href) => !current.has(href));
+      if (!missing.length) return;
+      // One reload per new version: a CDN still serving the old file can't cause a loop.
+      const key = missing.sort().join("\n");
+      if (window.sessionStorage.getItem("aniilogs:fresh-reload") === key) return;
+      window.sessionStorage.setItem("aniilogs:fresh-reload", key);
+      window.location.reload();
+    } catch {
+      // offline, or no session storage: keep the page as it is
+    }
+  }
+  if (window.fetch && window.DOMParser && /^https?:$/u.test(window.location.protocol)) {
+    window.addEventListener("load", () => window.setTimeout(reloadIfStale, 1500), { once: true });
+    window.addEventListener("pageshow", (event) => { if (event.persisted) { checkedAt = 0; void reloadIfStale(); } });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void reloadIfStale(); });
+  }
 })();

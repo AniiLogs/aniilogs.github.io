@@ -446,7 +446,7 @@
       if (member) copyBuild(side, member, options.aniilog.stat_growth?.level_cap || 70);
     }));
     // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
-    return window.AniilogsPicker?.enhance(select, { placeholder: "Type a name, form or element" })?.wrap || select;
+    return window.AniilogsPicker?.enhance(select, { placeholder: "Type a name, form or element", emptyText: "No Aniimo match" })?.wrap || select;
   }
 
   function renderSide(options, key, title, rerender) {
@@ -631,6 +631,7 @@
         rate.addEventListener("change", change(rerender, (target) => {
           settings.rates[row.attack.id] = Number(target.value);
         }));
+        rate = window.AniilogsPicker?.enhance(rate, { placeholder: "%", emptyText: "No matches" })?.wrap || rate;
       } else {
         rate = el("span", "", `${Math.round(row.attack.rates[0] * 100)}%`);
       }
@@ -828,7 +829,7 @@
           tier.addEventListener("change", change(rerender, (target) => {
             settings.tiers = { ...settings.tiers, [effect.id]: Number(target.value) };
           }));
-          item.append(tier);
+          item.append(window.AniilogsPicker?.enhance(tier, { placeholder: "Type a rarity", emptyText: "No matches" })?.wrap || tier);
         }
         if ((effect.stacks || 1) > 1 && settings.buffs[effect.id]) {
           const stacks = el("label", "duel-buff-stacks");

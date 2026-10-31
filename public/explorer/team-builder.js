@@ -511,8 +511,10 @@
       item.selected = String(option.value) === String(value || "");
       select.append(item);
     });
+    select.setAttribute("aria-label", labelText);
     select.addEventListener("change", () => onChange(select.value));
     label.append(el("span", "team-field-label", labelText), select);
+    window.AniilogsPicker?.enhance(select, { placeholder: "Type to filter", emptyText: "No matches" });
     return label;
   }
 
@@ -1055,7 +1057,7 @@
       render();
     });
     // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
-    const picker = window.AniilogsPicker?.enhance(select);
+    const picker = window.AniilogsPicker?.enhance(select, { placeholder: "Type a name, form or element", emptyText: "No Aniimo match" });
     if (picker) {
       picker.wrap.addEventListener("click", (event) => event.stopPropagation());
       picker.wrap.addEventListener("keydown", (event) => event.stopPropagation());
@@ -1090,7 +1092,9 @@
       }
       switchLoadout(selector.value);
     });
+    selector.setAttribute("aria-label", "Saved team");
     field.append(selector);
+    window.AniilogsPicker?.enhance(selector, { placeholder: "Type a team name", emptyText: "No team matches" });
     const fileInput = el("input");
     fileInput.type = "file";
     fileInput.accept = ".aniiteam,application/json";

@@ -13866,7 +13866,7 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
   html[data-embed="app"] .team-panel .team-builder-header { padding-right: 196px; }
 }
 
-/* ---- Type-to-filter Aniimo pickers (aniimo-picker.js): the text box takes the select's own classes. */
+/* ---- Type-to-filter pickers (aniimo-picker.js): the text box takes the select's own classes. */
 .aniimo-picker {
   position: relative;
   width: 100%;
@@ -13880,6 +13880,41 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
 .aniimo-picker-input {
   box-sizing: border-box;
   width: 100%;
+  padding-right: 30px !important;
+  text-overflow: ellipsis;
+}
+
+.aniimo-picker-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 24px;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.aniimo-picker-clear:hover {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+}
+
+.aniimo-picker-clear[hidden] {
+  display: none;
+}
+
+.aniimo-picker-option mark {
+  padding: 0;
+  border-radius: 2px;
+  background: rgba(var(--accent-rgb), 0.3);
+  color: inherit;
 }
 
 .aniimo-picker-list {
@@ -13921,6 +13956,12 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
 .aniimo-picker-option:hover,
 .aniimo-picker-option.is-active {
   background: rgba(var(--accent-rgb), 0.18);
+}
+
+.aniimo-picker-option.is-disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.6;
 }
 
 .aniimo-picker-option[aria-selected="true"] {
@@ -14068,4 +14109,13 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
   align-self: end;
   min-height: 34px;
   font-size: 13px;
+}
+
+/* The 1v1 hit-strength box is too narrow for a clear button. */
+.duel-cell-rate .aniimo-picker-input {
+  padding-right: 4px !important;
+}
+
+.duel-cell-rate .aniimo-picker-clear {
+  display: none;
 }
