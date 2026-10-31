@@ -145,7 +145,7 @@
     const model = window.AniilogsDamage;
     if (!model?.statTotals || !data?.forms?.[String(entry?.form_id)]) return null;
     const cap = aniilog.stat_growth?.level_cap || 70;
-    const options = window.AniilogsPotentialEditor?.totalsOptions(side, cap) || { level: side.level, potential: side.potential };
+    const options = window.AniilogsPotentialEditor?.totalsOptions(side, cap, data) || { level: side.level, potential: side.potential };
     return model.statTotals(data, aniilog, String(entry.form_id), options);
   }
 
@@ -709,7 +709,7 @@
       if (!casterStats.has(key)) {
         const cap = options.aniilog.stat_growth?.level_cap || 70;
         const source = key === you ? settings.you : options.memberStats?.[key] || {};
-        const build = window.AniilogsPotentialEditor?.totalsOptions(source, cap) || { level: source.level ?? cap, potential: source.potential ?? 0 };
+        const build = window.AniilogsPotentialEditor?.totalsOptions(source, cap, options.data) || { level: source.level ?? cap, potential: source.potential ?? 0 };
         const totals = model.statTotals?.(options.data, options.aniilog, key, build);
         casterStats.set(key, totals?.total || null);
       }

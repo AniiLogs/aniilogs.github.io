@@ -11309,6 +11309,22 @@ html[data-embed="app"] body > footer { display: none !important; }
   accent-color: var(--accent);
 }
 
+/* The Legendary held-item picker (held-item-picker.js) and what it adds, beside a stat's value. */
+.afp-growth-held-item {
+  max-width: 420px;
+}
+
+.afp-item-gain {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.afp-growth-table td .afp-item-gain {
+  margin-left: 4px;
+}
+
 .afp-growth-presets {
   display: flex;
   flex-wrap: wrap;

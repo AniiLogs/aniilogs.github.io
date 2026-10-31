@@ -1578,7 +1578,7 @@
 
     const cap = Number(growth.level_cap) || 70;
     const editor = window.AniilogsPotentialEditor;
-    const options = editor ? editor.totalsOptions(member, cap) : {
+    const options = editor ? editor.totalsOptions(member, cap, data) : {
       level: clampInt(member.level ?? cap, 1, cap, cap), potential: member.potential ?? 0, personality: member.personality || [],
     };
     const totals = model.statTotals(data, aniilog, member.formId, options);

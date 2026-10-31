@@ -318,7 +318,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.21.2-embed-header/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.21.3-legendary-items/u);
   assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.
@@ -328,7 +328,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /window\.loadDeveloperOverlay\("team-builder"\)/u);
   assert.match(explorerStyles, /\.team-panel \{\s*container: team-panel \/ inline-size;/u);
   // Damage model and Try-Hard Guide data load before the 1v1 and Team Builder scripts that use them.
-  assert.match(explorerHtml, /damage-model\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/damage-guide\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/aniimo-picker\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/potential-editor\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/duel\.js/u);
+  assert.match(explorerHtml, /damage-model\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/damage-guide\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/aniimo-picker\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/held-item-picker\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/potential-editor\.js\?v=[^"]+"><\/script>\s*<script defer src="\.\/duel\.js/u);
   // Aniimo dropdowns get type-to-filter: the picker wraps the select, which still drives the change.
   assert.match(teamBuilder, /window\.AniilogsPicker\?\.enhance\(select\)/u);
   // Team setups: Standard, Interlink (allies bring Core skills) and Holo-Sim (4 + a reserve);

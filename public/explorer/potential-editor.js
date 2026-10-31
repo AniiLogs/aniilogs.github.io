@@ -28,14 +28,16 @@
     return Object.fromEntries(STATS.map((stat) => [stat, all]));
   }
 
-  // statTotals options for a build.
-  function totalsOptions(build, cap = 70) {
+  // statTotals options for a build. With `data`, the held item counts only as the shared picker shows it
+  // (held-item-picker.js: Legendary, at the top item level).
+  function totalsOptions(build, cap = 70, data = null) {
+    const held = data && window.AniilogsHeldItems ? window.AniilogsHeldItems.normalize(data, build?.heldItem) : build?.heldItem;
     return {
       level: clampInt(build?.level ?? cap, 1, cap, cap),
       potential: ownPotential(build?.potential),
       personality: build?.personality || [],
       starUp: build?.starUp?.stage ? { stage: Number(build.starUp.stage), level: Number(build.starUp.level) || 0 } : null,
-      heldItems: build?.heldItem?.itemId ? [{ itemId: String(build.heldItem.itemId), level: Number(build.heldItem.level) || 0 }] : [],
+      heldItems: held?.itemId ? [{ itemId: String(held.itemId), level: Number(held.level) || 0 }] : [],
       // "Perfect" quality: species points with the property template's bonus (e.g. +15 HP / P.DEF / M.DEF).
       // Inferred: it reproduced a real Lv 65 Perfect Fulmintis card exactly; not shown in the game's code.
       useTemplate: Boolean(build?.perfect),
@@ -106,23 +108,10 @@
       sources.append(field("Star Up level", selectInput(stageLevels.map((value) => ({ value, label: `Level ${value}` })),
         Number(build.starUp.level) || 0, (value) => update({ starUp: { stage, level: Number(value) } }), "Star Up level")));
     }
-    const catalog = Object.entries(data?.held_item_catalog || {});
-    const recommended = new Set((data?.forms?.[formId]?.recommended?.held_items || []).flatMap((item) => item.tiers.map((tier) => String(tier.item_id))));
-    const itemOption = ([id, item]) => ({ value: id, label: `${item.name} (${item.quality_label || `quality ${item.quality}`})`,
-      search: item.stats.map((stat) => stat.label).join(" ") });
-    const itemOptions = [{ value: "", label: "No held item" }];
-    const mine = catalog.filter(([id]) => recommended.has(id));
-    if (mine.length) itemOptions.push({ group: "Recommended for this Aniimo", items: mine.map(itemOption) });
-    itemOptions.push({ group: "All held items", items: catalog.filter(([id]) => !recommended.has(id)).map(itemOption) });
-    const itemSelect = selectInput(itemOptions, build?.heldItem?.itemId || "",
-      (value) => update({ heldItem: value ? { itemId: value, level: build?.heldItem?.level || 0 } : null }), "Held item");
-    const picker = window.AniilogsPicker?.enhance(itemSelect, { placeholder: "Type an item name or stat" });
-    sources.append(field("Held item", picker?.wrap || itemSelect));
-    if (build?.heldItem?.itemId) {
-      const levels = Object.keys(data?.held_item_levels || {}).map(Number).filter(Number.isFinite);
-      const maxLevel = levels.length ? Math.max(...levels) : 15;
-      sources.append(field(`Item level (0–${maxLevel})`, numberInput(build.heldItem.level || 0, 0, maxLevel,
-        (value) => update({ heldItem: { ...build.heldItem, level: value } }), "Held item level")));
+    // Held item: the shared Legendary-only picker, always at the top item level.
+    if (window.AniilogsHeldItems) {
+      sources.append(window.AniilogsHeldItems.render({ data, formId, itemId: build?.heldItem?.itemId || "",
+        onChange: (heldItem) => update({ heldItem }) }));
     }
     const perfect = el("input");
     perfect.type = "checkbox";

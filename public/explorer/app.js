@@ -7450,8 +7450,39 @@ function afpGrownStat(growth, label, base, level, points = 0) {
 }
 
 function afpGrowthState() {
-  state.aniilogGrowth ||= { level: 70, potentials: {} };
+  state.aniilogGrowth ||= { level: 70, potentials: {}, heldItem: null };
   return state.aniilogGrowth;
+}
+
+// Extra potential attribute per stat (attribute_group_data 110-116), for potential above your own cap.
+const AFP_EXTRA_POTENTIAL_KEYS = Object.freeze({
+  HP: "pet_individual_point_hp", ATK: "pet_individual_point_atk", "P.DEF": "pet_individual_point_def",
+  "M.DEF": "pet_individual_point_def_mag", REGEN: "pet_individual_point_ep_regen_force", BREAK: "pet_individual_point_bp_atk",
+});
+
+// What the chosen held item adds to each stat at one level: the Team Builder's stat model (damage-model.js
+// statTotals) with and without the item, so the item's percent, per-level conversion and potential tiers count
+// exactly as on the Team Builder. { display label: { gain, potential } }, or null without an item or the data.
+function afpHeldItemGains(entry, stats, potentials, level, heldItem, ownMax) {
+  const model = window.AniilogsDamage;
+  const data = state.afpTeamData;
+  const formId = String(entry.form_id);
+  if (!heldItem || !model?.statTotals || !data?.forms?.[formId]) return null;
+  const own = {};
+  const extra = [];
+  for (const stat of stats) {
+    const points = potentials[stat.label] || 0;
+    own[stat.display] = Math.min(points, ownMax);
+    if (points > ownMax) extra.push({ key: AFP_EXTRA_POTENTIAL_KEYS[stat.display], value: points - ownMax, source: "Star Up" });
+  }
+  const options = { level, potential: own, extra };
+  const without = model.statTotals(data, state.aniilogData, formId, options);
+  const withItem = model.statTotals(data, state.aniilogData, formId, { ...options, heldItems: [heldItem] });
+  if (!without || !withItem) return null;
+  return Object.fromEntries(stats.map((stat) => [stat.label, {
+    gain: (withItem.total[stat.display] ?? 0) - (without.total[stat.display] ?? 0),
+    potential: withItem.potential?.[stat.display]?.held_items || 0,
+  }]));
 }
 
 function renderAfpStats(entry) {
@@ -7561,7 +7592,19 @@ function renderAfpStats(entry) {
   const earned = growth.potentials?.points_by_level?.[settings.level - 1];
   const earnedNote = document.createElement("p");
   earnedNote.className = "afp-growth-note";
-  controls.append(levelLabel, presets, earnedNote);
+  controls.append(levelLabel, presets);
+  // Held item: the Team Builder's Legendary-only picker (held-item-picker.js), once the Team Builder data is in.
+  if (!state.afpTeamData) loadAfpTeamData();
+  if (state.afpTeamData?.held_item_catalog && window.AniilogsHeldItems) {
+    settings.heldItem = window.AniilogsHeldItems.normalize(state.afpTeamData, settings.heldItem);
+    const heldItemField = window.AniilogsHeldItems.render({
+      data: state.afpTeamData, formId: String(entry.form_id), itemId: settings.heldItem?.itemId || "",
+      onChange: (heldItem) => { settings.heldItem = heldItem; renderTable(); },
+    });
+    heldItemField.classList.add("afp-growth-held-item");
+    controls.append(heldItemField);
+  }
+  controls.append(earnedNote);
   const table = document.createElement("table");
   table.className = "afp-growth-table";
   body.append(controls, table);
@@ -7578,10 +7621,19 @@ function renderAfpStats(entry) {
       head.append(cell);
     });
     table.append(head);
+    // The held item's potential tier counts toward the same cap, so typed potential leaves room for it.
+    const itemPotential = afpHeldItemGains(entry, stats, settings.potentials, level, settings.heldItem, ownMax) || {};
+    const pointsFor = (stat) => Math.min(settings.potentials[stat.label] || 0, maxPotential - (itemPotential[stat.label]?.potential || 0));
+    const capped = Object.fromEntries(stats.map((stat) => [stat.label, pointsFor(stat)]));
+    const gainsByLevel = settings.heldItem
+      ? Array.from({ length: cap }, (_, index) => afpHeldItemGains(entry, stats, capped, index + 1, settings.heldItem, ownMax))
+      : [];
     stats.forEach((stat) => {
-      const points = settings.potentials[stat.label] || 0;
+      const points = capped[stat.label];
       const base = Number(stat.value) || 0;
-      const values = Array.from({ length: cap }, (_, index) => afpGrownStat(growth, stat.label, base, index + 1, points) ?? 0);
+      const values = Array.from({ length: cap }, (_, index) => (afpGrownStat(growth, stat.label, base, index + 1, points) ?? 0)
+        + (gainsByLevel[index]?.[stat.label]?.gain || 0));
+      const item = gainsByLevel[level - 1]?.[stat.label];
       const row = document.createElement("tr");
       const name = document.createElement("th");
       name.scope = "row";
@@ -7590,14 +7642,21 @@ function renderAfpStats(entry) {
       const input = document.createElement("input");
       input.type = "number";
       input.min = "0";
-      input.max = String(maxPotential);
+      input.max = String(maxPotential - (item?.potential || 0));
       input.value = String(points);
       input.setAttribute("aria-label", `${stat.display} potential level`);
       input.addEventListener("change", () => {
-        settings.potentials[stat.label] = Math.max(0, Math.min(maxPotential, Math.round(Number(input.value) || 0)));
+        settings.potentials[stat.label] = Math.max(0, Math.min(maxPotential - (item?.potential || 0), Math.round(Number(input.value) || 0)));
         renderTable();
       });
       potentialCell.append(input);
+      if (item?.potential) {
+        const extra = document.createElement("span");
+        extra.className = "afp-item-gain";
+        extra.textContent = `+${item.potential}`;
+        extra.title = "Potential from the held item (past your own cap)";
+        potentialCell.append(extra);
+      }
       const curveCell = document.createElement("td");
       curveCell.className = "afp-growth-curve";
       const top = Math.max(...values, 1);
@@ -7608,12 +7667,19 @@ function renderAfpStats(entry) {
       const valueCell = document.createElement("td");
       valueCell.className = "is-current";
       valueCell.textContent = formatNumber(values[level - 1], 0);
+      if (item?.gain) {
+        const gain = document.createElement("span");
+        gain.className = "afp-item-gain";
+        gain.textContent = `+${formatNumber(item.gain, 0)}`;
+        gain.title = "From the held item";
+        valueCell.append(" ", gain);
+      }
       row.append(name, potentialCell, curveCell, valueCell);
       table.append(row);
     });
     const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
     earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
-    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat; Star Up stage 7 adds 4 more (${ownMax + STAR_UP_EXTRA}) and an Epic or Legendary held item at level 10 adds 2 to its stat (${maxPotential}). Values are before Star Up's and held items' other stat bonuses, talents and buffs. Formulas from the game scripts.`));
+    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat; Star Up stage 7 adds 4 more (${ownMax + STAR_UP_EXTRA}) and an Epic or Legendary held item at level 10 adds 2 to its stat (${maxPotential}). Values are before Star Up's other stat bonuses, personality, talents and buffs; a held item you pick is included (its +N shows beside the value). Formulas from the game scripts.`));
   }
   renderTable();
   void earned;
