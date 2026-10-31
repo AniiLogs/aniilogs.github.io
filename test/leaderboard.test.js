@@ -247,7 +247,7 @@ test("Holo-Battle Sim boards: the game's 12 stages, each difficulty ranking Vict
   assert.equal((await send(SESSIONS.dev2, run("d1", "Crucible of Fire", "Challenge", 760))).status, 201);
   // not one of the game's stages
   assert.equal((await send(SESSIONS.dev, run("bad1", "<b>Water</b>", "Hard", 100))).status, 400);
-  assert.equal((await send(SESSIONS.dev, run("bad2", "Training of Lightning", "Hard", 100))).status, 400);
+  assert.equal((await send(SESSIONS.dev, run("bad2", "Training of Wind", "Hard", 100))).status, 400);
   assert.equal((await send(SESSIONS.dev, run("bad3", "Training of Water", "Nightmare", 100))).status, 400);
   const board = async (trial, difficulty) => (await (await call(env,
     `/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&trial=${encodeURIComponent(trial)}&difficulty=${encodeURIComponent(difficulty)}`)).json()).entries;
@@ -259,12 +259,81 @@ test("Holo-Battle Sim boards: the game's 12 stages, each difficulty ranking Vict
   const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
   assert.deepEqual(facets.trials.map((t) => [t.name, t.difficulty, t.count]),
     [["Crucible of Fire", "Challenge", 2], ["Training of Water", "Hard", 4], ["Training of Water", "Normal", 1]]);
-  // the rules the page builds its pickers from: 3 elements x (Easy, Normal, Hard) + Challenge = 12 boards
-  assert.deepEqual(facets.simRules.elements, ["Grass", "Water", "Fire"]);
-  assert.deepEqual(facets.simRules.difficulties, ["Easy", "Normal", "Hard", "Challenge"]);
-  assert.equal(facets.simRules.elements.length * facets.simRules.stages.reduce((n, stage) => n + stage.difficulties.length, 0), 12);
+  assert.deepEqual(facets.trials.map((t) => t.season), ["1", "1", "1"]);
+  // the rules the page builds its pickers from, newest season first. Season 1: 3 elements x (Easy, Normal, Hard) +
+  // Challenge = 12 boards; Season 2: 3 elements x Easy to Trial = 15
+  const [second, first] = facets.simRules.seasons;
+  assert.deepEqual([first.season, first.elements, first.difficulties], [1, ["Grass", "Water", "Fire"], ["Easy", "Normal", "Hard", "Challenge"]]);
+  assert.deepEqual([second.season, second.elements, second.difficulties], [2, ["Earth", "Lightning", "Dark"], ["Easy", "Normal", "Hard", "Challenge", "Trial"]]);
+  assert.deepEqual(facets.simRules.seasons.map((season) => season.elements.length * season.difficulties.length), [15, 12]);
   assert.equal(facets.simRules.confirmed, true);
   assert.equal((await (await call(env, "/api/leaderboard/facets?mode=interlink")).json()).simRules, undefined);
+});
+
+test("Holo-Battle Sim Season 2: Earth, Lightning and Dark Training up to Trial, each season with its own boards", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
+  const run = (id, trial, difficulty, time, playedAt = 1793000000) => ({ kind: "sim_run", clientRunId: id, trial, difficulty, clearTimeS: time, cleared: true, partySize: 1, playedAt });
+  // aLogs sends the stage as the game shows it: "Earth Training - Trial", and Season 1's Normal as "Common"
+  assert.equal((await send(SESSIONS.dev, run("e1", "Earth Training", "Trial", 640))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("e2", "Earth", "Trial", 610))).status, 201);
+  assert.equal((await send(SESSIONS.dev, run("l1", "Lightning Training", "Hard", 300))).status, 201);
+  assert.equal((await send(SESSIONS.dev, run("w1", "Training of Water", "Common", 200, 1790000000))).status, 201);
+  assert.equal((await send(SESSIONS.dev, run("bad1", "Training of Water", "Trial", 100))).status, 400);   // Season 1 had no Trial
+  assert.equal((await send(SESSIONS.dev, run("bad2", "Dark Training", "Nightmare", 100))).status, 400);
+  const stored = sqlite.prepare("SELECT client_run_id AS id, cycle, trial, difficulty FROM leaderboard_submissions WHERE kind = 'sim_run' ORDER BY client_run_id").all();
+  assert.deepEqual(stored.map((row) => [row.id, row.cycle, row.trial, row.difficulty]),
+    [["e1", "2", "Earth", "Trial"], ["e2", "2", "Earth", "Trial"], ["l1", "2", "Lightning", "Hard"], ["w1", "1", "Water", "Normal"]]);
+  const board = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&${query}`)).json()).entries;
+  assert.deepEqual((await board("cycle=2&trial=Earth&difficulty=Trial")).map((e) => [e.player, e.clearTimeS, e.cycle, e.trialName, e.trialGroup]),
+    [["UserOne", 610, "2", "Earth Training", "Training"], ["DevOne", 640, "2", "Earth Training", "Training"]]);
+  assert.deepEqual((await board("cycle=1&trial=Water&difficulty=Normal")).map((e) => [e.player, e.trialName]), [["DevOne", "Training of Water"]]);
+  assert.deepEqual((await board("cycle=1&trial=Earth&difficulty=Trial")), []);
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
+  assert.deepEqual(facets.trials.map((t) => [t.season, t.name, t.difficulty, t.group]),
+    [["2", "Earth Training", "Trial", "Training"], ["2", "Lightning Training", "Hard", "Training"], ["1", "Training of Water", "Normal", "Basic Training"]]);
+});
+
+test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, transformation and gizmos on the boards, a board per style", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
+  const setupOf = (style) => ({
+    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20), level: -4 }, { level: 9 }],
+    mvpShares: { damage: 61.5, taken: 30, healing: 500 },
+    style, core: "Fervor Mask", transform: "Scorchhowl", coins: 8550, secret: "dropped",
+    gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }, { rarity: "Rare" }] }, { series: "Valor", count: 2 }],
+  });
+  const run = (id, style, time, extraSetup = setupOf(style)) => ({ kind: "sim_run", clientRunId: id, trial: "Earth Training", difficulty: "Trial",
+    clearTimeS: time, cleared: true, partySize: 1, playedAt: 1793000000, extra: { setup: extraSetup } });
+  assert.equal((await send(SESSIONS.dev, run("v1", "Valor", 600))).status, 201);
+  assert.equal((await send(SESSIONS.user, run("e1", "Energy", 580))).status, 201);
+  assert.equal((await send(SESSIONS.dev2, run("u1", "Sneaky", 570, { style: "Sneaky", picked: [{ name: "Spark", series: "Surge", rarity: "Common" }] }))).status, 201);
+  const board = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&cycle=2&trial=Earth&difficulty=Trial${query}`)).json()).entries;
+  const all = await board("");
+  assert.deepEqual(all.map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);
+  assert.deepEqual(all[2].extra.setup, {
+    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20).slice(0, 40) }],
+    mvpShares: { damage: 61.5, taken: 30 }, style: "Valor", core: "Fervor Mask", transform: "Scorchhowl",
+    gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }] }, { series: "Valor", count: 2 }], coins: 8550,
+  });
+  // a style that isn't one of the game's is left out; unmatched gizmo icons come as picked
+  assert.deepEqual(all[0].extra.setup, { picked: [{ name: "Spark", series: "Surge", rarity: "Common" }] });
+  assert.deepEqual((await board("&style=Valor")).map((e) => e.player), ["DevOne"]);
+  assert.deepEqual((await board("&style=Sneaky")).map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);   // not a style: no filter
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
+  assert.deepEqual(facets.simRules.styles, ["Energy", "Surge", "Defense", "Vitality", "Ironclad", "Valor", "Wealth"]);
+  assert.deepEqual(facets.styles.map((row) => [row.value, row.count]).sort(), [["Energy", 1], ["Valor", 1]]);
+});
+
+test("Holo-Battle Sim runs stored before seasons were kept get Season 1 by themselves", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST",
+    body: { kind: "sim_run", clientRunId: "old", trial: "Training of Fire", difficulty: "Hard", clearTimeS: 400, cleared: true } })).status, 201);
+  sqlite.prepare("UPDATE leaderboard_submissions SET cycle = NULL WHERE client_run_id = 'old'").run();
+  const fresh = { ...env, DB: Object.create(env.DB) };                             // a new worker: nothing filled yet
+  const entries = (await (await call(fresh, "/api/leaderboard/entries?kind=sim_run&cycle=1&trial=Fire&difficulty=Hard")).json()).entries;
+  assert.deepEqual(entries.map((e) => [e.cycle, e.trialName]), [["1", "Training of Fire"]]);
 });
 
 test("aLogs B2 sends the cropped proof and the whole screens: all four stored, served, and deleted with the run", async () => {

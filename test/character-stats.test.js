@@ -112,6 +112,30 @@ test("the character's level (from the EXP card) is kept beside the Profile numbe
   assert.deepEqual(shown.characters, [{ name: "MinMax", level: 64 }]);    // and neither replaced the level
 });
 
+test("the EXP card's progress into the level (exp of expNeeded) goes with the level, only as a pair, and resets with a new level", async () => {
+  const { env, sqlite } = await setup();
+  const token = await appToken(env, SESSIONS.owner);
+  sqlite.prepare("UPDATE game_characters SET verified_at = 1 WHERE game_uid = ?").run("302000105986");
+  const send = (stats) => app(env, token, "/api/leaderboard/characters/stats", { gameUid: "302000105986", stats });
+  const own = async () => (await (await site(env, "/api/profile/overview", { session: SESSIONS.owner })).json()).characters[0];
+  assert.equal((await send({ level: 64, exp: 5085, expNeeded: 80000, server: "Aniimo-Americas" })).status, 200);
+  assert.deepEqual([(await own()).level, (await own()).exp, (await own()).expNeeded], [64, 5085, 80000]);
+  assert.equal((await send({ level: 64, exp: 90000, expNeeded: 80000 })).status, 400);    // more than the level needs
+  assert.equal((await send({ level: 64, exp: 0, expNeeded: 0 })).status, 400);
+  assert.equal((await send({ level: 64, exp: -1, expNeeded: 80000 })).status, 400);
+  assert.equal((await send({ level: 64, exp: 5.5, expNeeded: 80000 })).status, 400);
+  assert.equal((await send({ level: 64, exp: 6000 })).status, 200);                       // a lone one is dropped
+  assert.equal((await own()).exp, 5085);
+  assert.equal((await send({ level: 64, exp: 7000, expNeeded: 80000 })).status, 200);     // EXP went up
+  assert.equal((await own()).exp, 7000);
+  assert.equal((await send({ level: 65 })).status, 200);                                  // a new level without its EXP
+  assert.deepEqual([(await own()).level, (await own()).exp, (await own()).expNeeded], [65, undefined, undefined]);
+  assert.equal((await send({ level: 65, exp: 100, expNeeded: 82000 })).status, 200);
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pub12345' WHERE discord_id = ?").run(IDS.owner);
+  const shown = await (await site(env, "/api/profiles/pub12345")).json();
+  assert.deepEqual(shown.characters, [{ name: "MinMax", level: 65, exp: 100, expNeeded: 82000, server: "Aniimo-Americas" }]);
+});
+
 test("the character's gender and server go beside it too; only female/male and a plain server name", async () => {
   const { env, sqlite } = await setup();
   const token = await appToken(env, SESSIONS.owner);

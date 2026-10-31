@@ -1482,7 +1482,7 @@ async function boardStandings(env, discordId, kind) {
   // a run whose boss wasn't recognised can't stand on a boss's board (it was a second row beside the real one)
   if (kind === "interlink_run" || kind === "interlink_best") where.push("s.boss_id IS NOT NULL");
   const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle"
-    : kind === "sim_run" ? "trial, difficulty" : "";
+    : kind === "sim_run" ? "cycle, trial, difficulty" : "";
   const partition = group ? `s.discord_id, ${group.split(", ").map((column) => `s.${column}`).join(", ")}` : "s.discord_id";
   const { results } = await env.DB.prepare(
     `WITH best AS (
@@ -1496,7 +1496,7 @@ async function boardStandings(env, discordId, kind) {
      SELECT ranked.*, gc.character_name AS characterName FROM ranked
      LEFT JOIN game_characters gc ON gc.game_uid = ranked.game_uid AND gc.discord_id = ranked.discord_id
      WHERE ranked.discord_id = ?
-     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : kind === "sim_run" ? "trial, difficulty" : group ? "boss_name, boss_id" : "position"}`,
+     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : kind === "sim_run" ? "cycle DESC, trial, difficulty" : group ? "boss_name, boss_id" : "position"}`,
   ).bind(kind, discordId).all();
   return (results || []).map((row) => ({
     position: Number(row.position),
@@ -1577,7 +1577,8 @@ async function ownProfileOverview(request, env) {
       "SELECT display_name AS displayName, bio, is_public AS isPublic, public_id AS publicId, preferences_json AS prefs FROM profiles WHERE discord_id = ?",
     ).bind(account.discordId).first(),
     env.DB.prepare(
-      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt, json_extract(stats_json, '$.level') AS level,
+      `SELECT game_uid AS gameUid, character_name AS name, last_seen_at AS lastSeenAt, json_extract(stats_json, '$.level') AS level, json_extract(stats_json, '$.exp') AS exp,
+         json_extract(stats_json, '$.expNeeded') AS expNeeded,
          json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server
        FROM game_characters WHERE discord_id = ? ORDER BY last_seen_at DESC`,
     ).bind(account.discordId).all(),
@@ -1608,7 +1609,7 @@ async function ownProfileOverview(request, env) {
       ...(Number(profile?.isPublic || 0) === 1 && profile?.publicId ? { publicId: profile.publicId } : {}),
     },
     layout: storedProfileLayout(profile?.prefs),
-    characters: (characters.results || []).map(({ level, gender, server, ...row }) => ({ ...row, ...characterDetails({ level, gender, server }) })),
+    characters: (characters.results || []).map(({ level, gender, server, exp, expNeeded, ...row }) => ({ ...row, ...characterDetails({ level, gender, server, exp, expNeeded }) })),
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     presence: await profilePresence(env, account.discordId),
     leaderboards,
@@ -1716,6 +1717,36 @@ function publicLineup(lineup) {
       cp: Number.isInteger(member?.cp) && member.cp >= 0 && member.cp <= 10000000 ? member.cp : undefined,
     })).filter((member) => member.aniimo) : undefined,
   })));
+}
+// aLogs' Holo-Battle Sim setup (extra.setup, from the Victory screen and the gizmo row) as the boards pass it on: the
+// team (MVP marked) and the MVP's shares, the Training Style, core and Alpha Transformation, each gizmo series with
+// its count and the gizmos picked (or `picked` alone when the row's icons weren't matched), and the coins. Any part
+// can be missing; only text and numbers in range go out.
+function publicSimSetup(setup) {
+  if (!setup || typeof setup !== "object" || Array.isArray(setup)) return null;
+  const text = (value, max = 40) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined);
+  const whole = (value, max) => (Number.isInteger(value) && value >= 0 && value <= max ? value : undefined);
+  const list = (value, max) => (Array.isArray(value) ? value.slice(0, max).filter((item) => item && typeof item === "object") : []);
+  const gizmo = (item) => ({ name: text(item.name, 60), series: text(item.series, 24), rarity: text(item.rarity, 20) });
+  const shares = setup.mvpShares && typeof setup.mvpShares === "object" ? setup.mvpShares : {};
+  const share = (value) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined);
+  const clean = JSON.parse(JSON.stringify({
+    team: list(setup.team, 5).map((member) => ({ name: text(member.name), level: whole(member.level, 999) || undefined, mvp: member.mvp === true || undefined }))
+      .filter((member) => member.name),
+    mvpShares: { damage: share(shares.damage), taken: share(shares.taken), healing: share(shares.healing) },
+    style: SIM_RULES.styles.includes(setup.style) ? setup.style : undefined,
+    core: text(setup.core),
+    transform: text(setup.transform),
+    gizmos: list(setup.gizmos, 12).map((row) => ({ series: text(row.series, 24), count: whole(row.count, 99),
+      picked: list(row.picked, 30).map(({ series: _series, ...item }) => gizmo(item)).filter((item) => item.name) })).filter((row) => row.series),
+    picked: list(setup.picked, 40).map(gizmo).filter((item) => item.name),
+    coins: whole(setup.coins, 1e9),
+  }));
+  for (const [key, value] of Object.entries(clean)) {
+    if ((Array.isArray(value) && !value.length) || (value && typeof value === "object" && !Object.keys(value).length)) delete clean[key];
+  }
+  for (const row of clean.gizmos || []) if (!row.picked.length) delete row.picked;
+  return Object.keys(clean).length ? clean : null;
 }
 // A shared run's lineup filled in from every copy of it: each player's details from the copy that read them, the
 // player's own copy first (their app saw their own panel best), then any other.
@@ -1831,7 +1862,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         teamDps: row.team_dps,
         partySize: row.party_size,
         difficulty: row.difficulty || null,
-        trialName: row.trial ? simStageName(row.trial, row.difficulty) : null,
+        trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles) || [],
         lineup: mergedLineup(publicLineup(extra.lineup), copies),
@@ -1884,7 +1915,7 @@ const NOBODYS_BEST = `(
         AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
           AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND ${BETTER_INTERLINK("b", "c")})))
   OR (c.kind = 'sim_run'
-    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'sim_run' AND b.trial IS c.trial
+    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'sim_run' AND b.cycle IS c.cycle AND b.trial IS c.trial
       AND b.difficulty IS c.difficulty AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id AND b.cleared = 1
       AND (COALESCE(c.cleared, 0) = 0 OR b.clear_time_s < c.clear_time_s OR (b.clear_time_s = c.clear_time_s AND b.created_at < c.created_at))))
 ) AND COALESCE(c.verify_state, '') NOT IN ('pending', 'mismatch')`;
@@ -1999,7 +2030,8 @@ async function publicProfile(request, env, publicId) {
   const { parts } = profileVisibility(1, profile.prefs);
   const shows = (part) => parts.includes(part);
   const [characters, main] = await Promise.all([
-    env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level,
+    env.DB.prepare(`SELECT character_name AS name, json_extract(stats_json, '$.level') AS level, json_extract(stats_json, '$.exp') AS exp,
+         json_extract(stats_json, '$.expNeeded') AS expNeeded,
       json_extract(stats_json, '$.gender') AS gender, json_extract(stats_json, '$.server') AS server FROM game_characters
       WHERE discord_id = ? AND character_name IS NOT NULL ORDER BY last_seen_at DESC`)
       .bind(profile.discordId).all(),
@@ -2274,30 +2306,55 @@ const LEADERBOARD_SORTS = Object.freeze({
   player: "ASC",
 });
 // Egg Heist difficulties, hardest first
-// Holo-Battle Sim stages, from the client's stage table: 12 stages, an element (Grass, Water, Fire) at Easy, Normal or
-// Hard ("Training of Water - Hard", Basic Training) or at Challenge ("Crucible of Fire - Challenge", which the Victory
-// screen also calls "Trial of Fire", Elemental Crucible). A run is stored by element (trial) and difficulty: one
-// board each. The facets send these rules to the page; a game update that adds stages only needs them edited.
+// Holo-Battle Sim stages, from the client's tables (rogue_difficulty_data, rogue_season_data), newest season first.
+// Season 1: an element (Grass, Water, Fire) at Easy, Normal (the English client says "Common") or Hard ("Training of
+// Water - Hard", Basic Training) or at Challenge ("Crucible of Fire - Challenge", which the Victory screen also calls
+// "Trial of Fire", Elemental Crucible). Season 2: Earth, Lightning or Dark at Easy to Trial ("Earth Training - Trial");
+// the game's own leaderboard ranks Trial only. A run is stored by season (cycle), element (trial) and difficulty: one
+// board each. The facets send these rules to the page; a game update that adds a season only needs one added here.
+const simSeason = (season, start, end, elements, stages) => Object.freeze({
+  season, start: Date.parse(start) / 1000, end: Date.parse(end) / 1000, elements: Object.freeze(elements),
+  difficulties: Object.freeze(stages.flatMap((stage) => stage.difficulties)),     // easiest to hardest
+  stages: Object.freeze(stages.map((stage) => Object.freeze({ ...stage, difficulties: Object.freeze(stage.difficulties) }))),
+});
 const SIM_RULES = Object.freeze({
-  elements: Object.freeze(["Grass", "Water", "Fire"]),
-  difficulties: Object.freeze(["Easy", "Normal", "Hard", "Challenge"]),             // easiest to hardest
-  stages: Object.freeze([
-    Object.freeze({ id: "basic", label: "Basic Training", name: "Training of {element}", difficulties: Object.freeze(["Easy", "Normal", "Hard"]) }),
-    Object.freeze({ id: "crucible", label: "Elemental Crucible", name: "Crucible of {element}", alias: "Trial of {element}",
-      difficulties: Object.freeze(["Challenge"]) }),
+  seasons: Object.freeze([
+    simSeason(2, "2026-10-29T02:00:00Z", "2026-12-09T03:59:59Z", ["Earth", "Lightning", "Dark"], [
+      { id: "training", label: "Training", name: "{element} Training", difficulties: ["Easy", "Normal", "Hard", "Challenge", "Trial"] },
+    ]),
+    simSeason(1, "2026-07-31T00:00:00Z", "2026-10-28T23:59:59Z", ["Grass", "Water", "Fire"], [
+      { id: "basic", label: "Basic Training", name: "Training of {element}", difficulties: ["Easy", "Normal", "Hard"] },
+      { id: "crucible", label: "Elemental Crucible", name: "Crucible of {element}", alias: "Trial of {element}", difficulties: ["Challenge"] },
+    ]),
   ]),
+  aliases: Object.freeze({ Common: "Normal" }),                                     // Season 1's English Normal
+  // the Training Styles, the tabs of the game's own Holo-Battle Sim leaderboard (rank_base_data 30001-30003)
+  styles: Object.freeze(["Energy", "Surge", "Defense", "Vitality", "Ironclad", "Valor", "Wealth"]),
   confirmed: true,
 });
-// "Training of Water", "Trial of Fire", "Crucible of Fire" or just "Fire": the element, or null when it isn't one
+// "Training of Water", "Trial of Fire", "Crucible of Fire", "Earth Training" or just "Fire": the element, or null
 function simElement(trial) {
-  const match = String(trial || "").trim().match(/^(?:(?:Training|Trial|Crucible) of )?([A-Za-z]+)$/iu);
-  return match ? SIM_RULES.elements.find((element) => element.toLowerCase() === match[1].toLowerCase()) || null : null;
+  const match = String(trial || "").trim().match(/^(?:(?:Training|Trial|Crucible) of )?([A-Za-z]+)(?: Training)?$/iu);
+  const word = match?.[1].toLowerCase();
+  return SIM_RULES.seasons.flatMap((season) => season.elements).find((element) => element.toLowerCase() === word) || null;
 }
-function simStage(difficulty) {
-  return SIM_RULES.stages.find((stage) => stage.difficulties.includes(difficulty)) || null;
+// the season a run belongs to: the one with its element (the one it was played in, should a later season reuse it)
+function simSeasonOf(element, playedAt = null, cycle = null) {
+  const sent = SIM_RULES.seasons.find((season) => String(season.season) === String(cycle ?? ""));
+  if (sent && (!element || sent.elements.includes(element))) return sent;
+  const seasons = SIM_RULES.seasons.filter((season) => !element || season.elements.includes(element));
+  return seasons.find((season) => playedAt && season.start <= playedAt && playedAt <= season.end)
+    || seasons.find((season) => playedAt && season.start <= playedAt) || seasons.at(-1) || null;
 }
-function simStageName(element, difficulty) {
-  const stage = simStage(difficulty);
+function simDifficulty(difficulty) {
+  return SIM_RULES.aliases[difficulty] || difficulty;
+}
+function simStage(difficulty, season = null) {
+  const seasonRules = typeof season === "object" && season ? season : simSeasonOf(null, null, season);
+  return seasonRules?.stages.find((stage) => stage.difficulties.includes(difficulty)) || null;
+}
+function simStageName(element, difficulty, cycle = null) {
+  const stage = simStage(difficulty, simSeasonOf(element, null, cycle));
   return element && stage ? stage.name.replace("{element}", element) : element || null;
 }
 
@@ -2504,14 +2561,21 @@ export function leaderboardSubmission(value) {
   };
   const bad = Object.entries(record).find(([, field]) => field === undefined);
   if (bad) return { error: `Field ${bad[0]} is invalid.` };
-  // a Holo-Battle Sim run names one of the game's stages: stored by element, with a difficulty the stages have
-  if (record.kind === "sim_run" && record.trial !== null) {
-    record.trial = simElement(record.trial);
-    if (!record.trial) return { error: "Field trial is invalid." };
-  } else if (record.kind !== "sim_run") record.trial = null;
-  if (record.kind === "sim_run" && record.difficulty !== null && !SIM_RULES.difficulties.includes(record.difficulty)) {
-    return { error: "Field difficulty is invalid." };
-  }
+  // a Holo-Battle Sim run names one of the game's stages: stored by season (cycle) and element, with a difficulty
+  // that season's stages have
+  if (record.kind === "sim_run") {
+    if (record.trial !== null) {
+      record.trial = simElement(record.trial);
+      if (!record.trial) return { error: "Field trial is invalid." };
+    }
+    const season = record.trial ? simSeasonOf(record.trial, record.playedAt) : null;
+    record.cycle = season ? String(season.season) : null;
+    if (record.difficulty !== null) {
+      record.difficulty = simDifficulty(record.difficulty);
+      const allowed = season ? season.difficulties : SIM_RULES.seasons.flatMap((item) => item.difficulties);
+      if (!allowed.includes(record.difficulty)) return { error: "Field difficulty is invalid." };
+    }
+  } else record.trial = null;
   if (!record.clientRunId) return { error: "clientRunId is required." };
 
   const players = value.players ?? [];
@@ -3234,6 +3298,7 @@ async function linkCharacter(request, env) {
 // their own Profile, and the character's level (from the EXP card the game shows when you gain EXP), gender (the mark
 // after the name on the Profile screen) and server (as the game's settings name it, e.g. "Aniimo-Americas"). Only for
 // a character this account proved from the game, and only whole numbers in range. Each send updates what it has.
+// The EXP card also gives the progress into that level: exp of expNeeded, kept only as a pair (exp <= expNeeded).
 const CHARACTER_STATS = Object.freeze(["aniimoPoint", "sparklingAniimo", "stylePoints", "prismanaAniimo", "level"]);
 const CHARACTER_STAT_MAX = 10_000_000;
 const CHARACTER_LEVEL_MAX = 200;
@@ -3259,6 +3324,13 @@ export function cleanCharacterStats(raw) {
     if (key === "level" && (value < 1 || value > CHARACTER_LEVEL_MAX)) return null;
     out[key] = value;
   }
+  // EXP into the level: only as a pair (a lone one is dropped), whole numbers, exp no more than the level needs
+  const whole = (value) => Number.isInteger(value) && value >= 0 && value <= CHARACTER_STAT_MAX;
+  if (raw.exp != null && raw.expNeeded != null) {
+    if (!whole(raw.exp) || !whole(raw.expNeeded) || raw.expNeeded < 1 || raw.exp > raw.expNeeded) return null;
+    out.exp = raw.exp;
+    out.expNeeded = raw.expNeeded;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -3275,7 +3347,7 @@ async function saveCharacterStats(request, env) {
   const gameUid = boundedText(body.gameUid, 24, /^\d+$/u);
   const stats = cleanCharacterStats(body.stats);
   if (!gameUid) return json({ error: "A numeric game UID is required." }, 400);
-  if (!stats) return json({ error: "Stats must be whole numbers (aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo, level), gender female or male, server a name." }, 400);
+  if (!stats) return json({ error: "Stats must be whole numbers (aniimoPoint, sparklingAniimo, stylePoints, prismanaAniimo, level; exp with expNeeded, exp no more than expNeeded), gender female or male, server a name." }, 400);
   const owned = await env.DB.prepare(
     "SELECT verified_at AS verifiedAt, stats_json AS statsJson FROM game_characters WHERE game_uid = ? AND discord_id = ?",
   ).bind(gameUid, account.discordId).first();
@@ -3283,6 +3355,11 @@ async function saveCharacterStats(request, env) {
   let saved = null;
   try { saved = owned.statsJson ? cleanCharacterStats(JSON.parse(owned.statsJson)) : null; } catch { saved = null; }
   const merged = { ...saved, ...stats };        // the level and the Profile screen's numbers arrive separately
+  // a new level without its EXP: the old level's EXP no longer applies
+  if (stats.level !== undefined && stats.exp === undefined && stats.level !== saved?.level) {
+    delete merged.exp;
+    delete merged.expNeeded;
+  }
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare("UPDATE game_characters SET stats_json = ?, stats_at = ? WHERE game_uid = ? AND discord_id = ?")
     .bind(JSON.stringify(merged), now, gameUid, account.discordId).run();
@@ -3392,6 +3469,7 @@ function characterDetails(row) {
     ...(Number.isInteger(row.level) ? { level: row.level } : {}),
     ...(CHARACTER_GENDERS.includes(row.gender) ? { gender: row.gender } : {}),
     ...(typeof row.server === "string" && row.server ? { server: row.server } : {}),
+    ...(Number.isInteger(row.exp) && Number.isInteger(row.expNeeded) && row.expNeeded > 0 ? { exp: row.exp, expNeeded: row.expNeeded } : {}),
   };
 }
 
@@ -3561,6 +3639,12 @@ function leaderboardFilters(params, { includeHidden = false } = {}) {
       where.push(`${column} = ?`);
       binds.push(value);
     }
+  }
+  // Holo-Battle Sim: one Training Style, as the game's own leaderboard tabs them (from aLogs' extra.setup)
+  const style = String(params.get("style") || "");
+  if (SIM_RULES.styles.includes(style)) {
+    where.push("json_extract(s.extra_json, '$.setup.style') = ?");
+    binds.push(style);
   }
   const integers = [["level", "s.boss_level"], ["party", "s.party_size"]];
   for (const [name, column] of integers) {
@@ -3787,10 +3871,17 @@ async function storeRunOutcome(env, submissionId) {
 }
 // Runs stored before the outcome column existed (or whose write failed) get theirs by themselves: the first API read
 // in each worker fills up to 500 before it answers, so the boards never show an old invalid run, and once nothing is
-// left that worker stops looking. No sign-in, no manual step.
+// left that worker stops looking. No sign-in, no manual step. Holo-Battle Sim runs stored before seasons were kept get
+// their season the same way, from their element.
 const OUTCOMES_FILLED = new WeakSet();
 async function fillRunOutcomes(env, max = 500) {
   if (!env.DB || OUTCOMES_FILLED.has(env.DB)) return null;
+  const onlyIn = SIM_RULES.seasons.flatMap((season) => season.elements
+    .filter((element) => SIM_RULES.seasons.filter((item) => item.elements.includes(element)).length === 1)
+    .map((element) => [element, String(season.season)]));
+  await env.DB.prepare(`UPDATE leaderboard_submissions SET cycle = CASE trial ${onlyIn.map(() => "WHEN ? THEN ?").join(" ")} END
+    WHERE kind = 'sim_run' AND cycle IS NULL AND trial IN (${onlyIn.map(() => "?").join(", ")})`)
+    .bind(...onlyIn.flat(), ...onlyIn.map(([element]) => element)).run();
   const { results } = await env.DB.prepare(
     `SELECT submission_id, kind, cycle, boss_id, stars, cleared, clear_time_s, extra_json FROM leaderboard_submissions
      WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL LIMIT ?`,
@@ -4233,7 +4324,7 @@ async function leaderboardEntries(request, env) {
   // one row per player: the sender, or a teammate credited with the run (see CREDITED_RUNS)
   const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.who, s.boss_id"
     : kind === "eggheist_season" ? "s.who, s.cycle"
-      : kind === "sim_run" ? "s.who, s.trial, s.difficulty" : "s.who";   // Sim: a best per trial and difficulty
+      : kind === "sim_run" ? "s.who, s.cycle, s.trial, s.difficulty" : "s.who";   // Sim: a best per season, trial and difficulty
   const base = `
     SELECT s.*, gc.character_name AS characterName,
       (SELECT character_name FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
@@ -4296,14 +4387,15 @@ async function leaderboardEntries(request, env) {
       partySize: row.party_size,
       difficulty: row.difficulty || null,
       trial: row.trial || null,
-      trialName: row.trial ? simStageName(row.trial, row.difficulty) : null,
-      trialGroup: row.trial ? simStage(row.difficulty)?.label || null : null,
+      trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
+      trialGroup: row.trial ? simStage(row.difficulty, simSeasonOf(row.trial, null, row.cycle))?.label || null : null,
       defeats: row.defeats ?? null,
       server: row.server || null,
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+        ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
         ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
       hasEvidence: Boolean(row.evidence_key),
@@ -4334,9 +4426,9 @@ async function leaderboardFacets(request, env) {
   const all = async (sql) => (await env.DB.prepare(sql).bind(mode).all()).results || [];
   const visible = "FROM leaderboard_submissions WHERE mode = ? AND status = 'visible' AND COALESCE(outcome, '') <> 'invalid'";
   const difficulties = await all(`SELECT difficulty AS value, COUNT(*) AS count ${visible} AND difficulty IS NOT NULL GROUP BY difficulty ORDER BY difficulty`);
-  // Holo-Battle Sim: each trial with the difficulties it has runs on (a board each)
-  const trials = mode === "sim" ? await all(`SELECT trial, difficulty, COUNT(*) AS count ${visible} AND trial IS NOT NULL
-    GROUP BY trial, difficulty ORDER BY trial, difficulty`) : [];
+  // Holo-Battle Sim: each season's trials with the difficulties they have runs on (a board each)
+  const trials = mode === "sim" ? await all(`SELECT cycle AS season, trial, difficulty, COUNT(*) AS count ${visible} AND trial IS NOT NULL
+    GROUP BY cycle, trial, difficulty ORDER BY cycle DESC, trial, difficulty`) : [];
   const [cycles, bosses, levels, parties, kinds, buffRows] = await Promise.all([
     all(`SELECT cycle AS value, COUNT(*) AS count ${visible} AND cycle IS NOT NULL GROUP BY cycle ORDER BY cycle DESC`),
     all(`SELECT boss_id AS id, MAX(boss_name) AS name, COUNT(*) AS count ${visible} AND boss_id IS NOT NULL GROUP BY boss_id ORDER BY name`),
@@ -4345,6 +4437,8 @@ async function leaderboardFacets(request, env) {
     all(`SELECT kind AS value, COUNT(*) AS count ${visible} GROUP BY kind`),
     mode === "sim" ? all(`SELECT buffs_json AS buffs ${visible} AND buffs_json IS NOT NULL LIMIT 2000`) : Promise.resolve([]),
   ]);
+  const styles = mode === "sim" ? await all(`SELECT json_extract(extra_json, '$.setup.style') AS value, COUNT(*) AS count ${visible}
+    AND json_extract(extra_json, '$.setup.style') IS NOT NULL GROUP BY value ORDER BY count DESC`) : [];
   const buffCounts = new Map();
   for (const row of buffRows) {
     for (const buff of parseJsonColumn(row.buffs) || []) {
@@ -4359,8 +4453,10 @@ async function leaderboardFacets(request, env) {
     levels,
     partySizes: parties,
     difficulties,
-    trials: trials.map((row) => ({ ...row, name: simStageName(row.trial, row.difficulty), group: simStage(row.difficulty)?.label || null })),
+    trials: trials.map((row) => ({ ...row, name: simStageName(row.trial, row.difficulty, row.season),
+      group: simStage(row.difficulty, simSeasonOf(row.trial, null, row.season))?.label || null })),
     simRules: mode === "sim" ? SIM_RULES : undefined,
+    styles: mode === "sim" ? styles.filter((row) => SIM_RULES.styles.includes(row.value)) : undefined,
     kinds,
     buffs: [...buffCounts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     sorts: Object.keys(LEADERBOARD_SORTS),
