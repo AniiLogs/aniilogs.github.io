@@ -1662,7 +1662,8 @@ async function searchProfiles(request, env) {
 // character's (as mainCharacter picks it). For SQL over profiles p.
 const PUBLIC_NAME_SQL = `COALESCE(CASE WHEN p.findable_by_name = 1 THEN p.display_name END,
   (SELECT gc.character_name FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.character_name IS NOT NULL
-   ORDER BY gc.game_uid = p.main_game_uid DESC, gc.verified_at IS NOT NULL DESC, gc.last_seen_at DESC LIMIT 1), 'Pathfinder')`;
+   ORDER BY gc.game_uid IS (SELECT main.main_game_uid FROM profiles main WHERE main.discord_id = gc.discord_id) DESC,
+     gc.verified_at IS NOT NULL DESC, gc.last_seen_at DESC LIMIT 1), 'Pathfinder')`;
 
 // GET /api/profiles/directory: the Profiles page's Recently joined (public profiles, newest first) and Online now
 // (public profiles showing their status). Players online with a private profile are only counted, never named.
