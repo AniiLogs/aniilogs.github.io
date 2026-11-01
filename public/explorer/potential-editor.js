@@ -1,7 +1,7 @@
 // Potential, Star Up and held item for one Aniimo, shared by the Team Builder Stats tab and the 1v1 sides.
 // A "build" is { level, potential: { HP, ATK, "P.DEF", REGEN, "M.DEF", BREAK } (or one number for all),
 // starUp: { stage, level } | null, heldItem: { itemId, level } | null, personality: [letters],
-// formResearch: [researched form ids] }.
+// formResearch: [researched form ids], coreUpgraded, formsCaught, prismanaCaught } (the last three only feed CP).
 // Each stat's potential is your own (rolled + Capability Awakening, 0-20) plus extra from Star Up and the
 // held item's tiers, which go past 20; stats use the total (damage-model.js statTotals).
 (() => {
@@ -42,6 +42,10 @@
       // Inferred: it reproduced a real Lv 65 Perfect Fulmintis card exactly; not shown in the game's code.
       useTemplate: Boolean(build?.perfect),
       formResearch: Array.isArray(build?.formResearch) ? build.formResearch.map(String) : [],
+      // CP only (Utils.getCpValue): an upgraded Core skill, and the handbook's caught forms and Prismana forms.
+      coreUpgraded: Boolean(build?.coreUpgraded),
+      formsCollected: clampInt(build?.formsCaught ?? 1, 1, 99, 1),
+      rainbowForms: clampInt(build?.prismanaCaught ?? 0, 0, 99, 0),
     };
   }
 
@@ -138,6 +142,27 @@
       label.append(check, el("span", "", `${row.form_label || "Form"} researched (${row.label} +${percent})`));
       sources.append(label);
     }
+    // CP inputs (Utils.getCpValue): an upgraded Core skill adds 5% to the level part and 20 more; each form
+    // of the species caught after the first and each Prismana form caught add 5.
+    if ((data?.forms?.[formId]?.skills || []).some((skill) => skill.core && skill.upgrade)) {
+      const upgraded = el("input");
+      upgraded.type = "checkbox";
+      upgraded.checked = Boolean(build?.coreUpgraded);
+      upgraded.addEventListener("change", () => update({ coreUpgraded: upgraded.checked }));
+      const upgradedLabel = el("label", "potential-check");
+      upgradedLabel.title = "The Core skill's upgrade is unlocked. CP only: +5% on the level part of CP and +20.";
+      upgradedLabel.append(upgraded, el("span", "", "Core skill upgraded"));
+      sources.append(upgradedLabel);
+    }
+    const baseId = aniilog?.entries?.find((row) => String(row.form_id) === String(formId))?.base_id;
+    const forms = Math.max(1, (aniilog?.entries || []).filter((row) => baseId && row.base_id === baseId).length);
+    const caught = field("Forms caught", numberInput(clampInt(build?.formsCaught ?? 1, 1, forms, 1), 1, forms,
+      (value) => update({ formsCaught: value }), "Forms of this Aniimo caught"));
+    caught.title = "Forms of this Aniimo in your Aniilog as caught. CP only: +5 for each after the first.";
+    const prismana = field("Prismana caught", numberInput(clampInt(build?.prismanaCaught ?? 0, 0, forms, 0), 0, forms,
+      (value) => update({ prismanaCaught: value }), "Prismana forms of this Aniimo caught"));
+    prismana.title = "Prismana forms of this Aniimo in your Aniilog as caught. CP only: +5 each.";
+    sources.append(caught, prismana);
     box.append(sources);
 
     // Per stat: your own potential (0-20) and what Star Up and the held item add on top.

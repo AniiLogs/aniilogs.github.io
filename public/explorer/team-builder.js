@@ -137,6 +137,10 @@
     }
     if (value?.perfect === true) member.perfect = true;
     if (Array.isArray(value?.formResearch)) member.formResearch = value.formResearch.map(String).filter((id) => /^\d+$/u.test(id));
+    // CP-only inputs: Core skill upgraded, and forms / Prismana forms caught in the Aniilog.
+    if (value?.coreUpgraded === true) member.coreUpgraded = true;
+    if (Number.isFinite(Number(value?.formsCaught)) && value?.formsCaught !== null) member.formsCaught = Math.min(99, Math.max(1, Math.round(Number(value.formsCaught))));
+    if (Number.isFinite(Number(value?.prismanaCaught)) && value?.prismanaCaught !== null) member.prismanaCaught = Math.min(99, Math.max(0, Math.round(Number(value.prismanaCaught))));
     if (value?.starUp && Number(value.starUp.stage) > 0) {
       member.starUp = { stage: Math.round(Number(value.starUp.stage)), level: Math.max(0, Math.round(Number(value.starUp.level) || 0)) };
     }
@@ -1619,7 +1623,7 @@
       box.append(editor.render({
         data, aniilog, formId: member.formId, build: member, totals,
         onChange: (next) => {
-          for (const key of ["potential", "starUp", "heldItem", "perfect", "formResearch"]) {
+          for (const key of ["potential", "starUp", "heldItem", "perfect", "formResearch", "coreUpgraded", "formsCaught", "prismanaCaught"]) {
             if (next[key] === null || next[key] === undefined) delete member[key];
             else member[key] = next[key];
           }
@@ -1652,6 +1656,7 @@
       box.append(cp);
     }
     box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at its rarity's top level (Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
+    if (Number.isFinite(totals.cp)) box.append(el("p", "team-data-note", "CP is the game's formula: species stats and level, your own potential, Star Up, the held item, an upgraded Core skill, and the forms and Prismana forms you have caught."));
     return box;
   }
 
@@ -1998,7 +2003,8 @@
       // The level and potential set on each member’s Stats tab (unset level = the cap).
       memberStats: Object.fromEntries(model.members.filter((member) => member?.formId)
         .map((member) => [String(member.formId), { level: member.level, potential: member.potential, starUp: member.starUp,
-          heldItem: member.heldItem, personality: member.personality, perfect: member.perfect, formResearch: member.formResearch }])),
+          heldItem: member.heldItem, personality: member.personality, perfect: member.perfect, formResearch: member.formResearch,
+          coreUpgraded: member.coreUpgraded, formsCaught: member.formsCaught, prismanaCaught: member.prismanaCaught }])),
       formLabel,
       contentUrl: host.contentUrl,
       developerMode: typeof window.developerModeEnabled === "function" && window.developerModeEnabled(),

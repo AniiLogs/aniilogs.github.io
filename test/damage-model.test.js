@@ -75,6 +75,20 @@ test("CP is formula 3100: species total, level, potential CP (x2 on recommended 
   assert.equal(D.combatPower(data, data.forms[1], species, 50, none, { heldItems: [{ itemId: 9, level: 2 }] }), 1068);
 });
 
+test("CP matches a real Lv 70 Irisalis card: Core skill upgraded, Prismana caught and the Feather at +15", () => {
+  const data = {
+    potential_cp: Array.from({ length: 21 }, (_, level) => ({ cp: 6 * level, recommended_rate: 2 })),
+    held_item_catalog: { 553025: { name: "Floral Rainbow Feather", quality: 5, cp: 200, cp_per_level: 15 } },
+    forms: { 1021300: { stat_template: { recommended_stats: ["ATK", "REGEN"] } } },
+  };
+  const species = { HP: 90, ATK: 130, "P.DEF": 78, "M.DEF": 78, REGEN: 108, BREAK: 56 };
+  const own = { HP: 20, ATK: 20, "P.DEF": 20, REGEN: 20, "M.DEF": 17, BREAK: 20 };
+  const card = { resonanceCp: 1050, heldItems: [{ itemId: "553025", level: 15 }], coreUpgraded: true, formsCollected: 1, rainbowForms: 1 };
+  assert.equal(D.combatPower(data, data.forms[1021300], species, 70, own, card), 4212);
+  // What the site showed before: no Core upgrade, no forms counted, no held item.
+  assert.equal(D.combatPower(data, data.forms[1021300], species, 70, own, { resonanceCp: 1050 }), 3646);
+});
+
 test("toughness drain is hit share x the skill's BREAK power x the target's modifiers", () => {
   assert.equal(D.toughnessDrain(24), 24);
   assert.equal(D.toughnessDrain(24, { hitShare: 0.5, tpReduceAdd: 0.25, sizeResistRate: 2 }), 7.5);
