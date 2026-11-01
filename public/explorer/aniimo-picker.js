@@ -4,6 +4,9 @@
 // Each option can carry extra words in data-search (element names, Aniilog number); every word typed
 // has to appear somewhere in the option's text, its group or those extra words ("fulm", "lightning"), and a
 // "#45" word matches the number 45 (also written #045). Matches are highlighted in the list.
+// An option can also carry named keywords in data-keywords, a JSON list of [kind, name] pairs (the Team
+// Builder's skills, traits and the effects they apply): typed words match those names too, and the matching
+// ones are shown under the option ("Skill · Star Glide") so it's clear why it's in the list.
 (() => {
   let nextId = 0;
 
@@ -19,9 +22,14 @@
       }
     }
     return rows.map((row) => {
-      const haystack = fold(`${row.option.textContent} ${row.group} ${row.option.dataset.search || ""}`);
-      const numbers = new Set((haystack.match(/\d+/gu) || []).map((digits) => String(Number(digits))));
-      return { ...row, haystack, numbers };
+      const own = fold(`${row.option.textContent} ${row.group} ${row.option.dataset.search || ""}`);
+      const numbers = new Set((own.match(/\d+/gu) || []).map((digits) => String(Number(digits))));
+      let keywords = [];
+      try { keywords = JSON.parse(row.option.dataset.keywords || "[]"); } catch { keywords = []; }
+      keywords = keywords.filter((pair) => Array.isArray(pair) && pair[1])
+        .map(([kind, name]) => ({ kind: String(kind || ""), name: String(name), folded: fold(name) }));
+      const haystack = [own, ...keywords.map((keyword) => keyword.folded)].join(" ");
+      return { ...row, own, haystack, numbers, keywords };
     });
   }
 
@@ -64,6 +72,29 @@
     });
     flush();
     return nodes;
+  }
+
+  // The keywords that explain a match: those holding a typed word the option's own text doesn't have.
+  // Names holding more of the words come first; at most two are shown, then "+N more".
+  function keywordHints(entry, words) {
+    const missing = words.map((word) => word.replace(/^#/u, "")).filter((word) => word && !entry.own.includes(word));
+    if (!missing.length || !entry.keywords.length) return null;
+    const hits = entry.keywords
+      .map((keyword) => ({ keyword, count: missing.filter((word) => keyword.folded.includes(word)).length }))
+      .filter((hit) => hit.count)
+      .sort((left, right) => right.count - left.count);
+    if (!hits.length) return null;
+    const hint = document.createElement("span");
+    hint.className = "aniimo-picker-hint";
+    hits.slice(0, 2).forEach(({ keyword }, index) => {
+      if (index) hint.append(", ");
+      const kind = document.createElement("span");
+      kind.className = "aniimo-picker-hint-kind";
+      kind.textContent = `${keyword.kind} · `;
+      hint.append(kind, ...highlighted(keyword.name, missing));
+    });
+    if (hits.length > 2) hint.append(` +${hits.length - 2} more`);
+    return hint;
   }
 
   // Returns { wrap, input, list, close }, or null when the select is missing or already enhanced.
@@ -183,7 +214,15 @@
         item.className = "aniimo-picker-option";
         item.setAttribute("role", "option");
         item.setAttribute("aria-selected", String(entry.option.selected && entry.option.value === select.value));
-        item.append(...highlighted(entry.option.textContent, words));
+        const hint = keywordHints(entry, words);
+        if (hint) {
+          const name = document.createElement("span");
+          name.className = "aniimo-picker-name";
+          name.append(...highlighted(entry.option.textContent, words));
+          item.append(name, hint);
+        } else {
+          item.append(...highlighted(entry.option.textContent, words));
+        }
         if (entry.option.disabled) {
           item.classList.add("is-disabled");
           item.setAttribute("aria-disabled", "true");

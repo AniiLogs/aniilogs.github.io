@@ -13978,6 +13978,31 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
   color: var(--muted);
 }
 
+/* Why an option matched: the skill, trait or effect holding the typed words (Team Builder). */
+.aniimo-picker-name,
+.aniimo-picker-hint {
+  display: block;
+}
+
+.aniimo-picker-hint {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.aniimo-picker-hint-kind {
+  font-weight: 700;
+}
+
+@media (pointer: coarse) {
+  .aniimo-picker-option:has(.aniimo-picker-hint) {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+  }
+}
+
 /* Touch screens: 16px text so phones don't zoom in on focus, and bigger rows to tap. */
 @media (pointer: coarse) {
   .aniimo-picker-input {

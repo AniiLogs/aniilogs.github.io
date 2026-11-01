@@ -420,6 +420,32 @@
     return entry?.form_label ? `${name} · ${entry.form_label}` : name;
   }
 
+  // Names the Aniimo picker also matches, as [kind, name]: its skills and traits, the effects they apply
+  // (a debuff when it lands on an enemy, otherwise a buff) and the skills' tags. Basic attacks are all
+  // called "ATK", so only their effects count. An effect named like its own skill or trait is left out.
+  function aniimoKeywords(form) {
+    const named = new Set();
+    const rows = [];
+    const add = (kind, name) => {
+      if (!name || named.has(name)) return;
+      named.add(name);
+      rows.push([kind, name]);
+    };
+    const links = [];
+    (form?.skills || []).forEach((skill) => [skill, skill.upgrade].filter(Boolean).forEach((variant) => {
+      if (variant.type !== "normal") add(variant.type === "ultimate" ? "Ultimate" : "Skill", variant.name);
+      links.push(...(variant.mechanics?.buffs || []));
+    }));
+    (form?.traits || []).forEach((trait) => {
+      add("Trait", trait.name);
+      links.push(...(trait.buffs || []).map((id) => ({ id, on: "self" })));
+    });
+    links.filter((link) => !isInternal(link.id))
+      .forEach((link) => add(link.on === "enemy" ? "Debuff" : "Buff", buff(link.id)?.name));
+    (form?.skills || []).forEach((skill) => (skill.tags || []).forEach((tag) => add("Tag", tag)));
+    return rows;
+  }
+
   function aniimoOptions() {
     // Aniilog order (its entries are already sorted for display).
     const order = new Map((aniilog?.entries || []).map((entry, index) => [String(entry.form_id), index]));
@@ -430,6 +456,7 @@
       // Extra words the picker's filter matches: elements and the Aniilog number.
       search: [...(data.forms[formId].elements || []).map((id) => element(id)?.name),
         entryForForm(formId)?.aniilog_number].filter(Boolean).join(" "),
+      keywords: aniimoKeywords(data.forms[formId]),
       sort: order.get(formId) ?? Number.MAX_SAFE_INTEGER,
     }));
     rows.sort((left, right) => left.sort - right.sort);
@@ -1033,6 +1060,7 @@
       item.value = option.value;
       item.textContent = option.label;
       if (option.search) item.dataset.search = option.search;
+      if (option.keywords?.length) item.dataset.keywords = JSON.stringify(option.keywords);
       item.selected = option.value === member.formId;
       if (!option.group) {
         select.append(item);
@@ -1057,7 +1085,7 @@
       render();
     });
     // Type-to-filter on top of the select (aniimo-picker.js); the select still drives the change.
-    const picker = window.AniilogsPicker?.enhance(select, { placeholder: "Type a name, form or element", emptyText: "No Aniimo match" });
+    const picker = window.AniilogsPicker?.enhance(select, { placeholder: "Name, element, skill, trait or effect", emptyText: "No Aniimo match" });
     if (picker) {
       picker.wrap.addEventListener("click", (event) => event.stopPropagation());
       picker.wrap.addEventListener("keydown", (event) => event.stopPropagation());
