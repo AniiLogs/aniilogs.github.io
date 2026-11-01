@@ -280,7 +280,11 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-row:nth-child(2) .lb-rk { color: #a9b6ba; }
 .lb-row:nth-child(3) .lb-rk { color: #d08a5a; }
 .lb-who { display: grid; min-width: 0; }
-.lb-who-name { overflow: hidden; font-size: 0.9rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+/* the name and its marks (you, unclaimed, Verified, the proof button) wrap onto a second line rather than being cut off;
+   only a name too long for the whole line is shortened */
+.lb-who-name { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-width: 0; font-size: 0.9rem; font-weight: 800; }
+.lb-who-name > :first-child { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-who-name > * + * { flex: none; }
 .lb-who-name a { color: inherit; }
 .lb-who small { color: var(--muted); font-size: 0.75rem; }
 .lb-val { font-weight: 900; text-align: right; }
