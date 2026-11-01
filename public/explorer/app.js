@@ -1232,7 +1232,28 @@ function renderAreaBorders() {
 // A Lumin puzzle's way through (lumin-routes.js): a dotted line from its start, through each collectible or along the
 // Runaway Amber's flight, to the Amber; for a Lumin Marking, from the marking to where its Amber appears (the spot to
 // look at it from). Drawn while its pin (or its Amber's) is selected, in the same map-world layer as the area borders.
-const LUMIN_ROUTES = window.ANIILOGS_LUMIN_ROUTES || {};
+const LUMIN_ROUTES = { ...(window.ANIILOGS_BLESSED_ROUTES || {}), ...(window.ANIILOGS_LUMIN_ROUTES || {}) };
+const LUMIN_LINKS = window.ANIILOGS_LUMIN_LINKS || {};
+const LUMIN_GATES = window.ANIILOGS_LUMIN_GATES || {};
+const LUMIN_GATE_LABELS = Object.freeze({
+  time: "Time of day",
+  weather: "Weather",
+  tide: "Tide",
+  quest: "Questline",
+  hidden: "Hidden trigger",
+});
+
+// What a Lumin Amber waits for (time of day, weather, tide, a questline, a hidden trigger), as selection rows.
+function luminGateRows(spawn) {
+  return (LUMIN_GATES[spawn?.coordinate_key] || []).map(([type, text]) => [LUMIN_GATE_LABELS[type] || "Unlock", text]);
+}
+
+// Marking a Lumin puzzle (collection, Runaway Amber, Marking) or its Amber collected marks the other one too: finishing
+// the puzzle is how that Amber is found, and the Amber is the puzzle's reward.
+function setLinkedCompletion(id, completed) {
+  setCompletion(id, completed);
+  (LUMIN_LINKS[id] || []).forEach((linkedId) => setCompletion(linkedId, completed));
+}
 const mapPositionFits = new Map();
 
 function luminRouteFor(spawn) {
@@ -1300,6 +1321,7 @@ function renderLuminRoute() {
 function luminRouteSummary(route) {
   if (!route) return "";
   if (route.kind === "marking") return "Dotted line: from the marking to where its Amber appears (look at the marking from there)";
+  if (route.kind === "blessing") return `Dotted line: from where ${route.aniimo || "the Blessed Aniimo"} appears to its Amber`;
   if (route.kind === "runaway") return `Dotted line: the Amber's flight from its start to where it lands${route.seconds ? ` (${route.seconds} s)` : ""}`;
   const count = route.count || Math.max(0, route.points.length - 2);
   return `Dotted line: start, then ${count} collectibles in order${route.seconds ? ` within ${route.seconds} s` : ""}, then the Amber`;
@@ -10598,7 +10620,7 @@ function toggleSpawnCollected(entry) {
   state.hoveredCanvasIndex = null;
   hideCanvasTooltip();
   const collected = !state.completed.has(id);
-  setCompletion(id, collected);
+  setLinkedCompletion(id, collected);
   persistLocalTracking();
   if (collected && !state.preferences.showCollected && state.selectedSpawnIndex === entry.index) dismissSelection();
   refreshLuminCompletionViews();
@@ -10715,7 +10737,7 @@ function updateChecklistCompletion(entry, completionState, checked) {
     });
   }
 
-  setCompletion(completionId, checked);
+  setLinkedCompletion(completionId, checked);
   // A Dazzling or Shadow Sparkling is a Sparkling, so ticking one ticks the form's Sparkling too.
   const sparklingId = checklistSparklingStateId(entry);
   if (checked && !checklistStateCounts(completionState) && sparklingId && !state.completed.has(sparklingId)) {
@@ -13417,7 +13439,10 @@ function renderLuminMapSources(section, layerItems) {
     const detail = document.createElement("p");
     detail.textContent = blessedDescription;
     const note = document.createElement("small");
-    note.textContent = "Catch-related source; no fixed Blessed Aniimo locations are verified in the current map files.";
+    // Each Blessed Aniimo is a fixed spot whose Amber is its reward (its sandbox, "赐福"): counted like the other kinds.
+    const blessedCount = [...Object.values(LUMIN_AMBER_KINDS), ...Object.values(LUMIN_AMBER_KINDS_BY_KEY)]
+      .filter(([amberKind]) => amberKind === "blessing").length;
+    note.textContent = `${blessedCount} Ambers on Whisperwake Isles and Breezy Plains are a Blessed Aniimo's reward: their pins say "Blessing" under Lumin source and name the Aniimo.`;
     blessed.append(title, detail, note);
     section.append(blessed);
   }
@@ -13434,8 +13459,9 @@ function renderLuminMapSources(section, layerItems) {
     detail.textContent = description;
     const note = document.createElement("small");
     const kind = id === "guarded-amber" ? "guarded" : "blend_in";
-    const count = Object.values(LUMIN_AMBER_KINDS).filter(([amberKind]) => amberKind === kind).length;
-    note.textContent = `${count} Whisperwake Isles Ambers are this kind: their pins say "${LUMIN_AMBER_KIND_LABELS[kind]}" under Lumin source.`;
+    const count = [...Object.values(LUMIN_AMBER_KINDS), ...Object.values(LUMIN_AMBER_KINDS_BY_KEY)]
+      .filter(([amberKind]) => amberKind === kind).length;
+    note.textContent = `${count} Ambers on Whisperwake Isles and Breezy Plains are this kind: their pins say "${LUMIN_AMBER_KIND_LABELS[kind]}" under Lumin source.`;
     info.append(title, detail, note);
     section.append(info);
   });
@@ -13462,7 +13488,12 @@ const LUMIN_AMBER_KIND_LABELS = Object.freeze({
   blessing: "Blessing",
   puzzle: "Puzzle",
   free: "Free pickup",
+  marking: "Lumin Marking",
+  runaway: "Runaway Amber",
+  migration: "Migration",
 });
+// Breezy Plains' Ambers, by coordinate_key (lumin-routes.js): not every pin there carries a record id.
+const LUMIN_AMBER_KINDS_BY_KEY = window.ANIILOGS_LUMIN_KINDS || {};
 const LUMIN_AMBER_KINDS = Object.freeze({
   "91049896": ["blend_in", "Link up as Bubbeep near the group, then talk to them; the Amber appears after."],
   "91052948": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
@@ -13530,7 +13561,8 @@ function luminMapMetadata(spawn) {
     };
   }
   if (spawn.marker_type === "lumin_amber") {
-    const known = LUMIN_AMBER_KINDS[String(spawn.source_record_id || "")];
+    const known = LUMIN_AMBER_KINDS[String(spawn.source_record_id || "")]
+      || LUMIN_AMBER_KINDS_BY_KEY[String(spawn.coordinate_key || "")];
     if (known) {
       const [kind, how] = known;
       return {
@@ -14424,9 +14456,15 @@ function renderSelectionDetail(detail, spawn, item) {
   const areaValue = areaDetailValue(spawn);
   const formValue = spawn.form_label || item.form_label;
   const regionValue = regionDetailValue(spawn);
+  const gateRows = luminGateRows(spawn);
+  // The new Time of day row says the same as the older "Only appears at in-game ..." row.
+  const detailRows = gateRows.some(([label]) => label === "Time of day")
+    ? spawnDetailRows(spawn).filter(([label, value]) => !(label === "Unlock" && /^Only appears at in-game/u.test(value)))
+    : spawnDetailRows(spawn);
   const rows = [
     ["Type", typeLabel],
-    ...spawnDetailRows(spawn),
+    ...detailRows,
+    ...gateRows,
     luminMetadata ? ["Lumin source", luminMetadata.source] : null,
     luminRouteFor(spawn) ? ["Route", luminRouteSummary(luminRouteFor(spawn))] : null,
     spawn.marker_type === "field_boss_lumin_reward" ? ["Reward", `${spawn.reward_amount || 1} Lumin Amber (first clear)`] : null,

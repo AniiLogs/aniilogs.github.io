@@ -527,13 +527,13 @@ test("map selections surface the reviewed short marker descriptions", () => {
   assert.match(explorerStyles, /\.selection-description\s*\{[^}]*font-size: 12px;/su);
 });
 
-test("the map organizes Lumin sources without inventing Blessed Aniimo locations", () => {
+test("the map organizes Lumin sources and counts the Blessed Aniimo spots from the game data", () => {
   assert.match(explorer, /function renderLuminMapSources\(section, layerItems\)/u);
   assert.match(explorer, /renderLuminMapSources\(section, layerItems\)/u);
   assert.match(explorer, /label: "Field boss first clears"/u);
   assert.match(explorer, /spawn\.special_type === "Alpha"/u);
   assert.match(explorer, /"blessed-aniimo", "description"/u);
-  assert.match(explorer, /no fixed Blessed Aniimo locations are verified/u);
+  assert.match(explorer, /\.filter\(\(\[amberKind\]\) => amberKind === "blessing"\)\.length;/u);
   assert.match(explorer, /const LUMIN_AMBER_KINDS = Object\.freeze\(\{/u);
   assert.match(explorer, /LUMIN_AMBER_KINDS\[String\(spawn\.source_record_id \|\| ""\)\]/u);
   assert.match(explorer, /"91399363": \["blend_in", "Link up as Prawnch/u);
@@ -740,4 +740,27 @@ test("Lumin puzzles draw their route from the game data when selected", async ()
   assert.match(explorer, /luminRouteFor\(spawn\) \? \["Route", luminRouteSummary\(luminRouteFor\(spawn\)\)\] : null/u);
   assert.match(explorerHtml, /<svg id="mapRouteLayer" class="map-route-layer"/u);
   assert.match(explorerStyles, /\.map-route-line\s*\{[^}]*stroke-dasharray/su);
+});
+
+test("a Lumin puzzle and its Amber are marked collected together", async () => {
+  const routes = await readFile(new URL("../public/explorer/lumin-routes.js", import.meta.url), "utf8");
+  assert.match(routes, /window\.ANIILOGS_LUMIN_LINKS = Object\.freeze\(\{/u);
+  assert.match(explorer, /function setLinkedCompletion\(id, completed\) \{\s*setCompletion\(id, completed\);\s*\(LUMIN_LINKS\[id\] \|\| \[\]\)\.forEach/u);
+  assert.match(explorer, /setLinkedCompletion\(id, collected\);/u);
+  assert.match(explorer, /setLinkedCompletion\(completionId, checked\);/u);
+});
+
+test("Lumin Ambers say what they wait for: time of day, weather, tide, questline, hidden trigger", async () => {
+  const routes = await readFile(new URL("../public/explorer/lumin-routes.js", import.meta.url), "utf8");
+  assert.match(routes, /window\.ANIILOGS_LUMIN_GATES = Object\.freeze\(\{/u);
+  assert.match(routes, /"CURRENT_N101_16_683_34": \[\["tide", "Low tide, Night 20:00–06:00 \(in-game clock\)"\]\]/u);
+  assert.match(explorer, /function luminGateRows\(spawn\)/u);
+  assert.match(explorer, /\.\.\.gateRows,/u);
+});
+
+test("Breezy Plains Lumin Ambers get the same kind and how-to as Whisperwake's", async () => {
+  const routes = await readFile(new URL("../public/explorer/lumin-routes.js", import.meta.url), "utf8");
+  assert.match(routes, /window\.ANIILOGS_LUMIN_KINDS = Object\.freeze\(\{/u);
+  assert.match(explorer, /\|\| LUMIN_AMBER_KINDS_BY_KEY\[String\(spawn\.coordinate_key \|\| ""\)\]/u);
+  assert.match(explorer, /runaway: "Runaway Amber",/u);
 });
