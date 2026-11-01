@@ -13957,6 +13957,53 @@ details.guide-toc summary {
   pointer-events: none;
 }
 
+.map-route-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.map-route-layer[hidden] {
+  display: none;
+}
+
+.map-route-line {
+  fill: none;
+  stroke: #ffd166;
+  stroke-width: 3px;
+  stroke-dasharray: 2 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+}
+
+.map-route-stop,
+.map-route-start,
+.map-route-end {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 2px;
+}
+
+.map-route-stop {
+  fill: #ffd166;
+  stroke: rgba(20, 22, 28, 0.85);
+}
+
+.map-route-start {
+  fill: rgba(20, 22, 28, 0.85);
+  stroke: #ffd166;
+}
+
+.map-route-end {
+  fill: #7ee0c3;
+  stroke: rgba(20, 22, 28, 0.85);
+}
+
 .map-area-border-layer[hidden] {
   display: none;
 }

@@ -330,7 +330,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.21.10-checklist-types/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.21.11-lumin-routes/u);
   assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.
@@ -730,4 +730,14 @@ test("Show collected is on by default, and an old saved off from the previous de
   assert.match(explorer, /showCollected: true,\s*showCollectedVersion: 2,/u);
   assert.match(explorer, /return Number\(preferences\?\.showCollectedVersion\) >= 2 \? Boolean\(preferences\.showCollected\) : true;/u);
   assert.match(explorer, /!\(Number\(preferences\?\.showCollectedVersion\) >= 2\)/u);
+});
+
+test("Lumin puzzles draw their route from the game data when selected", async () => {
+  const routes = await readFile(new URL("../public/explorer/lumin-routes.js", import.meta.url), "utf8");
+  assert.match(routes, /window\.ANIILOGS_LUMIN_ROUTES = Object\.freeze\(\{/u);
+  assert.match(routes, /"CURRENT_N1031_59_293_58": \{"kind":"collection","points":\[/u);
+  assert.match(explorer, /function renderLuminRoute\(\)/u);
+  assert.match(explorer, /luminRouteFor\(spawn\) \? \["Route", luminRouteSummary\(luminRouteFor\(spawn\)\)\] : null/u);
+  assert.match(explorerHtml, /<svg id="mapRouteLayer" class="map-route-layer"/u);
+  assert.match(explorerStyles, /\.map-route-line\s*\{[^}]*stroke-dasharray/su);
 });

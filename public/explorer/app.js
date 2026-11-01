@@ -797,6 +797,7 @@ const els = {
   showCollectedInput: document.querySelector("#showCollectedInput"),
   showAreaBordersInput: document.querySelector("#showAreaBordersInput"),
   mapAreaBorderLayer: document.querySelector("#mapAreaBorderLayer"),
+  mapRouteLayer: document.querySelector("#mapRouteLayer"),
   sharePinsButton: document.querySelector("#sharePinsButton"),
   sharePinsStatus: document.querySelector("#sharePinsStatus"),
   sharePinsNotice: document.querySelector("#sharePinsNotice"),
@@ -1226,6 +1227,82 @@ function renderAreaBorders() {
     return group;
   });
   layer.replaceChildren(...shapes);
+}
+
+// A Lumin puzzle's way through (lumin-routes.js): a dotted line from its start, through each collectible or along the
+// Runaway Amber's flight, to the Amber; for a Lumin Marking, from the marking to where its Amber appears (the spot to
+// look at it from). Drawn while its pin (or its Amber's) is selected, in the same map-world layer as the area borders.
+const LUMIN_ROUTES = window.ANIILOGS_LUMIN_ROUTES || {};
+const mapPositionFits = new Map();
+
+function luminRouteFor(spawn) {
+  return spawn ? LUMIN_ROUTES[spawn.coordinate_key] || null : null;
+}
+
+// Map x/y to the map image's 0-1 position: a straight-line fit of this map's own pins (each pin has both).
+function mapPositionFit() {
+  const mapId = state.activeMapId;
+  if (mapPositionFits.has(mapId)) return mapPositionFits.get(mapId);
+  const fit = (pairs) => {
+    const n = pairs.length;
+    if (n < 2) return null;
+    const mx = pairs.reduce((sum, [a]) => sum + a, 0) / n;
+    const my = pairs.reduce((sum, [, b]) => sum + b, 0) / n;
+    const sxx = pairs.reduce((sum, [a]) => sum + (a - mx) ** 2, 0);
+    if (!sxx) return null;
+    const slope = pairs.reduce((sum, [a, b]) => sum + (a - mx) * (b - my), 0) / sxx;
+    return [slope, my - slope * mx];
+  };
+  const spawns = (state.data?.spawns || []).filter((spawn) => (
+    spawn.map_id === mapId && Number.isFinite(spawn.x) && Number.isFinite(spawn.y) && spawn.normalized
+  ));
+  const fx = fit(spawns.map((spawn) => [spawn.x, spawn.normalized.x]));
+  const fy = fit(spawns.map((spawn) => [spawn.y, spawn.normalized.y]));
+  const result = fx && fy ? { fx, fy } : null;
+  if (result) mapPositionFits.set(mapId, result);
+  return result;
+}
+
+function renderLuminRoute() {
+  const layer = els.mapRouteLayer;
+  if (!layer) return;
+  const map = currentMap();
+  const spawn = state.selectedSpawnIndex == null ? null : state.data?.spawns[state.selectedSpawnIndex];
+  const route = luminRouteFor(spawn);
+  const fit = route && map?.width && map?.height ? mapPositionFit() : null;
+  layer.toggleAttribute("hidden", !fit);
+  if (!fit) {
+    layer.replaceChildren();
+    return;
+  }
+  layer.setAttribute("viewBox", `0 0 ${map.width} ${map.height}`);
+  const points = route.points.map(([x, y]) => [
+    (fit.fx[0] * x + fit.fx[1]) * map.width,
+    (fit.fy[0] * y + fit.fy[1]) * map.height,
+  ]);
+  const line = document.createElementNS(SVG_NS, "polyline");
+  line.setAttribute("class", `map-route-line map-route-${route.kind}`);
+  line.setAttribute("points", points.map(([x, y]) => `${x},${y}`).join(" "));
+  const stops = points.map(([x, y], index) => {
+    const dot = document.createElementNS(SVG_NS, "circle");
+    const end = index === points.length - 1;
+    dot.setAttribute("class", index === 0 ? "map-route-start" : end ? "map-route-end" : "map-route-stop");
+    dot.setAttribute("cx", String(x));
+    dot.setAttribute("cy", String(y));
+    dot.setAttribute("r", index === 0 || end ? "7" : "4");
+    return dot;
+  });
+  // A Runaway Amber's path is its flight, not stops to collect: only its start and landing get a dot.
+  const shown = route.kind === "runaway" ? [stops[0], stops[stops.length - 1]] : stops;
+  layer.replaceChildren(line, ...shown);
+}
+
+function luminRouteSummary(route) {
+  if (!route) return "";
+  if (route.kind === "marking") return "Dotted line: from the marking to where its Amber appears (look at the marking from there)";
+  if (route.kind === "runaway") return `Dotted line: the Amber's flight from its start to where it lands${route.seconds ? ` (${route.seconds} s)` : ""}`;
+  const count = route.count || Math.max(0, route.points.length - 2);
+  return `Dotted line: start, then ${count} collectibles in order${route.seconds ? ` within ${route.seconds} s` : ""}, then the Amber`;
 }
 
 function currentMap() {
@@ -11869,6 +11946,7 @@ function dismissSelection() {
   setDesktopSelectionVisible(false);
   updateMobileSelectionPanel();
   if (state.canvasMode) scheduleCanvasRender();
+  renderLuminRoute();
 }
 
 function clearSelectionDetails(message) {
@@ -14142,6 +14220,7 @@ function selectSpawn(index, anchor = null) {
   setDesktopSelectionVisible(true);
   updateDesktopSelectionPanel();
   setMobileSelectionMinimized(true);
+  renderLuminRoute();
 }
 
 function refreshSelectionDetails() {
@@ -14349,6 +14428,7 @@ function renderSelectionDetail(detail, spawn, item) {
     ["Type", typeLabel],
     ...spawnDetailRows(spawn),
     luminMetadata ? ["Lumin source", luminMetadata.source] : null,
+    luminRouteFor(spawn) ? ["Route", luminRouteSummary(luminRouteFor(spawn))] : null,
     spawn.marker_type === "field_boss_lumin_reward" ? ["Reward", `${spawn.reward_amount || 1} Lumin Amber (first clear)`] : null,
     spawn.document_group ? ["Series", spawn.document_group] : null,
     spawn.collectible_group ? ["Series", spawn.collectible_group] : null,
@@ -14516,6 +14596,7 @@ function useMapDatasetNow(mapId, dataset) {
   });
   state.mapAreas = Array.isArray(dataset?.areas) ? dataset.areas : [];
   renderAreaBorders();
+  renderLuminRoute();
   // Section and underground controls can now resolve marker artwork from the
   // loaded map shard. Re-render them after the async dataset replaces the
   // bootstrap-only shell.
@@ -14739,6 +14820,7 @@ function switchMap(mapId, preserveSharedPins = false) {
   });
   state.mapAreas = Array.isArray(dataset?.areas) ? dataset.areas : [];
   renderAreaBorders();
+  renderLuminRoute();
   if (dataset) applyPendingSharedPinSelection();
   updateMapTabs();
   const url = new URL(window.location.href);
