@@ -2631,6 +2631,104 @@ ul.team-skill-operations .team-skill-operation {
   gap: 8px;
 }
 
+.checklist-filter {
+  display: grid;
+  gap: 4px;
+}
+
+.checklist-filter .search {
+  width: 100%;
+}
+
+/* Aniimo table: one row per form, one column per rarity (Standard, Sparkling, Dazzling, Shadow). */
+.checklist-table {
+  --checklist-cell: 84px;
+  gap: 0;
+}
+
+.checklist-table-header,
+.checklist-panel .checklist-table-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) repeat(var(--checklist-columns, 2), var(--checklist-cell));
+  align-items: center;
+  gap: 8px;
+}
+
+.checklist-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid rgba(80, 96, 103, 0.72);
+  background: var(--panel);
+  padding: 6px;
+}
+
+.checklist-table-name {
+  grid-column: 1 / span 2;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.checklist-table-column {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.checklist-table-column strong {
+  font-size: 12px;
+}
+
+.checklist-table-column small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.checklist-table-rows {
+  display: grid;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.checklist-table-cell {
+  display: grid;
+  place-items: center;
+}
+
+.checklist-table-cell input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.checklist-table-cell.is-empty {
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .checklist-table {
+    --checklist-cell: 52px;
+  }
+
+  .checklist-table-header,
+  .checklist-panel .checklist-table-row {
+    grid-template-columns: 28px minmax(0, 1fr) repeat(var(--checklist-columns, 2), var(--checklist-cell));
+    gap: 4px;
+  }
+
+  .checklist-table-row .checklist-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .checklist-table-column strong {
+    font-size: 11px;
+  }
+}
+
 .checklist-panel .checklist-sparkling-summary p,
 .checklist-panel .checklist-special-section p,
 .checklist-panel .checklist-section-heading span {

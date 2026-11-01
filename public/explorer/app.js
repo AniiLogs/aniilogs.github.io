@@ -743,6 +743,7 @@ const els = {
   checklistCategoryTabs: document.querySelector("#checklistCategoryTabs"),
   luminChecklistTabs: document.querySelector("#luminChecklistTabs"),
   checklistSearchInput: document.querySelector("#checklistSearchInput"),
+  checklistFilterInput: document.querySelector("#checklistFilterInput"),
   checklistList: document.querySelector("#checklistList"),
   checklistPanel: document.querySelector("#checklistPanel"),
   checklistPanelTitle: document.querySelector("#checklistPanelTitle"),
@@ -10375,10 +10376,15 @@ function checklistSpecialEntries() {
     : [];
 }
 
+// The rare Sparkling columns (Dazzling, Shadow) are extras: they are tracked but left out of every total.
+function checklistStateCounts(completionState) {
+  return completionState?.counts_toward_total !== false;
+}
+
 function checklistCompletionStateIds(entries) {
   const ids = new Set();
   entries.forEach((entry) => {
-    (entry?.completion_states || []).forEach((completionState) => {
+    (entry?.completion_states || []).filter(checklistStateCounts).forEach((completionState) => {
       const id = String(completionState?.id || "").trim();
       if (id) ids.add(id);
     });
@@ -10407,7 +10413,7 @@ function checklistProgress(entries) {
   let total = 0;
   entries.forEach((entry) => {
     if (isDeveloperOverlayEntry(entry)) return;
-    (entry?.completion_states || []).forEach((completionState) => {
+    (entry?.completion_states || []).filter(checklistStateCounts).forEach((completionState) => {
       const id = String(completionState?.id || "").trim();
       if (!id || seen.has(id)) return;
       seen.add(id);
@@ -10438,7 +10444,7 @@ function checklistEntryMatches(entry) {
     entry?.coordinate_key,
     entry?.classification,
     entry?.detail,
-    entry?.completion_states?.map((completionState) => completionState?.label),
+    entry?.completion_states?.filter(checklistStateCounts).map((completionState) => completionState?.label),
   ]).includes(state.checklistSearch);
 }
 
@@ -10624,6 +10630,11 @@ function updateChecklistCompletion(entry, completionState, checked) {
   }
 
   setCompletion(completionId, checked);
+  // A Dazzling or Shadow Sparkling is a Sparkling, so ticking one ticks the form's Sparkling too.
+  const sparklingId = checklistSparklingStateId(entry);
+  if (checked && !checklistStateCounts(completionState) && sparklingId && !state.completed.has(sparklingId)) {
+    setCompletion(sparklingId, true);
+  }
   persistLocalTracking();
   if (isLuminChecklistEntry(entry)) {
     refreshLuminCompletionViews();
@@ -10729,6 +10740,105 @@ function renderChecklistRow(entry) {
   }
   row.append(states);
   return row;
+}
+
+// A form state's column: the part of its id after the form (aniimo:<form>:standard -> "standard").
+function checklistStateColumn(entry, completionState) {
+  const prefix = `aniimo:${entry?.form_id}:`;
+  const id = String(completionState?.id || "");
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+}
+
+// The Aniimo checklist as a table: one row per form, one column per rarity (Standard, Sparkling, then the
+// rare Sparkling variants), each column header with its own count.
+function renderChecklistAniimoTable(visibleEntries, allEntries) {
+  const columns = [];
+  allEntries.forEach((entry) => (entry.completion_states || []).forEach((completionState) => {
+    const key = checklistStateColumn(entry, completionState);
+    if (!columns.some((column) => column.key === key)) {
+      const rarity = (state.checklistData?.sparkling_rarities || []).find((candidate) => candidate.id === key);
+      columns.push({ key, label: completionState.label || key, title: rarity?.description || "" });
+    }
+  }));
+  const table = document.createElement("section");
+  table.className = "checklist-section checklist-table";
+  table.style.setProperty("--checklist-columns", String(columns.length));
+  table.setAttribute("role", "table");
+  table.setAttribute("aria-label", "Aniimo forms by rarity");
+
+  const header = document.createElement("div");
+  header.className = "checklist-table-header";
+  header.setAttribute("role", "row");
+  const nameHeading = document.createElement("span");
+  nameHeading.className = "checklist-table-name";
+  nameHeading.setAttribute("role", "columnheader");
+  nameHeading.textContent = `Aniimo · ${formatNumber(visibleEntries.length)} shown`;
+  header.append(nameHeading);
+  columns.forEach((column) => {
+    const ids = allEntries.flatMap((entry) => (entry.completion_states || [])
+      .filter((completionState) => checklistStateColumn(entry, completionState) === column.key)
+      .map((completionState) => completionState.id));
+    const heading = document.createElement("span");
+    heading.className = "checklist-table-column";
+    heading.setAttribute("role", "columnheader");
+    if (column.title) heading.title = column.title;
+    const label = document.createElement("strong");
+    label.textContent = column.label;
+    const count = document.createElement("small");
+    count.textContent = `${ids.filter((id) => state.completed.has(id)).length} / ${ids.length}`;
+    heading.append(label, count);
+    header.append(heading);
+  });
+  table.append(header);
+
+  const rows = document.createElement("div");
+  rows.className = "checklist-table-rows";
+  rows.setAttribute("role", "rowgroup");
+  visibleEntries.forEach((entry) => {
+    const row = document.createElement("article");
+    row.className = "checklist-row checklist-table-row";
+    row.dataset.checklistEntryId = entry.id;
+    row.setAttribute("role", "row");
+    row.append(makeIcon("checklist-icon checklist-aniimo-portrait", entry.icon));
+    const content = document.createElement("div");
+    content.className = "checklist-text";
+    content.setAttribute("role", "rowheader");
+    const name = document.createElement("strong");
+    name.textContent = entry.name || "Unnamed entry";
+    name.title = name.textContent;
+    const rowBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
+    if (rowBadge) name.append(" ", rowBadge);
+    const meta = document.createElement("small");
+    meta.textContent = checklistMetaText(entry);
+    meta.title = meta.textContent;
+    content.append(name, meta);
+    row.append(content);
+    columns.forEach((column) => {
+      const cell = document.createElement("span");
+      cell.className = "checklist-table-cell";
+      cell.setAttribute("role", "cell");
+      const completionState = (entry.completion_states || [])
+        .find((candidate) => checklistStateColumn(entry, candidate) === column.key);
+      if (!completionState) {
+        cell.classList.add("is-empty");
+        cell.textContent = "–";
+        cell.title = `${entry.name} has no ${column.label} version`;
+      } else {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = state.completed.has(completionState.id);
+        input.setAttribute("aria-label", `${completionState.label} ${entry.name} ${entry.form_label || ""}`.trim());
+        input.addEventListener("change", () => {
+          updateChecklistCompletion(entry, completionState, input.checked);
+        });
+        cell.append(input);
+      }
+      row.append(cell);
+    });
+    rows.append(row);
+  });
+  table.append(rows);
+  return table;
 }
 
 function renderLuminGuide() {
@@ -10985,7 +11095,10 @@ function renderChecklist() {
     const sparklingSummary = renderChecklistSparklingSummary(entries);
     if (sparklingSummary) fragment.append(sparklingSummary);
   }
-  if (visibleEntries.length) {
+  if (visibleEntries.length && state.checklistCategory === "aniimo") {
+    fragment.append(renderChecklistAniimoTable(visibleEntries, entries));
+    renderedSections += 1;
+  } else if (visibleEntries.length) {
     const section = document.createElement("section");
     section.className = "checklist-section";
     const rows = document.createElement("div");
@@ -14678,10 +14791,14 @@ function bindEvents() {
     renderItems();
     refreshVisibility();
   });
-  els.checklistSearchInput.addEventListener("input", () => {
-    state.checklistSearch = normalizedSearch(els.checklistSearchInput.value);
+  // The side panel's search and the filter box above the list are one filter: typing in either updates both.
+  [els.checklistSearchInput, els.checklistFilterInput].forEach((input) => input.addEventListener("input", () => {
+    [els.checklistSearchInput, els.checklistFilterInput].forEach((other) => {
+      if (other !== input) other.value = input.value;
+    });
+    state.checklistSearch = normalizedSearch(input.value);
     renderChecklist();
-  });
+  }));
   els.selectAllButton.addEventListener("click", () => {
     clearLocatedSpawn();
     activeMapItems().forEach((item) => setItemSelection(item.item_id, true));

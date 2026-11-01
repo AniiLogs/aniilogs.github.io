@@ -302,6 +302,18 @@ test("the checklist is its own top-level section with unchanged completion ids",
   assert.match(explorerStyles, /\.checklist-panel \.checklist-section-rows \{[^}]*grid-template-columns: repeat\(auto-fill/u);
 });
 
+test("Aniimo checklist rows have a column per rarity, and the rare ones stay out of every total", () => {
+  // One row per form; Dazzling and Shadow (counts_toward_total false) are tracked but never counted.
+  assert.match(explorer, /if \(visibleEntries\.length && state\.checklistCategory === "aniimo"\) \{\s*fragment\.append\(renderChecklistAniimoTable\(visibleEntries, entries\)\);/u);
+  assert.match(explorer, /function checklistStateCounts\(completionState\) \{\s*return completionState\?\.counts_toward_total !== false;/u);
+  assert.match(explorer, /\(entry\?\.completion_states \|\| \[\]\)\.filter\(checklistStateCounts\)\.forEach\(\(completionState\) => \{\s*const id = String\(completionState\?\.id \|\| ""\)\.trim\(\);\s*if \(!id \|\| seen\.has\(id\)\) return;/u);
+  // A rare Sparkling is a Sparkling: ticking one ticks the form's Sparkling too.
+  assert.match(explorer, /if \(checked && !checklistStateCounts\(completionState\) && sparklingId && !state\.completed\.has\(sparklingId\)\) \{\s*setCompletion\(sparklingId, true\);/u);
+  // The filter box above the list and the side panel's search are one filter.
+  assert.match(explorerHtml, /<input id="checklistFilterInput" class="search" type="search"[^>]*>\s*<\/div>\s*<div id="checklistList"/u);
+  assert.match(explorer, /\[els\.checklistSearchInput, els\.checklistFilterInput\]\.forEach\(\(input\) => input\.addEventListener\("input"/u);
+});
+
 test("Team Builder mounts the skill and synergy builder from reviewed release data", () => {
   assert.match(explorer, /ENABLED_WORKSPACE_VIEWS = new Set\(\["map", "tracking", "checklist", "itemlog", "team"\]\)/u);
   assert.match(explorer, /TEAM_BUILDER_DATA_URL = SITE_CONFIG\.teamBuilderDataUrl \|\| contentUrl\("\.\/data\/team_builder_data\.json"\)/u);
@@ -318,7 +330,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.21.8-picker-keywords/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.21.9-checklist-rarities/u);
   assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.
