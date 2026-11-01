@@ -713,7 +713,7 @@
       el("div", { class: "lb-bosses" }, data.bosses.map(bossBoard)),
       el("p", { class: "lb-note", text: "Only what the result screens show: score, stars, clear time, team DPS and each player's Avg DPS, BREAK damage and healing." }),
       el("p", { class: "lb-note lb-check-legend" }, checkBadge("verified"), " checked against the run's full screenshots · ",
-        checkBadge("pending"), " waiting for that check · no badge: no check needed (not a personal best or a top run)"));
+        checkBadge("pending"), " waiting for that check · no badge: not checked (not a personal best or a top run, or its screenshots couldn't be read)"));
     els.tableWrap.hidden = true;
     els.summary.textContent = "";
   }
