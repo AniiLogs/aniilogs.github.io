@@ -534,7 +534,11 @@ test("the map organizes Lumin sources without inventing Blessed Aniimo locations
   assert.match(explorer, /spawn\.special_type === "Alpha"/u);
   assert.match(explorer, /"blessed-aniimo", "description"/u);
   assert.match(explorer, /no fixed Blessed Aniimo locations are verified/u);
-  assert.match(explorer, /The current map marker does not identify whether this Amber is ordinary, guarded, or ecosystem-based/u);
+  assert.match(explorer, /const LUMIN_AMBER_KINDS = Object\.freeze\(\{/u);
+  assert.match(explorer, /LUMIN_AMBER_KINDS\[String\(spawn\.source_record_id \|\| ""\)\]/u);
+  assert.match(explorer, /"91399363": \["blend_in", "Link up as Prawnch/u);
+  assert.match(explorer, /"91130755": \["collection", "Start the timed run at its marker and collect 12 Lumin energy within 100 s/u);
+  assert.doesNotMatch(explorer, /does not identify whether this Amber is ordinary, guarded, or ecosystem-based/u);
   assert.match(explorerStyles, /\.map-lumin-source\s*\{/u);
 });
 
@@ -720,4 +724,10 @@ test("the Roles list knows testers, warns before Developer Mode is taken away, a
   assert.match(explorer, /function renderDeveloperRoleFilters\(container, rows\)/u);
   assert.match(explorer, /Show more \(/u);
   assert.ok(explorerStyles.includes('.developer-role-filters .developer-role-chip[aria-pressed="true"]'));
+});
+
+test("Show collected is on by default, and an old saved off from the previous default turns on once", () => {
+  assert.match(explorer, /showCollected: true,\s*showCollectedVersion: 2,/u);
+  assert.match(explorer, /return Number\(preferences\?\.showCollectedVersion\) >= 2 \? Boolean\(preferences\.showCollected\) : true;/u);
+  assert.match(explorer, /!\(Number\(preferences\?\.showCollectedVersion\) >= 2\)/u);
 });

@@ -497,7 +497,10 @@ const THEME_PRESETS = Object.freeze({
 const DEFAULT_CUSTOM_THEME = Object.freeze({ ...THEME_PRESETS.emberpup.colors });
 const DEFAULT_PREFERENCES = Object.freeze({
   showMagicAttack: false,
-  showCollected: false,
+  // Collected pins show (dimmed) unless turned off. Version 2: it was off by default before, so a saved "off" from an
+  // older visit is taken as that old default and turned on once.
+  showCollected: true,
+  showCollectedVersion: 2,
   developerMode: false,
   language: "en",
   theme: "default",
@@ -1594,6 +1597,10 @@ function normalizeThemeColors(value, fallback = DEFAULT_CUSTOM_THEME) {
   ]));
 }
 
+function showCollectedPreference(preferences) {
+  return Number(preferences?.showCollectedVersion) >= 2 ? Boolean(preferences.showCollected) : true;
+}
+
 function defaultPreferences() {
   return {
     ...DEFAULT_PREFERENCES,
@@ -1717,7 +1724,8 @@ function loadLocalTracking() {
     state.preferences = {
       ...defaultPreferences(),
       showMagicAttack: Boolean(preferences?.showMagicAttack),
-      showCollected: Boolean(preferences?.showCollected),
+      showCollected: showCollectedPreference(preferences),
+      showCollectedVersion: 2,
       developerMode: Boolean(preferences?.developerMode),
       language: window.AniipediaI18n.normalizeLocale(preferences?.language),
       theme: normalizeThemeId(preferences?.theme),
@@ -1727,7 +1735,7 @@ function loadLocalTracking() {
       mapSelectionFloatingPosition: normalizeSelectionFloatingPosition(preferences?.mapSelectionFloatingPosition),
       customTheme: normalizeThemeColors(preferences?.customTheme),
     };
-    if (snapshot.shouldMigrate || Number(preferences?.mapSelectionPopupVersion) < 2) {
+    if (snapshot.shouldMigrate || Number(preferences?.mapSelectionPopupVersion) < 2 || !(Number(preferences?.showCollectedVersion) >= 2)) {
       persistLocalTracking({ sync: false });
     }
   } catch (error) {
@@ -2428,7 +2436,8 @@ function applyCloudProgress(progress, mergeLocal) {
   state.preferences = {
     ...defaultPreferences(),
     showMagicAttack: Boolean(preferredPreferences.showMagicAttack),
-    showCollected: Boolean(preferredPreferences.showCollected),
+    showCollected: showCollectedPreference(preferredPreferences),
+    showCollectedVersion: 2,
     developerMode: Boolean(preferredPreferences.developerMode),
     language: window.AniipediaI18n.normalizeLocale(preferredPreferences.language),
     theme: normalizeThemeId(preferredPreferences.theme),
@@ -13346,7 +13355,9 @@ function renderLuminMapSources(section, layerItems) {
     const detail = document.createElement("p");
     detail.textContent = description;
     const note = document.createElement("small");
-    note.textContent = "The current map markers do not distinguish these from generic Amber pins; no separate locations have been assigned.";
+    const kind = id === "guarded-amber" ? "guarded" : "blend_in";
+    const count = Object.values(LUMIN_AMBER_KINDS).filter(([amberKind]) => amberKind === kind).length;
+    note.textContent = `${count} Whisperwake Isles Ambers are this kind: their pins say "${LUMIN_AMBER_KIND_LABELS[kind]}" under Lumin source.`;
     info.append(title, detail, note);
     section.append(info);
   });
@@ -13360,6 +13371,71 @@ function renderLuminMapSources(section, layerItems) {
   layerItems.filter((item) => !recognized.has(item))
     .forEach((item) => appendMapItemWithChildren(section, item));
 }
+
+// What each Whisperwake Lumin Amber is and what makes it appear, by its scene record (a pin's source_record_id).
+// Read from the game's scene data: an Amber's chest entity belongs to a level-design sandbox whose name gives its
+// puzzle type (blend-in, Lumin collection, guarded, totem ruins, blessing, plain reward) and whose level items hold
+// the details (a collection's count and time limit, the species a blend-in links you as, the guards).
+const LUMIN_AMBER_KIND_LABELS = Object.freeze({
+  blend_in: "Blend in",
+  collection: "Lumin collection",
+  guarded: "Guarded Amber",
+  totem: "Totem ruins",
+  blessing: "Blessing",
+  puzzle: "Puzzle",
+  free: "Free pickup",
+});
+const LUMIN_AMBER_KINDS = Object.freeze({
+  "91049896": ["blend_in", "Link up as Bubbeep near the group, then talk to them; the Amber appears after."],
+  "91052948": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91053558": ["guarded", "Defeat the Aniimo guarding it (Shelly); the Amber is released after."],
+  "91062381": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91102468": ["puzzle", "Finish this spot's puzzle (involves Dewlop); the Amber appears after."],
+  "91103745": ["blessing", "Find Blessed Bubbeep here and finish its event; the Amber is its reward."],
+  "91117294": ["collection", "Start the timed run at its marker and collect 19 Lumin energy within 90 s; the Amber appears when you finish."],
+  "91123960": ["blend_in", "Link up as Salabask near the group, then talk to them; the Amber appears after."],
+  "91125434": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91126628": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91126975": ["guarded", "Defeat the Aniimo guarding it (Dewlop); the Amber is released after."],
+  "91127909": ["guarded", "Defeat the Aniimo guarding it (Puffby); the Amber is released after."],
+  "91128879": ["collection", "Collect the scattered Lumin energy; the Amber appears when you finish."],
+  "91130755": ["collection", "Start the timed run at its marker and collect 12 Lumin energy within 100 s; the Amber appears when you finish."],
+  "91150202": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91168696": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91193895": ["collection", "Start the timed run at its marker and collect 8 Lumin energy within 35 s; the Amber appears when you finish."],
+  "91258720": ["guarded", "Defeat the Aniimo guarding it (Salabask); the Amber is released after."],
+  "91309108": ["blessing", "Find Blessed Salabask here and finish its event; the Amber is its reward."],
+  "91310360": ["blessing", "Find Blessed Sugarfish here and finish its event; the Amber is its reward."],
+  "91332947": ["blessing", "Find Blessed Popapus here and finish its event; the Amber is its reward."],
+  "91342330": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
+  "91363818": ["collection", "Collect the scattered Lumin energy; the Amber appears when you finish."],
+  "91363980": ["collection", "Start the timed run at its marker and collect 8 Lumin energy within 99 s; the Amber appears when you finish."],
+  "91364317": ["collection", "Start the timed run at its marker and collect 26 Lumin energy within 60 s; the Amber appears when you finish."],
+  "91364872": ["collection", "Collect the scattered Lumin energy; the Amber appears when you finish."],
+  "91371046": ["collection", "Start the timed run at its marker and collect 14 Lumin energy within 90 s; the Amber appears when you finish."],
+  "91381593": ["guarded", "Defeat the Aniimo guarding it (Eko); the Amber is released after."],
+  "91399363": ["blend_in", "Link up as Prawnch near the group, then talk to them; the Amber appears after."],
+  "91418260": ["puzzle", "Finish this spot's puzzle (involves Octopus at Work); the Amber appears after."],
+  "91418724": ["blessing", "Find Blessed Jeglid here and finish its event; the Amber is its reward."],
+  "91469641": ["collection", "Start the timed run at its marker and collect 9 Lumin energy within 45 s; the Amber appears when you finish."],
+  "91506775": ["blessing", "Find Blessed Prawnch, Puzzled Prawnch here and finish its event; the Amber is its reward."],
+  "91513222": ["guarded", "Defeat the Aniimo guarding it (Sugarfish, Sugarslime); the Amber is released after."],
+  "91514615": ["guarded", "Defeat the Aniimo guarding it (Prawnch, Jabster); the Amber is released after."],
+  "91529069": ["blessing", "Find Blessed Hypnowl here and finish its event; the Amber is its reward."],
+  "91530189": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91532100": ["collection", "Start the timed run at its marker and collect 17 Lumin energy within 50 s; the Amber appears when you finish."],
+  "91532442": ["collection", "Collect the scattered Lumin energy; the Amber appears when you finish."],
+  "91535345": ["collection", "Start the timed run at its marker and collect 11 Lumin energy within 45 s; the Amber appears when you finish."],
+  "91567937": ["blessing", "Find Blessed Eko here and finish its event; the Amber is its reward."],
+  "91571077": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91594942": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91600466": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91600476": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91600485": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91600500": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91600538": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+  "91600540": ["free", "The game files list it as a plain reward spot with no puzzle: reach it and open it."],
+});
 
 function luminMapMetadata(spawn) {
   if (spawn.marker_type === "field_boss_lumin_reward") {
@@ -13376,6 +13452,14 @@ function luminMapMetadata(spawn) {
     };
   }
   if (spawn.marker_type === "lumin_amber") {
+    const known = LUMIN_AMBER_KINDS[String(spawn.source_record_id || "")];
+    if (known) {
+      const [kind, how] = known;
+      return {
+        source: LUMIN_AMBER_KIND_LABELS[kind] || "Lumin Amber",
+        guide: spawn.reward_of ? `${how} The in-game map marks the puzzle, not this Amber.` : how,
+      };
+    }
     // A Lumin puzzle's reward chest: the in-game map marks the puzzle (reward_of), not the Amber.
     if (spawn.in_game_map_mark === false && spawn.reward_of) {
       return {
@@ -13392,7 +13476,7 @@ function luminMapMetadata(spawn) {
     }
     return {
       source: "Map-marked Amber",
-      guide: "The current map marker does not identify whether this Amber is ordinary, guarded, or ecosystem-based.",
+      guide: "The in-game map marks this Amber; what unlocks it isn't read from the game files yet.",
     };
   }
   if (spawn.marker_type === "lumin_marking") {
