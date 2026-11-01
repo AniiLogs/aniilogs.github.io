@@ -2640,27 +2640,81 @@ ul.team-skill-operations .team-skill-operation {
   width: 100%;
 }
 
-/* Aniimo table: one row per form, one column per rarity (Standard, Sparkling, Dazzling, Shadow). */
+/* Aniimo table: one row per form, one column per rarity (Standard, Sparkling, Type I–X, Dazzling, Shadow).
+   When the columns don't fit, they scroll sideways under the form names, which stay put. */
+.checklist-list {
+  container-type: inline-size;
+}
+
 .checklist-table {
-  --checklist-cell: 84px;
-  gap: 0;
+  --checklist-cell: 60px;
+  --checklist-type-cell: 40px;
+  --checklist-name: minmax(160px, 1fr);
+  display: grid;
 }
 
 .checklist-table-header,
 .checklist-panel .checklist-table-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) repeat(var(--checklist-columns, 2), var(--checklist-cell));
+  grid-template-columns: 34px var(--checklist-name) var(--checklist-cells, var(--checklist-cell) var(--checklist-cell));
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .checklist-table-header {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   border-bottom: 1px solid rgba(80, 96, 103, 0.72);
   background: var(--panel);
   padding: 6px;
+}
+
+@container (max-width: 940px) {
+  .checklist-table-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .checklist-table {
+    --checklist-name: 150px;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .checklist-table-header {
+    position: static;
+  }
+
+  .checklist-table-name,
+  .checklist-table-row > .checklist-icon,
+  .checklist-table-row > .checklist-text {
+    position: sticky;
+    z-index: 1;
+    background: var(--panel);
+  }
+
+  .checklist-table-name,
+  .checklist-table-row > .checklist-icon {
+    left: 0;
+  }
+
+  .checklist-table-name {
+    align-self: stretch;
+    display: grid;
+    align-content: end;
+  }
+
+  .checklist-table-row > .checklist-text {
+    left: 40px;
+    align-self: stretch;
+    display: grid;
+    align-content: center;
+  }
+}
+
+.checklist-table-caption {
+  min-height: 1.2em;
 }
 
 .checklist-table-name {
@@ -2683,6 +2737,7 @@ ul.team-skill-operations .team-skill-operation {
 .checklist-table-column small {
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .checklist-table-rows {
@@ -2710,12 +2765,27 @@ ul.team-skill-operations .team-skill-operation {
 
 @media (max-width: 640px) {
   .checklist-table {
-    --checklist-cell: 52px;
+    --checklist-cell: 54px;
+    --checklist-type-cell: 40px;
+  }
+
+  .checklist-table-column small {
+    font-size: 10px;
+  }
+
+  @container (max-width: 940px) {
+    .checklist-table {
+      --checklist-name: 118px;
+    }
+
+    .checklist-table-row > .checklist-text {
+      left: 32px;
+    }
   }
 
   .checklist-table-header,
   .checklist-panel .checklist-table-row {
-    grid-template-columns: 28px minmax(0, 1fr) repeat(var(--checklist-columns, 2), var(--checklist-cell));
+    grid-template-columns: 28px var(--checklist-name) var(--checklist-cells, var(--checklist-cell) var(--checklist-cell));
     gap: 4px;
   }
 

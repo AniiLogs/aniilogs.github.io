@@ -10749,22 +10749,35 @@ function checklistStateColumn(entry, completionState) {
   return id.startsWith(prefix) ? id.slice(prefix.length) : id;
 }
 
-// The Aniimo checklist as a table: one row per form, one column per rarity (Standard, Sparkling, then the
-// rare Sparkling variants), each column header with its own count.
+// The Aniimo checklist as a table: one row per form, one column per rarity (Standard, Sparkling, Sparkling
+// Type I–X, then the rare Dazzling and Shadow), each column header with its own count. On narrow screens the
+// columns scroll sideways under the form names.
 function renderChecklistAniimoTable(visibleEntries, allEntries) {
   const columns = [];
   allEntries.forEach((entry) => (entry.completion_states || []).forEach((completionState) => {
     const key = checklistStateColumn(entry, completionState);
     if (!columns.some((column) => column.key === key)) {
       const rarity = (state.checklistData?.sparkling_rarities || []).find((candidate) => candidate.id === key);
-      columns.push({ key, label: completionState.label || key, title: rarity?.description || "" });
+      const label = completionState.label || key;
+      const type = /^Type (\S+)$/u.exec(label);
+      columns.push({
+        key,
+        label: type ? type[1] : label,
+        caption: type ? "Type" : "",
+        title: rarity ? [rarity.name, rarity.description].filter(Boolean).join(": ") : "",
+      });
     }
   }));
-  const table = document.createElement("section");
-  table.className = "checklist-section checklist-table";
-  table.style.setProperty("--checklist-columns", String(columns.length));
+  const section = document.createElement("section");
+  section.className = "checklist-section checklist-table-scroll";
+  const table = document.createElement("div");
+  table.className = "checklist-table";
+  // Word columns (Standard, Sparkling, Dazzling, Shadow) are wider than the Type I–X numerals.
+  table.style.setProperty("--checklist-cells", columns
+    .map((column) => (column.caption ? "var(--checklist-type-cell)" : "var(--checklist-cell)")).join(" "));
   table.setAttribute("role", "table");
   table.setAttribute("aria-label", "Aniimo forms by rarity");
+  section.append(table);
 
   const header = document.createElement("div");
   header.className = "checklist-table-header";
@@ -10782,11 +10795,14 @@ function renderChecklistAniimoTable(visibleEntries, allEntries) {
     heading.className = "checklist-table-column";
     heading.setAttribute("role", "columnheader");
     if (column.title) heading.title = column.title;
+    const caption = document.createElement("small");
+    caption.className = "checklist-table-caption";
+    caption.textContent = column.caption;
     const label = document.createElement("strong");
     label.textContent = column.label;
     const count = document.createElement("small");
-    count.textContent = `${ids.filter((id) => state.completed.has(id)).length} / ${ids.length}`;
-    heading.append(label, count);
+    count.textContent = `${ids.filter((id) => state.completed.has(id)).length}/${ids.length}`;
+    heading.append(caption, label, count);
     header.append(heading);
   });
   table.append(header);
@@ -10822,7 +10838,7 @@ function renderChecklistAniimoTable(visibleEntries, allEntries) {
       if (!completionState) {
         cell.classList.add("is-empty");
         cell.textContent = "–";
-        cell.title = `${entry.name} has no ${column.label} version`;
+        cell.title = `${entry.name} has no ${`${column.caption} ${column.label}`.trim()} version`;
       } else {
         const input = document.createElement("input");
         input.type = "checkbox";
@@ -10838,7 +10854,11 @@ function renderChecklistAniimoTable(visibleEntries, allEntries) {
     rows.append(row);
   });
   table.append(rows);
-  return table;
+  // Every tick redraws the checklist, so the sideways scroll is kept for the next table.
+  section.addEventListener("scroll", () => {
+    state.checklistTableScroll = section.scrollLeft;
+  }, { passive: true });
+  return section;
 }
 
 function renderLuminGuide() {
@@ -11117,6 +11137,8 @@ function renderChecklist() {
     fragment.append(empty);
   }
   els.checklistList.append(fragment);
+  const tableScroll = els.checklistList.querySelector(".checklist-table-scroll");
+  if (tableScroll) tableScroll.scrollLeft = state.checklistTableScroll || 0;
 }
 
 function updateWorkspaceTabs() {
