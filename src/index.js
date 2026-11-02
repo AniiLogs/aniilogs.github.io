@@ -3177,8 +3177,9 @@ async function listRunChecks(request, env) {
   const { results } = await env.DB.prepare(
     `SELECT submission_id AS submissionId, kind, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS,
        players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, verify_at AS checkedAt, created_at AS sentAt,
-       (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
-        ORDER BY gc.last_seen_at DESC LIMIT 1) AS player
+       COALESCE((SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.game_uid = s.game_uid),
+         (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
+          ORDER BY gc.last_seen_at DESC LIMIT 1)) AS player
      FROM leaderboard_submissions s WHERE verify_state = ? ORDER BY verify_at DESC LIMIT 100`,
   ).bind(state).all();
   return json({
@@ -4147,10 +4148,14 @@ async function interlinkBests(env, cycles, list, server = null) {
        s.submission_id AS runId, s.evidence_key IS NOT NULL AS hasProof,
        s.outcome, s.clear_time_s AS runTimeS,               -- how it ended, and the battle's clock for every ending
        json_extract(s.extra_json, '$.timeLimitS') AS sentLimit,
-       CASE WHEN s.who LIKE 'name:%' THEN s.teammate ELSE
+       -- the character that played the run (an account can link several), else the account's latest-seen one
+       CASE WHEN s.who LIKE 'name:%' THEN s.teammate ELSE COALESCE(
+         (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.game_uid = COALESCE(s.teammate_uid, s.game_uid)),
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
-          ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
-       CASE WHEN s.who LIKE 'name:%' THEN NULL ELSE COALESCE(s.teammate_uid,
+          ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS player,
+       CASE WHEN s.who LIKE 'name:%' THEN NULL ELSE COALESCE(
+         (SELECT game_uid FROM game_characters gc WHERE gc.discord_id = s.who AND gc.game_uid = COALESCE(s.teammate_uid, s.game_uid)
+            AND gc.character_name IS NOT NULL),
          (SELECT game_uid FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS uid,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,

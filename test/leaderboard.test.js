@@ -815,6 +815,20 @@ test("a run sent without its score counts with the score its picture check read 
   assert.equal((await row()).score, null);
 });
 
+test("a row carries the name of the character that played the run, not the account's newest (2 Nov: Abzu shown as SanHao)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  await call(env, "/api/leaderboard/submissions", { token: a, method: "POST", body: run("best", { gameUid: TEST_CHARACTERS[SESSIONS.dev][0], score: 15000, stars: 15 }) });
+  const { discord_id: who } = sqlite.prepare("SELECT discord_id FROM leaderboard_submissions WHERE client_run_id = 'best'").get();
+  // the same account links a second character, seen later
+  sqlite.prepare(`INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at)
+    VALUES ('309999999999', ?, 'AltTwo', 'meter', 1, 9999999999)`).run(who);
+  const entry = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses
+    .find((b) => b.id === "80000107").entries[0];
+  assert.equal(entry.player, "DevOne");
+  assert.notEqual(entry.uid, "309999999999");
+});
+
 test("each player's row says when their best run reached the site, and only a new best moves it", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const a = await namedToken(env, SESSIONS.dev);
