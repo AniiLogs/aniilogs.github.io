@@ -1917,7 +1917,10 @@ const RUN_SCORE = (s) => `COALESCE(${s}.score, CASE WHEN ${s}.verify_state = 'ma
 
 const BETTER_INTERLINK = (b, c) => `(COALESCE(${b}.stars, -1) > COALESCE(${c}.stars, -1) OR (COALESCE(${b}.stars, -1) = COALESCE(${c}.stars, -1)
   AND (COALESCE(${RUN_SCORE(b)}, -1) > COALESCE(${RUN_SCORE(c)}, -1) OR (COALESCE(${RUN_SCORE(b)}, -1) = COALESCE(${RUN_SCORE(c)}, -1) AND ${b}.created_at < ${c}.created_at))))`;
-const PROVEN_BETTER = "b.evidence_key IS NOT NULL AND COALESCE(b.verify_state, '') NOT IN ('pending', 'mismatch')";
+// the better run has its own pictures and is through its check (5 minutes in, not waiting for or failing a reading), so
+// the older proof is never gone before the run that replaces it has held up
+const PROVEN_BETTER = `b.evidence_key IS NOT NULL AND COALESCE(b.verify_state, '') NOT IN ('pending', 'mismatch', 'unreadable')
+  AND COALESCE(json_extract(b.verify_json, '$.queued'), 0) = 0 AND b.created_at < CAST(strftime('%s', 'now') AS INTEGER) - 300`;
 const NOBODYS_BEST = `(
   (c.kind IN ('interlink_run', 'interlink_best')
     AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind IN ('interlink_run', 'interlink_best')

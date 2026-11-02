@@ -1576,8 +1576,10 @@ test("pictures: a better Interlink run replaces the older one's proof at once; b
   state("best", "pending");
   await prune();
   assert.equal(pictures("worse").length, 4);
-  // once it's through, the older run's pictures go straight away (no 14 / 90 day wait); its numbers stay
+  // once it's through its check (and 5 minutes in), the older run's pictures go on the next submission (no 14 / 90
+  // day wait); its numbers stay
   state("best", "match");
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id IN ('best', 'worse', 'review')").run();
   await prune();
   assert.deepEqual(pictures("worse"), []);
   const worse = sqlite.prepare("SELECT evidence_key, battle_evidence_key, proof_pruned_at, score FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
@@ -1591,6 +1593,7 @@ test("pictures: a better Interlink run replaces the older one's proof at once; b
   await sendRun(env, userToken, run("teammates-best", { score: 35000, stars: 28,
     players: [{ name: "UserOne", self: true }, { name: "DevOne", uid: "301000000001", ai: false }] }), screens);
   state("user-best", "match");
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id IN ('user-best', 'teammates-best')").run();
   await prune();
   for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
 });
