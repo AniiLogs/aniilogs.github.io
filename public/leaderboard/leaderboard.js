@@ -599,12 +599,13 @@
   const FULL_ROWS = 25;
   const SLOT_CLASSES = ["is-left", "is-center", "is-right"];
   // How a run ended, with its battle clock: "Boss Killed", "Early Exit" (every star, the leader ended it) or "Timed Out"
-  // (a quit run - invalid - is on no board). Runs from before outcomes were kept go by their clear time.
+  // (a quit run - invalid - is on no board); "Menu proof" when there's no clock. Runs from before outcomes were kept go
+  // by their clear time.
   function clearText(entry) {
     const time = entry.runTimeS ?? entry.clearTimeS;
     const ending = entry.outcome === "ended-early" ? "Early Exit" : entry.outcome === "cleared" ? "Boss Killed"
       : entry.outcome === "time-up" ? "Timed Out" : entry.clearTimeS != null ? "Boss Killed" : time != null ? "Timed Out" : null;
-    if (!ending) return "No time sent";
+    if (!ending) return "Menu proof";                 // sent from the game's menu (its best), not a result screen
     return time == null ? ending : `${ending}: ${duration(time)}`;
   }
   function shortDate(unix) {
@@ -626,20 +627,25 @@
       el("i", { "aria-hidden": "true" }), `Updated ${when} (${agoText(unix)})`);
   }
   // A player's own "last updated": when their best run on this board (or their newest best, for totals) reached AniiLogs.
-  function playerUpdated(unix) {
+  function playerUpdated(unix, label = "Updated ") {
     if (!unix) return null;
     const at = new Date(unix * 1000);
     return el("time", { class: "lb-when", datetime: at.toISOString(), title: `New best sent ${at.toLocaleString()} (${agoText(unix)})`,
-      text: `Updated ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` });
+      text: `${label}${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` });
   }
   // The run check's badge (shadow mode: nothing is held either way)
   const CHECK_BADGES = Object.freeze({
-    verified: { text: "Verified", title: "Checked: the site read this run's full screenshots again and they agree." },
-    pending: { text: "Pending", title: "Waiting for a check against this run's full screenshots." },
+    verified: { text: "✓", label: "Verified", title: "Verified" },
+    pending: { text: "i", label: "Pending", title: "Pending" },
+    invalid: { text: "✕", label: "Invalid", title: "Invalid" },
   });
+  // A board row's badge: its run's check, or "invalid" when the row has no proof pictures at all
+  function rowCheck(entry, ladder) {
+    return Object.keys(entry.proofIds || {}).length ? entry.checks?.[ladder.proof] || entry.checks?.score : "invalid";
+  }
   function checkBadge(check) {
     const badge = CHECK_BADGES[check];
-    return badge ? el("span", { class: `lb-check is-${check}`, title: badge.title, text: badge.text }) : null;
+    return badge ? el("span", { class: `lb-check is-${check}`, title: badge.title, "aria-label": badge.label, text: badge.text }) : null;
   }
   function playerName(entry, proofId, check = null) {
     return el("span", { class: "lb-who-name" }, profileName(entry.player, entry.profileId, {}, entry.uid),
@@ -657,37 +663,41 @@
     els.tableWrap.hidden = true;
   }
 
-  // Per Boss: the week's three boards, each with its own ladder menu.
-  function bossBoard(boss) {
-    const ladder = ladderOf(state.ladders[boss.id]);
+  // Per Boss: the week's three boards, each with its own ladder menu. A row: the player and how the run ended on the
+  // left, the ladder's figure over the stars on the right.
+  function bossBoard(boss, cycleId = state.week) {
+    const ladder = ladderOf(state.ladders[`${cycleId}:${boss.id}`]);
     const select = el("select", { "aria-label": `Rank the ${boss.slot || boss.name} board by`,
-      onchange: (event) => { void loadBoard(boss.id, event.target.value); } },
+      onchange: (event) => { void loadBoard(boss.id, event.target.value, cycleId); } },
     ...LADDERS.map((item) => el("option", { value: item.id, text: item.label })));
     select.value = ladder.id;
     const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
-      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score),
-        el("small", {}, clearText(entry), entry.updatedAt ? " · " : null, playerUpdated(entry.updatedAt))),
-      el("span", { class: "lb-val", text: ladder.value(entry) }),
-      stars(entry.stars)));
-    return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id,
+      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder)),
+        el("small", { text: clearText(entry) })),
+      el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry) }), stars(entry.stars))));
+    return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
       "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
     bossHead(boss, "lb-boss-head"),
     el("label", { class: "lb-ladder" }, el("span", { text: "Ladder" }), select),
     rows.length ? el("ol", { class: "lb-rows" }, rows)
       : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
     boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(boss.total)} →`,
-      onclick: () => { state.viewBoss = boss.id; state.viewLadder = ladder.id; state.offset = 0; void loadEntries(); } }) : null);
+      onclick: () => {
+        state.returnWeek = state.week; state.week = cycleId;     // back from "View all" returns to this page
+        state.viewBoss = boss.id; state.viewLadder = ladder.id; state.offset = 0; void loadEntries();
+      } }) : null);
   }
   // One board's ladder changed: reload just that board.
-  async function loadBoard(bossId, ladderId) {
-    state.ladders[bossId] = ladderOf(ladderId).id;
-    const ask = new URLSearchParams({ cycle: state.week, boss: bossId, ladder: state.ladders[bossId], limit: String(BOARD_ROWS) });
+  async function loadBoard(bossId, ladderId, cycleId) {
+    const key = `${cycleId}:${bossId}`;
+    state.ladders[key] = ladderOf(ladderId).id;
+    const ask = new URLSearchParams({ cycle: cycleId, boss: bossId, ladder: state.ladders[key], limit: String(BOARD_ROWS) });
     if (state.server) ask.set("server", state.server);
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
     const boss = response.ok ? (await response.json()).bosses?.[0] : null;
-    const old = els.interlink.querySelector(`[data-board-id="${CSS.escape(bossId)}"]`);
-    if (boss && old) old.replaceWith(bossBoard(boss));
+    const old = els.interlink.querySelector(`[data-week="${CSS.escape(cycleId)}"][data-board-id="${CSS.escape(bossId)}"]`);
+    if (boss && old) old.replaceWith(bossBoard(boss, cycleId));
   }
   function showSlot() {
     for (const node of els.interlink.querySelectorAll(".lb-boss")) {
@@ -708,12 +718,19 @@
       el("span", {}, weekRange(data.cycle), el("small", { text: ` · ${when === "this week" ? "current" : when}` })),
       el("button", { type: "button", "aria-label": "Next week", text: "›", disabled: at < 0 || at >= weeks.length - 1, onclick: () => go(weeks[at + 1]) }));
   }
-  function renderPerBoss(data) {
+  // A week's heading over its boards when two weeks show: this (or the coming) week, then last week.
+  function weekHead(data, dates = true) {
+    const now = Date.now() / 1000;
+    const label = data.cycle.start > now ? `Next week · starts ${shortDate(data.cycle.start)}` : data.cycle.end >= now ? "This week" : "Last week";
+    return el("div", { class: "lb-week-head" }, el("h3", { text: label }), dates ? el("span", { text: weekRange(data.cycle) }) : null,
+      data.cycle.start <= now ? updatedLine(data.updatedAt) : null);
+  }
+  function renderPerBoss(data, last = null) {
     const caps = data.rules?.starCaps || [];
     const clear = data.rules?.clearStars || [];
     const slotted = data.bosses.filter((boss) => boss.slotIndex != null);
     els.interlink.replaceChildren(
-      el("div", { class: "lb-subbar" }, weekNav(data), updatedLine(data.updatedAt)),
+      el("div", { class: "lb-subbar" }, weekNav(data), last ? null : updatedLine(data.updatedAt)),
       el("p", { class: "lb-rules" },
         caps.length ? el("span", {}, el("b", { text: "Max stars " }), caps.join(" / ")) : null,
         clear.length ? el("span", { text: `A kill is ${new Set(clear).size === 1 ? clear[0] : clear.join(" / ")} stars` }) : null,
@@ -723,10 +740,12 @@
         type: "button", role: "tab", "data-slot-index": boss.slotIndex, "aria-selected": String(boss.slotIndex === state.slot),
         class: SLOT_CLASSES[boss.slotIndex], onclick: () => { state.slot = boss.slotIndex; showSlot(); },
       }, boss.slot, el("small", { text: boss.name.replace(/^(Alpha|Omega) /u, "") })))),
-      el("div", { class: "lb-bosses" }, data.bosses.map(bossBoard)),
+      ...(last ? [weekHead(data, false)] : []),            // its dates are in the week menu just above
+      el("div", { class: "lb-bosses" }, data.bosses.map((boss) => bossBoard(boss, data.cycle.id))),
+      ...(last ? [weekHead(last), el("div", { class: "lb-bosses" }, last.bosses.map((boss) => bossBoard(boss, last.cycle.id)))] : []),
       el("p", { class: "lb-note", text: "Only what the result screens show: score, stars, clear time, team DPS and each player's Avg DPS, BREAK damage and healing." }),
       el("p", { class: "lb-note lb-check-legend" }, checkBadge("verified"), " checked against the run's full screenshots · ",
-        checkBadge("pending"), " waiting for that check · no badge: not checked (not a personal best or a top run, or its screenshots couldn't be read)"));
+        checkBadge("pending"), " waiting for that check · ", checkBadge("invalid"), " sent without proof pictures · no badge: not checked"));
     els.tableWrap.hidden = true;
     els.summary.textContent = "";
   }
@@ -740,11 +759,15 @@
     { id: "dps", label: "Avg DPS", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK", value: (e) => number(e.breakValue) },
     { id: "heal", label: "Healing", value: (e) => number(e.heal) },
+    { id: "date", label: "Submitted", value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best was sent
   ];
   function renderFull(data) {
     const boss = data.bosses[0];
     const ladder = ladderOf(state.viewLadder);
-    const back = () => { state.viewBoss = ""; state.offset = 0; void loadEntries(); };
+    const back = () => {
+      if (state.returnWeek !== undefined) { state.week = state.returnWeek; delete state.returnWeek; }
+      state.viewBoss = ""; state.offset = 0; void loadEntries();
+    };
     if (!boss) { back(); return; }
     // the ladder's figure first; on phones the figures it isn't ranked by beyond score and stars fold away
     const columns = [...FULL_COLUMNS.filter((column) => column.id === ladder.id), ...FULL_COLUMNS.filter((column) => column.id !== ladder.id)];
@@ -762,8 +785,7 @@
       columns.map((column, index) => el("th", { scope: "col", class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null, text: column.label }))));
     els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score),
-        playerUpdated(entry.updatedAt)),
+      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder))),
       columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null }, column.value(entry)))))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
@@ -776,7 +798,7 @@
     els.summary.textContent = `${boss.name} · ranked by ${ladder.label.toLowerCase()} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
   }
   function fold(column, index) {
-    return index && !["score", "stars", "clear"].includes(column.id) ? "lb-hide-sm" : "";
+    return index && !["score", "stars", "clear", "date"].includes(column.id) ? "lb-hide-sm" : "";
   }
 
   // Season Ladder: each player's best on each boss of each week, added up over a split (stars reset each split) or a season.
@@ -846,6 +868,8 @@
       renderSeason(data);
       return;
     }
+    // the plain Per Boss page (no week picked): this week's boards - or the coming week's, between weeks - over last week's
+    const twoWeeks = !state.viewBoss && !state.week;
     if (state.week) ask.set("cycle", state.week);
     if (state.viewBoss) {
       ask.set("boss", state.viewBoss);
@@ -860,10 +884,23 @@
     const data = await get(ask);
     if (requestId !== state.requestId) return;
     if (!data) { failed(); return; }
-    state.week = data.cycle.id;
+    if (!twoWeeks) {
+      state.week = data.cycle.id;
+      writeUrl();
+      if (state.viewBoss) renderFull(data);
+      else renderPerBoss(data);
+      return;
+    }
+    const now = Date.now() / 1000;
+    const ordered = [...data.weeks].sort((a, b) => a.start - b.start);
+    const top = ordered.find((week) => week.start <= now && now <= week.end) || ordered.find((week) => week.start > now) || data.cycle;
+    const prev = ordered[ordered.findIndex((week) => week.id === top.id) - 1] || null;
+    const weekData = (id) => (id === data.cycle.id ? data : get(new URLSearchParams([...ask, ["cycle", id]])));
+    const [topData, lastData] = await Promise.all([weekData(top.id), prev ? weekData(prev.id) : null]);
+    if (requestId !== state.requestId) return;
+    if (!topData) { failed(); return; }
     writeUrl();
-    if (state.viewBoss) renderFull(data);
-    else renderPerBoss(data);
+    renderPerBoss(topData, lastData);
   }
 
   async function loadEntries() {

@@ -233,10 +233,12 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 }
 
 /* The run check's badge: Verified (read again and agrees) or Pending (waiting for that check) */
-.lb-check { display: inline-block; margin-left: 6px; border-radius: 999px; font-size: 0.68em; font-weight: 800; letter-spacing: 0.02em;
-  padding: 1px 7px; vertical-align: middle; cursor: help; white-space: nowrap; }
+.lb-check { display: inline-grid; place-items: center; min-width: 1.5em; height: 1.5em; margin-left: 6px; border-radius: 999px; font-size: 0.72em;
+  font-weight: 900; line-height: 1; vertical-align: middle; cursor: help; white-space: nowrap; }
 .lb-check.is-verified { background: color-mix(in srgb, #3ddc84 20%, transparent); color: color-mix(in srgb, #3ddc84 75%, var(--text)); }
-.lb-check.is-pending { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+.lb-check.is-pending { background: color-mix(in srgb, #f2c230 22%, transparent); color: color-mix(in srgb, #f2c230 80%, var(--text)); font-family: Georgia, serif; font-style: italic; }
+.lb-check.is-pending, .lb-check.is-invalid { box-shadow: inset 0 0 0 1.5px currentColor; }   /* a drawn circle round the i and the x */
+.lb-check.is-invalid { background: color-mix(in srgb, #ef5350 22%, transparent); color: color-mix(in srgb, #ef5350 80%, var(--text)); }
 .lb-check-legend .lb-check { margin: 0 2px 0 0; }
 .lb-proof-tabs .lb-check { align-self: center; margin-left: auto; font-size: 0.8rem; }
 
@@ -272,8 +274,13 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-ladder { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
 .lb-interlink .lb-ladder select { flex: 1 1 0; width: 100%; min-width: 0; }
 .lb-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto 3.4rem; align-items: center; gap: 0.5rem;
-  border-radius: 8px; padding: 0.35rem 0.45rem; font-variant-numeric: tabular-nums; }
+.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; align-items: center; gap: 0.5rem;
+  border-radius: 8px; padding: 0.25rem 0.45rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.lb-figs { display: grid; justify-items: end; }
+.lb-week-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; margin-top: 0.3rem; }
+.lb-week-head h3 { margin: 0; font-size: 1rem; }
+.lb-week-head > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.lb-week-head .lb-updated { margin-left: auto; }
 .lb-row:nth-child(odd) { background: color-mix(in srgb, var(--panel) 70%, transparent); }
 .lb-row.is-own { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
 .lb-rk { color: var(--muted); font-weight: 900; text-align: center; }
