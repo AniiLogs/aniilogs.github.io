@@ -3870,7 +3870,7 @@ function runStarRule(cycleId, slot, sentCap) {
 // - "cleared": every star for its slot that week (or the cap aLogs read) - a kill;
 // - "ended-early": every star, and the leader ended it (aLogs read the game's "The team leader has ended the
 //   challenge." notice: extra.endedByLeader) - valid, it counts like a clear;
-// - "time-up": the clock ran out without every star;
+// - "time-up": the clock ran out without every star (the run's own clock: runTimeLimit);
 // - "invalid": under the clock without every star - someone quit before the run could count. It stays in the
 //   player's own history and off every board.
 // null when the time isn't known.
@@ -3880,7 +3880,13 @@ function interlinkOutcome(row, weeks) {
   const slot = week ? week.bosses.findIndex((boss) => String(boss.id) === String(row.boss_id)) : -1;
   const { clear } = runStarRule(row.cycle, slot, sentStarCap(row.extra_json));
   if ((Number(row.stars) || 0) >= clear) return (parseJsonColumn(row.extra_json) || {}).endedByLeader === true ? "ended-early" : "cleared";
-  return Number(row.clear_time_s) < INTERLINK_RULES.durationS ? "invalid" : "time-up";
+  return Number(row.clear_time_s) < runTimeLimit(row.extra_json) ? "invalid" : "time-up";
+}
+// The run's own clock as it started, which aLogs reads off the game's timer (extra.timeLimitS: 4:00 with the Overtime
+// blessing, or a new default), less 2 s for the result screen's rounding; the rules' default when none was sent.
+function runTimeLimit(extraJson) {
+  const sent = (parseJsonColumn(extraJson) || {}).timeLimitS;
+  return Number.isInteger(sent) && sent >= 60 && sent <= 900 ? sent - 2 : INTERLINK_RULES.durationS;
 }
 // Keeps a run's outcome column current (after it's stored or re-sent); the boards skip invalid ones.
 function ON_BOARDS(alias) {      // a declaration: CREDITED_RUNS (built at load) uses it
