@@ -611,14 +611,23 @@
     return `Week of ${shortDate(week.start)} – ${shortDate(week.end)}`;
   }
   // When the newest run on these boards reached AniiLogs
+  function agoText(unix) {
+    const minutes = Math.max(0, Math.round((Date.now() / 1000 - unix) / 60));
+    return minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago`
+      : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
+  }
   function updatedLine(unix) {
     if (!unix) return el("p", { class: "lb-updated" }, el("i", { "aria-hidden": "true" }), "No runs sent yet");
-    const minutes = Math.max(0, Math.round((Date.now() / 1000 - unix) / 60));
-    const ago = minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago`
-      : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
     const when = new Date(unix * 1000).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
     return el("p", { class: "lb-updated", title: "When the newest run on these boards reached AniiLogs" },
-      el("i", { "aria-hidden": "true" }), `Updated ${when} (${ago})`);
+      el("i", { "aria-hidden": "true" }), `Updated ${when} (${agoText(unix)})`);
+  }
+  // A player's own "last updated": when their best run on this board (or their newest best, for totals) reached AniiLogs.
+  function playerUpdated(unix) {
+    if (!unix) return null;
+    const at = new Date(unix * 1000);
+    return el("time", { class: "lb-when", datetime: at.toISOString(), title: `New best sent ${at.toLocaleString()} (${agoText(unix)})`,
+      text: `Updated ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` });
   }
   // The run check's badge (shadow mode: nothing is held either way)
   const CHECK_BADGES = Object.freeze({
@@ -654,7 +663,8 @@
     select.value = ladder.id;
     const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
-      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score), el("small", { text: clearText(entry) })),
+      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score),
+        el("small", {}, clearText(entry), entry.updatedAt ? " · " : null, playerUpdated(entry.updatedAt))),
       el("span", { class: "lb-val", text: ladder.value(entry) }),
       stars(entry.stars)));
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id,
@@ -749,7 +759,8 @@
       columns.map((column, index) => el("th", { scope: "col", class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null, text: column.label }))));
     els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score)),
+      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, entry.checks?.[ladder.proof] || entry.checks?.score),
+        playerUpdated(entry.updatedAt)),
       columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null }, column.value(entry)))))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
@@ -796,7 +807,7 @@
     }))));
     els.rows.replaceChildren(...(data.standings.length ? data.standings.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry), el("span", { class: "lb-bar", "aria-hidden": "true" },
+      el("td", { class: "lb-player" }, playerName(entry), playerUpdated(entry.updatedAt), el("span", { class: "lb-bar", "aria-hidden": "true" },
         el("i", { style: `width: ${Math.round((Number(entry.stars) || 0) / most * 100)}%` }))),
       el("td", { class: state.rank === "score" ? "is-ranked" : null, text: number(entry.total) }),
       el("td", { class: state.rank === "stars" ? "is-ranked" : null }, stars(entry.stars)),

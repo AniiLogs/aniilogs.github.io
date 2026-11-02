@@ -4216,9 +4216,10 @@ async function interlinkBoards(request, env) {
     for (const row of await interlinkBests(env, cycles, list, server)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
-        total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt };
+        total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt, updatedAt: row.firstAt };
       player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
       player.weeks.add(row.cycle); player.bosses += 1;
+      player.updatedAt = Math.max(player.updatedAt, row.firstAt);     // their newest best
       player.weekTotals.set(row.cycle, (player.weekTotals.get(row.cycle) || 0) + (Number(row.score) || 0));
       player.firstAt = Math.min(player.firstAt, row.firstAt);
       players.set(row.discordId, player);
@@ -4281,7 +4282,8 @@ async function interlinkBoards(request, env) {
     const slotIndex = cycle.bosses.findIndex((boss) => boss.id === id);
     const runs = rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row }));
     const all = (ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs))
-      .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder", own: own(discordId) }));
+      .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder",
+        updatedAt: firstAt, own: own(discordId) }));         // updatedAt: when this best run reached the site
     return {
       id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id,
       slot: slotIndex >= 0 ? INTERLINK_RULES.slots[slotIndex] || null : null,
@@ -4296,10 +4298,11 @@ async function interlinkBoards(request, env) {
   for (const row of rows) {
     const player = totals.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
       profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
-      total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt };
+      total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt, updatedAt: row.firstAt };
     player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.scores[row.bossId] = row.score;
     player.bossStars[row.bossId] = row.stars;
     player.firstAt = Math.min(player.firstAt, row.firstAt);
+    player.updatedAt = Math.max(player.updatedAt, row.firstAt);
     totals.set(row.discordId, player);
   }
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));

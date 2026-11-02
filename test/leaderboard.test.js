@@ -815,6 +815,24 @@ test("a run sent without its score counts with the score its picture check read 
   assert.equal((await row()).score, null);
 });
 
+test("each player's row says when their best run reached the site, and only a new best moves it", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const send = (body) => call(env, "/api/leaderboard/submissions", { token: a, method: "POST", body });
+  const at = (id, when) => sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ? WHERE client_run_id = ?").run(when, id);
+  const week = async () => (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  const mine = (data) => data.bosses.find((b) => b.id === "80000107").entries.find((e) => e.player === "DevOne");
+  await send(run("best", { score: 15000, stars: 15 })); at("best", 1000);
+  await send(run("worse", { score: 9000, stars: 9 })); at("worse", 2000);
+  assert.equal(mine(await week()).updatedAt, 1000);            // a worse run later doesn't count as an update
+  await send(run("better", { score: 18000, stars: 18 })); at("better", 3000);
+  const data = await week();
+  assert.equal(mine(data).updatedAt, 3000);
+  assert.equal(data.week.find((e) => e.player === "DevOne").updatedAt, 3000);
+  const season = await (await call(env, "/api/leaderboard/interlink?season=1")).json();
+  assert.equal(season.standings.find((e) => e.player === "DevOne").updatedAt, 3000);
+});
+
 test("boss boards show each player's one best run, its Battle Data and its pictures as proof", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
