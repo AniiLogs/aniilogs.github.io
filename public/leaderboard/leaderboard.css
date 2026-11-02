@@ -295,6 +295,8 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-who-name > * + * { flex: none; }
 .lb-who-name a { color: inherit; }
 .lb-who small { color: var(--muted); font-size: 0.75rem; }
+.lb-result { display: inline-flex; align-items: center; gap: 2px; }
+.lb-result .lb-proof { width: 1.2rem; height: 1.2rem; margin-left: 2px; }
 .lb-val { font-weight: 900; text-align: right; }
 .lb-row .lb-stars { justify-content: flex-end; font-size: 0.82rem; font-weight: 800; }
 .lb-more { border: 1px solid rgba(var(--accent-rgb), 0.6); border-radius: 10px; background: rgba(var(--accent-rgb), 0.08); color: var(--accent);

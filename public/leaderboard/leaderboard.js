@@ -639,6 +639,10 @@
     pending: { text: "i", label: "Pending", title: "Pending" },
     invalid: { text: "✕", label: "Invalid", title: "Invalid" },
   });
+  // How a board row's run ended, with its proof pictures beside it
+  function resultLine(entry, ladder) {
+    return [clearText(entry), proofButton(entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder))];
+  }
   // A board row's badge: its run's check, or "invalid" when the row has no proof pictures at all
   function rowCheck(entry, ladder) {
     return Object.keys(entry.proofIds || {}).length ? entry.checks?.[ladder.proof] || entry.checks?.score : "invalid";
@@ -673,8 +677,7 @@
     select.value = ladder.id;
     const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
-      el("span", { class: "lb-who" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder)),
-        el("small", { text: clearText(entry) })),
+      el("span", { class: "lb-who" }, playerName(entry, null, rowCheck(entry, ladder)), el("small", { class: "lb-result" }, ...resultLine(entry, ladder))),
       el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry) }), stars(entry.stars))));
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
       "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
@@ -785,8 +788,9 @@
       columns.map((column, index) => el("th", { scope: "col", class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null, text: column.label }))));
     els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry, entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder))),
-      columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null }, column.value(entry)))))
+      el("td", { class: "lb-player" }, playerName(entry, null, rowCheck(entry, ladder))),
+      columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null },
+        column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder)) : column.value(entry)))))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
     const first = boss.total ? state.offset + 1 : 0;

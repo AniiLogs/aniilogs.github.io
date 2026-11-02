@@ -3816,8 +3816,10 @@ function withProfiles(players, profiles) {
 // - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
 //   early from there); the last entry whose fromCycle is at or below the week's id applies. Weeks before 4000:
 //   15 stars cleared any boss. From 4000 a kill is every star: 20 / 40 / 20 (the center boss needs 40).
-// - durationS: a fight's clock (sys_config_data BossRushCombatDuration, 180). A run that ends before it without the
-//   kill's stars was quit early - the game still shows its result and Battle Data screens.
+// - clocks: a fight's clock (sys_config_data BossRushCombatDuration, 180) and the Overtime blessing's extra time (60),
+//   from the week each applies (the last entry whose fromCycle is at or below the week's id). A run that ends before
+//   its clock without the kill's stars was quit early - the game still shows its result and Battle Data screens.
+//   When the game changes them, add an entry from that week: never edit an old one, so past weeks keep their results.
 // - splitBlock: weeks are grouped into splits (the game resets stars) by their id block: 3000-3005 is one split,
 //   4000 starts the next.
 // - seasons: which weeks belong to which season, by week id (the last entry whose fromCycle is at or below the
@@ -3831,7 +3833,9 @@ const INTERLINK_RULES = Object.freeze({
     Object.freeze({ fromCycle: 0, caps: Object.freeze([15, 30, 15]), clear: Object.freeze([15, 15, 15]) }),
     Object.freeze({ fromCycle: 4000, caps: Object.freeze([20, 40, 20]), clear: Object.freeze([20, 40, 20]) }),
   ]),
-  durationS: 180,
+  clocks: Object.freeze([
+    Object.freeze({ fromCycle: 0, durationS: 180, overtimeS: 60 }),
+  ]),
   splitBlock: 1000,
   seasons: Object.freeze([
     Object.freeze({ season: 0, fromCycle: 0, label: "Before Season 1" }),
@@ -3844,6 +3848,10 @@ function interlinkSeasonRule(cycleId) {
   return INTERLINK_RULES.seasons.filter((rule) => rule.fromCycle <= id).at(-1) || INTERLINK_RULES.seasons[0];
 }
 
+function interlinkClock(cycleId) {
+  const id = Number(cycleId) || 0;
+  return INTERLINK_RULES.clocks.filter((rule) => rule.fromCycle <= id).at(-1) || INTERLINK_RULES.clocks[0];
+}
 function interlinkStarRule(cycleId) {
   const id = Number(cycleId) || 0;
   return INTERLINK_RULES.starCaps.filter((rule) => rule.fromCycle <= id).at(-1) || INTERLINK_RULES.starCaps[0];
@@ -3880,19 +3888,22 @@ function interlinkOutcome(row, weeks) {
   const week = interlinkCycle(weeks, row.cycle);
   const slot = week ? week.bosses.findIndex((boss) => String(boss.id) === String(row.boss_id)) : -1;
   const { clear } = runStarRule(row.cycle, slot, sentStarCap(row.extra_json));
-  const underClock = Number(row.clear_time_s) < runTimeLimit(row.extra_json);
+  const underClock = Number(row.clear_time_s) < runTimeLimit(row.extra_json, row.clear_time_s, row.cycle);
   if ((Number(row.stars) || 0) >= clear) {
     return (parseJsonColumn(row.extra_json) || {}).endedByLeader === true ? "ended-early" : underClock ? "cleared" : "time-up";
   }
   return underClock ? "invalid" : "time-up";
 }
 // The run's own clock as it started, which aLogs reads off the game's timer (extra.timeLimitS: 4:00 with the Overtime
-// blessing, or a new default), less 2 s for the result screen's rounding; the rules' default when none was sent.
-function runTimeLimit(extraJson) {
-  return timeLimitOf((parseJsonColumn(extraJson) || {}).timeLimitS);
+// blessing, or a new default), less 2 s for the result screen's rounding. None sent: the run's week's clock
+// (interlinkClock), with Overtime's extra time when the run lasted past the plain clock (only Overtime allows that).
+function runTimeLimit(extraJson, timeS, cycleId) {
+  return timeLimitOf((parseJsonColumn(extraJson) || {}).timeLimitS, timeS, cycleId);
 }
-function timeLimitOf(sent) {
-  return Number.isInteger(sent) && sent >= 60 && sent <= 900 ? sent - 2 : INTERLINK_RULES.durationS;
+function timeLimitOf(sent, timeS, cycleId) {
+  if (Number.isInteger(sent) && sent >= 60 && sent <= 900) return sent - 2;
+  const { durationS, overtimeS } = interlinkClock(cycleId);
+  return Number(timeS) > durationS ? durationS + overtimeS - 2 : durationS;
 }
 // Keeps a run's outcome column current (after it's stored or re-sent); the boards skip invalid ones.
 function ON_BOARDS(alias) {      // a declaration: CREDITED_RUNS (built at load) uses it
@@ -4170,7 +4181,7 @@ async function interlinkBests(env, cycles, list, server = null) {
     const clear = slot >= 0 ? runStarRule(row.cycle, slot, Number.isInteger(row.sentCap) && row.sentCap >= 10 && row.sentCap <= 100 ? row.sentCap : null).clear : null;
     if (clear && (Number(row.stars) || 0) < clear) row.clearTimeS = null;
     // stored before full stars at the clock's end counted as time-up (2 Nov): read as it is now
-    if (row.outcome === "cleared" && row.runTimeS != null && row.runTimeS >= timeLimitOf(row.sentLimit)) row.outcome = "time-up";
+    if (row.outcome === "cleared" && row.runTimeS != null && row.runTimeS >= timeLimitOf(row.sentLimit, row.runTimeS, row.cycle)) row.outcome = "time-up";
     delete row.sentCap; delete row.sentLimit;
     return row;
   });

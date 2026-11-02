@@ -1868,12 +1868,12 @@ test("Timed Out or quit goes by the run's own clock (Overtime: 4:00); every star
   const overtime = { extra: { timeLimitS: 240 } };
   await sendRun(env, token, run("ot-quit", { ...infergon, ...overtime, stars: 12, score: 12000, clearTimeS: 210, cleared: false, playedAt: 1792700300 }));
   await sendRun(env, token, run("ot-timeout", { ...infergon, ...overtime, stars: 13, score: 13000, clearTimeS: 240, cleared: false, playedAt: 1792700200 }));
-  // an older app sent no clock: 3:00 decides; and it called a kill at 3:20 "not cleared"
+  // an older app sent no clock: a run past 3:00 had Overtime (4:00), so every star at 3:20 is a kill
   await sendRun(env, token, run("old-kill", { ...infergon, stars: 15, score: 17000, clearTimeS: 200, cleared: false, playedAt: 1792700100 }));
   const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
-  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[12000, "invalid"], [13000, "time-up"], [17000, "time-up"]]);
+  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[12000, "invalid"], [13000, "time-up"], [17000, "cleared"]]);
   const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((b) => b.id === "80000107").entries[0];
-  assert.deepEqual([row.score, row.outcome, row.runTimeS], [17000, "time-up", 200]);     // without its clock, 3:00 decides
+  assert.deepEqual([row.score, row.outcome, row.runTimeS], [17000, "cleared", 200]);     // Boss Killed: 3:20
 });
 
 test("every star at the clock's end is Timed Out (the team hit for score until time ran out); under the clock it's a kill", async () => {
