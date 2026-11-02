@@ -598,11 +598,14 @@
   const BOARD_ROWS = 10;                                  // a boss board's top rows; "View all" pages the rest
   const FULL_ROWS = 25;
   const SLOT_CLASSES = ["is-left", "is-center", "is-right"];
-  // A run's time, kept short for phones: the clear time, or "No clear" (time ran out, or no kill recorded); a run the
-  // leader ended with every star says so (a quit run - invalid - is on no board)
+  // How a run ended, with its battle clock: "Boss Killed", "Early Exit" (every star, the leader ended it) or "Timed Out"
+  // (a quit run - invalid - is on no board). Runs from before outcomes were kept go by their clear time.
   function clearText(entry) {
-    if (entry.outcome === "ended-early") return `Ended early (${duration(entry.clearTimeS)})`;
-    return entry.clearTimeS == null ? "No clear" : duration(entry.clearTimeS);
+    const time = entry.runTimeS ?? entry.clearTimeS;
+    const ending = entry.outcome === "ended-early" ? "Early Exit" : entry.outcome === "cleared" ? "Boss Killed"
+      : entry.outcome === "time-up" ? "Timed Out" : entry.clearTimeS != null ? "Boss Killed" : time != null ? "Timed Out" : null;
+    if (!ending) return "No time sent";
+    return time == null ? ending : `${ending}: ${duration(time)}`;
   }
   function shortDate(unix) {
     return new Date(unix * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });

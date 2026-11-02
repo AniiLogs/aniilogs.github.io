@@ -1844,3 +1844,19 @@ test("aLogs B2's Party screen as sent: the lead with level and CP, teammates by 
   assert.deepEqual(listed.lineup[0].team, [{ aniimo: "Emberpup", aniimoLevel: 60, cp: 12345 }, { aniimo: "Somniwing" }, { aniimo: "Tromber" }]);
   assert.deepEqual(listed.buffs, [{ name: "Joint Defense", level: 3 }, { name: "Coordinated Offensive", level: 2 }, { name: "Spark Offering or Ember Offering" }]);
 });
+
+test("a boss board row says how its run ended, with the battle clock: Timed Out, Early Exit, Boss Killed", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const infergon = { boss: { id: "80000107", name: "Omega Infergon", level: 60 } };      // week 3005: 15 stars clear
+  const row = async () => {
+    const e = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((b) => b.id === "80000107").entries[0];
+    return [e.outcome, e.runTimeS, e.clearTimeS];
+  };
+  await sendRun(env, token, run("timeout", { ...infergon, stars: 12, score: 12500, clearTimeS: 180, cleared: false }));
+  assert.deepEqual(await row(), ["time-up", 180, null]);                  // no kill time, but the clock ran 3:00
+  await sendRun(env, token, run("leader-ended", { ...infergon, stars: 15, score: 16000, clearTimeS: 120, cleared: true, extra: { endedByLeader: true } }));
+  assert.deepEqual(await row(), ["ended-early", 120, 120]);
+  await sendRun(env, token, run("kill", { ...infergon, stars: 15, score: 18000, clearTimeS: 140, cleared: true }));
+  assert.deepEqual(await row(), ["cleared", 140, 140]);
+});

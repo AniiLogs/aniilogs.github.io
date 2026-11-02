@@ -4122,6 +4122,7 @@ async function interlinkBests(env, cycles, list, server = null) {
        s.p_dps AS avgDps, s.p_break AS breakValue, s.p_taken AS damageTaken, s.p_heal AS heal,
        s.team_dps AS teamDps, json_extract(s.extra_json, '$.starCap') AS sentCap,
        s.submission_id AS runId, s.evidence_key IS NOT NULL AS hasProof,
+       s.outcome, s.clear_time_s AS runTimeS,               -- how it ended, and the battle's clock for every ending
        CASE WHEN s.who LIKE 'name:%' THEN s.teammate ELSE
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
