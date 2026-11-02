@@ -797,7 +797,25 @@ test("boards filter by game server; runs from different servers never vouch for 
   assert.equal(slots("eu").some((p) => p.confirmed), false);
 });
 
-test("boss boards carry each player's own Battle Data bests, with the run behind each best as proof", async () => {
+test("a run sent without its score counts with the score its picture check read (2 Nov: Abzu's 15-star run)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const send = (body) => call(env, "/api/leaderboard/submissions", { token: a, method: "POST", body });
+  await send(run("lower", { score: 13430, stars: 13 }));
+  await send(run("unscored", { score: null, stars: 15 }));
+  const row = async () => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses
+    .find((b) => b.id === "80000107").entries.find((e) => e.player === "DevOne");
+  // most stars wins the row even before the score is known
+  assert.deepEqual([(await row()).stars, (await row()).score], [15, null]);
+  const reading = (stars) => JSON.stringify({ reading: { result: { score: 15218, stars, time: "180s" } } });
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'match', verify_json = ? WHERE client_run_id = 'unscored'").run(reading(15));
+  assert.deepEqual([(await row()).stars, (await row()).score], [15, 15218]);
+  // a reading with other stars isn't taken
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_json = ? WHERE client_run_id = 'unscored'").run(reading(14));
+  assert.equal((await row()).score, null);
+});
+
+test("boss boards show each player's one best run, its Battle Data and its pictures as proof", async () => {
   const EVIDENCE = evidenceStore();
   const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
   const a = await namedToken(env, SESSIONS.dev);
@@ -816,10 +834,11 @@ test("boss boards carry each player's own Battle Data bests, with the run behind
   const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
   const rows = week.bosses.find((b) => b.id === "80000109").entries;
   const me = rows.find((e) => e.player === "DevOne");
-  assert.deepEqual([me.score, me.clearTimeS, me.avgDps, me.breakValue, me.damageTaken, me.heal], [20000, 140, 19000, 280000, 6000, 50]);
-  assert.deepEqual(me.proofIds, { score: high, clear: fast, dps: fast, break: high, taken: fast, heal: fast });
+  // one run per row, the best (most stars, then score): all its figures and its pictures, never another run's
+  assert.deepEqual([me.score, me.clearTimeS, me.avgDps, me.breakValue, me.damageTaken, me.heal], [20000, null, 15000, 280000, 4000, 0]);
+  assert.deepEqual(me.proofIds, { score: high, dps: high, break: high, taken: high, heal: high });
   const kaela = rows.find((e) => e.player === "Kaela");
-  assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 1200, high, fast]);
+  assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 900, high, high]);
 
   // "All runs" ranks by those stats too: each player's own card, their best run for it
   const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}`)).json()).entries;
@@ -1534,42 +1553,45 @@ test("at most DAILY_RUN_LIMIT new records an account a day; re-sends still go th
   assert.notEqual((await sendRun(env, token, run("d2", { score: 25000 }))).status, 429);   // the same record again
 });
 
-test("pictures: a run that's nobody's best keeps full screens 14 days and crops 90; bests and runs under review keep all", async () => {
+test("pictures: a better Interlink run replaces the older one's proof at once; bests and runs under review keep theirs", async () => {
   const EVIDENCE = evidenceStore();
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
   const devToken = await namedToken(env, SESSIONS.dev);
   const userToken = await namedToken(env, SESSIONS.user);
   sqlite.prepare("UPDATE game_characters SET verified_at = 1").run();
   const screens = ["evidence", "battle", "evidence_full", "battle_full"];
-  await sendRun(env, devToken, run("best", { score: 30000, stars: 25 }), screens);
-  await sendRun(env, devToken, run("worse", { score: 20000, stars: 20 }), screens);
-  await sendRun(env, devToken, run("review", { score: 10000, stars: 10 }), screens);
-  await sendRun(env, userToken, run("user-best", { score: 40000, stars: 30 }), screens);
-  // not UserOne's best, but better than anything DevOne (in the party, UID proven) sent: DevOne's best, so it stays
-  await sendRun(env, userToken, run("teammates-best", { score: 35000, stars: 28,
-    players: [{ name: "UserOne", self: true }, { name: "DevOne", uid: "301000000001", ai: false }] }), screens);
   const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
-  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch' WHERE client_run_id = 'review'").run();
-  const age = (days) => sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ?").run(Math.floor(Date.now() / 1000) - days * 86400);
   const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
     .map((key) => (/-(battle-)?full\./u.test(key) ? "full" : "crop")).sort();
+  const state = (client, value) => sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = ? WHERE client_run_id = ?").run(value, client);
   let n = 0;
   const prune = async () => { for (let i = 0; i < 3; i += 1) await sendRun(env, devToken, run(`trigger-${n += 1}`, { cycle: "3004", boss: { id: "80000099", name: "Alpha Irisal", level: 1 } })); };
-  age(10);
+
+  // a run under review keeps its pictures, better runs or not (marked before the next run comes in)
+  await sendRun(env, devToken, run("review", { score: 10000, stars: 10 }), screens);
+  state("review", "mismatch");
+  await sendRun(env, devToken, run("worse", { score: 20000, stars: 20 }), screens);
+  // a better run that is itself under review doesn't replace anything yet
+  await sendRun(env, devToken, run("best", { score: 30000, stars: 25 }), screens);
+  state("best", "pending");
   await prune();
-  assert.equal(pictures("worse").length, 4);                              // under 14 days: everything
-  age(20);
-  await prune();
-  assert.deepEqual(pictures("worse"), ["crop", "crop"]);                 // nobody's best: the full screens go
-  for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
-  age(100);
+  assert.equal(pictures("worse").length, 4);
+  // once it's through, the older run's pictures go straight away (no 14 / 90 day wait); its numbers stay
+  state("best", "match");
   await prune();
   assert.deepEqual(pictures("worse"), []);
   const worse = sqlite.prepare("SELECT evidence_key, battle_evidence_key, proof_pruned_at, score FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
-  assert.deepEqual([worse.evidence_key, worse.battle_evidence_key, worse.score], [null, null, 20000]);   // the numbers stay
+  assert.deepEqual([worse.evidence_key, worse.battle_evidence_key, worse.score], [null, null, 20000]);
   assert.ok(worse.proof_pruned_at > 0);
   const listed = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs.find((r) => r.submissionId === id("worse"));
   assert.deepEqual([listed.hasEvidence, listed.hasFullScreens, Boolean(listed.proofPrunedAt)], [false, [], true]);
+
+  // not UserOne's best, but better than anything DevOne (in the party, UID proven) sent: DevOne's best, so it stays
+  await sendRun(env, userToken, run("user-best", { score: 40000, stars: 30 }), screens);
+  await sendRun(env, userToken, run("teammates-best", { score: 35000, stars: 28,
+    players: [{ name: "UserOne", self: true }, { name: "DevOne", uid: "301000000001", ai: false }] }), screens);
+  state("user-best", "match");
+  await prune();
   for (const kept of ["best", "user-best", "teammates-best", "review"]) assert.equal(pictures(kept).length, 4, kept);
 });
 
