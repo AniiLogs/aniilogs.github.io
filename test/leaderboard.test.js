@@ -1861,7 +1861,7 @@ test("a boss board row says how its run ended, with the battle clock: Timed Out,
   assert.deepEqual(await row(), ["cleared", 140, 140]);
 });
 
-test("Timed Out or quit goes by the run's own clock (Overtime: 4:00); a kill after 3:00 is still a kill", async () => {
+test("Timed Out or quit goes by the run's own clock (Overtime: 4:00); every star at the clock's end is Timed Out", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const token = await namedToken(env, SESSIONS.dev);
   const infergon = { boss: { id: "80000107", name: "Omega Infergon", level: 60 } };      // week 3005: 15 stars clear
@@ -1871,7 +1871,20 @@ test("Timed Out or quit goes by the run's own clock (Overtime: 4:00); a kill aft
   // an older app sent no clock: 3:00 decides; and it called a kill at 3:20 "not cleared"
   await sendRun(env, token, run("old-kill", { ...infergon, stars: 15, score: 17000, clearTimeS: 200, cleared: false, playedAt: 1792700100 }));
   const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
-  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[12000, "invalid"], [13000, "time-up"], [17000, "cleared"]]);
+  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[12000, "invalid"], [13000, "time-up"], [17000, "time-up"]]);
   const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((b) => b.id === "80000107").entries[0];
-  assert.deepEqual([row.score, row.outcome, row.runTimeS], [17000, "cleared", 200]);     // Boss Killed: 3:20
+  assert.deepEqual([row.score, row.outcome, row.runTimeS], [17000, "time-up", 200]);     // without its clock, 3:00 decides
+});
+
+test("every star at the clock's end is Timed Out (the team hit for score until time ran out); under the clock it's a kill", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const infergon = { boss: { id: "80000107", name: "Omega Infergon", level: 60 } };      // week 3005: 15 stars clear
+  await sendRun(env, token, run("full-3m", { ...infergon, stars: 15, score: 20062, clearTimeS: 180, cleared: false, playedAt: 1792700300 }));
+  await sendRun(env, token, run("ot-kill", { ...infergon, stars: 15, score: 19000, clearTimeS: 200, cleared: true, extra: { timeLimitS: 240 }, playedAt: 1792700200 }));
+  await sendRun(env, token, run("ot-full", { ...infergon, stars: 15, score: 18000, clearTimeS: 240, cleared: false, extra: { timeLimitS: 240 }, playedAt: 1792700100 }));
+  const history = (await historyOf(env, "/api/profile/history", SESSIONS.dev)).runs;
+  assert.deepEqual(history.map((r) => [r.score, r.outcome]), [[20062, "time-up"], [19000, "cleared"], [18000, "time-up"]]);
+  const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((b) => b.id === "80000107").entries[0];
+  assert.deepEqual([row.score, row.outcome, row.runTimeS], [20062, "time-up", 180]);   // "Timed Out: 3:00"
 });

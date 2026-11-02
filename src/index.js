@@ -3867,7 +3867,8 @@ function runStarRule(cycleId, slot, sentCap) {
 
 // How an Interlink run ended. The game lets the leader end a run early only once the team has every star; otherwise
 // it's a kill (more score) or the clock running out. So:
-// - "cleared": every star for its slot that week (or the cap aLogs read) - a kill;
+// - "cleared": every star for its slot that week (or the cap aLogs read), under the clock - a kill (every star at
+//   the clock's end is "time-up": a team at full stars keeps hitting for score until time runs out);
 // - "ended-early": every star, and the leader ended it (aLogs read the game's "The team leader has ended the
 //   challenge." notice: extra.endedByLeader) - valid, it counts like a clear;
 // - "time-up": the clock ran out without every star (the run's own clock: runTimeLimit);
@@ -3879,13 +3880,18 @@ function interlinkOutcome(row, weeks) {
   const week = interlinkCycle(weeks, row.cycle);
   const slot = week ? week.bosses.findIndex((boss) => String(boss.id) === String(row.boss_id)) : -1;
   const { clear } = runStarRule(row.cycle, slot, sentStarCap(row.extra_json));
-  if ((Number(row.stars) || 0) >= clear) return (parseJsonColumn(row.extra_json) || {}).endedByLeader === true ? "ended-early" : "cleared";
-  return Number(row.clear_time_s) < runTimeLimit(row.extra_json) ? "invalid" : "time-up";
+  const underClock = Number(row.clear_time_s) < runTimeLimit(row.extra_json);
+  if ((Number(row.stars) || 0) >= clear) {
+    return (parseJsonColumn(row.extra_json) || {}).endedByLeader === true ? "ended-early" : underClock ? "cleared" : "time-up";
+  }
+  return underClock ? "invalid" : "time-up";
 }
 // The run's own clock as it started, which aLogs reads off the game's timer (extra.timeLimitS: 4:00 with the Overtime
 // blessing, or a new default), less 2 s for the result screen's rounding; the rules' default when none was sent.
 function runTimeLimit(extraJson) {
-  const sent = (parseJsonColumn(extraJson) || {}).timeLimitS;
+  return timeLimitOf((parseJsonColumn(extraJson) || {}).timeLimitS);
+}
+function timeLimitOf(sent) {
   return Number.isInteger(sent) && sent >= 60 && sent <= 900 ? sent - 2 : INTERLINK_RULES.durationS;
 }
 // Keeps a run's outcome column current (after it's stored or re-sent); the boards skip invalid ones.
@@ -4129,6 +4135,7 @@ async function interlinkBests(env, cycles, list, server = null) {
        s.team_dps AS teamDps, json_extract(s.extra_json, '$.starCap') AS sentCap,
        s.submission_id AS runId, s.evidence_key IS NOT NULL AS hasProof,
        s.outcome, s.clear_time_s AS runTimeS,               -- how it ended, and the battle's clock for every ending
+       json_extract(s.extra_json, '$.timeLimitS') AS sentLimit,
        CASE WHEN s.who LIKE 'name:%' THEN s.teammate ELSE
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1) END AS player,
@@ -4162,7 +4169,9 @@ async function interlinkBests(env, cycles, list, server = null) {
     const slot = cycle ? cycle.bosses.findIndex((boss) => boss.id === String(row.bossId)) : -1;
     const clear = slot >= 0 ? runStarRule(row.cycle, slot, Number.isInteger(row.sentCap) && row.sentCap >= 10 && row.sentCap <= 100 ? row.sentCap : null).clear : null;
     if (clear && (Number(row.stars) || 0) < clear) row.clearTimeS = null;
-    delete row.sentCap;
+    // stored before full stars at the clock's end counted as time-up (2 Nov): read as it is now
+    if (row.outcome === "cleared" && row.runTimeS != null && row.runTimeS >= timeLimitOf(row.sentLimit)) row.outcome = "time-up";
+    delete row.sentCap; delete row.sentLimit;
     return row;
   });
 }
