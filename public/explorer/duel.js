@@ -452,6 +452,7 @@
         if (!entry) continue;
         const option = el("option", "", options.formLabel(entry, options.data.forms?.[formId]));
         option.value = formId;
+        option.dataset.aniimoLink = formId;
         // Extra words the picker's filter matches: elements and the Aniilog number.
         option.dataset.search = [...(entry.elements || []).map((item) => item.name), entry.aniilog_number].filter(Boolean).join(" ");
         option.selected = formId === String(side.formId) && (label === "Your team" || !team.includes(formId));
@@ -475,6 +476,9 @@
     const card = el("section", `duel-side is-${key}`);
     const head = el("header", "duel-side-head");
     head.append(el("h3", "", title));
+    // The picked Aniimo's own page ("take me there", /aniimo-link.js).
+    const link = model.entry && window.AniilogsAniimoLink?.create(String(model.entry.form_id), options.formLabel(model.entry, options.data.forms?.[String(model.entry.form_id)]));
+    if (link) head.append(link);
     if (model.entry?.icon) {
       const icon = el("img", "duel-side-icon");
       icon.src = options.contentUrl ? options.contentUrl(model.entry.icon) : model.entry.icon;
@@ -844,6 +848,9 @@
         );
         label.append(check, copy);
         item.append(label);
+        // Outside the label, so opening the Aniimo's page doesn't tick the buff.
+        const source = entry && window.AniilogsAniimoLink?.create(String(entry.form_id), entry.name);
+        if (source) item.append(source);
         if (effect.tiers?.length > 1) {
           const tier = el("select", "duel-buff-tier");
           tier.setAttribute("aria-label", `${effect.name} rarity`);

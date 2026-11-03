@@ -483,7 +483,7 @@ function renderPhotos(photos, publicView = false) {
         const known = aniimo.get(String(id));
         if (!known) continue;
         const chip = element("a", "profile-photo-aniimo");
-        chip.href = `/explorer/?view=aniilog&aniimo=${encodeURIComponent(id)}`;
+        chip.href = window.AniilogsAniimoLink?.url(id) || `/explorer/?aniimo=${encodeURIComponent(id)}`;
         if (known.icon) {
           const icon = element("img");
           icon.src = known.icon; icon.alt = ""; icon.loading = "lazy";
@@ -1090,19 +1090,33 @@ function historyLineup(run) {
     panel.append(link);
   }
   const facts = element("dl", "history-lineup-facts");
+  // each line: text, or a list of text and nodes (an Aniimo's "take me there" link, /aniimo-link.js)
   const fact = (label, ...lines) => {
-    lines = lines.filter(Boolean);
+    lines = lines.filter((line) => (Array.isArray(line) ? line.length : line));
     if (!lines.length) return;
     const value = element("dd");
-    lines.forEach((line, index) => value.append(index ? element("span", "history-lineup-team", line) : document.createTextNode(line)));
+    lines.forEach((line, index) => {
+      const nodes = (Array.isArray(line) ? line : [line]).filter(Boolean)
+        .map((part) => (typeof part === "string" ? document.createTextNode(part) : part));
+      if (!index) { value.append(...nodes); return; }
+      const team = element("span", "history-lineup-team");
+      team.append(...nodes);
+      value.append(team);
+    });
     facts.append(element("dt", "", label), value);
   };
-  const aniimo = (entry) => [entry.aniimo, Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "",
-    Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : ""].filter(Boolean).join(" ");
+  // the run keeps the Aniimo's name (read from the Party screen): the Aniilog finds the Aniimo by it
+  const aniimo = (entry) => {
+    const text = [entry.aniimo, Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "",
+      Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : ""].filter(Boolean).join(" ");
+    const link = entry.aniimo ? window.AniilogsAniimoLink?.create(entry.aniimo, entry.aniimo) : null;
+    return text ? [text, link] : [];
+  };
   for (const player of players) {
     // the whole team only when aLogs read more than the lead (the rest are icons, there in the picture)
     const team = Array.isArray(player.team) && player.team.length > 1 ? player.team : [];
-    fact(player.name || (player.slot ? `${player.slot}P` : "Player"), aniimo(player), team.length ? `Team: ${team.map(aniimo).join(" · ")}` : "");
+    fact(player.name || (player.slot ? `${player.slot}P` : "Player"), aniimo(player),
+      team.length ? ["Team: ", ...team.flatMap((member, index) => [index ? " · " : "", ...aniimo(member)])] : "");
   }
   fact("Team buffs", buffs.map((buff) => `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`).join(", "));
   if (!picture) facts.append(element("dd", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));

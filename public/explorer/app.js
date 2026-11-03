@@ -304,12 +304,13 @@ const REQUESTED_SETTINGS_OPEN = REQUESTED_SETTINGS_TAB === "1" || REQUESTED_SETT
 const ENABLED_WORKSPACE_VIEWS = new Set(["map", "tracking", "checklist", "itemlog", "team"]);
 if (SITE_CONFIG.aniilogAvailable) ENABLED_WORKSPACE_VIEWS.add("aniilog");
 const HIDDEN_MAP_IDS = new Set(["egg-heist", "egg-heist-team"]);
+// Each Aniimo's own page is /explorer/?aniimo=<form id> (older links say ?view=aniilog&aniimo=<form id>); a name in
+// its place (?aniimo=Emberpup, from pages that only know the name) is matched once the Aniilog data is in.
+const REQUESTED_ANIIMO_KEY = String(INITIAL_URL_PARAMS.get("aniimo") || "").trim();
 const REQUESTED_WORKSPACE_VIEW = ENABLED_WORKSPACE_VIEWS.has(INITIAL_URL_PARAMS.get("view"))
   ? INITIAL_URL_PARAMS.get("view")
-  : "map";
-const REQUESTED_ANIIMO_FORM_ID = /^\d+$/u.test(INITIAL_URL_PARAMS.get("aniimo") || "")
-  ? INITIAL_URL_PARAMS.get("aniimo")
-  : "";
+  : (REQUESTED_ANIIMO_KEY && !INITIAL_URL_PARAMS.get("view") && ENABLED_WORKSPACE_VIEWS.has("aniilog") ? "aniilog" : "map");
+const REQUESTED_ANIIMO_FORM_ID = /^\d+$/u.test(REQUESTED_ANIIMO_KEY) ? REQUESTED_ANIIMO_KEY : "";
 const REQUESTED_ANIIMO_RARITY = INITIAL_URL_PARAMS.get("rarity") || "";
 const REQUESTED_ANIIMO_GENDER = REQUESTED_ANIIMO_FORM_ID
   && ["male", "female"].includes(INITIAL_URL_PARAMS.get("gender"))
@@ -628,6 +629,8 @@ const state = {
     itemlog: 0,
   },
   catalogStickyFrame: 0,
+  // An Aniimo asked for by name in the address, matched when the Aniilog data arrives.
+  pendingAniimoName: REQUESTED_ANIIMO_KEY && !REQUESTED_ANIIMO_FORM_ID ? REQUESTED_ANIIMO_KEY : "",
   catalogSelection: {
     aniilog: REQUESTED_ANIIMO_FORM_ID ? `aniimo:${REQUESTED_ANIIMO_FORM_ID}` : "aniimo:1005100",
     itemlog: "item:4010132",
@@ -2803,6 +2806,8 @@ function renderTracking() {
       `X ${formatCoordinate(entry.x)}, Y ${formatCoordinate(entry.y)}`,
     ].filter(Boolean).join(" - ");
     location.title = location.textContent;
+    const trackedLink = mapItemAniimoLink(state.data?.itemsById?.get(entry.item_id), entry.display_name);
+    if (trackedLink) name.append(trackedLink);
     title.append(name, location);
 
     const remove = document.createElement("button");
@@ -5213,8 +5218,12 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   if (availabilityBadge) name.append(" ", availabilityBadge);
   button.append(icon, copy);
   button.addEventListener("click", () => {
-    state.catalogSelection[view] = entry.id;
-    renderCatalogPreview();
+    // An Aniimo is its own page (one Back step); an item just changes the selection.
+    if (view === "aniilog") openAniimoPage(entry.id, { scrollIndex: false });
+    else {
+      state.catalogSelection[view] = entry.id;
+      renderCatalogPreview();
+    }
     // On phones the details sit below the list, so take the reader there (the search shortcut brings them back).
     if (window.matchMedia(PHONE_CATALOG_QUERY).matches) {
       window.requestAnimationFrame(() => els.catalogPanel.scrollIntoView({ behavior: "smooth", block: "start" }));
@@ -6534,7 +6543,7 @@ function renderResearchGuide(research) {
       open.textContent = aniimo.name;
       open.title = `Open ${aniimo.name} in the Aniilog`;
       open.addEventListener("click", () => openAniilogRecord(aniimo.id));
-      list.append(open);
+      list.append(aniimoLinkPair(open, aniimo.id, aniimo.name));
     });
     block.append(list);
   }
@@ -6542,12 +6551,7 @@ function renderResearchGuide(research) {
 }
 
 function openAniilogRecord(entryId) {
-  state.catalogSelection.aniilog = entryId;
-  state.catalogSearch.aniilog = "";
-  renderCatalogPreview();
-  window.requestAnimationFrame(() => {
-    els.catalogPanel.scrollTo({ top: 0, behavior: "smooth" });
-  });
+  openAniimoPage(entryId);
 }
 
 function createEvolutionNode(node, label, isCurrent = false) {
@@ -6569,6 +6573,10 @@ function createEvolutionNode(node, label, isCurrent = false) {
   copy.append(name, form);
   button.append(icon, copy);
   button.addEventListener("click", () => openAniilogRecord(node.id));
+  if (!isCurrent) {
+    const link = window.AniilogsAniimoLink?.create(String(node.id || "").replace(/^aniimo:/u, ""), node.name);
+    if (link) labelNode.append(link);
+  }
   card.append(labelNode, button);
   if (Array.isArray(node.requirements) && node.requirements.length) {
     const requirements = document.createElement("ul");
@@ -8224,7 +8232,7 @@ function renderAfpBuildTab(entry) {
       button.title = `Open ${partner.name} in the Aniilog`;
       button.disabled = !partner.published;
       button.addEventListener("click", () => openAniilogRecord(partner.id));
-      list.append(button);
+      list.append(partner.published ? aniimoLinkPair(button, partner.id, partner.name) : button);
     });
     section.append(list);
     box.append(section);
@@ -8367,11 +8375,8 @@ function renderAfpFormPills(entry) {
     button.append(icon, String(form.form_label || "Form").replace(/ Form$/u, ""));
     const badge = developerAvailabilityBadge(form.availability, form.availability_note);
     if (badge) button.append(" ", badge);
-    button.addEventListener("click", () => {
-      state.catalogSelection.aniilog = form.id;
-      renderCatalogPreview();
-    });
-    row.append(button);
+    button.addEventListener("click", () => openAniimoPage(form.id, { scrollIndex: false }));
+    row.append(form.id === entry.id ? button : aniimoLinkPair(button, form.id, `${form.name} (${form.form_label || "Form"})`));
   });
   return row;
 }
@@ -9936,6 +9941,7 @@ function renderCatalogPreview(options = {}) {
     return;
   }
 
+  if (view === "aniilog" && state.pendingAniimoName) resolvePendingAniimoName();
   const allEntries = allCatalogEntriesForView(view);
   const entries = catalogEntriesForView(view);
   if (view === "aniilog" && state.aniilogData?.totals && developerModeEnabled()) {
@@ -9977,6 +9983,7 @@ function renderCatalogPreview(options = {}) {
 
   const selected = entries.find((entry) => entry.id === state.catalogSelection[view]) || entries[0];
   state.catalogSelection[view] = selected.id;
+  if (view === "aniilog") syncAniimoAddress(selected);
   let approvedGenders = null;
   if (view === "aniilog") {
     const approvedVariants = Array.isArray(selected.showcase_variants)
@@ -10795,6 +10802,14 @@ function checklistMetaText(entry) {
   ].filter(Boolean).join(" - ");
 }
 
+// A checklist form's "take me there" link to its Aniilog page.
+function appendChecklistAniimoLink(name, entry) {
+  if (!/^\d+$/u.test(String(entry?.form_id || "")) || !ENABLED_WORKSPACE_VIEWS.has("aniilog")) return;
+  const label = `${entry.name || "Aniimo"}${entry.form_label ? ` (${entry.form_label})` : ""}`;
+  const link = window.AniilogsAniimoLink?.create(entry.form_id, label);
+  if (link) name.append(link);
+}
+
 function renderChecklistRow(entry) {
   const row = document.createElement("article");
   row.className = "checklist-row";
@@ -10814,6 +10829,7 @@ function renderChecklistRow(entry) {
   name.title = name.textContent;
   const rowBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
   if (rowBadge) name.append(" ", rowBadge);
+  appendChecklistAniimoLink(name, entry);
   const meta = document.createElement("small");
   meta.textContent = checklistMetaText(entry);
   meta.title = meta.textContent;
@@ -10933,6 +10949,7 @@ function renderChecklistAniimoTable(visibleEntries, allEntries) {
     name.title = name.textContent;
     const rowBadge = developerAvailabilityBadge(entry.availability, entry.availability_note);
     if (rowBadge) name.append(" ", rowBadge);
+    appendChecklistAniimoLink(name, entry);
     const meta = document.createElement("small");
     meta.textContent = checklistMetaText(entry);
     meta.title = meta.textContent;
@@ -11491,15 +11508,142 @@ function renderTeamBuilder() {
     loadAniilog: ensureAniilogData,
     contentUrl,
     dataUrl: TEAM_BUILDER_DATA_URL,
+    pushAddress,
   });
 }
 
-function showWorkspaceView(view) {
-  setSidebarView(view);
+// ---- Addresses and Back/Forward. Opening a section or an Aniimo is a navigation: it adds one history entry
+// (pushState), after saving the scroll positions of the page being left in its own entry. Small changes (typing,
+// filters, a form picked in the 3D viewer) only rewrite the current entry (replaceState). Back and Forward
+// (popstate) put back the section, the Aniimo, the Team Builder tab and the scroll positions.
+function rememberScrollPosition() {
+  try {
+    const index = els.catalogSidebarContent.querySelector(".catalog-index");
+    const scroll = {
+      page: window.scrollY,
+      catalog: els.catalogPanel.scrollTop,
+      team: els.teamPanel.scrollTop,
+      sidebar: els.sidebar.scrollTop,
+      index: index ? index.scrollTop : null,
+    };
+    window.history.replaceState({ ...(window.history.state || {}), scroll }, "", window.location.href);
+  } catch {
+    // Only the scroll position is lost.
+  }
+}
+
+function restoreScrollPosition(scroll) {
+  if (!scroll) return;
+  const apply = () => {
+    const index = els.catalogSidebarContent.querySelector(".catalog-index");
+    if (index && Number.isFinite(scroll.index)) index.scrollTop = scroll.index;
+    if (Number.isFinite(scroll.catalog)) els.catalogPanel.scrollTop = scroll.catalog;
+    if (Number.isFinite(scroll.team)) els.teamPanel.scrollTop = scroll.team;
+    if (Number.isFinite(scroll.sidebar)) els.sidebar.scrollTop = scroll.sidebar;
+    if (Number.isFinite(scroll.page) && MOBILE_LAYOUT_QUERY.matches) window.scrollTo(0, scroll.page);
+  };
+  // After this render, and again once lazy content (the Aniilog data, the Team Builder) has filled in.
+  window.requestAnimationFrame(() => window.requestAnimationFrame(apply));
+  window.setTimeout(apply, 350);
+}
+
+function pushAddress(url, historyState = null) {
+  const next = new URL(url, window.location.href);
+  if (next.href === window.location.href) return;
+  rememberScrollPosition();
+  window.history.pushState(historyState, "", next);
+}
+
+function showWorkspaceView(view, { replace = false } = {}) {
   const url = new URL(window.location.href);
   if (view === "map") url.searchParams.delete("view");
   else url.searchParams.set("view", view);
-  window.history.pushState({ workspaceView: view }, "", url);
+  // The Aniimo and the Team Builder tab belong to their own sections, which put them back as they render.
+  url.searchParams.delete("aniimo");
+  url.searchParams.delete("tab");
+  if (replace) window.history.replaceState({ workspaceView: view }, "", url);
+  else pushAddress(url, { workspaceView: view });
+  setSidebarView(view);
+}
+
+// An Aniimo by form id ("1005100", "aniimo:1005100") or by name; false when the Aniilog is off.
+function selectAniimoFromAddress(key, { scrollIndex = false } = {}) {
+  const id = String(key || "").replace(/^aniimo:/u, "").trim();
+  if (!id || !ENABLED_WORKSPACE_VIEWS.has("aniilog")) return false;
+  if (!/^\d+$/u.test(id)) {
+    state.pendingAniimoName = id;
+    if (state.aniilogData) resolvePendingAniimoName();
+    return true;
+  }
+  state.pendingAniimoName = "";
+  state.catalogSelection.aniilog = `aniimo:${id}`;
+  if (!state.aniilogData) return true;
+  // One hidden by the list's search or filters would fall back to the first match: clear them for it.
+  if (!catalogEntriesForView("aniilog").some((entry) => entry.id === state.catalogSelection.aniilog)) {
+    clearCatalogFiltersForShortcut("aniilog");
+  }
+  if (scrollIndex) {
+    const entryIndex = catalogEntriesForView("aniilog").findIndex((entry) => entry.id === state.catalogSelection.aniilog);
+    if (entryIndex >= 0) state.catalogIndexScroll.aniilog = Math.max(0, entryIndex * CATALOG_INDEX_ROW_HEIGHT - CATALOG_INDEX_ROW_HEIGHT);
+  }
+  return true;
+}
+
+// ?aniimo=<name>: the Basic Form of the Aniimo with that name (or its first form); its id then goes in the address.
+function resolvePendingAniimoName() {
+  const wanted = String(state.pendingAniimoName || "").trim().toLowerCase();
+  if (!wanted || !state.aniilogData) return;
+  state.pendingAniimoName = "";
+  const forms = (state.aniilogData.entries || []).filter((entry) => String(entry?.name || "").trim().toLowerCase() === wanted);
+  const entry = forms.find((form) => aniilogFormKey(form.form_key) === "basic") || forms[0];
+  if (entry) selectAniimoFromAddress(entry.form_id, { scrollIndex: true });
+}
+
+// The open Aniimo's address stays in the bar (replaceState: a form picked in the viewer isn't a new page).
+function syncAniimoAddress(entry) {
+  if (state.sidebarView !== "aniilog" || !entry?.form_id) return;
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("aniimo") === String(entry.form_id)) return;
+  url.searchParams.set("aniimo", String(entry.form_id));
+  if (url.searchParams.get("view") !== "aniilog") url.searchParams.delete("view");
+  window.history.replaceState(window.history.state, "", url);
+}
+
+// A control followed by the "take me there" link (aniimo-link.js) for an entry id ("aniimo:1005100") or form id.
+function aniimoLinkPair(control, id, name) {
+  return window.AniilogsAniimoLink?.inline(control, String(id || "").replace(/^aniimo:/u, ""), name) || control;
+}
+
+// Opens an Aniimo's page in place, as one history entry. The "take me there" links (aniimo-link.js) use it too.
+function openAniimoPage(key, { scrollIndex = true } = {}) {
+  const id = String(key || "").replace(/^aniimo:/u, "").trim();
+  if (!id || !ENABLED_WORKSPACE_VIEWS.has("aniilog")) return false;
+  const url = new URL(window.AniilogsAniimoLink?.url(id) || `/explorer/?aniimo=${encodeURIComponent(id)}`, window.location.href);
+  const current = new URLSearchParams(window.location.search);
+  // The aLogs app's own parameters stay with the visit.
+  for (const name of ["embed", "uid", "theme"]) {
+    if (current.has(name)) url.searchParams.set(name, current.get(name));
+  }
+  pushAddress(url, { workspaceView: "aniilog", aniimo: id });
+  selectAniimoFromAddress(id, { scrollIndex });
+  if (state.sidebarView === "aniilog") renderCatalogPreview();
+  else setSidebarView("aniilog");
+  window.requestAnimationFrame(() => {
+    els.catalogPanel.scrollTo({ top: 0 });
+    if (MOBILE_LAYOUT_QUERY.matches) window.scrollTo(0, 0);
+  });
+  return true;
+}
+
+function applyAddressFromHistory(event) {
+  const params = new URLSearchParams(window.location.search);
+  const key = String(params.get("aniimo") || "").trim();
+  const requested = params.get("view") || (key ? "aniilog" : "map");
+  const view = ENABLED_WORKSPACE_VIEWS.has(requested) ? requested : "map";
+  if (view === "aniilog" && key) selectAniimoFromAddress(key);
+  if (view === "team") window.AniilogsTeamBuilder?.applyAddress?.();
+  setSidebarView(view);
+  restoreScrollPosition(event?.state?.scroll || null);
 }
 
 // Phones: a bottom tab bar replaces the top page links (the aLogs app shows its own tabs, so it has none).
@@ -12114,10 +12258,19 @@ async function openSelectedMarkerCatalogEntry() {
   }
 
   clearCatalogFiltersForShortcut(view);
+  // The Aniimo's own page, or the Item-log: either way one Back step returns to the map and this pin.
+  if (view === "aniilog") {
+    openAniimoPage(entry.id);
+    return;
+  }
   state.catalogSelection[view] = entry.id;
   const orderedEntries = catalogEntriesForView(view);
   const entryIndex = orderedEntries.findIndex((candidate) => candidate.id === entry.id);
   state.catalogIndexScroll[view] = Math.max(0, entryIndex * CATALOG_INDEX_ROW_HEIGHT - CATALOG_INDEX_ROW_HEIGHT);
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", view);
+  url.searchParams.delete("aniimo");
+  pushAddress(url, { workspaceView: view });
   setSidebarView(view);
   window.requestAnimationFrame(() => {
     els.catalogPanel.scrollTo({ top: 0, behavior: "smooth" });
@@ -14369,6 +14522,15 @@ function renderPointSelectionDetail(detail, point) {
   detail.append(title, grid);
 }
 
+// The "take me there" link for an Aniimo on the map (its pin, list row or tracking card): the matching Aniilog form
+// once the Aniilog data is in, until then the species by name. null for anything that isn't an Aniimo.
+function mapItemAniimoLink(item, name) {
+  if (!item?.is_aniimo || !ENABLED_WORKSPACE_VIEWS.has("aniilog")) return null;
+  const entry = state.aniilogData ? resolveAniilogEntryForSelection(item, state.aniilogData.entries || []) : null;
+  const key = entry?.form_id || String(item.species_name || "").trim();
+  return key ? window.AniilogsAniimoLink?.create(key, name || entry?.name || key) || null : null;
+}
+
 function renderSelectionDetail(detail, spawn, item) {
   detail.className = "selection";
   detail.replaceChildren();
@@ -14401,6 +14563,7 @@ function renderSelectionDetail(detail, spawn, item) {
   });
   const small = document.createElement("small");
   small.className = "selection-subtitle";
+  const aniimoLink = mapItemAniimoLink(item, spawn.display_name);
   const normalizedSelectionName = ` ${String(spawn.display_name || "")
     .toLocaleLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
@@ -14432,7 +14595,14 @@ function renderSelectionDetail(detail, spawn, item) {
     underground.append(document.createTextNode("Underground"));
     small.append(underground);
   }
-  titleText.append(strong, small);
+  if (aniimoLink) {
+    const nameLine = document.createElement("span");
+    nameLine.className = "aniimo-link-inline selection-name-line";
+    nameLine.append(strong, aniimoLink);
+    titleText.append(nameLine, small);
+  } else {
+    titleText.append(strong, small);
+  }
   const availabilityBadge = developerAvailabilityBadge(spawn.availability, spawn.availability_note);
   if (availabilityBadge) titleText.append(availabilityBadge);
 
@@ -14937,19 +15107,17 @@ function bindEvents() {
   DESKTOP_SIDEBAR_QUERY.addEventListener("change", (event) => {
     if (!event.matches) setDesktopSidebarCollapsed(false);
   });
-  els.mapWorkspaceTab.addEventListener("click", () => setSidebarView("map"));
-  els.trackingWorkspaceTab.addEventListener("click", () => setSidebarView("tracking"));
-  els.aniilogWorkspaceTab.addEventListener("click", () => setSidebarView("aniilog"));
-  els.itemlogWorkspaceTab.addEventListener("click", () => setSidebarView("itemlog"));
-  els.teamWorkspaceTab.addEventListener("click", () => setSidebarView("team"));
+  els.mapWorkspaceTab.addEventListener("click", () => showWorkspaceView("map"));
+  els.trackingWorkspaceTab.addEventListener("click", () => showWorkspaceView("tracking"));
+  els.aniilogWorkspaceTab.addEventListener("click", () => showWorkspaceView("aniilog"));
+  els.itemlogWorkspaceTab.addEventListener("click", () => showWorkspaceView("itemlog"));
+  els.teamWorkspaceTab.addEventListener("click", () => showWorkspaceView("team"));
   els.topNavMap?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "map"));
   els.topNavAniilog?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "aniilog"));
   els.topNavItemlog?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "itemlog"));
   els.topNavChecklist?.addEventListener("click", (event) => openWorkspaceFromNavigation(event, "checklist"));
-  window.addEventListener("popstate", () => {
-    const view = new URLSearchParams(window.location.search).get("view") || "map";
-    setSidebarView(ENABLED_WORKSPACE_VIEWS.has(view) ? view : "map");
-  });
+  window.addEventListener("popstate", applyAddressFromHistory);
+  window.AniilogsAniimoLink?.setNavigator((key) => openAniimoPage(key));
   els.appVersion.addEventListener("click", openChangelog);
   els.settingsButton.addEventListener("click", openSettings);
   els.topbarDeveloperButton.addEventListener("click", () => {
@@ -14977,7 +15145,7 @@ function bindEvents() {
     if (event.key === "Home") nextIndex = 0;
     if (event.key === "End") nextIndex = tabs.length - 1;
     event.preventDefault();
-    setSidebarView(tabs[nextIndex].dataset.workspaceView);
+    showWorkspaceView(tabs[nextIndex].dataset.workspaceView, { replace: true });
     tabs[nextIndex].focus();
   });
   document.addEventListener("keydown", (event) => {

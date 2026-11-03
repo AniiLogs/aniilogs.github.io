@@ -64,7 +64,7 @@
       const saved = JSON.parse(window.localStorage.getItem(VIEW_STORAGE_KEY) || "null");
       return {
         // A shared link to a Guide section (#guide-…) opens the Guide.
-        page: /^#guide-/u.test(window.location.hash) ? "guide" : ["types", "duel", "guide"].includes(saved?.page) ? saved.page : "team",
+        page: /^#guide-/u.test(window.location.hash) ? "guide" : pageFromAddress() || (["types", "duel", "guide"].includes(saved?.page) ? saved.page : "team"),
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
         memberTab: String(saved?.memberTab || "skills"),
       };
@@ -81,7 +81,41 @@
     }
   }
 
+  // The open tab is in the address (/explorer/?view=team&tab=duel): a shared or reloaded link opens it, and the
+  // browser's Back and Forward return to it. Switching tabs adds a history entry; anything else keeps the entry.
+  // (Called while viewState is first read, so the tab list is a literal here rather than a later constant.)
+  function pageFromAddress() {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    return ["team", "types", "duel", "guide"].includes(tab) ? tab : "";
+  }
+
+  // push: a new history entry, written before the render so the entry being left keeps its own scroll position.
+  function writePageAddress(push, page = viewState.page) {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("view") !== "team" || url.searchParams.get("tab") === page) return;
+    url.searchParams.set("tab", page);
+    if (push && host?.pushAddress) host.pushAddress(url, { workspaceView: "team", tab: page });
+    else if (push) window.history.pushState({ workspaceView: "team", tab: page }, "", url);
+    else window.history.replaceState(window.history.state, "", url);
+  }
+
+  function goToPage(page) {
+    if (viewState.page !== page) writePageAddress(true, page);
+    viewState.page = page;
+    saveViewState();
+    render();
+  }
+
+  // Back/Forward (the explorer's popstate): the tab named in the address.
+  function applyAddress() {
+    const page = pageFromAddress() || "team";
+    if (viewState.page === page) return;
+    viewState.page = page;
+    saveViewState();
+  }
+
   function openTypes(types) {
+    if (viewState.page !== "types") writePageAddress(true, "types");
     viewState = { ...viewState, page: "types", types: types.map(String).slice(0, MAX_TYPE_SELECTION) };
     saveViewState();
     render();
@@ -425,6 +459,11 @@
     return entry?.form_label ? `${name} · ${entry.form_label}` : name;
   }
 
+  // The "take me there" link to a form's Aniilog page (aniimo-link.js), or null.
+  function aniimoLink(formId, entry, form, options) {
+    return formId ? window.AniilogsAniimoLink?.create(String(formId), formLabel(entry, form), options) || null : null;
+  }
+
   // Names the Aniimo picker also matches, as [kind, name]: its skills and traits, the effects they apply
   // (a debuff when it lands on an enemy, otherwise a buff) and the skills' tags. Basic attacks are all
   // called "ATK", so only their effects count. An effect named like its own skill or trait is left out.
@@ -559,6 +598,12 @@
     if (!unique.length) return "";
     const percent = PERCENT_KEY.test(key);
     return unique.map((value) => (percent ? `${formatNumber(value * 100)}%` : formatNumber(value))).join(" / ");
+  }
+
+  // A heading or name with a link after it (when there is one).
+  function withLink(node, link) {
+    if (link) node.append(link);
+    return node;
   }
 
   function pill(text, modifier = "") {
@@ -1048,6 +1093,8 @@
     });
     const header = el("div", "team-sidebar-slot-header");
     header.append(el("span", "team-sidebar-slot-role", slotRole(index)));
+    const slotLink = form ? aniimoLink(member.formId, entry, form) : null;
+    if (slotLink) header.append(slotLink);
     const identity = el("div", "team-sidebar-slot-identity");
     if (entry?.icon) identity.append(icon(entry.icon, "team-sidebar-slot-icon"));
     else identity.append(el("span", "team-sidebar-slot-icon team-sidebar-slot-icon--empty", String(index + 1)));
@@ -1066,6 +1113,7 @@
       item.textContent = option.label;
       if (option.search) item.dataset.search = option.search;
       if (option.keywords?.length) item.dataset.keywords = JSON.stringify(option.keywords);
+      if (option.value) item.dataset.aniimoLink = option.value;
       item.selected = option.value === member.formId;
       if (!option.group) {
         select.append(item);
@@ -1196,7 +1244,8 @@
         el("span", "", form ? entry?.form_label || "" : "Select a team member"),
       );
       card.append(copy);
-      grid.append(card);
+      // The card picks the slot; the link in its corner opens the Aniimo's page.
+      grid.append(form && window.AniilogsAniimoLink ? window.AniilogsAniimoLink.wrapCorner(card, member.formId, formLabel(entry, form)) : card);
     });
     section.append(heading, renderPartners(), grid);
     return section;
@@ -1328,7 +1377,7 @@
     const copy = el("div", "team-member-copy");
     copy.append(
       el("p", "team-eyebrow", slotRole(index)),
-      el("h2", "", entry?.name || form.name),
+      withLink(el("h2", "", entry?.name || form.name), aniimoLink(member.formId, entry, form)),
       el("p", "team-member-meta", [entry?.form_label, entry?.role].filter((part) => typeof part === "string" && part).join(" · ")),
     );
     if (form.elements?.length) {
@@ -1459,6 +1508,7 @@
     else chip.append(el("span", "team-partners-icon team-partners-icon--empty", "?"));
     const copy = el("div", "team-partners-copy");
     const name = el("strong", "", extra ? extra.name : formLabel(entry, form));
+    if (!extra) withLink(name, aniimoLink(partner.formId, entry, form));
     if (extra) {
       const badge = availabilityBadge(extra);
       if (badge) name.append(" ", badge);
@@ -1791,9 +1841,7 @@
     model.activeSlot = slot;
     persist();
     status = `Added to ${slotRole(slot).toLocaleLowerCase()}.`;
-    viewState.page = "team";
-    saveViewState();
-    render();
+    goToPage("team");
   }
 
   function renderTypePicker() {
@@ -1821,7 +1869,7 @@
         const pick = button("", "team-type-member", () => openTypes(form.elements));
         if (entry?.icon) pick.append(icon(entry.icon, "team-type-member-icon"));
         pick.append(el("span", "", entry?.name || form.name));
-        quick.append(pick);
+        quick.append(window.AniilogsAniimoLink?.inline(pick, member.formId, formLabel(entry, form)) || pick);
       });
       section.append(quick);
     }
@@ -1893,7 +1941,7 @@
         if (entry?.icon) card.append(icon(entry.icon, "team-overview-icon"));
         const copy = el("div", "team-overview-copy");
         copy.append(
-          el("strong", "", entry?.name || form.name),
+          withLink(el("strong", "", entry?.name || form.name), aniimoLink(formId, entry, form)),
           el("small", "", [entry?.form_label, entry?.role].filter(Boolean).join(" · ")),
           chipRow(form.elements),
         );
@@ -1955,11 +2003,7 @@
     group.setAttribute("role", "tablist");
     [["team", "Team"], ["types", "Type matchups"], ["duel", "1v1"], ["guide", window.AniilogsGuide?.title || "Guide"]].forEach(([id, label]) => {
       if (id === "guide" && !window.AniilogsGuidePage) return;
-      const control = button(label, "team-mode-button", () => {
-        viewState.page = id;
-        saveViewState();
-        render();
-      });
+      const control = button(label, "team-mode-button", () => goToPage(id));
       control.setAttribute("role", "tab");
       control.setAttribute("aria-selected", String(viewState.page === id));
       group.append(control);
@@ -1992,7 +2036,7 @@
     panel.append(header);
     if (typesPage) panel.append(renderTypesPage());
     else if (duelPage) panel.append(renderDuelPage());
-    else if (guidePage) panel.append(window.AniilogsGuidePage.render());
+    else if (guidePage) panel.append(window.AniilogsGuidePage.render({ aniilog }));
     else panel.append(renderOverview(), renderTeamPage());
   }
 
@@ -2045,6 +2089,7 @@
     model.members.forEach(validateMember);
     persist();
     render();
+    writePageAddress(false);
     requestDeveloperOverlay();
   }
 
@@ -2054,11 +2099,12 @@
     if (viewState.page !== "guide") {
       viewState.page = "guide";
       saveViewState();
+      writePageAddress(false);
       render();
       return;
     }
     document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
-  window.AniilogsTeamBuilder = Object.freeze({ show });
+  window.AniilogsTeamBuilder = Object.freeze({ show, applyAddress });
 })();
