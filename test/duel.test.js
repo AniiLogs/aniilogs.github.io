@@ -34,6 +34,25 @@ test("HP damage follows formula 3001: max(ATK - DEF, 10% ATK) x Might / 10, elem
   assert.ok(Math.abs(duel.hpDamage(attacker, defender, fireKick, { ...scenario, broken: true, brokenBonus: 0.5 }, false) - plain * 1.5) < 1e-9);
 });
 
+test("the attacker's role sets the ATK that goes into formula 3001 (formula_data 3512 and 3513)", () => {
+  const side = (role, level, atk, breakValue) => ({ entry: { role }, side: { level }, stats: { Attack: atk, Break: breakValue } });
+  // DPS (and no role) use ATK as is.
+  assert.equal(duel.roleAttack(side("DPS", 70, 500, 900)).atk, 500);
+  assert.equal(duel.roleAttack({ stats: { Attack: 354 } }).atk, 354);
+  // BREAK: ATK + 0.42 x (min(BREAK, 2.2 x ATK) - 0.5 x ATK), never below ATK.
+  assert.ok(Math.abs(duel.roleAttack(side("BREAK", 70, 300, 600)).atk - (300 + 0.42 * (600 - 150))) < 1e-9);
+  assert.ok(Math.abs(duel.roleAttack(side("BREAK", 70, 300, 2000)).atk - (300 + 0.42 * (660 - 150))) < 1e-9);
+  assert.equal(duel.roleAttack(side("BREAK", 70, 300, 100)).atk, 300);
+  // Support / REGEN / Heal: the higher of ATK and 7 x min(60, Lv) + 0.3 x ATK.
+  assert.ok(Math.abs(duel.roleAttack(side("HEALER", 70, 300, 0)).atk - (420 + 90)) < 1e-9);
+  assert.ok(Math.abs(duel.roleAttack(side("SUPPORT", 30, 100, 0)).atk - (210 + 30)) < 1e-9);
+  assert.equal(duel.roleAttack(side("REGEN", 70, 800, 0)).atk, 800);
+  // hpDamage uses it.
+  const healer = { ...side("HEALER", 70, 300, 0), elements: [] };
+  const target = { stats: { Defense: 110 }, elements: [] };
+  assert.ok(Math.abs(duel.hpDamage(healer, target, fireKick, scenario, false) - (510 - 110) * 7.2) < 1e-9);
+});
+
 test("BREAK damage follows formula 3023 (Might x BREAK rate) and never drops below 1x for elements", () => {
   const resist = { stats: {}, elements: ["5"] };
   assert.ok(Math.abs(duel.breakDamage(attacker, resist, fireKick, scenario, false) - 182 * 7.2) < 1e-9);
