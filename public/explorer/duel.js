@@ -1,3 +1,4 @@
+// game-audit: 1.1.3857679 2026-11-03 RULES (crit, same-element, 10% floor, PvP 0.15, BREAK time 6 s), fallback 3001/3023, role ATK via damage-model.js
 (() => {
   "use strict";
 

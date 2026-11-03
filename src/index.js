@@ -1,3 +1,4 @@
+// game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";

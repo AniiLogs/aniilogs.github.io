@@ -1,3 +1,4 @@
+// game-audit: unaudited skills, traits, buffs and recommendations from team_builder_data.json (generated from the game tables)
 (() => {
   "use strict";
 

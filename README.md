@@ -95,6 +95,35 @@ explicitly approves publication, so an accidental push cannot deploy this
 working tree. Any public-file change must be reviewed and re-pinned before that
 approval flag is changed.
 
+## Game-audit tags
+
+Code whose content comes from the game (formulas, rules, tables, generated
+catalogs) carries one comment line near the top, never shown to players:
+
+```text
+// game-audit: <game version> <YYYY-MM-DD | undated> <what was checked>
+// game-audit: unaudited <what in it comes from the game>
+// game-audit: n/a <why a file that looks game-related isn't>
+```
+
+The version is the installed game's, as `LuaCacheVer.txt` writes it (for
+example `1.1.3857679`). Tag only what was actually re-checked against that
+version, and move the tag forward after re-checking a part for a new game
+version.
+
+```powershell
+npm.cmd run game:audit          # report
+npm.cmd run game:audit:strict   # exit 1 on anything older, unaudited or untagged
+```
+
+The check reads the installed version from `ANIIMO_GAME_DIR` (default: the
+Steam install) `Aniimo_Data/cvs/res/lua/LuaCacheVer.txt`, or the newest
+`builds/<version>` folder under `ANIIMO_GAME_MAP` (the game-files map), and
+skips the version comparison when neither is there. It lists the parts audited
+against the installed game, against an older one, unaudited parts, malformed
+tags, and game-derived files with no tag. `test/game-audit.test.js` keeps every
+game-derived file tagged.
+
 ## Privacy defaults
 
 Profiles are private by default. Public achievements and game identities will

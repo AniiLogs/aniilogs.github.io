@@ -1,3 +1,4 @@
+// game-audit: unaudited Challenge Score from bossrush_grade_data, Interlink and Holo-Battle Sim rules
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
   const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");

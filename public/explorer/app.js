@@ -1,3 +1,4 @@
+// game-audit: unaudited Aniilog pages: stat growth, roles, research, maps and item log read from the game-derived release data
 const SITE_CONFIG = window.ANIILOGS_CONFIG || window.ANIIPEDIA_CONFIG || {};
 // View Model: live 3D viewer origin and the released forms/appearances it shows.
 const VIEW_MODEL_ORIGIN = String(SITE_CONFIG.modelViewerOrigin || "").replace(/\/+$/u, "");

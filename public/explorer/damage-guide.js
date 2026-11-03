@@ -1,3 +1,4 @@
+// game-audit: 1.1.3857679 2026-11-03 every section, table, example and i-note (claim-by-claim list kept with the owner's private notes)
 // The Try-Hard Guide's text and the "i" notes for skills and traits whose game text leaves something
 // out. Plain-text paragraphs (no HTML); the page renders them. Each section says how sure it is:
 // exact (read from the game's scripts or tables), by-name (matched to a game attribute by its name),

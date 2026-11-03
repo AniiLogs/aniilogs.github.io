@@ -1,3 +1,4 @@
+// game-audit: n/a renders damage-guide.js; no game rules of its own
 (() => {
   "use strict";
 

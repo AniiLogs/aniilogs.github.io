@@ -1,3 +1,4 @@
+// game-audit: unaudited Lumin puzzle routes from Scene.<id>.scene_sandbox_data
 // The way through each Lumin puzzle, drawn as a dotted line on the map when its pin is selected (app.js,
 // renderLuminRoute), by the pin's coordinate_key. Read from the game's scene data (Scene.<id>.scene_sandbox_data):
 //   collection  a Lumin collection's start, then each collectible in order (CollectItemPuzzle's itemList), then the Amber
