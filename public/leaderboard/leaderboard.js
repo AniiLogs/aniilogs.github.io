@@ -600,9 +600,11 @@
   const SLOT_CLASSES = ["is-left", "is-center", "is-right"];
   // How a run ended, with its battle clock: "Boss Killed", "Early Exit" (every star, the leader ended it) or "Timed Out"
   // (a quit run - invalid - is on no board); "Menu proof" when there's no clock. Runs from before outcomes were kept go
-  // by their clear time.
+  // by their clear time. An "unconfirmed" run - a two-boss center that ended under the clock without every star - shows
+  // its time alone: until a live run shows how the two bosses' stars add up, the site can't say if it was a kill.
   function clearText(entry) {
     const time = entry.runTimeS ?? entry.clearTimeS;
+    if (entry.outcome === "unconfirmed") return duration(time);
     const ending = entry.outcome === "ended-early" ? "Early Exit" : entry.outcome === "cleared" ? "Boss Killed"
       : entry.outcome === "time-up" ? "Timed Out" : entry.clearTimeS != null ? "Boss Killed" : time != null ? "Timed Out" : null;
     if (!ending) return "Menu proof";                 // sent from the game's menu (its best), not a result screen
