@@ -20,7 +20,7 @@ async function collectFiles(directory, files = []) {
   return files;
 }
 
-const canonicalTextExtensions = new Set([".css", ".html", ".js", ".json", ".txt"]);
+const canonicalTextExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".svg", ".txt", ".webmanifest", ".xml"]);
 
 async function canonicalBytes(path) {
   const bytes = await readFile(path);
