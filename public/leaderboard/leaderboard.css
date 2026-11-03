@@ -271,6 +271,8 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-boss h3 small, .lb-full-head h3 small { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
 .lb-cap { display: grid; justify-items: end; gap: 0.1rem; flex: none; color: var(--muted); font-size: 0.72rem; font-weight: 700; }
 .lb-cap .lb-stars { color: var(--text); font-size: 1rem; font-weight: 900; }
+.lb-unconfirmed { color: var(--muted); font-size: 0.66rem; font-weight: 700; font-style: italic; }
+.lb-unconfirmed-note { flex-basis: 100%; }
 .lb-ladder { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
 .lb-interlink .lb-ladder select { flex: 1 1 0; width: 100%; min-width: 0; }
 .lb-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }

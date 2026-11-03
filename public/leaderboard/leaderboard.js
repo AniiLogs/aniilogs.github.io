@@ -586,7 +586,7 @@
   const LADDERS = [
     { id: "score", label: "Score", proof: "score", value: (e) => number(e.score) },
     { id: "stars", label: "Stars", proof: "score", value: (e) => number(e.score) },
-    { id: "clear", label: "Fastest clear", short: "Time", proof: "clear", value: (e) => clearText(e) },
+    { id: "clear", label: "Fastest clear", short: "Time", proof: "clear", value: (e, boss) => clearText(e, boss) },
     { id: "teamDps", label: "Team DPS", proof: "score", value: (e) => number(e.teamDps) },
     { id: "dps", label: "Avg DPS (one player)", short: "Avg DPS", proof: "dps", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK damage (one player)", short: "BREAK", proof: "break", value: (e) => number(e.breakValue) },
@@ -598,19 +598,36 @@
   const BOARD_ROWS = 10;                                  // a boss board's top rows; "View all" pages the rest
   const FULL_ROWS = 25;
   const SLOT_CLASSES = ["is-left", "is-center", "is-right"];
-  // How a run ended, with its battle clock: "Boss Killed", "Early Exit" (every star, the leader ended it) or "Timed Out"
-  // (a quit run - invalid - is on no board); "Menu proof" when there's no clock. Runs from before outcomes were kept go
-  // by their clear time.
-  function clearText(entry) {
+  // How a run ended, with its battle clock: "Boss Killed" ("Both Killed" on a two-boss board), "Early Exit" (every
+  // star, the leader ended it) or "Timed Out" (a quit run - invalid - is on no board); "Menu proof" when there's no
+  // clock. Runs from before outcomes were kept go by their clear time.
+  function clearText(entry, boss = null) {
     const time = entry.runTimeS ?? entry.clearTimeS;
-    const ending = entry.outcome === "ended-early" ? "Early Exit" : entry.outcome === "cleared" ? "Boss Killed"
-      : entry.outcome === "time-up" ? "Timed Out" : entry.clearTimeS != null ? "Boss Killed" : time != null ? "Timed Out" : null;
+    const killed = boss?.second ? "Both Killed" : "Boss Killed";
+    const ending = entry.outcome === "ended-early" ? "Early Exit" : entry.outcome === "cleared" ? killed
+      : entry.outcome === "time-up" ? "Timed Out" : entry.clearTimeS != null ? killed : time != null ? "Timed Out" : null;
     if (!ending) return "Menu proof";                 // sent from the game's menu (its best), not a result screen
     return time == null ? ending : `${ending}: ${duration(time)}`;
   }
   function shortDate(unix) {
     return new Date(unix * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
+  // A two-boss fight (weeks 4003-4005's center: the second boss comes when the first dies, in the same run) is named by
+  // both bosses: "Alpha Blazen + Omega Tucking", on its tab "Blazen + Tucking".
+  function bossName(boss) {
+    return boss.second ? `${boss.name} + ${boss.second.name}` : boss.name;
+  }
+  function bossTab(boss) {
+    const short = (name) => String(name).replace(/^(Alpha|Omega) /u, "");
+    return boss.second ? `${short(boss.name)} + ${short(boss.second.name)}` : short(boss.name);
+  }
+  // How a two-boss fight's stars add up is only known from a live run (the API says when: rules.twoBossStarsConfirmed);
+  // until then its max stars and a kill's stars are marked unconfirmed.
+  function markPairs(data) {
+    for (const boss of data?.bosses || []) boss.unconfirmed = Boolean(boss.second) && data.rules?.twoBossStarsConfirmed !== true;
+    return data;
+  }
+  const UNCONFIRMED = "Two bosses in one run: how their stars add up isn't confirmed yet";
   function weekRange(week) {
     return `Week of ${shortDate(week.start)} – ${shortDate(week.end)}`;
   }
@@ -640,8 +657,8 @@
     invalid: { text: "✕", label: "Invalid", title: "Invalid" },
   });
   // How a board row's run ended, with its proof pictures beside it
-  function resultLine(entry, ladder) {
-    return [clearText(entry), proofButton(entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder))];
+  function resultLine(entry, ladder, boss = null) {
+    return [clearText(entry, boss), proofButton(entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder))];
   }
   // A board row's badge: its run's check, or "invalid" when the row has no proof pictures at all
   function rowCheck(entry, ladder) {
@@ -658,8 +675,9 @@
   function bossHead(boss, className, detail = "") {
     return el("div", { class: className },
       el("div", {}, el("div", { class: "lb-slot", text: [boss.slot || "Boss", detail].filter(Boolean).join(" · ") }),
-        el("h3", {}, boss.name, boss.level ? el("small", { text: ` · Lv ${boss.level}` }) : null)),
-      boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap)) : null);
+        el("h3", {}, bossName(boss), boss.level ? el("small", { text: ` · Lv ${boss.level}` }) : null)),
+      boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap),
+        boss.unconfirmed ? el("small", { class: "lb-unconfirmed", title: UNCONFIRMED, text: "unconfirmed" }) : null) : null);
   }
   function failed() {
     els.summary.textContent = "The leaderboard could not be loaded.";
@@ -677,8 +695,8 @@
     select.value = ladder.id;
     const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
-      el("span", { class: "lb-who" }, playerName(entry, null, rowCheck(entry, ladder)), el("small", { class: "lb-result" }, ...resultLine(entry, ladder))),
-      el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry) }), stars(entry.stars))));
+      el("span", { class: "lb-who" }, playerName(entry, null, rowCheck(entry, ladder)), el("small", { class: "lb-result" }, ...resultLine(entry, ladder, boss))),
+      el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry, boss) }), stars(entry.stars))));
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
       "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
     bossHead(boss, "lb-boss-head"),
@@ -698,7 +716,7 @@
     const ask = new URLSearchParams({ cycle: cycleId, boss: bossId, ladder: state.ladders[key], limit: String(BOARD_ROWS) });
     if (state.server) ask.set("server", state.server);
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
-    const boss = response.ok ? (await response.json()).bosses?.[0] : null;
+    const boss = response.ok ? markPairs(await response.json()).bosses?.[0] : null;
     const old = els.interlink.querySelector(`[data-week="${CSS.escape(cycleId)}"][data-board-id="${CSS.escape(bossId)}"]`);
     if (boss && old) old.replaceWith(bossBoard(boss, cycleId));
   }
@@ -732,17 +750,22 @@
     const caps = data.rules?.starCaps || [];
     const clear = data.rules?.clearStars || [];
     const slotted = data.bosses.filter((boss) => boss.slotIndex != null);
+    // a two-boss fight's slot: its max stars and kill stars aren't confirmed yet
+    const pairs = slotted.filter((boss) => boss.unconfirmed);
+    const mark = (values) => values.map((value, slot) => (pairs.some((boss) => boss.slotIndex === slot) ? `${value} (unconfirmed)` : value)).join(" / ");
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" }, weekNav(data), last ? null : updatedLine(data.updatedAt)),
       el("p", { class: "lb-rules" },
-        caps.length ? el("span", {}, el("b", { text: "Max stars " }), caps.join(" / ")) : null,
-        clear.length ? el("span", { text: `A kill is ${new Set(clear).size === 1 ? clear[0] : clear.join(" / ")} stars` }) : null,
+        caps.length ? el("span", {}, el("b", { text: "Max stars " }), mark(caps)) : null,
+        clear.length ? el("span", { text: `A kill is ${new Set(clear).size === 1 && !pairs.length ? clear[0] : mark(clear)} stars` }) : null,
+        ...pairs.map((boss) => el("span", { class: "lb-unconfirmed-note",
+          text: `${boss.slot || "This"} fight: ${boss.name}, then ${boss.second.name}, in one run. How its stars add up isn't confirmed yet.` })),
         el("span", { text: "Best run per player per boss" }),
         el("span", { text: "Ranked by score; pick another ladder in each board's menu" })),
       el("div", { class: "lb-slot-switch", role: "tablist", "aria-label": "Boss" }, ...slotted.map((boss) => el("button", {
         type: "button", role: "tab", "data-slot-index": boss.slotIndex, "aria-selected": String(boss.slotIndex === state.slot),
         class: SLOT_CLASSES[boss.slotIndex], onclick: () => { state.slot = boss.slotIndex; showSlot(); },
-      }, boss.slot, el("small", { text: boss.name.replace(/^(Alpha|Omega) /u, "") })))),
+      }, boss.slot, el("small", { text: bossTab(boss) })))),
       ...(last ? [weekHead(data, false)] : []),            // its dates are in the week menu just above
       el("div", { class: "lb-bosses" }, data.bosses.map((boss) => bossBoard(boss, data.cycle.id))),
       ...(last ? [weekHead(last), el("div", { class: "lb-bosses" }, last.bosses.map((boss) => bossBoard(boss, last.cycle.id)))] : []),
@@ -757,7 +780,7 @@
   const FULL_COLUMNS = [
     { id: "score", label: "Score", value: (e) => number(e.score) },
     { id: "stars", label: "Stars", value: (e) => stars(e.stars) },
-    { id: "clear", label: "Time", value: (e) => clearText(e) },
+    { id: "clear", label: "Time", value: (e, boss) => clearText(e, boss) },
     { id: "teamDps", label: "Team DPS", value: (e) => number(e.teamDps) },
     { id: "dps", label: "Avg DPS", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK", value: (e) => number(e.breakValue) },
@@ -790,7 +813,7 @@
       el("td", { class: "lb-rank", text: String(entry.rank) }),
       el("td", { class: "lb-player" }, playerName(entry, null, rowCheck(entry, ladder))),
       columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null },
-        column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder)) : column.value(entry)))))
+        column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder, boss)) : column.value(entry, boss)))))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
     const first = boss.total ? state.offset + 1 : 0;
@@ -799,7 +822,7 @@
     for (const node of [els.prev, els.next, els.page]) node.hidden = boss.total <= FULL_ROWS;
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= boss.total;
-    els.summary.textContent = `${boss.name} · ranked by ${ladder.label.toLowerCase()} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
+    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
   }
   function fold(column, index) {
     return index && !["score", "stars", "clear", "date"].includes(column.id) ? "lb-hide-sm" : "";
@@ -852,7 +875,7 @@
     if (state.server) ask.set("server", state.server);
     const get = async (params) => {
       const response = await apiFetch(`/leaderboard/interlink?${params}`);
-      return response.ok ? response.json() : null;
+      return response.ok ? markPairs(await response.json()) : null;
     };
     if (board().custom === "season") {
       if (!state.season) {                                   // nothing picked: the current week's season and split

@@ -1032,6 +1032,8 @@ const weekLabel = (week) => (week?.start ? `Week of ${shortDate(week.start)}` : 
 function historyTitle(run) {
   if (run.mode === "sim") return [run.trialName || "Holo-Battle Sim", run.difficulty].filter(Boolean).join(" · ");
   if (run.mode === "eggheist") return run.rank?.name ? `Egg Heist · ${run.rank.name}` : "Egg Heist";
+  // a two-boss fight (weeks 4003-4005's center): both bosses, the first the run is filed under
+  if (run.boss?.name && run.boss.second?.name) return `${run.boss.name} + ${run.boss.second.name}`;
   return run.boss?.name || "Holo-Battle Interlink";
 }
 function historyNumbers(run) {
