@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, "..");
 const git = (...args) => execFileSync("git", args, { cwd: root, maxBuffer: 64 * 1024 * 1024 });
 const names = git("ls-tree", "-r", "--name-only", "-z", "HEAD", "public")
   .toString("utf8").split("\0").filter(Boolean).sort();
-const canonicalTextExtensions = new Set([".css", ".html", ".js", ".json", ".txt"]);
+const canonicalTextExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".svg", ".txt", ".webmanifest", ".xml"]);
 const tree = createHash("sha256");
 let totalBytes = 0;
 for (const path of names) {

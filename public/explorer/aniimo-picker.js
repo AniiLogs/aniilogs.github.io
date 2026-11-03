@@ -7,6 +7,7 @@
 // An option can also carry named keywords in data-keywords, a JSON list of [kind, name] pairs (the Team
 // Builder's skills, traits and the effects they apply): typed words match those names too, and the matching
 // ones are shown under the option ("Skill · Star Glide") so it's clear why it's in the list.
+// An option with data-aniimo-link (an Aniimo's form id) shows a link to that Aniimo's page beside its name.
 (() => {
   let nextId = 0;
 
@@ -223,6 +224,10 @@
         } else {
           item.append(...highlighted(entry.option.textContent, words));
         }
+        // An Aniimo option (data-aniimo-link: its form id) also gets the "take me there" link (/aniimo-link.js);
+        // the link keeps its clicks, so it opens the Aniimo's page without picking it.
+        const link = entry.option.dataset.aniimoLink && window.AniilogsAniimoLink?.create(entry.option.dataset.aniimoLink, entry.option.textContent);
+        if (link) item.prepend(link);
         if (entry.option.disabled) {
           item.classList.add("is-disabled");
           item.setAttribute("aria-disabled", "true");

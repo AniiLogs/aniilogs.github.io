@@ -13,7 +13,7 @@ const profileSaveButton = document.querySelector("[data-profile-save]");
 const profileStatus = document.querySelector("[data-profile-status]");
 const profileOverview = document.querySelector("[data-profile-overview]");
 const PROFILE_VIEW = new URLSearchParams(window.location.search).get("view") === "profile"
-  || /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "");
+  || /^(?:[A-Za-z0-9]{8,24}|\d{1,24})$/u.test(new URLSearchParams(window.location.search).get("profile") || "");
 const profilePublic = document.querySelector("[data-profile-public]");
 const profilePublicRow = document.querySelector("[data-profile-public-row]");
 const profilePublicLink = document.querySelector("[data-profile-public-link]");
@@ -24,8 +24,9 @@ const profilePresenceRow = document.querySelector("[data-profile-presence-row]")
 const profileSearchRow = document.querySelector("[data-profile-search-row]");
 const profileListedInSearch = document.querySelector("[data-profile-search]");
 // /?view=profile is the profile page: your own profile (or a sign-in prompt), with a search for anyone else's.
-// /?profile=<id> shows someone's public profile (read-only) in the same view.
-const PUBLIC_PROFILE_ID = /^[A-Za-z0-9]{8,24}$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
+// /?profile=<id> shows someone's public profile (read-only) in the same view; <id> can be a character's game UID
+// (the profile of the account that linked it, or "This profile is private").
+const PUBLIC_PROFILE_ID = /^(?:[A-Za-z0-9]{8,24}|\d{1,24})$/u.test(new URLSearchParams(window.location.search).get("profile") || "")
   ? new URLSearchParams(window.location.search).get("profile")
   : "";
 // true once the server says the profile at ?profile=<id> is the viewer's own
@@ -169,8 +170,10 @@ function showVisibility(profile) {
     private: "Private · visible only to you" }[profilePublic.value];
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
   if (profile.isPublic && profile.publicId) {
-    const link = element("a", "", `${window.location.origin}/?profile=${profile.publicId}`);
-    link.href = `/?profile=${profile.publicId}`;
+    // the main character's game UID when there is one (the profile id link keeps working)
+    const id = profile.profileUid || profile.publicId;
+    const link = element("a", "", `${window.location.origin}/?profile=${id}`);
+    link.href = `/?profile=${id}`;
     profilePublicLink.replaceChildren("Your profile link: ", link);
   }
 }
@@ -480,7 +483,7 @@ function renderPhotos(photos, publicView = false) {
         const known = aniimo.get(String(id));
         if (!known) continue;
         const chip = element("a", "profile-photo-aniimo");
-        chip.href = `/explorer/?view=aniilog&aniimo=${encodeURIComponent(id)}`;
+        chip.href = window.AniilogsAniimoLink?.url(id) || `/explorer/?aniimo=${encodeURIComponent(id)}`;
         if (known.icon) {
           const icon = element("img");
           icon.src = known.icon; icon.alt = ""; icon.loading = "lazy";
@@ -565,10 +568,11 @@ async function loadProfileOverview(publicId = "") {
   try {
     const response = await apiFetch(publicId ? `/profiles/${encodeURIComponent(publicId)}` : "/profile/overview");
     if (response.status === 404 && publicId) {
+      const isPrivate = (await response.json().catch(() => ({}))).private === true;
       for (const panel of profileOverview.querySelectorAll("[data-overview-panel]")) panel.hidden = true;
-      profileOverview.querySelector("[data-overview-name]").textContent = "Profile not found";
-      overviewStatus.textContent = "This profile is private or doesn't exist.";
-      describeForSearch({ title: "AniiLogs — Profile not found", noindex: true });
+      profileOverview.querySelector("[data-overview-name]").textContent = isPrivate ? "This profile is private" : "Profile not found";
+      overviewStatus.textContent = isPrivate ? "Its owner keeps this profile private." : "This profile is private or doesn't exist.";
+      describeForSearch({ title: isPrivate ? "AniiLogs — Private profile" : "AniiLogs — Profile not found", noindex: true });
       return;
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -845,7 +849,7 @@ if (PROFILE_VIEW) {
 // private profile has none, and its owner is told where to make one.
 function showProfileLink(publicId, profile) {
   const share = profileOverview.querySelector("[data-profile-share]");
-  const id = publicId || profile?.publicId || "";
+  const id = publicId || (profile?.publicId ? profile.profileUid || profile.publicId : "");
   const url = share.querySelector("[data-profile-share-url]");
   const note = share.querySelector("[data-profile-share-note]");
   share.hidden = !PROFILE_VIEW;
@@ -1091,19 +1095,33 @@ function historyLineup(run) {
     panel.append(link);
   }
   const facts = element("dl", "history-lineup-facts");
+  // each line: text, or a list of text and nodes (an Aniimo's "take me there" link, /aniimo-link.js)
   const fact = (label, ...lines) => {
-    lines = lines.filter(Boolean);
+    lines = lines.filter((line) => (Array.isArray(line) ? line.length : line));
     if (!lines.length) return;
     const value = element("dd");
-    lines.forEach((line, index) => value.append(index ? element("span", "history-lineup-team", line) : document.createTextNode(line)));
+    lines.forEach((line, index) => {
+      const nodes = (Array.isArray(line) ? line : [line]).filter(Boolean)
+        .map((part) => (typeof part === "string" ? document.createTextNode(part) : part));
+      if (!index) { value.append(...nodes); return; }
+      const team = element("span", "history-lineup-team");
+      team.append(...nodes);
+      value.append(team);
+    });
     facts.append(element("dt", "", label), value);
   };
-  const aniimo = (entry) => [entry.aniimo, Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "",
-    Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : ""].filter(Boolean).join(" ");
+  // the run keeps the Aniimo's name (read from the Party screen): the Aniilog finds the Aniimo by it
+  const aniimo = (entry) => {
+    const text = [entry.aniimo, Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "",
+      Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : ""].filter(Boolean).join(" ");
+    const link = entry.aniimo ? window.AniilogsAniimoLink?.create(entry.aniimo, entry.aniimo) : null;
+    return text ? [text, link] : [];
+  };
   for (const player of players) {
     // the whole team only when aLogs read more than the lead (the rest are icons, there in the picture)
     const team = Array.isArray(player.team) && player.team.length > 1 ? player.team : [];
-    fact(player.name || (player.slot ? `${player.slot}P` : "Player"), aniimo(player), team.length ? `Team: ${team.map(aniimo).join(" · ")}` : "");
+    fact(player.name || (player.slot ? `${player.slot}P` : "Player"), aniimo(player),
+      team.length ? ["Team: ", ...team.flatMap((member, index) => [index ? " · " : "", ...aniimo(member)])] : "");
   }
   fact("Team buffs", buffs.map((buff) => `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`).join(", "));
   if (!picture) facts.append(element("dd", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));

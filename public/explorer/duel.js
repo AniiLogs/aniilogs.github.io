@@ -1,10 +1,12 @@
+// game-audit: 1.1.3857679 2026-11-03 RULES (crit, same-element, 10% floor, PvP 0.15, BREAK time 6 s), fallback 3001/3023, role ATK via damage-model.js
 (() => {
   "use strict";
 
   // 1v1: what one Aniimo's attacks do to another, with the game's own damage formulas decoded from its scripts
-  // (Data/formula_data.lua 3001 HP damage, 3023 BREAK damage; CombatActionTool's crit, element and same-element
-  // rules). Stats come from the Aniilog's stat_growth, so they match the Aniimo page. Every number assumes the
-  // attack lands: dodges, misses, positioning and buffs are not simulated.
+  // (Data/formula_data.lua 3001 HP damage with the role's ATK from 3512 / 3513, 3023 BREAK damage;
+  // CombatActionTool's crit, element and same-element rules). Stats come from the Aniilog's stat_growth, so they
+  // match the Aniimo page. Every number assumes the attack lands: dodges, misses, positioning and buffs are not
+  // simulated.
   // Team Builder mounts it with render({ aniilog, data, members, memberStats, formLabel, contentUrl, developerMode, rerender }).
   const STORAGE_KEY = "aniilogs:duel:v1";
   const RULES = Object.freeze({
@@ -233,10 +235,21 @@
 
   // --- Damage ---------------------------------------------------------------------------------------
 
+  // The ATK formula 3001 gets for this attacker: its role's ATK (damage-model.js roleAttack, formula_data 3512 for
+  // BREAK and 3513 for Support / REGEN / Heal, game 1.1), from the Aniilog entry's `role` (= pet_data.functionId).
+  // Without the damage model loaded, ATK as is.
+  function roleAttack(attacker) {
+    const stats = attacker.stats || {};
+    const model = window.AniilogsDamage;
+    if (model?.roleAttack) return model.roleAttack(attacker.entry?.role, stats.Attack, stats.Break, attacker.side?.level);
+    const atk = Math.max(stats.Attack || 0, 0);
+    return { atk, base: atk, role: null, formula: null, basis: "exact", slope: 1, note: "" };
+  }
+
   // Formula 3001 for one hit, with every modifier the scenario doesn't set left neutral (1x).
   function hpDamage(attacker, defender, attack, scenario, crit) {
-    const [atkKey, defKey] = STAT_KEYS[attack.category];
-    const atk = Math.max(attacker.stats[atkKey] || 0, 0);
+    const [, defKey] = STAT_KEYS[attack.category];
+    const atk = roleAttack(attacker).atk;
     const def = defender.stats[defKey] || 0;
     let damage = Math.max(atk - def, RULES.minimumShare * atk) * (chosenRate(attack) * attack.might / 10);
     damage *= elementFactor(scenario.data, attack.element, defender.elements);
@@ -296,8 +309,9 @@
   function modelHit(attacker, defender, attack, scenario) {
     const model = window.AniilogsDamage;
     if (!model?.hit) return null;
+    const used = roleAttack(attacker);
     const side = (model, modifiers) => ({
-      atk: model.stats.Attack || 0,
+      atk: model === attacker ? used.atk : model.stats.Attack || 0,
       pdef: model.stats.Defense || 0,
       mdef: model.stats["Magic Defense"] || 0,
       breakAtk: model.stats.Break || 0,
@@ -308,7 +322,7 @@
     const attackerMods = { ...(scenario.attackerMods || {}) };
     if (scenario.broken && scenario.brokenBonus) attackerMods.dmg_break_add_ratio = (attackerMods.dmg_break_add_ratio || 0) + scenario.brokenBonus;
     const type = attack.group === "Normal" ? "basic" : attack.group === "Ultimate" ? "ultimate" : "skill";
-    return model.hit(side(attacker, attackerMods), side(defender, scenario.defenderMods || {}), {
+    const result = model.hit(side(attacker, attackerMods), side(defender, scenario.defenderMods || {}), {
       might: attack.might,
       // BREAK (formula 3023): the skill's Might times its bpRate; tpPower only drains toughness.
       breakRate: attack.breakRate,
@@ -323,6 +337,9 @@
       broken: scenario.broken,
       pvp: scenario.pvp,
     });
+    // The working starts with the ATK that went in, when the role changes it or says how it's used.
+    if (result && used.note) result.steps = [{ label: `ATK used: ${used.note}`, value: used.atk, basis: used.basis, whole: true }, ...(result.steps || [])];
+    return result;
   }
 
   function matchup(aniilog, data, attackerSide, defenderSide, scenario) {
@@ -435,6 +452,7 @@
         if (!entry) continue;
         const option = el("option", "", options.formLabel(entry, options.data.forms?.[formId]));
         option.value = formId;
+        option.dataset.aniimoLink = formId;
         // Extra words the picker's filter matches: elements and the Aniilog number.
         option.dataset.search = [...(entry.elements || []).map((item) => item.name), entry.aniilog_number].filter(Boolean).join(" ");
         option.selected = formId === String(side.formId) && (label === "Your team" || !team.includes(formId));
@@ -458,6 +476,9 @@
     const card = el("section", `duel-side is-${key}`);
     const head = el("header", "duel-side-head");
     head.append(el("h3", "", title));
+    // The picked Aniimo's own page ("take me there", /aniimo-link.js).
+    const link = model.entry && window.AniilogsAniimoLink?.create(String(model.entry.form_id), options.formLabel(model.entry, options.data.forms?.[String(model.entry.form_id)]));
+    if (link) head.append(link);
     if (model.entry?.icon) {
       const icon = el("img", "duel-side-icon");
       icon.src = options.contentUrl ? options.contentUrl(model.entry.icon) : model.entry.icon;
@@ -504,6 +525,13 @@
         stats.append(pair);
       }
       card.append(stats);
+      // Role and the ATK its hits use (roleAttack), when the role changes it.
+      const used = roleAttack(model);
+      if (used.role) {
+        const roleLine = el("p", "duel-note", `Role: ${used.role.label}.`);
+        if (Math.round(used.atk) !== Math.round(used.base)) roleLine.textContent += ` Its hits use ATK ${whole(used.atk)} (formula ${used.role.formula}${used.basis === "inferred" ? ", not verified: inferred" : ""}).`;
+        card.append(roleLine);
+      }
     }
     return card;
   }
@@ -820,6 +848,9 @@
         );
         label.append(check, copy);
         item.append(label);
+        // Outside the label, so opening the Aniimo's page doesn't tick the buff.
+        const source = entry && window.AniilogsAniimoLink?.create(String(entry.form_id), entry.name);
+        if (source) item.append(source);
         if (effect.tiers?.length > 1) {
           const tier = el("select", "duel-buff-tier");
           tier.setAttribute("aria-label", `${effect.name} rarity`);
@@ -864,7 +895,7 @@
     for (const step of row.steps) {
       const item = el("li");
       const value = Number(step.value);
-      const shown = step.label.startsWith("Base") ? whole(value) : `×${Math.round(value * 1000) / 1000}`;
+      const shown = step.whole || step.label.startsWith("Base") ? whole(value) : `×${Math.round(value * 1000) / 1000}`;
       item.append(el("span", "", step.label), el("b", "", shown));
       if (step.basis && step.basis !== "exact") item.append(el("small", "duel-step-basis", step.basis === "inferred" ? "not verified: inferred" : step.basis === "by-name" ? "not verified: matched by name" : step.basis));
       list.append(item);
@@ -911,10 +942,10 @@
     );
     root.append(results);
     const sources = el("p", "duel-sources");
-    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. BREAK dmg is formula 3023: BREAK stat × Might ÷ 10 × the skill’s BREAK rate, and it can crit. Hits to BREAK divides the opponent’s BREAK bar by it and isn’t checked in the game yet. Toughness (a separate stagger gauge) is in each attack’s working. Physical skills hit P.DEF and magic skills M.DEF, both with ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. The ATK that goes in depends on the attacker's role, as the game's role-trait tooltips say: DPS uses ATK; BREAK uses formula 3512, ATK + 0.42 × (BREAK − half of ATK), with BREAK counted up to 2.2× ATK; Support, REGEN and Heal use formula 3513, 7 × level (up to Lv 60) + 0.3 × ATK, when that is more than ATK (the “when more” part is inferred from the tooltip, not read from the game). Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. BREAK dmg is formula 3023: BREAK stat × Might ÷ 10 × the skill’s BREAK rate, and it can crit. Hits to BREAK divides the opponent’s BREAK bar by it and isn’t checked in the game yet. Toughness (a separate stagger gauge) is in each attack’s working. Physical skills hit P.DEF and magic skills M.DEF, both with the role's ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
     root.append(sources);
     return root;
   }
 
-  window.AniilogsDuel = Object.freeze({ render, rules: RULES, hpDamage, breakDamage, rotation, grownStat });
+  window.AniilogsDuel = Object.freeze({ render, rules: RULES, hpDamage, breakDamage, roleAttack, rotation, grownStat });
 })();

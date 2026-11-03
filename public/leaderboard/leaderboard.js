@@ -1,3 +1,4 @@
+// game-audit: unaudited Challenge Score from bossrush_grade_data, Interlink and Holo-Battle Sim rules
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
   const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
@@ -78,7 +79,7 @@
     // Interlink: the week shown, the board opened with "View all" and its ladder, each board's ladder, the boss a phone
     // shows (0 left, 1 center, 2 right), and the Season Ladder's season, split ("all": the whole season) and order
     week: "", viewBoss: "", viewLadder: "score", ladders: {}, slot: 1, season: "", split: "", rank: "score",
-    status: null, facets: null, total: 0, expanded: new Set(), requestId: 0,
+    status: null, facets: null, total: 0, expanded: new Set(), requestId: 0, push: false,
   };
 
   // ---------------------------------------------------------------- helpers
@@ -196,10 +197,20 @@
     if (state.offset) params.set("offset", String(state.offset));
     return params;
   }
+  // Switching game mode, board, week or "View all" is a navigation (state.push: a new history entry, after the page
+  // being left saves its scroll position in its own entry); sorting, filters and paging only rewrite the entry.
+  // The browser's Back and Forward (popstate below) bring the board back.
   function writeUrl() {
     const url = new URL(window.location.href);
     url.search = query().toString();
-    window.history.replaceState(null, "", url);
+    const push = state.push && url.href !== window.location.href;
+    state.push = false;
+    if (push) {
+      window.history.replaceState({ ...(window.history.state || {}), scroll: window.scrollY }, "", window.location.href);
+      window.history.pushState(null, "", url);
+    } else {
+      window.history.replaceState(window.history.state, "", url);
+    }
   }
 
   // ---------------------------------------------------------------- filters
@@ -231,6 +242,7 @@
     });
     const pickBoard = (kind) => {
       if (state.kind === kind) return;
+      state.push = true;
       state.kind = kind;
       state.sort = "";
       state.order = "";
@@ -385,6 +397,8 @@
       el("strong", { text: "Setup" }),
       setup.team?.length ? el("ol", { class: "lb-setup-team" }, setup.team.map((member) => el("li", {},
         el("span", { text: `${member.name}${member.level ? ` Lv ${member.level}` : ""}` }),
+        // the run records only the name (read from the result screen): the Aniilog finds the Aniimo by it
+        member.name ? window.AniilogsAniimoLink?.create(member.name, member.name) : null,
         member.mvp ? el("span", { class: "lb-mark lb-mvp", text: "MVP" }) : null))) : null,
       shares.length ? el("p", { class: "lb-facts", text: `MVP share: ${shares.join(" · ")}` }) : null,
       facts.length ? el("dl", { class: "lb-setup-facts" }, facts.flatMap(([label, value]) => [el("dt", { text: label }), el("dd", { text: value })])) : null,
@@ -708,6 +722,7 @@
       : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
     boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(boss.total)} →`,
       onclick: () => {
+        state.push = true;
         state.returnWeek = state.week; state.week = cycleId;     // back from "View all" returns to this page
         state.viewBoss = boss.id; state.viewLadder = ladder.id; state.offset = 0; void loadEntries();
       } }) : null);
@@ -735,7 +750,7 @@
     const now = Date.now() / 1000;
     const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id);   // in time order
     const at = weeks.findIndex((week) => week.id === data.cycle.id);
-    const go = (week) => { state.week = week.id; state.ladders = {}; state.viewBoss = ""; state.offset = 0; void loadEntries(); };
+    const go = (week) => { state.push = true; state.week = week.id; state.ladders = {}; state.viewBoss = ""; state.offset = 0; void loadEntries(); };
     const when = weekAgo(data.cycle);
     return el("div", { class: "lb-week-nav" },
       el("button", { type: "button", "aria-label": "Previous week", text: "‹", disabled: at <= 0, onclick: () => go(weeks[at - 1]) }),
@@ -795,6 +810,7 @@
     const ladder = ladderOf(state.viewLadder);
     const back = () => {
       if (state.returnWeek !== undefined) { state.week = state.returnWeek; delete state.returnWeek; }
+      state.push = true;
       state.viewBoss = ""; state.offset = 0; void loadEntries();
     };
     if (!boss) { back(); return; }
@@ -1004,6 +1020,7 @@
   document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
     tab.addEventListener("click", async () => {
       if (state.mode === tab.dataset.modeTab) return;
+      state.push = true;
       state.mode = tab.dataset.modeTab;
       state.kind = BOARDS[state.mode][0].kind;
       state.sort = "";
@@ -1046,6 +1063,22 @@
   els.next.addEventListener("click", () => {
     state.offset += pageSize();
     void loadEntries();
+  });
+
+  // Back/Forward: the board in the address, then the scroll position it was left at.
+  window.addEventListener("popstate", async (event) => {
+    if (els.board.hidden) return;
+    const mode = state.mode;
+    state.push = false;
+    delete state.returnWeek;
+    state.expanded.clear();
+    readUrl();
+    renderControls();
+    if (state.mode !== mode) await loadFacets();
+    renderControls();
+    await loadEntries();
+    const scroll = Number(event.state?.scroll);
+    if (Number.isFinite(scroll)) window.requestAnimationFrame(() => window.scrollTo(0, scroll));
   });
 
   // ---------------------------------------------------------------- access gate

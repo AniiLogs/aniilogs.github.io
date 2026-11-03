@@ -1,3 +1,4 @@
+// game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -1330,7 +1331,9 @@ async function ownProfile(request, env) {
   const isPublic = Number(row?.isPublic || 0) === 1;
   const { prefs, ...shown } = row || {};
   const { mode, parts } = profileVisibility(row?.isPublic, prefs);
-  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null } });
+  // profileUid: the main character's game UID, the address of the profile link (?profile=<UID>)
+  const main = await mainCharacter(env, account.discordId);
+  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1607,6 +1610,8 @@ async function ownProfileOverview(request, env) {
       isPublic: Number(profile?.isPublic || 0) === 1,
       visibility: profileVisibility(profile?.isPublic, profile?.prefs).mode,
       ...(Number(profile?.isPublic || 0) === 1 && profile?.publicId ? { publicId: profile.publicId } : {}),
+      // the main character's game UID: the profile link's address (?profile=<UID>)
+      profileUid: main?.gameUid || null,
     },
     layout: storedProfileLayout(profile?.prefs),
     characters: (characters.results || []).map(({ level, gender, server, exp, expNeeded, ...row }) => ({ ...row, ...characterDetails({ level, gender, server, exp, expNeeded }) })),
@@ -1893,8 +1898,10 @@ async function ownBattleHistory(request, env) {
   if (!leaderboardAllowed(account, env)) return json({ runs: [], next: null, filters: { modes: [], bosses: [], weeks: [] } });
   return json(await battleHistory(env, account.discordId, new URL(request.url).searchParams, { owner: true }));
 }
-async function publicBattleHistory(request, env, publicId) {
-  const profile = await env.DB.prepare("SELECT discord_id AS discordId, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1").bind(publicId).first();
+async function publicBattleHistory(request, env, id) {
+  const resolved = await resolveProfileId(env, id);
+  if (resolved.private) return json({ error: "This profile is private.", private: true }, 404);
+  const profile = await env.DB.prepare("SELECT discord_id AS discordId, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1").bind(resolved.publicId).first();
   if (!profile || !profileVisibility(1, profile.prefs).parts.includes("history")) return json({ error: "Profile not found." }, 404);
   if (!leaderboardPublic(env)) return json({ runs: [], next: null, filters: { modes: [], bosses: [], weeks: [] } });
   return json(await battleHistory(env, profile.discordId, new URL(request.url).searchParams, { owner: false }));
@@ -2038,7 +2045,22 @@ async function profilesSitemap(env) {
   });
 }
 
-async function publicProfile(request, env, publicId) {
+// ?profile=<game UID>: game UIDs are public, so a character's UID opens the profile of the account that linked it - its
+// public profile, or "private" when that account's profile isn't public. Profile ids keep working as before.
+async function resolveProfileId(env, id) {
+  if (!/^\d{1,24}$/u.test(id) || await env.DB.prepare("SELECT 1 AS ok FROM profiles WHERE public_id = ? AND is_public = 1").bind(id).first())
+    return { publicId: id };
+  const row = await env.DB.prepare(
+    "SELECT p.public_id AS publicId, p.is_public AS isPublic FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id WHERE gc.game_uid = ?",
+  ).bind(id).first();
+  if (!row) return { publicId: id };   // no such character: the usual "not found"
+  return Number(row.isPublic) === 1 && row.publicId ? { publicId: row.publicId } : { private: true };
+}
+
+async function publicProfile(request, env, id) {
+  const resolved = await resolveProfileId(env, id);
+  if (resolved.private) return json({ error: "This profile is private.", private: true }, 404);
+  const publicId = resolved.publicId;
   const profile = await env.DB.prepare(
     "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1",
   ).bind(publicId).first();
@@ -5173,10 +5195,11 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/layout" && request.method === "PUT") return saveProfileLayout(request, env);
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
   if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
-  const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})\/history$/u);
+  // a profile id or a game UID (resolveProfileId)
+  const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})\/history$/u);
   if (historyMatch && request.method === "GET") return publicBattleHistory(request, env, historyMatch[1]);
   if (url.pathname === "/api/sitemap/profiles.xml" && request.method === "GET") return profilesSitemap(env);
-  const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24})$/u);
+  const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);
   if (url.pathname === "/api/admin/developers" && request.method === "GET") {

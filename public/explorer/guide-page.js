@@ -1,10 +1,11 @@
+// game-audit: n/a renders damage-guide.js; no game rules of its own
 (() => {
   "use strict";
 
   // The Try-Hard Guide page (a Team Builder tab): the text from damage-guide.js (window.AniilogsGuide) laid out with
   // a table of contents, a link for every section (#guide-<id>, also usable in a shared link), "Back to contents"
   // after each section and, on desktop, contents that stay beside the text and mark the section being read.
-  // Team Builder mounts it with render().
+  // Team Builder mounts it with render({ aniilog }).
   const BASIS_LABELS = Object.freeze({
     exact: ["From the game files", "Read straight from the game's scripts or tables."],
     "by-name": ["Not verified: matched by name", "The formula input is matched to a game stat by its name; the code that passes it in runs on the game's server. Not yet checked in the game."],
@@ -12,11 +13,54 @@
     text: ["From the game text", "Taken from the game's own skill text rather than its effect data."],
   });
   const SECTION_PREFIX = "guide-";
+  // Aniimo named in the text, as { pattern, ids }: each name gets the "take me there" link (/aniimo-link.js) after it.
+  let aniimoNames = null;
 
   function el(tag, className = "", text = "") {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== "") node.textContent = text;
+    return node;
+  }
+
+  // The Basic Form of every Aniimo the Aniilog lists, by name (longest first, so "Flameruff" isn't cut short).
+  function readAniimoNames(aniilog) {
+    const ids = new Map();
+    for (const entry of aniilog?.entries || []) {
+      const name = String(entry?.name || "").trim();
+      if (!name || !/^\d+$/u.test(String(entry.form_id || ""))) continue;
+      const basic = /^basic/iu.test(String(entry.form_key || entry.form_label || "basic"));
+      if (!ids.has(name) || basic && !ids.get(name).basic) ids.set(name, { id: String(entry.form_id), basic });
+    }
+    if (!ids.size) return null;
+    const names = [...ids.keys()].sort((left, right) => right.length - left.length)
+      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
+    return { pattern: new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.join("|")})(?![\\p{L}\\p{N}])`, "gu"), ids };
+  }
+
+  // Plain text as nodes, with a link after the first mention of each Aniimo it names (the text itself is never parsed as HTML).
+  function linkedText(text) {
+    const value = String(text);
+    if (!aniimoNames || !window.AniilogsAniimoLink) return [document.createTextNode(value)];
+    const nodes = [];
+    const linked = new Set();   // one link per Aniimo per paragraph
+    let last = 0;
+    for (const match of value.matchAll(aniimoNames.pattern)) {
+      if (linked.has(match[0])) continue;
+      linked.add(match[0]);
+      const end = match.index + match[0].length;
+      nodes.push(document.createTextNode(value.slice(last, end)));
+      const link = window.AniilogsAniimoLink.create(aniimoNames.ids.get(match[0]).id, match[0]);
+      if (link) nodes.push(link);
+      last = end;
+    }
+    nodes.push(document.createTextNode(value.slice(last)));
+    return nodes;
+  }
+
+  function linkedEl(tag, className, text) {
+    const node = el(tag, className);
+    node.append(...linkedText(text));
     return node;
   }
 
@@ -51,7 +95,7 @@
     const tbody = el("tbody");
     table.rows.forEach((row) => {
       const line = el("tr");
-      row.forEach((cell, index) => line.append(el(index === 0 ? "th" : "td", "", String(cell))));
+      row.forEach((cell, index) => line.append(linkedEl(index === 0 ? "th" : "td", "", String(cell))));
       tbody.append(line);
     });
     node.append(thead, tbody);
@@ -98,7 +142,7 @@
     title.append(" ", anchor);
     head.append(title, basisBadge(section.basis));
     node.append(head);
-    (section.paragraphs || []).forEach((text) => node.append(el("p", "", text)));
+    (section.paragraphs || []).forEach((text) => node.append(linkedEl("p", "", text)));
     if (section.table?.rows?.length) node.append(renderTable(section.table));
     // Open questions to test in the game, as a checklist.
     if (section.tests?.length) {
@@ -106,12 +150,12 @@
       section.tests.forEach((test) => {
         const item = el("li");
         item.id = `${SECTION_PREFIX}test-${test.id}`;
-        item.append(el("span", "guide-test-box", ""), el("span", "", test.text));
+        item.append(el("span", "guide-test-box", ""), linkedEl("span", "", test.text));
         list.append(item);
       });
       node.append(list);
     }
-    if (section.note) node.append(el("p", "guide-note", section.note));
+    if (section.note) node.append(linkedEl("p", "guide-note", section.note));
     const back = el("a", "guide-back", "Back to contents");
     back.href = "#guide-contents";
     back.addEventListener("click", (event) => {
@@ -136,7 +180,9 @@
     root.querySelectorAll(".guide-section").forEach((section) => observer.observe(section));
   }
 
-  function render() {
+  // render({ aniilog }): the Aniilog data, when given, links every Aniimo the guide names to its page.
+  function render({ aniilog = null } = {}) {
+    aniimoNames = readAniimoNames(aniilog);
     const guide = window.AniilogsGuide;
     const root = el("div", "guide-page");
     if (!guide?.sections?.length) {

@@ -1,9 +1,10 @@
+// game-audit: 1.1.3857679 2026-11-03 every section, table, example and i-note (claim-by-claim list kept with the owner's private notes)
 // The Try-Hard Guide's text and the "i" notes for skills and traits whose game text leaves something
 // out. Plain-text paragraphs (no HTML); the page renders them. Each section says how sure it is:
 // exact (read from the game's scripts or tables), by-name (matched to a game attribute by its name),
 // inferred (a reasoned reading), text (from the game's own skill text, not its effect data). A section
 // may carry `tests`: [{ id, text }] for things to check in the game before they can be trusted. Numbers come
-// from build 3846247; see damage-model.js for the maths.
+// from build 3846247, re-checked against game 1.1 (build 3857679); see damage-model.js for the maths.
 (() => {
   const TITLE = "Try-Hard Guide";
 
@@ -13,10 +14,22 @@
       title: "How a hit's damage is worked out",
       basis: "exact",
       paragraphs: [
-        "Every hit starts from your ATK minus the target's defence, times the skill's Might divided by 10. A Might 30 skill hits for 3 × (ATK − DEF).",
+        "Every hit starts from your ATK minus the target's defence, times the skill's Might divided by 10. A Might 30 skill hits for 3 × (ATK − DEF). Which ATK counts depends on your Aniimo's role: see the next section.",
         "That base never drops below 10% of your ATK, so even a very tanky target takes something.",
         "The base is then multiplied by a row of separate boosts: the element matchup, a ×1.1 bonus when the skill's element is one of your Aniimo's own, Elemental Boost, crits, Damage Amp and Final Damage.",
         "Physical skills hit against P.DEF and Magical skills against M.DEF. This part is inferred: the game's server picks which defence it passes in, but the stat names and skill categories line up.",
+      ],
+    },
+    {
+      id: "role-atk",
+      title: "ATK by role",
+      basis: "inferred",
+      paragraphs: [
+        "Since game 1.1 the ATK a hit uses depends on the Aniimo's role. The game's role-trait tooltips say so: BREAK Aniimo read \"When ATK is low, ATK and BREAK both affect damage within a certain range.\" Support, REGEN and Heal Aniimo read the same with \"ATK and level\". DPS Aniimo have no trait.",
+        "DPS: your ATK.",
+        "BREAK: ATK + 0.42 × (BREAK − half your ATK), counting BREAK only up to 2.2 × your ATK and never below your ATK (formula 3512). A BREAK Aniimo with ATK 350 and BREAK 491 hits as if it had ATK 483. The most it can reach is 1.714 × ATK.",
+        "Support, REGEN and Heal: 7 × level (up to Lv 60) + 0.3 × ATK, when that is more than your ATK (formula 3513). At Lv 60 and above that is 420 + 0.3 × ATK, so it helps while ATK is under 600; at Lv 30 while ATK is under 300. A Lv 70 Heal Aniimo with ATK 335 hits as if it had ATK 521.",
+        "Both formulas are read from the game's files. Which role uses which is matched from the tooltips (they name exactly those formulas' inputs), and the \"when that is more\" for Support, REGEN and Heal is read from \"When ATK is low\": the game's server applies them, so the client files don't show the call. In 1.0 every Aniimo instead used the higher of ATK and 0.825 × BREAK.",
       ],
     },
     {
@@ -24,7 +37,7 @@
       title: "What stacks with what",
       basis: "exact",
       paragraphs: [
-        "Many buffs with a range in their text (for example Waltz's 28–49% Crit Damage) grow with the caster's own stat. For most, the game works out base × (0.8 + stat × rate), capped at 1.4 (or 1.2 for some). The low end is at 0 of that stat, the top at the cap, so a higher-ATK caster gives a bigger buff.",
+        "Many buffs with a range in their text (for example Waltz's 28–49% Crit Damage) grow with the caster's own stat. For most, the game works out base × (0.8 + stat × rate), capped at 1.4 (or at 1.2 for some; a few start at 1.0 instead of 0.8). The low end is at 0 of that stat, the top at the cap, so a higher-ATK caster gives a bigger buff.",
         "Boosts of the same kind add together. Different kinds multiply. Two +15% Damage Amp buffs give +30%, not +32%. A +15% Damage Amp and a +15% Elemental Boost give ×1.15 × 1.15 = +32%.",
         "So spreading your team's boosts over different kinds beats piling up one kind. Each kind is strongest while it is still empty.",
         "Damage Amp, Damage Boost and \"DMG +x%\" are all the same stat in the game, so they share one pot. The target's Damage Reduction comes out of that same pot. The Damage Amp and Final Damage pots each have a floor of ×0.2, so reductions can never cut those below a fifth. The elemental pot has no floor: at 0 or less the hit does nothing.",
@@ -48,20 +61,21 @@
       basis: "exact",
       paragraphs: [
         "Each ATK potential point adds 0.8% to your ATK's formula value. Every 4 points also add +4% to the stat's % pot, which it shares with personality and held items. So 20 points give ×1.16 and +20%, about +39% ATK.",
-        "Because damage comes from ATK minus the target's DEF, extra ATK is worth more than its own percentage. The gain from extra ATK is ΔATK ÷ (ATK − DEF): the closer your ATK is to the target's DEF, the bigger each point's effect.",
+        "Because damage comes from ATK minus the target's DEF, extra ATK is worth more than its own percentage. For a DPS Aniimo the gain from extra ATK is ΔATK ÷ (ATK − DEF): the closer your ATK is to the target's DEF, the bigger each point's effect.",
+        "Other roles hit with their role's ATK (see ATK by role), so a point of ATK counts differently. The gain is (points × rate) ÷ (role ATK − DEF). BREAK: rate 0.79 while BREAK is between half and 2.2 × ATK (each BREAK point then adds 0.42), 1.714 once BREAK is above 2.2 × ATK, 1 when BREAK is under half of ATK. Support, REGEN and Heal: rate 0.3 while the level part is the higher (ATK under 10 × level, up to Lv 60), 1 above it.",
         "Against no defence, +39% ATK is +39% damage. Against a same-level target it is about +76%. Against a very tanky target that was holding you at the 10% floor, it can be several times your damage.",
         "Compare a +15% Damage Amp buff: at most +15%, and less if your team already has Damage Amp. Damage Amp doesn't care about the target's DEF. ATK potential matters most against tanky targets.",
-        "Example: Flameruff (ATK 111, P.DEF 72 species values) hitting another Flameruff with no P.DEF potential, per 10 Might.",
+        "Example: Flameruff, a DPS (ATK 111, P.DEF 72 species values), hitting another Flameruff with no P.DEF potential, per 10 Might.",
       ],
       table: {
         columns: ["ATK potential", "Lv 50: ATK / damage", "Lv 67: ATK / damage", "Lv 70: ATK / damage"],
         rows: [
           ["0", "309 / 159", "413 / 212", "437 / 225"],
-          ["4", "331 / 181", "444 / 243", "469 / 257"],
-          ["8", "355 / 205", "475 / 274", "502 / 290"],
-          ["12", "379 / 229", "507 / 306", "536 / 324"],
-          ["16", "404 / 254", "540 / 339", "571 / 359"],
-          ["20", "430 / 280 (+76%)", "574 / 373 (+76%)", "608 / 396 (+76%)"],
+          ["4", "332 / 182", "445 / 244", "470 / 258"],
+          ["8", "356 / 206", "476 / 275", "503 / 291"],
+          ["12", "380 / 230", "508 / 307", "537 / 325"],
+          ["16", "405 / 255", "541 / 340", "572 / 360"],
+          ["20", "431 / 281 (+77%)", "575 / 374 (+76%)", "609 / 397 (+76%)"],
         ],
       },
       note: "Target P.DEF: 150 at Lv 50, 201 at Lv 67, 212 at Lv 70. Before personality, held items and other bonuses.",
@@ -95,7 +109,7 @@
         "The BREAK bar over a target is its BREAK points. Every hit takes BREAK damage off it, and at zero the target is in BREAK. Pets stay in BREAK for 6s.",
         "BREAK damage uses your BREAK stat: (your BREAK − the target's BREAK defence) × the hit's share × the skill's Might ÷ 10. Some skills add their own BREAK multiplier; most don't. It can crit like normal damage (up to ×3), and a bad element matchup never lowers it. Damage Amp, Final Damage and the same-element bonus don't affect it. BREAK Efficiency and \"BREAK damage taken\" on the target do.",
         "A pet's BREAK bar grows with its level: about 27,900 at Lv 50 and 52,800 at Lv 70 (formula 3110). Pets have no BREAK defence of their own. So against a pet, hits to BREAK ≈ its BREAK bar ÷ your BREAK damage per hit.",
-        "Example: a Lv 50 Flameruff with 20 BREAK potential has BREAK 208. Fire Kick (Might 72) deals about 208 × 7.2 ≈ 1,500 BREAK damage, so about 19 Fire Kicks to BREAK a Lv 50 pet without any BREAK Efficiency.",
+        "Example: a Lv 50 Flameruff with 20 BREAK potential has BREAK 209. Fire Kick (Might 72) deals about 209 × 7.2 ≈ 1,500 BREAK damage, so about 19 Fire Kicks to BREAK a Lv 50 pet without any BREAK Efficiency.",
         "Toughness is a different, smaller gauge (60 for pets; 10, 30, 50, 120 or unbreakable for other targets). It drains by each skill's own toughness power (a separate value per skill), not your BREAK stat. Casting raises it and super armour blocks it, so it reads as the stagger / interrupt gauge rather than BREAK (inferred).",
         "Monsters use their own BREAK bars, and the world scales to your level, so hits to BREAK something depend on what you're fighting and both levels.",
       ],
@@ -119,8 +133,9 @@
         "Each stat is its base value × (1 + every % bonus) + flat bonuses. All % bonuses to a stat share one pot: potential, personality, held items.",
         "The base value comes from the Aniimo's species points, level and potential. The game can also give an owned Aniimo species points of its own, which replace the listed ones, so your card may not match the site's numbers exactly.",
         "Potential per stat has three sources. Your own points, rolled at capture plus Capability Awakening, go up to 20. Star Up adds extra potential to every stat on top of that cap: +1 at stage 5, +2 at stage 6, +4 at stage 7. Some Epic and Legendary held items add +2 to one stat once the item reaches level 10. Stats use the total; CP counts only your own points.",
-        "Star Up also adds flat HP, ATK, P.DEF, M.DEF, REGEN and BREAK (added before the % bonuses) and +2% to each stat from stage 2 or 3 on.",
+        "Star Up also adds flat HP, ATK, P.DEF, M.DEF, REGEN and BREAK (added before the % bonuses), +2% to each stat from stage 2 or 3 on, and Counter Boost from stage 4.",
         "The card shows each stat rounded up. With a Perfect Aniimo's species points, the calculator matched a real Lv 65 Fulmintis card exactly on HP, P.DEF, M.DEF and REGEN.",
+        "From Lv 61 to 70 HP, ATK, P.DEF and M.DEF grow faster than before (formulas 3003, 3004 and 3007 add extra levels for pets); REGEN and BREAK don't.",
         "Personality traits each give one bonus and one home bonus, for example Energetic: ATK +2%, BREAK +2%. Natures are flavour only.",
         "A held item's stat grows with its level: +5% of its base per level up to level 10, then +10% per level, doubling at level 15.",
       ],
@@ -141,6 +156,7 @@
         { id: "vs-break", text: "Bonus damage against a target in BREAK (e.g. Ironclad Armament) is its own multiplier." },
         { id: "inspiration", text: "Sparkelf's Inspiration: the text says +15–18% team Fire damage, but the game data gives +30% Fire Elemental Boost. Test which one shows up in a hit." },
         { id: "whole-team", text: "Whole-team buffs such as Zephyr's Breath and Inspiration reach every Aniimo on the team, including ones not currently out. Read from the skill texts; the game code for it isn't in the client." },
+        { id: "role-atk", text: "ATK by role. Test: a Lv 70 Heal, Support or REGEN Aniimo with ATK well under 600 should hit a target for about (420 + 0.3 × ATK − DEF) × Might ÷ 10, not (ATK − DEF) × Might ÷ 10; one with ATK above 600 should hit with its own ATK. A BREAK Aniimo should hit for (ATK + 0.42 × (BREAK − ATK ÷ 2) − DEF) × Might ÷ 10." },
         { id: "level-gap", text: "Which side of the level-gap table applies to whom. The world scales with your level, so this matters in most fights." },
       ],
     },
@@ -149,7 +165,7 @@
       title: "CP",
       basis: "exact",
       paragraphs: [
-        "CP comes from the Aniimo's listed species values, not its current stats: HP + 2 × ATK + P.DEF + M.DEF + REGEN + BREAK. ATK counts double.",
+        "CP comes from the Aniimo's listed species values, not its current stats: HP + 2 × ATK + P.DEF + M.DEF + REGEN + BREAK. ATK counts double. When that total is exactly 654 the game takes 16 off.",
         "That total is multiplied by a level factor (6 × level + 35, up to level 80) and by 0.005. An upgraded Core skill adds 5% to that part, and potential adds a little more.",
         "On top come: +20 for an upgraded Core skill, your held item's CP (its base CP plus a fixed amount per item level), 30% of your potential CP, resonance CP, and +5 for each extra form or rainbow form of that Aniimo you've collected.",
         "Potential CP is 6 per potential level in each stat, counted twice in the stats the game recommends for that Aniimo.",
@@ -163,11 +179,11 @@
     { kind: "skill", id: 11200021, forms: [1003100, 1003101, 1003103], basis: "exact",
       text: "Wisptis's Darkblade gives +15% basic attack damage, not the 40% in the text. Ignitis's version gives the 40%." },
     { kind: "skill", id: 10300090, forms: [1019100], basis: "exact",
-      text: "Shelly's puddle bonus is +15% Water Elemental Boost for 10s, not Damage Amp for 20s as the text says. It stacks with Damage Amp instead of sharing a pot with it." },
+      text: "Shelly's puddle bonus is +15% Water Elemental Boost, not Damage Amp as the text says. It stacks with Damage Amp instead of sharing a pot with it. The skill applies it for 10s, though the buff's own default is the text's 20s." },
     { kind: "skill", id: 10400270, basis: "exact",
       text: "Besides the extra damage near water, Thunder Slam also gives Sherro +15% Damage Amp for 20s." },
     { kind: "skill", id: 10900480, basis: "exact",
-      text: "Weakness Mark also lowers the marked target's own damage by 5%, on top of cutting its crit resistance." },
+      text: "Once the skill is upgraded, Weakness Mark also lowers the marked target's own damage by 5%, on top of cutting its crit resistance." },
     { kind: "trait", id: 10252, basis: "text",
       text: "The +30% is Damage Amp, so it shares a pot with your other Damage Amp. It only counts against targets with more than 5 Fire Debuff stacks." },
     { kind: "skill", id: 10600080, basis: "exact",

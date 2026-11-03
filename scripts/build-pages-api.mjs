@@ -1,3 +1,4 @@
+// game-audit: n/a build script; only blocks private game data from the bundle
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
