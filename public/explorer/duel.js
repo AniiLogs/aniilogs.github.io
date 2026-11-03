@@ -24,19 +24,6 @@
     Physical: ["Attack", "Defense"],
     Magic: ["Attack", "Magic Defense"],
   });
-  // The ATK a hit puts into formula 3001 depends on the attacker's role (game 1.1, build 3857679). The role is
-  // pet_data.functionId (the Aniilog entry's `role`). The game's role-trait tooltips (gamestring_config_data,
-  // keys from LuaUIUtils.PET_CAREER_TRAIT_TEXT_KEYS) say "When ATK is low, ATK and BREAK both affect damage within
-  // a certain range." for BREAK (CAREER_DES_BREAK) and "...ATK and level both affect damage..." for Support,
-  // REGEN and Heal (CAREER_DES_SUP); DPS has no trait. Those inputs are formula_data 3512 (breakValue, atk) and
-  // 3513 (lv, atk), both new in 1.1, when 3001 stopped using max(ATK, 0.825 x BREAK) for everyone.
-  const ROLE_ATTACK = Object.freeze({
-    DPS: { label: "DPS" },
-    BREAK: { label: "BREAK", formula: 3512 },
-    SUPPORT: { label: "Support", formula: 3513 },
-    REGEN: { label: "REGEN", formula: 3513 },
-    HEALER: { label: "Heal", formula: 3513 },
-  });
   // The game’s six stats in its stat-card order, with its labels.
   const SHOWN_STATS = Object.freeze([
     ["HP", "HP"], ["Attack", "ATK"], ["Defense", "P.DEF"], ["EP Regen", "REGEN"], ["Magic Defense", "M.DEF"], ["Break", "BREAK"],
@@ -247,28 +234,15 @@
 
   // --- Damage ---------------------------------------------------------------------------------------
 
-  // The ATK formula 3001 gets for this attacker. formula_data 3512 (BREAK role):
-  // ATK + max(0.42 x (min(BREAK, 2.2 x ATK) - 0.5 x ATK), 0), never below ATK. 3513 (Support, REGEN, Heal):
-  // 7 x min(60, level) + 0.3 x ATK; it is used only when it beats ATK (inferred from "When ATK is low": below
-  // ATK = 10 x min(60, level) it would lower damage). An attacker with no role (or DPS) uses ATK.
+  // The ATK formula 3001 gets for this attacker: its role's ATK (damage-model.js roleAttack, formula_data 3512 for
+  // BREAK and 3513 for Support / REGEN / Heal, game 1.1), from the Aniilog entry's `role` (= pet_data.functionId).
+  // Without the damage model loaded, ATK as is.
   function roleAttack(attacker) {
-    const atk = Math.max(attacker.stats?.Attack || 0, 0);
-    const role = ROLE_ATTACK[String(attacker.entry?.role || "").toUpperCase()] || null;
-    if (!role?.formula) return { atk, base: atk, role, note: role ? `${role.label} role: ATK as is` : "", basis: "exact" };
-    if (role.formula === 3512) {
-      const breakValue = Math.max(attacker.stats?.Break || 0, 0);
-      const bonus = Math.max(0.42 * (Math.min(breakValue, 2.2 * atk) - 0.5 * atk), 0);
-      return {
-        atk: atk + bonus, base: atk, role, basis: "exact",
-        note: `${role.label} role, formula 3512: ATK + 0.42 × (min(BREAK, 2.2 × ATK) − 0.5 × ATK) = ${whole(atk)} + ${whole(bonus)}`,
-      };
-    }
-    const level = Math.max(Number(attacker.side?.level) || 1, 1);
-    const fromLevel = 7 * Math.min(60, level) + 0.3 * atk;
-    return {
-      atk: Math.max(atk, fromLevel), base: atk, role, basis: "inferred",
-      note: `${role.label} role, formula 3513: higher of ATK (${whole(atk)}) and 7 × min(60, Lv ${level}) + 0.3 × ATK (${whole(fromLevel)})`,
-    };
+    const stats = attacker.stats || {};
+    const model = window.AniilogsDamage;
+    if (model?.roleAttack) return model.roleAttack(attacker.entry?.role, stats.Attack, stats.Break, attacker.side?.level);
+    const atk = Math.max(stats.Attack || 0, 0);
+    return { atk, base: atk, role: null, formula: null, basis: "exact", slope: 1, note: "" };
   }
 
   // Formula 3001 for one hit, with every modifier the scenario doesn't set left neutral (1x).

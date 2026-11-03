@@ -1,12 +1,14 @@
-// Damage and stat model from the game's own scripts (build 3846247). Pure functions for the 1v1 tab,
-// the Guide and the Team Builder Stats tab; no DOM. Every rule says where it comes from:
+// Damage and stat model from the game's own scripts (build 3846247; re-checked against 1.1 build 3857679).
+// Pure functions for the 1v1 tab, the Guide and the Team Builder Stats tab; no DOM. Every rule says where it
+// comes from:
 //   exact   - read from the game's bytecode or tables;
 //   by-name - the formula input is matched to a game attribute by its name (the code that passes it
 //             in runs on the server, not in the client);
 //   inferred - a reasoned reading; say so wherever it is shown.
-// Sources: Data/formula_data.lua formulas 3001 (HP damage), 3023 (BREAK), 3003-3018 (base stats);
-// Common/Ability/CombatActionTool.lua (crit, element matchup, elemental damage); AttributeCalcUtils
-// (stat = value x (1 + percent) + flat); PetAttributeCalcUtils (what a pet's stats add up from).
+// Sources: Data/formula_data.lua formulas 3001 (HP damage), 3512 / 3513 (the ATK a role's hits use), 3023
+// (BREAK), 3003-3018 (base stats); Common/Ability/CombatActionTool.lua (crit, element matchup, elemental
+// damage); AttributeCalcUtils (stat = value x (1 + percent) + flat); PetAttributeCalcUtils (what a pet's stats
+// add up from).
 (() => {
   const STATS = Object.freeze(["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"]);
   // Older Aniilog files label the base stats differently.
@@ -211,6 +213,59 @@
     return Math.floor(Math.max(total, 1));
   }
 
+  // --- Role ATK (game 1.1) ------------------------------------------------------------------------
+
+  // An Aniimo's role is pet_data.functionId (DPS / BREAK / SUP / ENERGY / HEAL; the Aniilog entry's `role` says
+  // DPS / BREAK / SUPPORT / REGEN / HEALER). In 1.1 formula 3001 takes ATK as given (1.0 used max(ATK, 0.825 x
+  // BREAK) for everyone), and the role sets the ATK that goes in. The game's role-trait tooltips
+  // (gamestring_config_data CAREER_DES_BREAK 1942254706 / CAREER_DES_SUP 1164328192, picked per role by
+  // LuaUIUtils.PET_CAREER_TRAIT_TEXT_KEYS; DPS shows none) say "When ATK is low, ATK and BREAK [BREAK role] /
+  // ATK and level [Support, REGEN, Heal] both affect damage within a certain range." Those are exactly the
+  // inputs of formula_data 3512 (breakValue, atk) and 3513 (lv, atk), both new in 1.1 (exact bodies). Which
+  // role uses which formula is matched by those inputs (inferred: the server calls them, not the client).
+  const ROLES = Object.freeze({
+    DPS: { key: "DPS", label: "DPS", formula: null },
+    BREAK: { key: "BREAK", label: "BREAK", formula: 3512 },
+    SUP: { key: "SUP", label: "Support", formula: 3513 },
+    ENERGY: { key: "ENERGY", label: "REGEN", formula: 3513 },
+    HEAL: { key: "HEAL", label: "Heal", formula: 3513 },
+  });
+  const ROLE_ALIASES = Object.freeze({ SUPPORT: "SUP", REGEN: "ENERGY", HEALER: "HEAL", HEALING: "HEAL" });
+  function roleOf(role) {
+    const key = String(role || "").toUpperCase();
+    return ROLES[ROLE_ALIASES[key] || key] || null;
+  }
+
+  // The ATK a hit of this role puts into formula 3001.
+  //   DPS (or unknown): ATK.
+  //   BREAK, formula 3512 (exact body): ATK + max(0.42 x (min(BREAK, 2.2 x ATK) - 0.5 x ATK), 0).
+  //   Support / REGEN / Heal, formula 3513 (exact body): 7 x min(60, level) + 0.3 x ATK, used only when it is
+  //   above ATK (inferred from "When ATK is low": below ATK = 10 x min(60, level) it would lower damage).
+  // slope: damage-ATK gained per point of ATK (1 for DPS; 0.79 / 1.714 / 1 for BREAK by range; 0.3 while
+  // 3513 is the higher; 1 above it). Returns { atk, base, role, formula, basis, slope, note }.
+  function roleAttack(role, atk, breakValue = 0, level = 1) {
+    const info = roleOf(role);
+    const base = Math.max(Number(atk) || 0, 0);
+    if (!info?.formula) {
+      return { atk: base, base, role: info, formula: null, basis: "exact", slope: 1, note: info ? `${info.label} role: ATK as is` : "" };
+    }
+    if (info.formula === 3512) {
+      const counted = Math.min(Math.max(Number(breakValue) || 0, 0), 2.2 * base);
+      const bonus = Math.max(0.42 * (counted - 0.5 * base), 0);
+      const slope = bonus <= 0 ? 1 : counted >= 2.2 * base ? 1 + 0.42 * 1.7 : 1 - 0.42 * 0.5;
+      return {
+        atk: base + bonus, base, role: info, formula: 3512, basis: "exact", slope,
+        note: `${info.label} role, formula 3512: ATK + 0.42 × (min(BREAK, 2.2 × ATK) − 0.5 × ATK) = ${Math.round(base)} + ${Math.round(bonus)}`,
+      };
+    }
+    const lv = Math.max(Number(level) || 1, 1);
+    const fromLevel = 7 * Math.min(60, lv) + 0.3 * base;
+    return {
+      atk: Math.max(base, fromLevel), base, role: info, formula: 3513, basis: "inferred", slope: fromLevel > base ? 0.3 : 1,
+      note: `${info.label} role, formula 3513: higher of ATK (${Math.round(base)}) and 7 × min(60, Lv ${lv}) + 0.3 × ATK (${Math.round(fromLevel)})`,
+    };
+  }
+
   // --- Damage -----------------------------------------------------------------------------------
 
   // Defending elements multiply (exact, CombatActionTool 1288-1301). Net advantage x (1 + attacker's
@@ -287,6 +342,8 @@
     // BREAK damage (formula 3023, exact): (BREAK - target's BREAK DEF) x hit share x Might / 10 x bpRate
     // x efficiency pot (min 0.2) x max(1, matchup) x crit x elemental pot. Damage Amp, Final Damage and the
     // same-element bonus don't touch it. Efficiency and BREAK damage taken share the pot (by-name).
+    // 1.1 added x (1 + playBp) inside 3023; playBp is play_bp_add_ratio ("Gameplay BREAK Modifier
+    // Multiplier", attribute_id_data; by-name), which no table or buff sets, so it is 0 here (x1).
     const breakHit = Math.max(0, ((attacker.breakAtk || 0) - (defender.breakDef || 0)) * (share * Number(skill.might || 0) / 10)
       * Number(skill.breakRate ?? 1) * Math.max(0.2, 1 + (atk.break || 0) + (def.break || 0)) * Math.max(1, matchup.factor) * elementalDamage);
 
@@ -411,6 +468,6 @@
   }
 
   window.AniilogsDamage = Object.freeze({
-    STATS, STAT_ALIASES, BRACKETS, bracketOf, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, options,
+    STATS, STAT_ALIASES, BRACKETS, ROLES, bracketOf, roleOf, roleAttack, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, options,
   });
 })();

@@ -165,3 +165,41 @@ test("a researched form's Form Research bonus adds to every form of the species"
   assert.equal(researched.total.ATK, Math.ceil(base * 1.22 - 1e-9));
   assert.equal(researched.bonus.ATK.sources[0].source, "Form Research: Prismana Form");
 });
+
+test("role ATK (game 1.1): DPS as is, BREAK formula 3512, Support / REGEN / Heal formula 3513 when above ATK", () => {
+  // DPS and an unknown role: ATK, one damage-ATK per ATK point.
+  assert.deepEqual([D.roleAttack("DPS", 437, 204, 70).atk, D.roleAttack("DPS", 437, 204, 70).slope], [437, 1]);
+  assert.equal(D.roleAttack(undefined, 437, 900, 70).atk, 437);
+  // BREAK: ATK + 0.42 x (min(BREAK, 2.2 x ATK) - 0.5 x ATK); 0.79 per ATK point in range, 1.714 at the cap, 1 below half.
+  const breaker = D.roleAttack("BREAK", 350, 491, 70);
+  assert.ok(Math.abs(breaker.atk - (350 + 0.42 * (491 - 175))) < 1e-9);
+  assert.ok(Math.abs(breaker.slope - 0.79) < 1e-9);
+  assert.ok(Math.abs(D.roleAttack("BREAK", 200, 1000, 70).atk - 200 * 1.714) < 1e-9);
+  assert.ok(Math.abs(D.roleAttack("BREAK", 200, 1000, 70).slope - 1.714) < 1e-9);
+  assert.deepEqual([D.roleAttack("BREAK", 400, 150, 70).atk, D.roleAttack("BREAK", 400, 150, 70).slope], [400, 1]);
+  // Support / REGEN / Heal (both the game's and the Aniilog's role names): max(ATK, 7 x min(60, Lv) + 0.3 x ATK).
+  for (const role of ["SUP", "SUPPORT", "ENERGY", "REGEN", "HEAL", "HEALER"]) {
+    assert.ok(Math.abs(D.roleAttack(role, 335, 0, 70).atk - (420 + 100.5)) < 1e-9, role);
+    assert.equal(D.roleAttack(role, 335, 0, 70).basis, "inferred");
+  }
+  assert.ok(Math.abs(D.roleAttack("SUP", 213, 0, 30).atk - (210 + 63.9)) < 1e-9);
+  assert.equal(D.roleAttack("SUP", 213, 0, 30).slope, 0.3);
+  assert.deepEqual([D.roleAttack("HEAL", 700, 0, 70).atk, D.roleAttack("HEAL", 700, 0, 70).slope], [700, 1]);
+  assert.equal(D.roleOf("HEALER").label, "Heal");
+});
+
+test("the Try-Hard Guide explains ATK by role (game 1.1) and how much an ATK point is worth per role", () => {
+  const section = G.sections.find((row) => row.id === "role-atk");
+  assert.equal(section.basis, "inferred");
+  const text = section.paragraphs.join(" ");
+  assert.match(text, /formula 3512/u);
+  assert.match(text, /formula 3513/u);
+  assert.match(text, /ATK 483/u);
+  assert.match(text, /ATK 521/u);
+  const atk = G.sections.find((row) => row.id === "atk").paragraphs.join(" ");
+  assert.match(atk, /rate 0\.79/u);
+  assert.match(atk, /rate 0\.3/u);
+  // The worked examples match the model.
+  assert.equal(Math.round(D.roleAttack("BREAK", 350, 491, 70).atk), 483);
+  assert.equal(Math.round(D.roleAttack("HEALER", 335, 0, 70).atk), 521);
+});

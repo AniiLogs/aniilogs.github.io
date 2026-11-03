@@ -7,9 +7,14 @@ const source = await readFile(new URL("../public/explorer/duel.js", import.meta.
 const teamBuilder = await readFile(new URL("../public/explorer/team-builder.js", import.meta.url), "utf8");
 const explorerHtml = await readFile(new URL("../public/explorer/index.html", import.meta.url), "utf8");
 
-function loadDuel() {
+const damageModel = await readFile(new URL("../public/explorer/damage-model.js", import.meta.url), "utf8");
+
+// Loaded the way the page loads them: damage-model.js first (the role ATK lives there), then duel.js.
+function loadDuel({ withModel = true } = {}) {
   const window = { localStorage: { getItem: () => null, setItem: () => {} } };
-  vm.runInNewContext(source, { window, document: {} });
+  const context = { window, document: {} };
+  if (withModel) vm.runInNewContext(damageModel, context);
+  vm.runInNewContext(source, context);
   return window.AniilogsDuel;
 }
 
@@ -47,6 +52,11 @@ test("the attacker's role sets the ATK that goes into formula 3001 (formula_data
   assert.ok(Math.abs(duel.roleAttack(side("HEALER", 70, 300, 0)).atk - (420 + 90)) < 1e-9);
   assert.ok(Math.abs(duel.roleAttack(side("SUPPORT", 30, 100, 0)).atk - (210 + 30)) < 1e-9);
   assert.equal(duel.roleAttack(side("REGEN", 70, 800, 0)).atk, 800);
+  // Game role keys work too (pet_data.functionId).
+  assert.ok(Math.abs(duel.roleAttack(side("HEAL", 70, 300, 0)).atk - 510) < 1e-9);
+  // duel.js uses the damage model's helper; without the model loaded it falls back to ATK.
+  assert.match(source, /model\.roleAttack\(attacker\.entry\?\.role, stats\.Attack, stats\.Break, attacker\.side\?\.level\)/u);
+  assert.equal(loadDuel({ withModel: false }).roleAttack(side("HEALER", 70, 300, 0)).atk, 300);
   // hpDamage uses it.
   const healer = { ...side("HEALER", 70, 300, 0), elements: [] };
   const target = { stats: { Defense: 110 }, elements: [] };
