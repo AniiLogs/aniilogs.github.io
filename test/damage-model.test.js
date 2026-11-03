@@ -203,3 +203,11 @@ test("the Try-Hard Guide explains ATK by role (game 1.1) and how much an ATK poi
   assert.equal(Math.round(D.roleAttack("BREAK", 350, 491, 70).atk), 483);
   assert.equal(Math.round(D.roleAttack("HEALER", 335, 0, 70).atk), 521);
 });
+
+test("Guide audit for 1.1: ATK table and BREAK example use the rounded-up stat cards, notes match the 1.1 buff data", () => {
+  const atk = G.sections.find((row) => row.id === "atk");
+  assert.equal(atk.table.rows.at(-1).join(" | "), "20 | 431 / 281 (+77%) | 575 / 374 (+76%) | 609 / 397 (+76%)");
+  assert.match(G.sections.find((row) => row.id === "break").paragraphs.join(" "), /BREAK 209\. Fire Kick \(Might 72\) deals about 209 × 7\.2/u);
+  assert.match(G.explanationFor("skill", 10900480).text, /^Once the skill is upgraded/u);
+  assert.doesNotMatch(G.explanationFor("skill", 10300090, 1019100).text, /for 10s, not Damage Amp for 20s/u);
+});
