@@ -1041,11 +1041,14 @@ function historyNumbers(run) {
   if (run.mode === "interlink" && run.score != null) parts.push(`${numberFormat.format(run.score)} pts`);
   if (run.mode === "eggheist" && run.score != null) parts.push(`${numberFormat.format(run.score)} pts`);
   if (run.stars != null && run.mode === "interlink") parts.push(`★ ${run.stars}`);
-  // an Interlink run: cleared, quit before the clock ran out (the result screens still appear), or the clock ran out
+  // an Interlink run: cleared, quit before the clock ran out (the result screens still appear), or the clock ran out.
+  // "unconfirmed" (a two-boss center that ended under the clock without every star, kept on the boards until a live
+  // run shows how the two bosses' stars add up): its time alone, no ending
   if (run.outcome === "cleared") parts.push(`cleared in ${clockTime(run.clearTimeS)}`);
   else if (run.outcome === "ended-early") parts.push(`ended early at ${clockTime(run.clearTimeS)}`);
   else if (run.outcome === "time-up") parts.push("time up");
   else if (run.outcome === "invalid") parts.push(`quit at ${clockTime(run.clearTimeS)}`);
+  else if (run.outcome === "unconfirmed") parts.push(clockTime(run.clearTimeS));
   else if (run.clearTimeS != null) parts.push(run.cleared ? `cleared in ${clockTime(run.clearTimeS)}` : run.mode === "interlink" ? "no clear" : clockTime(run.clearTimeS));
   if (run.floors != null) parts.push(`${run.floors} floors`);
   return parts.join(" · ");
