@@ -6350,6 +6350,7 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
         scaling.forEach((line) => {
           const text = document.createElement("span");
           text.textContent = line;
+          text.dataset.scalingNote = line;           // its number at the Growth panel's stats (afpRefreshScalingNotes)
           note.append(text);
         });
         copy.append(note);
@@ -7574,6 +7575,35 @@ function afpGrownStat(growth, label, base, level, points = 0) {
   return Math.floor(total * (1 + percent));
 }
 
+// The stats the Aniilog tab's Growth panel is set to (level, your potential, Star Up, held item), worked out by the
+// Team Builder's model; null without the data yet.
+function afpCurrentStats(entry) {
+  const model = window.AniilogsDamage;
+  const data = state.afpTeamData;
+  if (!entry || !model?.statTotals || !data?.forms?.[String(entry.form_id)] || !state.aniilogData?.stat_growth) return null;
+  const settings = afpGrowthState();
+  const stats = aniilogGameStats(entry);
+  return model.statTotals(data, state.aniilogData, String(entry.form_id), {
+    level: settings.level,
+    potential: Object.fromEntries(stats.map((stat) => [stat.display, Number(settings.potentials[stat.label]) || 0])),
+    heldItems: settings.heldItem ? [settings.heldItem] : [],
+    starUp: settings.starUp || undefined,
+  })?.total || null;
+}
+
+// Each skill scaling note on the page gets its number at those stats ("At your 460 REGEN: 40.6%.").
+function afpRefreshScalingNotes(entry) {
+  const stats = afpCurrentStats(entry);
+  const read = window.AniilogsDamage?.scalingNote;
+  document.querySelectorAll("[data-scaling-note]").forEach((node) => {
+    const line = node.dataset.scalingNote;
+    const result = stats && read ? read(line, stats) : null;
+    if (!result) { node.textContent = line; return; }
+    const shown = result.value.toFixed(Math.max(result.decimals, result.percent ? 1 : 2));
+    node.textContent = `${line} At your ${Math.round(result.statValue).toLocaleString("en-US")} ${result.stat} (Stats › Growth): ${shown}${result.percent ? "%" : ""}.`;
+  });
+}
+
 function afpGrowthState() {
   state.aniilogGrowth ||= { level: 70, potentials: {}, heldItem: null, starUp: null };
   return state.aniilogGrowth;
@@ -7854,6 +7884,7 @@ function renderAfpStats(entry) {
     });
     const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
     earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
+    window.setTimeout(() => afpRefreshScalingNotes(entry), 0);   // the skills' stat-scaled numbers follow these stats
     earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat. Star Up adds stats at every stage and extra potential from stage 5 (+1, +2 at stage 6, +4 at stage 7); an Epic or Legendary held item (at item level 10) adds 2 more to the stat it boosts (Giant Tortoise Shell boosts both P.DEF and M.DEF). What they add shows beside the box and the value (+N), worked out as on the Team Builder. Values are before personality, talents and buffs. Formulas from the game scripts.`));
   }
   renderTable();
@@ -8402,6 +8433,8 @@ function renderAniilogFormGrid(entry) {
   const grid = document.createElement("div");
   grid.className = "afp";
   grid.append(renderAfpJumpBar(), renderAfpStats(entry), renderAfpSkills(entry), renderAfpKit(entry), renderAfpProfile(entry), renderAfpTabs(entry));
+  // The skills' stat-scaled numbers, at the Growth panel's stats (whichever stat view is showing), once it's on the page.
+  window.setTimeout(() => afpRefreshScalingNotes(entry), 0);
   return grid;
 }
 

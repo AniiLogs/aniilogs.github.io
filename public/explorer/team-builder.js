@@ -695,6 +695,26 @@
     return sentences.join(" ");
   }
 
+  // The stats of the member whose skills and traits are being drawn (their stat card: level, potential, Star Up,
+  // held item...), so values that scale with a stat show their number for this build. Null outside that.
+  let scalingStats = null;
+  function memberCardStats(member) {
+    const damage = window.AniilogsDamage;
+    const growth = aniilog?.stat_growth;
+    if (!damage?.statTotals || !growth || !member?.formId) return null;
+    const cap = Number(growth.level_cap) || 70;
+    const editor = window.AniilogsPotentialEditor;
+    const options = editor ? editor.totalsOptions(member, cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
+    return damage.statTotals(data, aniilog, member.formId, options)?.total || null;
+  }
+  // " At this build's 929 ATK: 33.4%." after a scaling note, or "" without the member's stats.
+  function scalingSuffix(note) {
+    const result = scalingStats && window.AniilogsDamage?.scalingNote?.(note, scalingStats);
+    if (!result) return "";
+    const shown = result.value.toFixed(Math.max(result.decimals, result.percent ? 1 : 2));
+    return ` At this build's ${Math.round(result.statValue).toLocaleString("en-US")} ${result.stat}: ${shown}${result.percent ? "%" : ""}.`;
+  }
+
   function renderBuffLine(link, fallbackName = "Unnamed effect") {
     const detail = buff(link.id);
     const item = el("li", "team-buff");
@@ -712,7 +732,12 @@
     if (attributes.length) {
       const list = el("dl", "team-skill-coefficients");
       attributes.forEach((attribute) => {
-        const value = [formatValues(attribute.key, attribute.values), attribute.formula].filter(Boolean).join(" · ");
+        // A value that scales with a stat: its number at this member's stat, beside how it scales.
+        const scaled = attribute.scaling && scalingStats && window.AniilogsDamage?.scaledValue
+          ? window.AniilogsDamage.scaledValue(attribute.scaling, scalingStats, attribute.scaling.bases?.length || 1) : null;
+        const atStat = Number.isFinite(scaled)
+          ? `${formatValues(attribute.key, [scaled])} at this build's ${Math.round(scalingStats[attribute.scaling.stat]).toLocaleString("en-US")} ${attribute.scaling.stat}` : "";
+        const value = [formatValues(attribute.key, attribute.values), atStat, attribute.formula].filter(Boolean).join(" · ");
         list.append(el("dt", "", attribute.label), el("dd", "", `${value}${attribute.per_stack ? " per stack" : ""}`));
       });
       item.append(list);
@@ -800,7 +825,7 @@
     if (skill.description) {
       const description = el("details", "team-skill-description");
       description.append(el("summary", "", "Game description"), el("p", "", skill.description));
-      skill.scaling?.forEach((note) => description.append(el("p", "team-skill-caveat", note)));
+      skill.scaling?.forEach((note) => description.append(el("p", "team-skill-caveat", note + scalingSuffix(note))));
       copy.append(description);
     }
     if (skill.upgrade) copy.append(renderUpgrade(skill, skill.upgrade));
@@ -1397,7 +1422,10 @@
     body.setAttribute("role", "tabpanel");
     if (tab === "build") body.append(renderBuild(member, form));
     else if (tab === "stats") body.append(renderStats(member, entry));
-    else body.append(renderSkillLoadout(member, form, index), renderTraits(form));
+    else {
+      scalingStats = memberCardStats(member);
+      try { body.append(renderSkillLoadout(member, form, index), renderTraits(form)); } finally { scalingStats = null; }
+    }
     wrapper.append(renderMemberTabs(), body);
     return wrapper;
   }

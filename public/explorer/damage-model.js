@@ -409,6 +409,20 @@
     return (scaling.round_down ? Math.floor(raw) : raw) * Number(scaling.factor ?? 1);
   }
   // The range the game text shows: the value at 0 of the stat and at the cap.
+  // A skill's scaling note, as the data words it ("24.0%, plus an additional 3.60% for every 100 REGEN, up to a total
+  // maximum of 42.0%."), at the given stats: the same formula as scaledValue (min(max, base + per x stat / 100)).
+  // { value, percent, stat, statValue, decimals } or null when the note isn't that shape or the stat isn't known.
+  const SCALING_NOTE = /^\s*(\d+(?:\.\d+)?)(%?),\s*plus an additional (\d+(?:\.\d+)?)%? for every 100 ([A-Za-z]+(?:\.[A-Za-z]+)?),\s*up to a total maximum of (\d+(?:\.\d+)?)%?/u;
+  function scalingNote(note, stats) {
+    const match = SCALING_NOTE.exec(String(note || ""));
+    if (!match) return null;
+    const stat = STAT_ALIASES[match[4]] || match[4].toUpperCase();
+    const statValue = Number(stats?.[stat]);
+    if (!Number.isFinite(statValue)) return null;
+    const value = Math.min(Number(match[5]), Number(match[1]) + Number(match[3]) * statValue / 100);
+    return { value, percent: match[2] === "%", stat, statValue, decimals: (match[1].split(".")[1] || "").length };
+  }
+
   function scaledRange(scaling) {
     if (!scaling) return null;
     const base = Number(scaling.bases?.[0]);
@@ -481,6 +495,6 @@
   }
 
   window.AniilogsDamage = Object.freeze({
-    STATS, STAT_ALIASES, BRACKETS, ROLES, bracketOf, roleOf, roleAttack, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, options,
+    STATS, STAT_ALIASES, BRACKETS, ROLES, bracketOf, roleOf, roleAttack, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, scalingNote, options,
   });
 })();
