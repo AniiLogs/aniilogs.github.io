@@ -10151,6 +10151,47 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));
 }
 
+/* Treasure chests: the game's white chest mark in a ring coloured by the chest's tier (Basic blue, Exquisite purple,
+   Magnificent gold), on the map and in the Chests checklist. */
+.pin-chest {
+  --chest-ring: #4da3ff;
+}
+.pin-chest-purple,
+.checklist-chest-purple {
+  --chest-ring: #b57cff;
+}
+.pin-chest-gold,
+.checklist-chest-gold {
+  --chest-ring: #f2c14e;
+}
+.pin-chest .pin-body {
+  box-sizing: border-box;
+  border: 2.5px solid var(--chest-ring);
+  border-radius: 50%;
+  background: rgba(20, 27, 48, 0.92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.pin-chest .pin-icon {
+  width: 64%;
+  height: 64%;
+  object-fit: contain;
+}
+.checklist-chest {
+  --chest-ring: #4da3ff;
+  box-sizing: border-box;
+  padding: 4px;
+  border: 2px solid var(--chest-ring);
+  border-radius: 50%;
+  background: rgba(20, 27, 48, 0.92);
+}
+.checklist-chest-rewards {
+  display: block;
+  overflow: hidden;
+  color: var(--muted, #9aa4ad);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* An event pin whose Lumin Amber is folded into it (shown once the event is selected). */
 .pin-lumin-badge {
   position: absolute;

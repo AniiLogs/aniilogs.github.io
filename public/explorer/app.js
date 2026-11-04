@@ -10888,7 +10888,8 @@ function updateChecklistCompletion(entry, completionState, checked) {
     setCompletion(sparklingId, true);
   }
   persistLocalTracking();
-  if (isLuminChecklistEntry(entry)) {
+  // (map pins ticked here too: a Lumin's or a chest's)
+  if (isLuminChecklistEntry(entry) || entry?.kind === "treasure_chest") {
     refreshLuminCompletionViews();
   } else {
     renderChecklist();
@@ -10901,6 +10902,9 @@ function updateChecklistCompletion(entry, completionState, checked) {
 const CHECKLIST_FIRST_REGION_ID = "300001";
 
 function checklistMetaText(entry) {
+  if (entry?.kind === "treasure_chest") {
+    return [entry.map_label, entry.area_name, entry.coordinate_key].filter(Boolean).join(" - ");
+  }
   if (entry?.kind === "aniimo_form") {
     const region = String(entry.aniilog_number || "").startsWith("#")
       && entry.research_country?.id !== CHECKLIST_FIRST_REGION_ID
@@ -10957,6 +10961,7 @@ function renderChecklistRow(entry) {
   if (entry?.kind === "aniimo_form" || entry?.kind === "aniimo_special") {
     iconClasses.push("checklist-aniimo-portrait");
   }
+  if (CHEST_TIER_COLORS[entry?.chest_tier]) iconClasses.push(`checklist-chest checklist-chest-${entry.chest_tier}`);
   row.append(makeIcon(iconClasses.join(" "), entry.icon));
   const content = document.createElement("div");
   content.className = "checklist-text";
@@ -10970,6 +10975,14 @@ function renderChecklistRow(entry) {
   meta.textContent = checklistMetaText(entry);
   meta.title = meta.textContent;
   content.append(name, meta);
+  // A chest says what it pays (its exact contents, or the game's preview when the server rolls them).
+  if (entry?.kind === "treasure_chest" && entry.rewards) {
+    const rewards = document.createElement("small");
+    rewards.className = "checklist-chest-rewards";
+    rewards.textContent = entry.reward_kind === "random" ? `Possible rewards (random): ${entry.rewards}` : entry.rewards;
+    rewards.title = rewards.textContent;
+    content.append(rewards);
+  }
   row.append(content);
 
   const states = document.createElement("div");
@@ -10989,7 +11002,8 @@ function renderChecklistRow(entry) {
     control.append(input, label);
     states.append(control);
   });
-  if (isLuminChecklistEntry(entry) && entry?.map_id && luminCompletionIdForChecklistEntry(entry)) {
+  if ((isLuminChecklistEntry(entry) || entry?.kind === "treasure_chest") && entry?.map_id
+    && luminCompletionIdForChecklistEntry(entry)) {
     const locate = document.createElement("button");
     locate.type = "button";
     locate.className = "checklist-locate";
@@ -14244,6 +14258,9 @@ function renderItems() {
   });
 }
 
+// A treasure chest's outline, by how it looks in the game (its model): Basic blue, Exquisite purple, Magnificent gold.
+const CHEST_TIER_COLORS = Object.freeze({ blue: "#4da3ff", purple: "#b57cff", gold: "#f2c14e" });
+
 function pinClassName(spawn) {
   return [
     "pin",
@@ -14253,6 +14270,7 @@ function pinClassName(spawn) {
     spawn.marker_type === "aniimo_spawn" && spawn.aniimo_id ? "pin-specific-aniimo" : "",
     spawn.layer_id === "teleports" ? "pin-teleport" : "",
     spawn.layer_id === "ambers" ? "pin-amber" : "",
+    CHEST_TIER_COLORS[spawn.chest_tier] ? `pin-chest pin-chest-${spawn.chest_tier}` : "",
     spawn.marker_type === "underground_entrance" ? "pin-underground" : "",
     spawn.marker_type === "physical_reward_source" ? "pin-physical-reward-source" : "",
     spawn.is_underground ? "pin-underground-marker" : "",
@@ -14495,7 +14513,22 @@ function renderCanvasPins() {
     const defaultIconSource = spawn.icon || item?.icon;
     const hoverIconSource = spawn.hover_icon || item?.hover_icon;
     const icon = canvasIcon(index === state.hoveredCanvasIndex && hoverIconSource ? hoverIconSource : defaultIconSource);
-    if (icon) {
+    const chestColor = CHEST_TIER_COLORS[spawn.chest_tier];
+    if (chestColor) {
+      context.save();
+      context.beginPath();
+      context.arc(x, y, size / 2, 0, Math.PI * 2);
+      context.fillStyle = "rgba(20, 27, 48, 0.92)";
+      context.fill();
+      context.strokeStyle = chestColor;
+      context.lineWidth = 2.5;
+      context.stroke();
+      context.restore();
+    }
+    if (icon && chestColor) {
+      const iconSize = size * 0.64;
+      context.drawImage(icon, x - iconSize / 2, y - iconSize / 2, iconSize, iconSize);
+    } else if (icon) {
       if (isAstraMarkPointIcon(defaultIconSource)) {
         const radius = Math.max(5, size * 0.19);
         context.save();

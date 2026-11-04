@@ -330,7 +330,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.21.13-lumin-fold/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.21.14-chests/u);
   assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.
@@ -547,7 +547,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20261104-build3857679-team-builder-audit-r86"/u);
+  assert.match(explorerConfig, /contentRevision = "20261104-build3857679-chests-r87"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
