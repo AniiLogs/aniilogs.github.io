@@ -738,7 +738,9 @@
         const atStat = Number.isFinite(scaled)
           ? `${formatValues(attribute.key, [scaled])} at this build's ${Math.round(scalingStats[attribute.scaling.stat]).toLocaleString("en-US")} ${attribute.scaling.stat}` : "";
         const value = [formatValues(attribute.key, attribute.values), atStat, attribute.formula].filter(Boolean).join(" · ");
-        list.append(el("dt", "", attribute.label), el("dd", "", `${value}${attribute.per_stack ? " per stack" : ""}`));
+        // A row that only applies in a state ("While holding 3 Movements") says so beside its label.
+        list.append(el("dt", "", attribute.condition ? `${attribute.label} (${attribute.condition.replace(/^./u, (c) => c.toLowerCase())})` : attribute.label),
+          el("dd", "", `${value}${attribute.per_stack ? " per stack" : ""}`));
       });
       item.append(list);
     }

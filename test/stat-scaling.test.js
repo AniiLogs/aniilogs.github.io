@@ -28,3 +28,7 @@ test("the Team Builder and the Aniilog tab use the stats you set", () => {
   assert.match(app, /text\.dataset\.scalingNote = line;/u);
   assert.match(app, /window\.setTimeout\(\(\) => afpRefreshScalingNotes\(entry\), 0\);/u);
 });
+
+test("a stat-scaled row that only applies in a state names that state beside its label", () => {
+  assert.match(read("team-builder.js"), /attribute\.condition \? `\$\{attribute\.label\} \(\$\{attribute\.condition/u);
+});
