@@ -18,3 +18,9 @@ test("the Aniilog Growth values are the Team Builder's (rounded up like the game
   assert.match(app, /const totalsByLevel = model\?\.statTotals && teamData\?\.forms\?\.\[String\(entry\.form_id\)\]/u);
   assert.match(app, /totalsByLevel\[index\]\?\.\[stat\.display\]/u);
 });
+
+test("held-item buffs that change past a stat's potential are applied once every potential source is counted", () => {
+  const model = readFileSync(new URL("../public/explorer/damage-model.js", import.meta.url), "utf8");
+  assert.match(model, /if \(attribute\.potential_over\) conditional\.push\(\{ attribute, source \}\);/u);
+  assert.match(model, /total > attribute\.potential_over\.over \? attribute\.potential_over\.value : attribute\.value/u);
+});

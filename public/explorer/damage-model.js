@@ -122,6 +122,7 @@
     const template = options.useTemplate ? form.stat_template?.species_bonus || {} : {};
     const bonus = Object.fromEntries(STATS.map((stat) => [stat, { v: 0, p: 0, fix: 0, conv: 0, sources: [] }]));
     const potential = Object.fromEntries(STATS.map((stat) => [stat, { own: ownPotential(stat), star_up: 0, held_items: 0, other: 0 }]));
+    const conditional = [];
     const modifiers = {};
     // Where an attribute lands: a stat part, a stat's extra potential, or a combat modifier.
     const add = (key, value, source, kind = "other") => {
@@ -155,8 +156,13 @@
       item.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value * (1 + ratio), source, "held_items")));
       // propConversions {"level", <attr>_conv, rate}: + rate per pet level (e.g. 0.7 BREAK per level).
       item.conversions.filter((row) => row.from === "level").forEach((row) => add(row.key, row.rate * level, source, "held_items"));
+      // A tier buff that changes past a stat's potential (item level 15: "doubles if ATK potential exceeds 15",
+      // potential_over { stat, over, value }) waits until every potential source is counted, below.
       item.tiers.filter((tier) => levelNumber >= tier.level && !tier.need_energy)
-        .forEach((tier) => tier.buffs.forEach((buffRow) => buffRow.attributes.forEach((attribute) => add(attribute.key, attribute.value, source, "held_items"))));
+        .forEach((tier) => tier.buffs.forEach((buffRow) => buffRow.attributes.forEach((attribute) => {
+          if (attribute.potential_over) conditional.push({ attribute, source });
+          else add(attribute.key, attribute.value, source, "held_items");
+        })));
     });
     // Form Research: options.formResearch lists the researched form ids (PetAttributeCalcUtils.getFormCollectEntryAttributeMap).
     (options.formResearch || []).forEach((researched) => {
@@ -164,6 +170,12 @@
       if (row) add(row.key, row.value, `Form Research: ${row.form_label || row.form_id}`);
     });
     (options.extra || []).forEach(({ key, value, source }) => add(key, value, source || "Other"));
+    // (held-item buffs that change past a stat's potential, now that every potential source is in)
+    for (const { attribute, source } of conditional) {
+      const parts = potential[attribute.potential_over.stat];
+      const total = parts ? parts.own + parts.star_up + parts.held_items + parts.other : 0;
+      add(attribute.key, total > attribute.potential_over.over ? attribute.potential_over.value : attribute.value, source, "held_items");
+    }
     const result = { level, base: {}, total: {}, potential: {}, bonus, modifiers, template_species: template };
     STATS.forEach((stat) => {
       const points = Number.isFinite(options.species?.[stat]) ? options.species[stat] : (species[stat] ?? NaN) + (template[stat] || 0);
