@@ -7786,11 +7786,24 @@ function renderAfpStats(entry) {
     const gainsByLevel = settings.heldItem || settings.starUp
       ? Array.from({ length: cap }, (_, index) => afpBonusGains(entry, stats, capped, index + 1, settings.heldItem, settings.starUp))
       : [];
+    // Each level's values from the Team Builder's stat model (damage-model.js statTotals): it rounds the card's stat up
+    // as the game does, so a maxed Aniimo shows the game's numbers and the Team Builder's. (This panel's own formula
+    // rounded down and showed 1 less with any potential.) Without the Team Builder data yet, that formula stands in.
+    const model = window.AniilogsDamage;
+    const teamData = state.afpTeamData;
+    const totalsByLevel = model?.statTotals && teamData?.forms?.[String(entry.form_id)]
+      ? Array.from({ length: cap }, (_, index) => model.statTotals(teamData, state.aniilogData, String(entry.form_id), {
+        level: index + 1,
+        potential: Object.fromEntries(stats.map((stat) => [stat.display, capped[stat.label] || 0])),
+        heldItems: settings.heldItem ? [settings.heldItem] : [],
+        starUp: settings.starUp || undefined,
+      })?.total || null)
+      : [];
     stats.forEach((stat) => {
       const points = capped[stat.label];
       const base = Number(stat.value) || 0;
-      const values = Array.from({ length: cap }, (_, index) => (afpGrownStat(growth, stat.label, base, index + 1, points) ?? 0)
-        + (gainsByLevel[index]?.[stat.label]?.gain || 0));
+      const values = Array.from({ length: cap }, (_, index) => totalsByLevel[index]?.[stat.display]
+        ?? (afpGrownStat(growth, stat.label, base, index + 1, points) ?? 0) + (gainsByLevel[index]?.[stat.label]?.gain || 0));
       const item = gainsByLevel[level - 1]?.[stat.label];
       const row = document.createElement("tr");
       const name = document.createElement("th");

@@ -13,3 +13,8 @@ test("the Aniilog Growth stats have Star Up stage and level, computed like the T
   assert.match(app, /heldItems: heldItem \? \[heldItem\] : \[\], starUp: starUp \|\| undefined/u);
   assert.doesNotMatch(app, /afpHeldItemGains|typedMax/u);
 });
+
+test("the Aniilog Growth values are the Team Builder's (rounded up like the game's card), not a separate formula", () => {
+  assert.match(app, /const totalsByLevel = model\?\.statTotals && teamData\?\.forms\?\.\[String\(entry\.form_id\)\]/u);
+  assert.match(app, /totalsByLevel\[index\]\?\.\[stat\.display\]/u);
+});
