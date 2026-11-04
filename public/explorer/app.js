@@ -10458,10 +10458,29 @@ function scheduleMobileCatalogStickyIdentity() {
   });
 }
 
+// Lumin entries the checklist leaves out, so each find counts once: a Themed Puzzle that gives no Amber
+// (LUMIN_NO_AMBER), and an Amber linked to a puzzle entry that is itself on the checklist (the puzzle stands for both).
+const LUMIN_NO_AMBER = new Set(window.ANIILOGS_LUMIN_NO_AMBER || []);
+const luminLeftOutCache = new WeakMap();
+function luminChecklistLeftOut(entries) {
+  if (luminLeftOutCache.has(entries)) return luminLeftOutCache.get(entries);
+  const ids = new Set(entries.map((entry) => entry?.completion_states?.[0]?.id).filter(Boolean));
+  const out = new Set(LUMIN_NO_AMBER);
+  ids.forEach((id) => {
+    if (!id.startsWith("amber:overworld:")) return;
+    if ((LUMIN_LINKS[id] || []).some((linkedId) => ids.has(linkedId) && !LUMIN_NO_AMBER.has(linkedId))) out.add(id);
+  });
+  luminLeftOutCache.set(entries, out);
+  return out;
+}
+
 function checklistEntriesForCategory(category = state.checklistCategory) {
   if (!Array.isArray(state.checklistData?.entries)) return [];
   const extra = developerContentAllowed() ? developerEntries.checklist : [];
-  return [...state.checklistData.entries, ...extra].filter((entry) => entry?.category === category);
+  const leftOut = luminChecklistLeftOut(state.checklistData.entries);
+  return [...state.checklistData.entries, ...extra].filter((entry) => (
+    entry?.category === category && !leftOut.has(entry?.completion_states?.[0]?.id)
+  ));
 }
 
 const LUMIN_CHECKLIST_TABS = Object.freeze([

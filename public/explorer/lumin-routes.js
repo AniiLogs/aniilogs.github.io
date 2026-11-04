@@ -304,7 +304,29 @@ window.ANIILOGS_LUMIN_LINKS = Object.freeze({
   "amber:overworld:whisperwake-isles:3003:CURRENT_N800_39_364_70:collected": ["amber:event:whisperwake-isles:3003:CURRENT_N883_86_390_47:collected"],
   "amber:overworld:whisperwake-isles:3003:CURRENT_N91_45_1034_67:collected": ["amber:event:whisperwake-isles:3003:CURRENT_N74_54_1071_21:collected"],
   "amber:overworld:whisperwake-isles:3003:CURRENT_N984_65_378_71:collected": ["amber:lumin_marking:whisperwake-isles:3003:CURRENT_N984_65_378_71:collected"],
+  // Themed Puzzle "Blessed Wisptis" (sandbox 81288860, Berylline Vale) spawns this Amber itself: one find (game build 3857679)
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N774_11_1328_83:collected": ["amber:overworld:country-of-time:3000:CURRENT_N771_79_1323_74:collected"],
+  "amber:overworld:country-of-time:3000:CURRENT_N771_79_1323_74:collected": ["amber:lumin_marking:country-of-time:3000:CURRENT_N774_11_1328_83:collected"],
 });
+
+// Themed Puzzle pins (UI_Icon_MarkPoint_ThemeDecryption) that give no Lumin Amber: finishing them opens wind paths,
+// golden Aniimo or chests (their sandboxes and scene_sandbox_finished_data spawn no Amber; game build 3857679). They stay
+// on the map as puzzles but are left out of the Lumin checklist and its totals (app.js, checklistEntriesForCategory).
+window.ANIILOGS_LUMIN_NO_AMBER = Object.freeze([
+  "amber:lumin_marking:country-of-time:3000:CURRENT_559_89_1513_88:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N1309_38_890_32:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N1622_40_634_20:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N1666_46_603_57:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N269_16_1803_71:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N322_57_1800_14:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N358_40_1805_40:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N44_21_1706_09:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N498_06_1529_77:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N510_13_1789_30:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N559_06_1650_67:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N695_74_1435_11:collected",
+  "amber:lumin_marking:country-of-time:3000:CURRENT_N789_76_1460_80:collected",
+]);
 
 // What a Lumin Amber (and its puzzle's pin) waits for, shown in its selection details (app.js, luminGateRows):
 //   time     the in-game clock window (a spawner's refreshLogicTimes, a puzzle's activeParams or its activeCondition)
