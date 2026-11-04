@@ -602,6 +602,7 @@ const state = {
   checklistLoadError: "",
   checklistCategory: "aniimo",
   luminChecklistTab: "ambers",
+  chestChecklistTab: "basic",
   checklistSearch: "",
   checklistMissingSparkling: false,
   itemlogData: null,
@@ -10585,10 +10586,32 @@ function luminChecklistEntries(tabId = state.luminChecklistTab) {
   ));
 }
 
+// The Chests checklist's tabs, like Lumin's: one per tier of modern chest, and the Ancient chests (every tier) on
+// their own.
+const CHEST_CHECKLIST_TABS = Object.freeze([
+  { id: "basic", label: "Basic", tier: "blue" },
+  { id: "exquisite", label: "Exquisite", tier: "purple" },
+  { id: "magnificent", label: "Magnificent", tier: "gold" },
+  { id: "ancient", label: "Ancient" },
+]);
+
+function chestChecklistEntries(tabId = state.chestChecklistTab) {
+  const tab = CHEST_CHECKLIST_TABS.find((candidate) => candidate.id === tabId) || CHEST_CHECKLIST_TABS[0];
+  return checklistEntriesForCategory("chests").filter((entry) => (
+    tab.tier ? entry?.chest_tier === tab.tier && !isAncientChest(entry) : isAncientChest(entry)
+  ));
+}
+
+// A checklist category with its own row of tabs under the main ones: its tabs, which state field holds the open
+// one, and the entries a tab lists.
+const CHECKLIST_SUB_TABS = Object.freeze({
+  ambers: { tabs: LUMIN_CHECKLIST_TABS, stateKey: "luminChecklistTab", entries: luminChecklistEntries, label: "Lumin checklist sources" },
+  chests: { tabs: CHEST_CHECKLIST_TABS, stateKey: "chestChecklistTab", entries: chestChecklistEntries, label: "Chest tiers" },
+});
+
 function checklistEntriesForActiveTab() {
-  return state.checklistCategory === "ambers"
-    ? luminChecklistEntries()
-    : checklistEntriesForCategory();
+  const subTabs = CHECKLIST_SUB_TABS[state.checklistCategory];
+  return subTabs ? subTabs.entries() : checklistEntriesForCategory();
 }
 
 function checklistSpecialEntries() {
@@ -11251,23 +11274,25 @@ function renderChecklistSpecialSection() {
   return section;
 }
 
-function renderLuminChecklistTabs() {
+// The open category's own row of tabs (Lumin's sources, the Chests tiers), in the row under the main tabs.
+function renderChecklistSubTabs(subTabs) {
   els.luminChecklistTabs.textContent = "";
-  const availableTabs = LUMIN_CHECKLIST_TABS.filter((tab) => luminChecklistEntries(tab.id).length);
-  if (!availableTabs.some((tab) => tab.id === state.luminChecklistTab)) {
-    state.luminChecklistTab = availableTabs[0]?.id || LUMIN_CHECKLIST_TABS[0].id;
+  els.luminChecklistTabs.setAttribute("aria-label", subTabs.label);
+  const availableTabs = subTabs.tabs.filter((tab) => subTabs.entries(tab.id).length);
+  if (!availableTabs.some((tab) => tab.id === state[subTabs.stateKey])) {
+    state[subTabs.stateKey] = availableTabs[0]?.id || subTabs.tabs[0].id;
   }
   availableTabs.forEach((tab) => {
-    const entries = luminChecklistEntries(tab.id);
+    const entries = subTabs.entries(tab.id);
     const progress = checklistProgress(entries);
     const button = document.createElement("button");
     button.type = "button";
     button.className = "lumin-checklist-tab";
     button.setAttribute("role", "tab");
-    button.setAttribute("aria-selected", String(state.luminChecklistTab === tab.id));
-    button.tabIndex = state.luminChecklistTab === tab.id ? 0 : -1;
+    button.setAttribute("aria-selected", String(state[subTabs.stateKey] === tab.id));
+    button.tabIndex = state[subTabs.stateKey] === tab.id ? 0 : -1;
     button.addEventListener("click", () => {
-      state.luminChecklistTab = tab.id;
+      state[subTabs.stateKey] = tab.id;
       renderChecklist();
     });
     const label = document.createElement("span");
@@ -11358,16 +11383,15 @@ function renderChecklist() {
     els.checklistCategoryTabs.append(tab);
   });
 
-  if (state.checklistCategory === "ambers") renderLuminChecklistTabs();
+  const subTabs = CHECKLIST_SUB_TABS[state.checklistCategory];
+  if (subTabs) renderChecklistSubTabs(subTabs);
 
   const entries = checklistEntriesForActiveTab();
   const progress = checklistProgress(entries);
   els.checklistCount.textContent = `${progress.completed} / ${progress.total}`;
   const activeCategory = categories.find((category) => category?.id === state.checklistCategory);
-  const activeLuminTab = state.checklistCategory === "ambers"
-    ? LUMIN_CHECKLIST_TABS.find((tab) => tab.id === state.luminChecklistTab)
-    : null;
-  els.checklistPanelTitle.textContent = [activeCategory?.label || state.checklistCategory, activeLuminTab?.label]
+  const activeSubTab = subTabs?.tabs.find((tab) => tab.id === state[subTabs.stateKey]) || null;
+  els.checklistPanelTitle.textContent = [activeCategory?.label || state.checklistCategory, activeSubTab?.label]
     .filter(Boolean).join(" · ");
   els.checklistPanelCount.textContent = els.checklistCount.textContent;
   renderChecklistHubStatus();

@@ -35,3 +35,13 @@ test("a chest checklist row says what it pays, can Locate its pin, and ticks the
   assert.match(app, /\(isLuminChecklistEntry\(entry\) \|\| entry\?\.kind === "treasure_chest"\) && entry\?\.map_id/u);
   assert.match(app, /if \(isLuminChecklistEntry\(entry\) \|\| entry\?\.kind === "treasure_chest"\) \{\r?\n    refreshLuminCompletionViews\(\);/u);
 });
+
+test("the Chests checklist has its own tabs like Lumin's: Basic, Exquisite, Magnificent, Ancient", () => {
+  assert.match(app, /const CHEST_CHECKLIST_TABS = Object\.freeze\(\[\r?\n  \{ id: "basic", label: "Basic", tier: "blue" \},\r?\n  \{ id: "exquisite", label: "Exquisite", tier: "purple" \},\r?\n  \{ id: "magnificent", label: "Magnificent", tier: "gold" \},\r?\n  \{ id: "ancient", label: "Ancient" \},/u);
+  // a tier tab lists that tier's modern chests; Ancient lists every Ancient chest
+  assert.match(app, /tab\.tier \? entry\?\.chest_tier === tab\.tier && !isAncientChest\(entry\) : isAncientChest\(entry\)/u);
+  // one sub-tab row for both categories
+  assert.match(app, /ambers: \{ tabs: LUMIN_CHECKLIST_TABS, stateKey: "luminChecklistTab"/u);
+  assert.match(app, /chests: \{ tabs: CHEST_CHECKLIST_TABS, stateKey: "chestChecklistTab"/u);
+  assert.match(app, /if \(subTabs\) renderChecklistSubTabs\(subTabs\);/u);
+});
