@@ -10152,16 +10152,12 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 }
 
 /* Treasure chests: the game's chest mark filled with its tier's colour (Basic blue, Exquisite purple, Magnificent
-   gold, a boss's reward chest red) and outlined white, or pearlescent (a soft hue on each side) for an Ancient chest;
-   on the map and in the Chests checklist. The mark is a mask over a block of the tier's colour (.chest-glyph-fill),
-   so the outline sits on the element around it. */
+   gold, a boss's reward chest red) and outlined white, or for an Ancient chest a rainbow edge and a pearly sheen; on
+   the map and in the Chests checklist. The mark is a mask over a block of the tier's colour (.chest-glyph-fill), so
+   the outline sits on the element around it. */
 .pin-chest,
 .checklist-chest {
   --chest-ring: #4da3ff;
-  --chest-edge-1: #ffffff;
-  --chest-edge-2: #ffffff;
-  --chest-edge-3: #ffffff;
-  --chest-edge-4: #ffffff;
 }
 .pin-chest-purple,
 .checklist-chest-purple {
@@ -10175,30 +10171,51 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 .checklist-chest-red {
   --chest-ring: #ff4d4d;
 }
-.pin-chest-ancient,
-.checklist-chest-ancient {
-  --chest-edge-1: #ff7ad9;
-  --chest-edge-2: #5fe3ff;
-  --chest-edge-3: #b48cff;
-  --chest-edge-4: #ffe36e;
-}
 .chest-glyph {
+  position: relative;
   display: block;
   box-sizing: border-box;
   filter:
-    drop-shadow(1.5px 0 0 var(--chest-edge-1))
-    drop-shadow(-1.5px 0 0 var(--chest-edge-2))
-    drop-shadow(0 1.5px 0 var(--chest-edge-3))
-    drop-shadow(0 -1.5px 0 var(--chest-edge-4))
+    drop-shadow(1.5px 0 0 #ffffff)
+    drop-shadow(-1.5px 0 0 #ffffff)
+    drop-shadow(0 1.5px 0 #ffffff)
+    drop-shadow(0 -1.5px 0 #ffffff)
     drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
 }
+.chest-glyph-fill,
+.chest-glyph-edge {
+  -webkit-mask: var(--chest-icon) center / contain no-repeat;
+  mask: var(--chest-icon) center / contain no-repeat;
+}
 .chest-glyph-fill {
+  position: relative;
   display: block;
   width: 100%;
   height: 100%;
   background: var(--chest-ring);
-  -webkit-mask: var(--chest-icon) center / contain no-repeat;
-  mask: var(--chest-icon) center / contain no-repeat;
+}
+.chest-glyph-edge {
+  display: none;
+}
+/* Ancient chests: a rainbow edge running round the chest (the mark, larger, behind it) and a pearly sheen across
+   its tier colour, in place of the white outline. */
+.pin-chest-ancient .chest-glyph,
+.chest-glyph.checklist-chest-ancient {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+.pin-chest-ancient .chest-glyph-edge,
+.checklist-chest-ancient .chest-glyph-edge {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: conic-gradient(#ff4fd8, #ffe14d, #4dffb8, #3fd9ff, #9d6bff, #ff4fd8);
+}
+.pin-chest-ancient .chest-glyph-fill,
+.checklist-chest-ancient .chest-glyph-fill {
+  transform: scale(0.8);       /* inside the rainbow edge, which keeps the chest's full size */
+  background:
+    linear-gradient(135deg, transparent 30%, rgba(255, 255, 255, 0.75) 45%, transparent 60%),
+    var(--chest-ring);
 }
 .pin-chest .pin-icon {
   width: 80%;
@@ -10206,6 +10223,7 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 }
 .checklist-chest {
   padding: 4px;
+  background: none;            /* (the outline would trace the icon box's background) */
 }
 .checklist-chest-rewards {
   display: block;

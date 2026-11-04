@@ -14267,17 +14267,21 @@ function renderItems() {
 const CHEST_TIER_COLORS = Object.freeze({ blue: "#4da3ff", purple: "#b57cff", gold: "#f2c14e", red: "#ff4d4d" });
 // Ancient chests (the old-style models) get a pearlescent outline instead: a soft hue on each side.
 const CHEST_OUTLINE_OFFSETS = [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]];
-const CHEST_PEARL_COLORS = ["#ff7ad9", "#5fe3ff", "#b48cff", "#ffe36e", "#ffa6e0", "#8fb8ff", "#ffcf9e", "#8fffe0"];
+// Ancient chests: a rainbow edge running round the chest and a pearly sheen across its tier colour.
+const CHEST_PEARL_COLORS = ["#ff4fd8", "#ffe14d", "#4dffb8", "#3fd9ff", "#9d6bff"];
+const CHEST_PEARL_EDGE_SCALE = 1.24;
 // The chest mark filled with its tier's colour (the mark is a mask over a block of colour), inside an element that
 // carries the outline (white, or pearlescent for an Ancient chest).
 function chestGlyph(className, source) {
   const glyph = document.createElement("span");
   glyph.className = `${className} chest-glyph`;
   glyph.setAttribute("aria-hidden", "true");
+  if (source) glyph.style.setProperty("--chest-icon", `url("${contentUrl(source)}")`);
+  const edge = document.createElement("span");
+  edge.className = "chest-glyph-edge";             // the Ancient chest's rainbow edge (hidden on the others)
   const fill = document.createElement("span");
   fill.className = "chest-glyph-fill";
-  if (source) fill.style.setProperty("--chest-icon", `url("${contentUrl(source)}")`);
-  glyph.append(fill);
+  glyph.append(edge, fill);
   return glyph;
 }
 
@@ -14303,6 +14307,39 @@ function tintedCanvasIcon(image, color) {
     tintedIcons.set(key, tinted);
   }
   return tinted;
+}
+
+// An Ancient chest's layers on the canvas map, cached per icon: "edge" (the mark in a rainbow running round it, drawn
+// larger behind the chest) and "sheen" (a white band across the mark, drawn over its tier colour).
+const pearlLayers = new Map();
+function pearlCanvasLayer(image, kind) {
+  const key = `${image.src}|${kind}`;
+  let layer = pearlLayers.get(key);
+  if (!layer) {
+    layer = document.createElement("canvas");
+    const width = layer.width = image.naturalWidth;
+    const height = layer.height = image.naturalHeight;
+    const context = layer.getContext("2d");
+    context.drawImage(image, 0, 0);
+    context.globalCompositeOperation = "source-in";
+    let paint;
+    if (kind === "edge") {
+      paint = context.createConicGradient
+        ? context.createConicGradient(0, width / 2, height / 2)
+        : context.createLinearGradient(0, 0, width, height);
+      CHEST_PEARL_COLORS.concat(CHEST_PEARL_COLORS[0])
+        .forEach((color, n, all) => paint.addColorStop(n / (all.length - 1), color));
+    } else {
+      paint = context.createLinearGradient(0, 0, width, height);
+      paint.addColorStop(0.3, "rgba(255, 255, 255, 0)");
+      paint.addColorStop(0.45, "rgba(255, 255, 255, 0.75)");
+      paint.addColorStop(0.6, "rgba(255, 255, 255, 0)");
+    }
+    context.fillStyle = paint;
+    context.fillRect(0, 0, width, height);
+    pearlLayers.set(key, layer);
+  }
+  return layer;
 }
 
 function pinClassName(spawn) {
@@ -14560,15 +14597,22 @@ function renderCanvasPins() {
     const icon = canvasIcon(index === state.hoveredCanvasIndex && hoverIconSource ? hoverIconSource : defaultIconSource);
     const chestColor = CHEST_TIER_COLORS[spawn.chest_tier];
     if (icon && chestColor) {
-      // the chest mark filled with its tier's colour and outlined white (an Ancient chest: pearlescent, a soft hue
-      // per side): the outline-tinted mark drawn around it, then the tier-tinted mark on top
+      // the chest mark filled with its tier's colour and outlined white (an Ancient chest: a rainbow edge behind it
+      // and a pearly sheen over it)
       const iconSize = size * 0.8;
       const left = x - iconSize / 2;
       const top = y - iconSize / 2;
-      const ancient = isAncientChest(spawn);
-      CHEST_OUTLINE_OFFSETS.forEach(([dx, dy], side) => context.drawImage(
-        tintedCanvasIcon(icon, ancient ? CHEST_PEARL_COLORS[side] : "#ffffff"), left + dx, top + dy, iconSize, iconSize));
-      context.drawImage(tintedCanvasIcon(icon, chestColor), left, top, iconSize, iconSize);
+      if (isAncientChest(spawn)) {
+        // (the rainbow edge is the chest's full size, so the chest inside it is drawn smaller: same size as the others)
+        const innerSize = iconSize / CHEST_PEARL_EDGE_SCALE;
+        context.drawImage(pearlCanvasLayer(icon, "edge"), left, top, iconSize, iconSize);
+        context.drawImage(tintedCanvasIcon(icon, chestColor), x - innerSize / 2, y - innerSize / 2, innerSize, innerSize);
+        context.drawImage(pearlCanvasLayer(icon, "sheen"), x - innerSize / 2, y - innerSize / 2, innerSize, innerSize);
+      } else {
+        CHEST_OUTLINE_OFFSETS.forEach(([dx, dy]) => context.drawImage(
+          tintedCanvasIcon(icon, "#ffffff"), left + dx, top + dy, iconSize, iconSize));
+        context.drawImage(tintedCanvasIcon(icon, chestColor), left, top, iconSize, iconSize);
+      }
     } else if (icon) {
       if (isAstraMarkPointIcon(defaultIconSource)) {
         const radius = Math.max(5, size * 0.19);
