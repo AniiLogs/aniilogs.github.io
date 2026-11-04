@@ -10151,10 +10151,17 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     drop-shadow(0 1px 1px rgba(0, 0, 0, 0.75));
 }
 
-/* Treasure chests: the game's white chest mark outlined in its tier's colour (Basic blue, Exquisite purple,
-   Magnificent gold), on the map and in the Chests checklist. */
-.pin-chest {
+/* Treasure chests: the game's chest mark filled with its tier's colour (Basic blue, Exquisite purple, Magnificent
+   gold, a boss's reward chest red) and outlined white, or pearlescent (a soft hue on each side) for an Ancient chest;
+   on the map and in the Chests checklist. The mark is a mask over a block of the tier's colour (.chest-glyph-fill),
+   so the outline sits on the element around it. */
+.pin-chest,
+.checklist-chest {
   --chest-ring: #4da3ff;
+  --chest-edge-1: #ffffff;
+  --chest-edge-2: #ffffff;
+  --chest-edge-3: #ffffff;
+  --chest-edge-4: #ffffff;
 }
 .pin-chest-purple,
 .checklist-chest-purple {
@@ -10164,33 +10171,41 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 .checklist-chest-gold {
   --chest-ring: #f2c14e;
 }
-.pin-chest .pin-icon,
-.checklist-chest {
+.pin-chest-red,
+.checklist-chest-red {
+  --chest-ring: #ff4d4d;
+}
+.pin-chest-ancient,
+.checklist-chest-ancient {
+  --chest-edge-1: #ff7ad9;
+  --chest-edge-2: #5fe3ff;
+  --chest-edge-3: #b48cff;
+  --chest-edge-4: #ffe36e;
+}
+.chest-glyph {
+  display: block;
+  box-sizing: border-box;
   filter:
-    drop-shadow(1.5px 0 0 var(--chest-ring))
-    drop-shadow(-1.5px 0 0 var(--chest-ring))
-    drop-shadow(0 1.5px 0 var(--chest-ring))
-    drop-shadow(0 -1.5px 0 var(--chest-ring))
+    drop-shadow(1.5px 0 0 var(--chest-edge-1))
+    drop-shadow(-1.5px 0 0 var(--chest-edge-2))
+    drop-shadow(0 1.5px 0 var(--chest-edge-3))
+    drop-shadow(0 -1.5px 0 var(--chest-edge-4))
     drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+.chest-glyph-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--chest-ring);
+  -webkit-mask: var(--chest-icon) center / contain no-repeat;
+  mask: var(--chest-icon) center / contain no-repeat;
 }
 .pin-chest .pin-icon {
   width: 80%;
   height: 80%;
 }
 .checklist-chest {
-  --chest-ring: #4da3ff;
-  box-sizing: border-box;
-  padding: 3px;
-}
-/* Ancient chests: a pearlescent outline (a soft hue on each side) instead of the tier colour. */
-.pin-chest.pin-chest-ancient .pin-icon,
-.checklist-chest.checklist-chest-ancient {
-  filter:
-    drop-shadow(1.5px 0 0 #ff7ad9)
-    drop-shadow(-1.5px 0 0 #5fe3ff)
-    drop-shadow(0 1.5px 0 #b48cff)
-    drop-shadow(0 -1.5px 0 #ffe36e)
-    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+  padding: 4px;
 }
 .checklist-chest-rewards {
   display: block;

@@ -10965,7 +10965,9 @@ function renderChecklistRow(entry) {
     iconClasses.push(`checklist-chest checklist-chest-${entry.chest_tier}`);
     if (isAncientChest(entry)) iconClasses.push("checklist-chest-ancient");
   }
-  row.append(makeIcon(iconClasses.join(" "), entry.icon));
+  row.append(CHEST_TIER_COLORS[entry?.chest_tier]
+    ? chestGlyph(iconClasses.join(" "), entry.icon)
+    : makeIcon(iconClasses.join(" "), entry.icon));
   const content = document.createElement("div");
   content.className = "checklist-text";
   const name = document.createElement("strong");
@@ -14262,10 +14264,23 @@ function renderItems() {
 }
 
 // A treasure chest's outline, by how it looks in the game (its model): Basic blue, Exquisite purple, Magnificent gold.
-const CHEST_TIER_COLORS = Object.freeze({ blue: "#4da3ff", purple: "#b57cff", gold: "#f2c14e" });
+const CHEST_TIER_COLORS = Object.freeze({ blue: "#4da3ff", purple: "#b57cff", gold: "#f2c14e", red: "#ff4d4d" });
 // Ancient chests (the old-style models) get a pearlescent outline instead: a soft hue on each side.
 const CHEST_OUTLINE_OFFSETS = [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]];
 const CHEST_PEARL_COLORS = ["#ff7ad9", "#5fe3ff", "#b48cff", "#ffe36e", "#ffa6e0", "#8fb8ff", "#ffcf9e", "#8fffe0"];
+// The chest mark filled with its tier's colour (the mark is a mask over a block of colour), inside an element that
+// carries the outline (white, or pearlescent for an Ancient chest).
+function chestGlyph(className, source) {
+  const glyph = document.createElement("span");
+  glyph.className = `${className} chest-glyph`;
+  glyph.setAttribute("aria-hidden", "true");
+  const fill = document.createElement("span");
+  fill.className = "chest-glyph-fill";
+  if (source) fill.style.setProperty("--chest-icon", `url("${contentUrl(source)}")`);
+  glyph.append(fill);
+  return glyph;
+}
+
 function isAncientChest(subject) {
   return subject?.chest_style === "ancient"
     || /\(ancient\)/u.test(String(subject?.display_type_label || subject?.name || ""));
@@ -14337,7 +14352,7 @@ function createMarkerPin(entry) {
   const iconSource = spawn.icon || item.icon;
   if (!iconSource) pin.classList.add("pin-no-icon");
   if (isAstraMarkPointIcon(iconSource)) pin.classList.add("pin-astra-markpoint");
-  const icon = makeIcon("pin-icon", iconSource);
+  const icon = CHEST_TIER_COLORS[spawn.chest_tier] ? chestGlyph("pin-icon", iconSource) : makeIcon("pin-icon", iconSource);
   const hoverIconSource = spawn.hover_icon || item.hover_icon;
   const hoverIcon = hoverIconSource ? makeIcon("pin-icon pin-icon-selected", hoverIconSource) : null;
   const undergroundBadge = spawn.is_underground && state.data.underground_badge_icon
@@ -14545,15 +14560,15 @@ function renderCanvasPins() {
     const icon = canvasIcon(index === state.hoveredCanvasIndex && hoverIconSource ? hoverIconSource : defaultIconSource);
     const chestColor = CHEST_TIER_COLORS[spawn.chest_tier];
     if (icon && chestColor) {
-      // the chest mark outlined in its tier's colour (an Ancient chest: pearlescent, a soft hue per side): the
-      // tinted mark drawn around it, then the mark on top
+      // the chest mark filled with its tier's colour and outlined white (an Ancient chest: pearlescent, a soft hue
+      // per side): the outline-tinted mark drawn around it, then the tier-tinted mark on top
       const iconSize = size * 0.8;
       const left = x - iconSize / 2;
       const top = y - iconSize / 2;
       const ancient = isAncientChest(spawn);
       CHEST_OUTLINE_OFFSETS.forEach(([dx, dy], side) => context.drawImage(
-        tintedCanvasIcon(icon, ancient ? CHEST_PEARL_COLORS[side] : chestColor), left + dx, top + dy, iconSize, iconSize));
-      context.drawImage(icon, left, top, iconSize, iconSize);
+        tintedCanvasIcon(icon, ancient ? CHEST_PEARL_COLORS[side] : "#ffffff"), left + dx, top + dy, iconSize, iconSize));
+      context.drawImage(tintedCanvasIcon(icon, chestColor), left, top, iconSize, iconSize);
     } else if (icon) {
       if (isAstraMarkPointIcon(defaultIconSource)) {
         const radius = Math.max(5, size * 0.19);
