@@ -52,6 +52,6 @@ test("Breezy Plains Morphling's Memory levels are Lumin finds with their own che
 test("Morphling's Memory sits in the Lumin section with an Amber badge, and every Lumin row can Locate its pin", () => {
   assert.match(app, /const LUMIN_SECTION_ITEM_IDS = new Set\(\["current-poi-10402"\]\);/u);
   assert.match(app, /subject\.layer_id = "ambers";/u);
-  assert.match(app, /const LUMIN_BADGE_ITEM_IDS = new Set\(\["current-poi-10402", "current-poi-10400"\]\);/u);
+  assert.match(app, /const LUMIN_BADGE_PIN_KEYS = new Set\(\["CURRENT_N774_11_1328_83"\]\);/u);
   assert.match(app, /luminCompletionIdForSpawn\(spawn\) === completionId \|\| spawnCompletionId\(spawn\) === completionId/u);
 });

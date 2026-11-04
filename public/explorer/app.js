@@ -14754,13 +14754,15 @@ function focusSpawn(spawn) {
 // Map marks that give a Lumin Amber but are not Ambers themselves (Morphling's Memory: one on the first clear, see
 // ANIILOGS_MORPHLING_LUMIN) are listed in the Lumin section, with a small Amber badge on the pin, in the list and in
 // the selection box (the special badge every view already draws).
-// Themed Puzzles (already in the Lumin section) carry the same badge.
+// Of the Themed Puzzles only Blessed Wisptis gives a Lumin (the Amber beside it, linked); that pin carries the badge too.
 const LUMIN_SECTION_ITEM_IDS = new Set(["current-poi-10402"]);
-const LUMIN_BADGE_ITEM_IDS = new Set(["current-poi-10402", "current-poi-10400"]);
+const LUMIN_BADGE_PIN_KEYS = new Set(["CURRENT_N774_11_1328_83"]);
 const LUMIN_BADGE_ICON = "assets/map-runtime-3528012/UI_Icon_MarkPoint_MythicalAnimals.png";
 function moveToLuminSection(subject) {
   if (LUMIN_SECTION_ITEM_IDS.has(subject?.item_id)) subject.layer_id = "ambers";
-  if (LUMIN_BADGE_ITEM_IDS.has(subject?.item_id)) subject.special_badge_icon = subject.special_badge_icon || LUMIN_BADGE_ICON;
+  if (LUMIN_SECTION_ITEM_IDS.has(subject?.item_id) || LUMIN_BADGE_PIN_KEYS.has(subject?.coordinate_key)) {
+    subject.special_badge_icon = subject.special_badge_icon || LUMIN_BADGE_ICON;
+  }
 }
 
 function prepareData(data) {
