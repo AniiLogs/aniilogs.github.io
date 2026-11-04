@@ -12237,10 +12237,12 @@ function setDesktopSelectionVisible(visible) {
 
 function dismissSelection() {
   if (state.selectedPin) state.selectedPin.classList.remove("selected");
+  const reopenFold = spawnOpensLuminFold(state.selectedSpawnIndex) || spawnOpensLuminFold(state.locatedSpawnIndex);
   state.selectedPin = null;
   state.selectedSpawnIndex = null;
   state.hoveredCanvasIndex = null;
   clearLocatedSpawn();
+  if (reopenFold) refreshLuminFoldPins();
   hideCanvasTooltip();
   state.mobileSelectionMinimized = true;
   state.desktopSelectionMinimized = false;
@@ -13232,12 +13234,68 @@ function visibleSpawnEntries() {
       }
     });
   }
+  const shown = foldLinkedLuminAmbers(entries);
   const locatedEntry = locatedSpawnEntry();
-  if (locatedEntry && !entries.some((entry) => entry.index === locatedEntry.index)) {
-    entries.push(locatedEntry);
+  if (locatedEntry && !shown.some((entry) => entry.index === locatedEntry.index)) {
+    shown.push(locatedEntry);
   }
-  entries.sort((a, b) => a.index - b.index);
-  return entries;
+  shown.sort((a, b) => a.index - b.index);
+  return shown;
+}
+
+// An event's Lumin Amber (LUMIN_LINKS: a collection run, Runaway Amber or Lumin Marking and the Amber it pays) folds
+// into the event's pin, so each find reads as one Lumin: while the event's pin is on the map (its filter on, not hidden
+// as collected or by the search), its Amber shows only once the event or the Amber is selected (or Located). With the
+// event's pin not shown, the Amber shows as any other. The event pin carries a small Amber badge meanwhile
+// (state.foldedLuminEvents: event spawn index -> its folded Amber's spawn).
+const LUMIN_LINK_PARTNERS = (() => {
+  const partners = new Map();
+  const add = (a, b) => {
+    if (!partners.has(a)) partners.set(a, new Set());
+    partners.get(a).add(b);
+  };
+  Object.entries(LUMIN_LINKS).forEach(([id, linked]) => linked.forEach((other) => { add(id, other); add(other, id); }));
+  return partners;
+})();
+const isFoldableLuminAmberId = (id) => id.startsWith("amber:overworld:") && LUMIN_LINK_PARTNERS.has(id);
+
+function foldLinkedLuminAmbers(entries) {
+  state.foldedLuminEvents = new Map();
+  if (!LUMIN_LINK_PARTNERS.size) return entries;
+  const byId = new Map();
+  entries.forEach((entry) => {
+    const id = spawnCompletionId(entry.spawn);
+    if (id && LUMIN_LINK_PARTNERS.has(id)) byId.set(id, entry);
+  });
+  if (!byId.size) return entries;
+  const open = new Set();
+  [state.selectedSpawnIndex, state.locatedSpawnIndex].forEach((index) => {
+    const spawn = Number.isInteger(index) ? state.data.spawns[index] : null;
+    const id = spawn ? spawnCompletionId(spawn) : "";
+    if (id) [id, ...(LUMIN_LINK_PARTNERS.get(id) || [])].forEach((openId) => open.add(openId));
+  });
+  const folded = new Set();
+  byId.forEach((entry, id) => {
+    if (!isFoldableLuminAmberId(id) || open.has(id)) return;
+    const event = [...LUMIN_LINK_PARTNERS.get(id)].map((partner) => byId.get(partner))
+      .find((candidate) => candidate && !isFoldableLuminAmberId(spawnCompletionId(candidate.spawn)));
+    if (!event) return;
+    folded.add(entry.index);
+    if (!state.foldedLuminEvents.has(event.index)) state.foldedLuminEvents.set(event.index, entry.spawn);
+  });
+  return folded.size ? entries.filter((entry) => !folded.has(entry.index)) : entries;
+}
+
+// Whether selecting or leaving this spawn changes which Lumin Ambers are folded (it is one end of a Lumin link).
+function spawnOpensLuminFold(index) {
+  const spawn = Number.isInteger(index) ? state.data?.spawns[index] : null;
+  return Boolean(spawn && LUMIN_LINK_PARTNERS.has(spawnCompletionId(spawn)));
+}
+
+// Redraw only the pins (not the filter list) after the selection opens or closes a folded Lumin Amber.
+function refreshLuminFoldPins() {
+  state.visibleEntries = visibleSpawnEntries();
+  renderPins(state.visibleEntries);
 }
 
 function updateFilterCount() {
@@ -14236,6 +14294,12 @@ function createMarkerPin(entry) {
   pinBody.append(icon);
   if (hoverIcon) pinBody.append(hoverIcon);
   if (specialBadge) pinBody.append(specialBadge);
+  const foldedAmber = state.foldedLuminEvents?.get(index);
+  if (foldedAmber) {
+    const amberIcon = foldedAmber.icon || state.data.itemsById.get(foldedAmber.item_id)?.icon;
+    if (amberIcon) pinBody.append(makeIcon("pin-lumin-badge", amberIcon));
+    pin.setAttribute("aria-label", `${pin.getAttribute("aria-label")}, gives a Lumin Amber (select to show it)`);
+  }
   if (undergroundBadge) pinBody.append(undergroundBadge);
   if (spawnCollected(spawn)) {
     pinBody.append(createPinCompletionBadge());
@@ -14448,6 +14512,23 @@ function renderCanvasPins() {
     if (specialBadge) {
       context.drawImage(specialBadge, x + size / 2 - 15, y - size / 2 - 3, 18, 18);
     }
+    const foldedAmber = state.foldedLuminEvents?.get(index);
+    const amberBadge = foldedAmber
+      ? canvasIcon(foldedAmber.icon || state.data.itemsById.get(foldedAmber.item_id)?.icon) : null;
+    if (amberBadge) {
+      const bx = x - size / 2 - 3;
+      const by = y - size / 2 - 3;
+      context.save();
+      context.beginPath();
+      context.arc(bx + 8, by + 8, 9, 0, Math.PI * 2);
+      context.fillStyle = "rgba(52, 57, 67, 0.96)";
+      context.fill();
+      context.strokeStyle = "rgba(255, 206, 110, 0.95)";
+      context.lineWidth = 1;
+      context.stroke();
+      context.restore();
+      context.drawImage(amberBadge, bx + 1, by + 1, 14, 14);
+    }
     if (spawnCollected(spawn)) {
       const badgeRadius = Math.max(5, Math.min(6.5, size * 0.2));
       const badgeX = x + size * 0.34;
@@ -14522,7 +14603,9 @@ function selectSpawn(index, anchor = null) {
   if (state.selectedPin) {
     state.selectedPin.classList.remove("selected");
   }
+  const previousIndex = state.selectedSpawnIndex;
   state.selectedSpawnIndex = index;
+  if (selectionChanged && (spawnOpensLuminFold(previousIndex) || spawnOpensLuminFold(index))) refreshLuminFoldPins();
   const pin = state.domPins.get(index) || null;
   if (pin) pin.classList.add("selected");
   state.selectedPin = pin;
