@@ -38,7 +38,7 @@
 
   // The address of an Aniimo's page: its form id, or a name the Aniilog resolves. "" when there is neither.
   function url(id) {
-    const key = String(id ?? "").replace(/^aniimo:/u, "").trim();
+    const key = String(id ?? "").replace(/^aniimo(?:-special)?:/u, "").trim();
     return key ? `${PAGE_PATH}?aniimo=${encodeURIComponent(key)}` : "";
   }
 

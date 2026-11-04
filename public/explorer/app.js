@@ -6577,7 +6577,7 @@ function createEvolutionNode(node, label, isCurrent = false) {
   button.append(icon, copy);
   button.addEventListener("click", () => openAniilogRecord(node.id));
   if (!isCurrent) {
-    const link = window.AniilogsAniimoLink?.create(String(node.id || "").replace(/^aniimo:/u, ""), node.name);
+    const link = window.AniilogsAniimoLink?.create(String(node.id || "").replace(/^aniimo(?:-special)?:/u, ""), node.name);
     if (link) labelNode.append(link);
   }
   card.append(labelNode, button);
@@ -10023,6 +10023,7 @@ function renderCatalogPreview(options = {}) {
   }
 
   if (view === "aniilog" && state.pendingAniimoName) resolvePendingAniimoName();
+  if (view === "aniilog") state.catalogSelection.aniilog = aniilogEntryIdForForm(state.catalogSelection.aniilog);
   const allEntries = allCatalogEntriesForView(view);
   const entries = catalogEntriesForView(view);
   if (view === "aniilog" && state.aniilogData?.totals && developerModeEnabled()) {
@@ -11702,8 +11703,22 @@ function showWorkspaceView(view, { replace = false } = {}) {
 }
 
 // An Aniimo by form id ("1005100", "aniimo:1005100") or by name; false when the Aniilog is off.
+// An Aniilog entry id ("aniimo:1005100", or "aniimo-special:1036100" for Lunara, Helion and their evolutions) or a
+// bare form id, as the form id the address carries.
+function aniimoFormIdFromKey(key) {
+  return String(key || "").replace(/^aniimo(?:-special)?:/u, "").trim();
+}
+
+// The Aniilog entry id of a form ("aniimo:<form id>" until the data has loaded, then the entry's own id).
+function aniilogEntryIdForForm(key) {
+  const id = aniimoFormIdFromKey(key);
+  if (!/^\d+$/u.test(id)) return key;
+  const entry = (state.aniilogData?.entries || []).find((candidate) => String(candidate?.form_id) === id);
+  return entry?.id || `aniimo:${id}`;
+}
+
 function selectAniimoFromAddress(key, { scrollIndex = false } = {}) {
-  const id = String(key || "").replace(/^aniimo:/u, "").trim();
+  const id = aniimoFormIdFromKey(key);
   if (!id || !ENABLED_WORKSPACE_VIEWS.has("aniilog")) return false;
   if (!/^\d+$/u.test(id)) {
     state.pendingAniimoName = id;
@@ -11711,7 +11726,7 @@ function selectAniimoFromAddress(key, { scrollIndex = false } = {}) {
     return true;
   }
   state.pendingAniimoName = "";
-  state.catalogSelection.aniilog = `aniimo:${id}`;
+  state.catalogSelection.aniilog = aniilogEntryIdForForm(id);
   if (!state.aniilogData) return true;
   // One hidden by the list's search or filters would fall back to the first match: clear them for it.
   if (!catalogEntriesForView("aniilog").some((entry) => entry.id === state.catalogSelection.aniilog)) {
@@ -11746,12 +11761,12 @@ function syncAniimoAddress(entry) {
 
 // A control followed by the "take me there" link (aniimo-link.js) for an entry id ("aniimo:1005100") or form id.
 function aniimoLinkPair(control, id, name) {
-  return window.AniilogsAniimoLink?.inline(control, String(id || "").replace(/^aniimo:/u, ""), name) || control;
+  return window.AniilogsAniimoLink?.inline(control, String(id || "").replace(/^aniimo(?:-special)?:/u, ""), name) || control;
 }
 
 // Opens an Aniimo's page in place, as one history entry. The "take me there" links (aniimo-link.js) use it too.
 function openAniimoPage(key, { scrollIndex = true } = {}) {
-  const id = String(key || "").replace(/^aniimo:/u, "").trim();
+  const id = aniimoFormIdFromKey(key);
   if (!id || !ENABLED_WORKSPACE_VIEWS.has("aniilog")) return false;
   const url = new URL(window.AniilogsAniimoLink?.url(id) || `/explorer/?aniimo=${encodeURIComponent(id)}`, window.location.href);
   const current = new URLSearchParams(window.location.search);
