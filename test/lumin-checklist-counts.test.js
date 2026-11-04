@@ -37,3 +37,14 @@ test("Breezy Plains Sanctums are Lumin finds on the checklist, and the region's 
   assert.match(app, /const LUMIN_REGION_CAPS = Object\.freeze\(\{ "country-of-time": 200 \}\);/u);
   assert.match(app, /\.\.\.\(window\.ANIILOGS_SANCTUM_LUMIN \|\| \[\]\),/u);
 });
+
+test("Breezy Plains Morphling's Memory levels are Lumin finds with their own checklist tab", () => {
+  const morphlings = window.ANIILOGS_MORPHLING_LUMIN;
+  assert.equal(morphlings.length, 5);
+  for (const entry of morphlings) {
+    assert.equal(entry.kind, "lumin_morphling");
+    assert.match(entry.completion_states[0].legacy_completion_ids[0], /^pin:country-of-time:current-poi-10402:CURRENT_/u);
+  }
+  assert.match(app, /function isLuminMorphlingSpawn\(spawn\)/u);
+  assert.match(app, /\{ id: "morphlings", label: "Morphlings", kind: "lumin_morphling", sourceType: "morphling" \}/u);
+});

@@ -1879,6 +1879,7 @@ function migrateChecklistCompletionIds(checklistData) {
     ...(Array.isArray(checklistData?.entries) ? checklistData.entries : []),
     ...(Array.isArray(checklistData?.special_entries) ? checklistData.special_entries : []),
     ...(window.ANIILOGS_SANCTUM_LUMIN || []),
+    ...(window.ANIILOGS_MORPHLING_LUMIN || []),
   ];
   entries.forEach((entry) => {
     (entry?.completion_states || []).forEach((completionState) => {
@@ -10462,7 +10463,7 @@ function scheduleMobileCatalogStickyIdentity() {
 // Lumin entries the checklist leaves out, so each find counts once: a Themed Puzzle that gives no Amber
 // (LUMIN_NO_AMBER), and an Amber linked to a puzzle entry that is itself on the checklist (the puzzle stands for both).
 const LUMIN_NO_AMBER = new Set(window.ANIILOGS_LUMIN_NO_AMBER || []);
-const LUMIN_SANCTUM_ENTRIES = window.ANIILOGS_SANCTUM_LUMIN || [];
+const LUMIN_SANCTUM_ENTRIES = [...(window.ANIILOGS_SANCTUM_LUMIN || []), ...(window.ANIILOGS_MORPHLING_LUMIN || [])];
 const luminLeftOutCache = new WeakMap();
 function luminChecklistLeftOut(entries) {
   if (luminLeftOutCache.has(entries)) return luminLeftOutCache.get(entries);
@@ -10493,6 +10494,7 @@ const LUMIN_CHECKLIST_TABS = Object.freeze([
   { id: "markings", label: "Markings", kind: "lumin_amber", sourceType: "lumin_marking" },
   { id: "boss-clears", label: "Bosses", kind: "lumin_amber", sourceType: "quest" },
   { id: "event-embers", label: "Events", kind: "lumin_amber", sourceType: "event" },
+  { id: "morphlings", label: "Morphlings", kind: "lumin_morphling", sourceType: "morphling" },
 ]);
 
 function luminChecklistEntries(tabId = state.luminChecklistTab) {
@@ -10606,15 +10608,21 @@ function checklistEntryMatches(entry) {
 }
 
 const LUMIN_COMPLETION_MARKER_TYPES = new Set(["lumin_amber", "lumin_marking", "teleport_sanctum", "quest_lumen_seed", "lumin_event"]);
-const LUMIN_CHECKLIST_ENTRY_KINDS = new Set(["lumin_amber", "lumin_sanctum"]);
+const LUMIN_CHECKLIST_ENTRY_KINDS = new Set(["lumin_amber", "lumin_sanctum", "lumin_morphling"]);
 
 // A Breezy Plains Sanctum (a map teleport) gives one Lumin Amber on its first clear (lumin-routes.js, ANIILOGS_SANCTUM_LUMIN).
 function isLuminSanctumSpawn(spawn) {
   return spawn?.marker_type === "teleport" && spawn?.teleport_type === "sanctum" && String(spawn?.scene_id) === "3000";
 }
 
+// A Breezy Plains Morphling's Memory (a map "misc" mark) gives one Lumin Amber on its first clear (ANIILOGS_MORPHLING_LUMIN).
+function isLuminMorphlingSpawn(spawn) {
+  return spawn?.item_id === "current-poi-10402" && String(spawn?.scene_id) === "3000";
+}
+
 function isLuminCompletionSpawn(spawn) {
-  return Boolean(spawn) && (LUMIN_COMPLETION_MARKER_TYPES.has(spawn.marker_type) || isLuminSanctumSpawn(spawn));
+  return Boolean(spawn) && (LUMIN_COMPLETION_MARKER_TYPES.has(spawn.marker_type) || isLuminSanctumSpawn(spawn)
+    || isLuminMorphlingSpawn(spawn));
 }
 
 function isLuminChecklistEntry(entry) {
@@ -10625,6 +10633,7 @@ function luminSourceTypeForSpawn(spawn) {
   if (spawn?.marker_type === "lumin_amber") return "overworld";
   if (spawn?.marker_type === "lumin_marking") return "lumin_marking";
   if (spawn?.marker_type === "teleport_sanctum" || isLuminSanctumSpawn(spawn)) return "sanctum";
+  if (isLuminMorphlingSpawn(spawn)) return "morphling";
   if (spawn?.marker_type === "quest_lumen_seed") return "quest";
   if (spawn?.marker_type === "lumin_event") return "event";
   return "";
