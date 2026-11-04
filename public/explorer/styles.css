@@ -2552,6 +2552,7 @@ ul.team-skill-operations .team-skill-operation {
 }
 
 .checklist-panel {
+  --checklist-panel-pad: clamp(16px, 2vw, 30px);
   position: absolute;
   inset: 0;
   display: flex;
@@ -2561,7 +2562,7 @@ ul.team-skill-operations .team-skill-operation {
   gap: 16px;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: clamp(16px, 2vw, 30px);
+  padding: var(--checklist-panel-pad);
 }
 
 .checklist-panel[hidden] {
@@ -2663,7 +2664,7 @@ ul.team-skill-operations .team-skill-operation {
 
 .checklist-table-header {
   position: sticky;
-  top: 0;
+  top: calc(-1 * var(--checklist-panel-pad, 0px));   /* the panel's top edge, not below its padding (rows showed there) */
   z-index: 2;
   border-bottom: 1px solid rgba(80, 96, 103, 0.72);
   background: var(--panel);
