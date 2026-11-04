@@ -18,7 +18,8 @@ test("Blessed Wisptis Themed Puzzle and its Amber are one find", () => {
 
 test("Themed Puzzles without an Amber are listed and left out of the checklist", () => {
   const noAmber = window.ANIILOGS_LUMIN_NO_AMBER;
-  assert.equal(noAmber.length, 13);
+  assert.equal(noAmber.length, 14);
+  assert.ok(noAmber.includes("amber:event:whisperwake-isles:3003:CURRENT_70_63_N20_02:collected"));
   assert.ok(!noAmber.includes("amber:lumin_marking:country-of-time:3000:CURRENT_N774_11_1328_83:collected"));
   assert.match(app, /const leftOut = luminChecklistLeftOut\(state\.checklistData\.entries\);/u);
   assert.match(app, /!leftOut\.has\(entry\?\.completion_states\?\.\[0\]\?\.id\)/u);

@@ -326,6 +326,9 @@ window.ANIILOGS_LUMIN_NO_AMBER = Object.freeze([
   "amber:lumin_marking:country-of-time:3000:CURRENT_N559_06_1650_67:collected",
   "amber:lumin_marking:country-of-time:3000:CURRENT_N695_74_1435_11:collected",
   "amber:lumin_marking:country-of-time:3000:CURRENT_N789_76_1460_80:collected",
+  // Not a Themed Puzzle: Whisperwake's "Tide on the Wind" has a second pin, "Lumin Collection", where it ends and its
+  // Amber appears (same sandbox, 91364308); "Tide on the Wind" stands for the find.
+  "amber:event:whisperwake-isles:3003:CURRENT_70_63_N20_02:collected",
 ]);
 
 // What a Lumin Amber (and its puzzle's pin) waits for, shown in its selection details (app.js, luminGateRows):
