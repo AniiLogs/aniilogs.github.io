@@ -10771,8 +10771,9 @@ async function locateChecklistLuminEntry(entry) {
     return;
   }
 
+  // (the pin's own tick id: a boss's first-clear pin is ticked by its pin id, not a Lumin id)
   const index = state.data.spawns.findIndex((spawn) => (
-    luminCompletionIdForSpawn(spawn) === completionId
+    luminCompletionIdForSpawn(spawn) === completionId || spawnCompletionId(spawn) === completionId
   ));
   if (index < 0) {
     console.warn("No map marker matched the Lumen checklist entry.", entry.id);
@@ -14750,6 +14751,17 @@ function focusSpawn(spawn) {
   }
 }
 
+// Map marks that give a Lumin Amber but are not Ambers themselves (Morphling's Memory: one on the first clear, see
+// ANIILOGS_MORPHLING_LUMIN) are listed in the Lumin section, with a small Amber badge on the pin, in the list and in
+// the selection box (the special badge every view already draws).
+const LUMIN_SECTION_ITEM_IDS = new Set(["current-poi-10402"]);
+const LUMIN_BADGE_ICON = "assets/map-runtime-3528012/UI_Icon_MarkPoint_MythicalAnimals.png";
+function moveToLuminSection(subject) {
+  if (!LUMIN_SECTION_ITEM_IDS.has(subject?.item_id)) return;
+  subject.layer_id = "ambers";
+  subject.special_badge_icon = subject.special_badge_icon || LUMIN_BADGE_ICON;
+}
+
 function prepareData(data) {
   const sourceItems = Array.isArray(data.items) ? data.items : [];
   const sourceSpawns = Array.isArray(data.spawns) ? data.spawns : [];
@@ -14786,6 +14798,7 @@ function prepareData(data) {
   data.itemIdsByMap = new Map(data.maps.map((map) => [map.id, new Set()]));
   data.items.forEach((item) => {
     item.layer_id = item.layer_id || (isEggItem(item) ? "eggs" : "items");
+    moveToLuminSection(item);
   });
   data.items.sort(compareItems);
   data.items.forEach((item, index) => {
@@ -14802,6 +14815,7 @@ function prepareData(data) {
   });
   data.spawns.forEach((spawn, index) => {
     spawn.map_id = spawn.map_id || data.map.id;
+    moveToLuminSection(spawn);
     spawn.search_text = spawnSearchText(spawn);
     if (!data.spawnsByItemId.has(spawn.item_id)) {
       data.spawnsByItemId.set(spawn.item_id, []);
