@@ -23,3 +23,16 @@ test("Themed Puzzles without an Amber are listed and left out of the checklist",
   assert.match(app, /const leftOut = luminChecklistLeftOut\(state\.checklistData\.entries\);/u);
   assert.match(app, /!leftOut\.has\(entry\?\.completion_states\?\.\[0\]\?\.id\)/u);
 });
+
+test("Breezy Plains Sanctums are Lumin finds on the checklist, and the region's Lumin stop at 200", () => {
+  const sanctums = window.ANIILOGS_SANCTUM_LUMIN;
+  assert.equal(sanctums.length, 17);
+  for (const entry of sanctums) {
+    assert.equal(entry.kind, "lumin_sanctum");
+    assert.equal(entry.completion_states[0].quantity, 1);
+    assert.match(entry.completion_states[0].legacy_completion_ids[0], /^pin:country-of-time:current-poi-10305:CURRENT_/u);
+  }
+  assert.match(app, /function isLuminSanctumSpawn\(spawn\)/u);
+  assert.match(app, /const LUMIN_REGION_CAPS = Object\.freeze\(\{ "country-of-time": 200 \}\);/u);
+  assert.match(app, /\.\.\.\(window\.ANIILOGS_SANCTUM_LUMIN \|\| \[\]\),/u);
+});

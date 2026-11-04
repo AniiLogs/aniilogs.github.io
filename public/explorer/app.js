@@ -1878,6 +1878,7 @@ function migrateChecklistCompletionIds(checklistData) {
   const entries = [
     ...(Array.isArray(checklistData?.entries) ? checklistData.entries : []),
     ...(Array.isArray(checklistData?.special_entries) ? checklistData.special_entries : []),
+    ...(window.ANIILOGS_SANCTUM_LUMIN || []),
   ];
   entries.forEach((entry) => {
     (entry?.completion_states || []).forEach((completionState) => {
@@ -10461,6 +10462,7 @@ function scheduleMobileCatalogStickyIdentity() {
 // Lumin entries the checklist leaves out, so each find counts once: a Themed Puzzle that gives no Amber
 // (LUMIN_NO_AMBER), and an Amber linked to a puzzle entry that is itself on the checklist (the puzzle stands for both).
 const LUMIN_NO_AMBER = new Set(window.ANIILOGS_LUMIN_NO_AMBER || []);
+const LUMIN_SANCTUM_ENTRIES = window.ANIILOGS_SANCTUM_LUMIN || [];
 const luminLeftOutCache = new WeakMap();
 function luminChecklistLeftOut(entries) {
   if (luminLeftOutCache.has(entries)) return luminLeftOutCache.get(entries);
@@ -10478,7 +10480,9 @@ function checklistEntriesForCategory(category = state.checklistCategory) {
   if (!Array.isArray(state.checklistData?.entries)) return [];
   const extra = developerContentAllowed() ? developerEntries.checklist : [];
   const leftOut = luminChecklistLeftOut(state.checklistData.entries);
-  return [...state.checklistData.entries, ...extra].filter((entry) => (
+  const sanctums = state.checklistData.entries.some((entry) => entry?.map_id === "country-of-time")
+    && !state.checklistData.entries.some((entry) => entry?.kind === "lumin_sanctum") ? LUMIN_SANCTUM_ENTRIES : [];
+  return [...state.checklistData.entries, ...sanctums, ...extra].filter((entry) => (
     entry?.category === category && !leftOut.has(entry?.completion_states?.[0]?.id)
   ));
 }
@@ -10541,21 +10545,39 @@ function checklistCompletionStateQuantity(completionState) {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
 }
 
+// The game's Lumin counter for a region stops at its cap (Breezy Plains: 200, though more can be found there); every
+// find stays on the map and checklist, only the counted Lumin stop at the cap.
+const LUMIN_REGION_CAPS = Object.freeze({ "country-of-time": 200 });
+
 function checklistProgress(entries) {
   const useRewardQuantities = entries.some((entry) => entry?.category === "ambers");
   const seen = new Set();
+  const byRegion = new Map();
   let completed = 0;
   let total = 0;
   entries.forEach((entry) => {
     if (isDeveloperOverlayEntry(entry)) return;
+    const cap = useRewardQuantities && entry?.category === "ambers" ? LUMIN_REGION_CAPS[entry?.map_id] : undefined;
     (entry?.completion_states || []).filter(checklistStateCounts).forEach((completionState) => {
       const id = String(completionState?.id || "").trim();
       if (!id || seen.has(id)) return;
       seen.add(id);
       const quantity = useRewardQuantities ? checklistCompletionStateQuantity(completionState) : 1;
-      total += quantity;
-      if (state.completed.has(id)) completed += quantity;
+      const done = state.completed.has(id) ? quantity : 0;
+      if (cap === undefined) {
+        total += quantity;
+        completed += done;
+        return;
+      }
+      const region = byRegion.get(entry.map_id) || { cap, total: 0, completed: 0 };
+      region.total += quantity;
+      region.completed += done;
+      byRegion.set(entry.map_id, region);
     });
+  });
+  byRegion.forEach((region) => {
+    total += Math.min(region.total, region.cap);
+    completed += Math.min(region.completed, region.cap);
   });
   return { completed, total };
 }
@@ -10586,8 +10608,13 @@ function checklistEntryMatches(entry) {
 const LUMIN_COMPLETION_MARKER_TYPES = new Set(["lumin_amber", "lumin_marking", "teleport_sanctum", "quest_lumen_seed", "lumin_event"]);
 const LUMIN_CHECKLIST_ENTRY_KINDS = new Set(["lumin_amber", "lumin_sanctum"]);
 
+// A Breezy Plains Sanctum (a map teleport) gives one Lumin Amber on its first clear (lumin-routes.js, ANIILOGS_SANCTUM_LUMIN).
+function isLuminSanctumSpawn(spawn) {
+  return spawn?.marker_type === "teleport" && spawn?.teleport_type === "sanctum" && String(spawn?.scene_id) === "3000";
+}
+
 function isLuminCompletionSpawn(spawn) {
-  return Boolean(spawn) && LUMIN_COMPLETION_MARKER_TYPES.has(spawn.marker_type);
+  return Boolean(spawn) && (LUMIN_COMPLETION_MARKER_TYPES.has(spawn.marker_type) || isLuminSanctumSpawn(spawn));
 }
 
 function isLuminChecklistEntry(entry) {
@@ -10597,7 +10624,7 @@ function isLuminChecklistEntry(entry) {
 function luminSourceTypeForSpawn(spawn) {
   if (spawn?.marker_type === "lumin_amber") return "overworld";
   if (spawn?.marker_type === "lumin_marking") return "lumin_marking";
-  if (spawn?.marker_type === "teleport_sanctum") return "sanctum";
+  if (spawn?.marker_type === "teleport_sanctum" || isLuminSanctumSpawn(spawn)) return "sanctum";
   if (spawn?.marker_type === "quest_lumen_seed") return "quest";
   if (spawn?.marker_type === "lumin_event") return "event";
   return "";
