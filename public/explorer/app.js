@@ -10961,7 +10961,10 @@ function renderChecklistRow(entry) {
   if (entry?.kind === "aniimo_form" || entry?.kind === "aniimo_special") {
     iconClasses.push("checklist-aniimo-portrait");
   }
-  if (CHEST_TIER_COLORS[entry?.chest_tier]) iconClasses.push(`checklist-chest checklist-chest-${entry.chest_tier}`);
+  if (CHEST_TIER_COLORS[entry?.chest_tier]) {
+    iconClasses.push(`checklist-chest checklist-chest-${entry.chest_tier}`);
+    if (isAncientChest(entry)) iconClasses.push("checklist-chest-ancient");
+  }
   row.append(makeIcon(iconClasses.join(" "), entry.icon));
   const content = document.createElement("div");
   content.className = "checklist-text";
@@ -14260,6 +14263,13 @@ function renderItems() {
 
 // A treasure chest's outline, by how it looks in the game (its model): Basic blue, Exquisite purple, Magnificent gold.
 const CHEST_TIER_COLORS = Object.freeze({ blue: "#4da3ff", purple: "#b57cff", gold: "#f2c14e" });
+// Ancient chests (the old-style models) get a pearlescent outline instead: a soft hue on each side.
+const CHEST_OUTLINE_OFFSETS = [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]];
+const CHEST_PEARL_COLORS = ["#ff7ad9", "#5fe3ff", "#b48cff", "#ffe36e", "#ffa6e0", "#8fb8ff", "#ffcf9e", "#8fffe0"];
+function isAncientChest(subject) {
+  return subject?.chest_style === "ancient"
+    || /\(ancient\)/u.test(String(subject?.display_type_label || subject?.name || ""));
+}
 
 // A loaded icon filled with one colour (its shape kept), cached per icon and colour: a chest's outline on the canvas map.
 const tintedIcons = new Map();
@@ -14290,6 +14300,7 @@ function pinClassName(spawn) {
     spawn.layer_id === "teleports" ? "pin-teleport" : "",
     spawn.layer_id === "ambers" ? "pin-amber" : "",
     CHEST_TIER_COLORS[spawn.chest_tier] ? `pin-chest pin-chest-${spawn.chest_tier}` : "",
+    CHEST_TIER_COLORS[spawn.chest_tier] && isAncientChest(spawn) ? "pin-chest-ancient" : "",
     spawn.marker_type === "underground_entrance" ? "pin-underground" : "",
     spawn.marker_type === "physical_reward_source" ? "pin-physical-reward-source" : "",
     spawn.is_underground ? "pin-underground-marker" : "",
@@ -14534,13 +14545,14 @@ function renderCanvasPins() {
     const icon = canvasIcon(index === state.hoveredCanvasIndex && hoverIconSource ? hoverIconSource : defaultIconSource);
     const chestColor = CHEST_TIER_COLORS[spawn.chest_tier];
     if (icon && chestColor) {
-      // the chest mark outlined in its tier's colour: the tinted mark drawn around it, then the mark on top
+      // the chest mark outlined in its tier's colour (an Ancient chest: pearlescent, a soft hue per side): the
+      // tinted mark drawn around it, then the mark on top
       const iconSize = size * 0.8;
       const left = x - iconSize / 2;
       const top = y - iconSize / 2;
-      const outline = tintedCanvasIcon(icon, chestColor);
-      [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]]
-        .forEach(([dx, dy]) => context.drawImage(outline, left + dx, top + dy, iconSize, iconSize));
+      const ancient = isAncientChest(spawn);
+      CHEST_OUTLINE_OFFSETS.forEach(([dx, dy], side) => context.drawImage(
+        tintedCanvasIcon(icon, ancient ? CHEST_PEARL_COLORS[side] : chestColor), left + dx, top + dy, iconSize, iconSize));
       context.drawImage(icon, left, top, iconSize, iconSize);
     } else if (icon) {
       if (isAstraMarkPointIcon(defaultIconSource)) {

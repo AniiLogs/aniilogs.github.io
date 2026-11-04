@@ -14,7 +14,11 @@ test("chest pins and checklist icons are outlined blue, purple or gold by tier",
   for (const tier of ["purple", "gold"]) assert.match(css, new RegExp(`\\.pin-chest-${tier},\\r?\\n\\.checklist-chest-${tier} \\{`, "u"));
   assert.match(css, /\.pin-chest \.pin-icon,\r?\n\.checklist-chest \{\r?\n  filter:\r?\n    drop-shadow\(1\.5px 0 0 var\(--chest-ring\)\)/u);
   assert.doesNotMatch(css, /\.pin-chest \.pin-body \{/u);          // an outline on the mark, no ring around it
-  assert.match(app, /tintedCanvasIcon\(icon, chestColor\)/u);
+  assert.match(app, /tintedCanvasIcon\(icon, ancient \? CHEST_PEARL_COLORS\[side\] : chestColor\)/u);
+  // Ancient chests: pearlescent (a soft hue per side) on the map, the canvas map and the checklist
+  assert.match(app, /isAncientChest\(spawn\) \? "pin-chest-ancient"/u);
+  assert.match(app, /iconClasses\.push\("checklist-chest-ancient"\)/u);
+  assert.match(css, /\.pin-chest\.pin-chest-ancient \.pin-icon,\r?\n\.checklist-chest\.checklist-chest-ancient \{/u);
 });
 
 test("a chest checklist row says what it pays, can Locate its pin, and ticks the pin with it", () => {

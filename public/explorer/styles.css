@@ -10182,6 +10182,16 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
   box-sizing: border-box;
   padding: 3px;
 }
+/* Ancient chests: a pearlescent outline (a soft hue on each side) instead of the tier colour. */
+.pin-chest.pin-chest-ancient .pin-icon,
+.checklist-chest.checklist-chest-ancient {
+  filter:
+    drop-shadow(1.5px 0 0 #ff7ad9)
+    drop-shadow(-1.5px 0 0 #5fe3ff)
+    drop-shadow(0 1.5px 0 #b48cff)
+    drop-shadow(0 -1.5px 0 #ffe36e)
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
 .checklist-chest-rewards {
   display: block;
   overflow: hidden;
