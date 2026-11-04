@@ -14261,6 +14261,25 @@ function renderItems() {
 // A treasure chest's outline, by how it looks in the game (its model): Basic blue, Exquisite purple, Magnificent gold.
 const CHEST_TIER_COLORS = Object.freeze({ blue: "#4da3ff", purple: "#b57cff", gold: "#f2c14e" });
 
+// A loaded icon filled with one colour (its shape kept), cached per icon and colour: a chest's outline on the canvas map.
+const tintedIcons = new Map();
+function tintedCanvasIcon(image, color) {
+  const key = `${image.src}|${color}`;
+  let tinted = tintedIcons.get(key);
+  if (!tinted) {
+    tinted = document.createElement("canvas");
+    tinted.width = image.naturalWidth;
+    tinted.height = image.naturalHeight;
+    const context = tinted.getContext("2d");
+    context.drawImage(image, 0, 0);
+    context.globalCompositeOperation = "source-in";
+    context.fillStyle = color;
+    context.fillRect(0, 0, tinted.width, tinted.height);
+    tintedIcons.set(key, tinted);
+  }
+  return tinted;
+}
+
 function pinClassName(spawn) {
   return [
     "pin",
@@ -14514,20 +14533,15 @@ function renderCanvasPins() {
     const hoverIconSource = spawn.hover_icon || item?.hover_icon;
     const icon = canvasIcon(index === state.hoveredCanvasIndex && hoverIconSource ? hoverIconSource : defaultIconSource);
     const chestColor = CHEST_TIER_COLORS[spawn.chest_tier];
-    if (chestColor) {
-      context.save();
-      context.beginPath();
-      context.arc(x, y, size / 2, 0, Math.PI * 2);
-      context.fillStyle = "rgba(20, 27, 48, 0.92)";
-      context.fill();
-      context.strokeStyle = chestColor;
-      context.lineWidth = 2.5;
-      context.stroke();
-      context.restore();
-    }
     if (icon && chestColor) {
-      const iconSize = size * 0.64;
-      context.drawImage(icon, x - iconSize / 2, y - iconSize / 2, iconSize, iconSize);
+      // the chest mark outlined in its tier's colour: the tinted mark drawn around it, then the mark on top
+      const iconSize = size * 0.8;
+      const left = x - iconSize / 2;
+      const top = y - iconSize / 2;
+      const outline = tintedCanvasIcon(icon, chestColor);
+      [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]]
+        .forEach(([dx, dy]) => context.drawImage(outline, left + dx, top + dy, iconSize, iconSize));
+      context.drawImage(icon, left, top, iconSize, iconSize);
     } else if (icon) {
       if (isAstraMarkPointIcon(defaultIconSource)) {
         const radius = Math.max(5, size * 0.19);
