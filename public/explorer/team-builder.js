@@ -21,15 +21,17 @@
   const MEMBER_SLOTS = 5;
   const MAX_ACTIVE_SKILLS = 2;
   // Team setups, under PvE or PvP (Team Builder's second row of tabs). 1v1 is a PvP tab too, but its own page
-  // (duel.js): DUEL_TAB below. card: how the share card names the mode.
+  // (duel.js): DUEL_TAB below. card: how the share card names the mode. main: the one slot whose skills are picked,
+  // the others support with their Core skill only (Interlink: slot 1; both Egg Heist modes: slot 2).
   const MODES = Object.freeze([
     Object.freeze({ id: "standard", label: "Standard", share: "s", group: "pve" }),
-    Object.freeze({ id: "interlink", label: "Interlink", share: "c", group: "pve" }),
+    Object.freeze({ id: "interlink", label: "Interlink", share: "c", group: "pve", main: 0 }),
     Object.freeze({ id: "holosim", label: "Holo-Sim", share: "h", group: "pve" }),
-    Object.freeze({ id: "eggheist", label: "Egg Heist", share: "e", group: "pve" }),
-    Object.freeze({ id: "pvpfair", label: "Fair", share: "f", group: "pvp", card: "PvP · Fair" }),
-    Object.freeze({ id: "pvpunfair", label: "Unfair", share: "u", group: "pvp", card: "PvP · Unfair" }),
-    Object.freeze({ id: "eggheistpvp", label: "Egg Heist PvP", share: "x", group: "pvp" }),
+    Object.freeze({ id: "eggheist", label: "Egg Heist", share: "e", group: "pve", main: 1 }),
+    // Fair and Unfair: four Aniimo; their rule sets aren't known yet, so they're marked work in progress.
+    Object.freeze({ id: "pvpfair", label: "Fair (WIP)", share: "f", group: "pvp", card: "PvP · Fair (WIP)" }),
+    Object.freeze({ id: "pvpunfair", label: "Unfair (WIP)", share: "u", group: "pvp", card: "PvP · Unfair (WIP)" }),
+    Object.freeze({ id: "eggheistpvp", label: "Egg Heist PvP", share: "x", group: "pvp", main: 1 }),
   ]);
   const MODE_GROUPS = Object.freeze([
     Object.freeze({ id: "pve", label: "PvE" }),
@@ -40,10 +42,10 @@
     standard: "Four Aniimo, each with two picked active skills. Each Aniimo's Core switch-skill and Ultimate are always available.",
     interlink: "You control the first Aniimo and pick its skills. The other three bring their Core skills.",
     holosim: "Like Standard, plus a reserve you can swap in and out between battles in the Holo-Battle Simulator.",
-    eggheist: "Four Aniimo, each with two picked active skills, for Egg Heist runs.",
-    pvpfair: "Fair PvP: four Aniimo against another player's team, each with two picked active skills.",
-    pvpunfair: "Unfair PvP: four Aniimo against another player's team, each with two picked active skills.",
-    eggheistpvp: "Four Aniimo, each with two picked active skills, for Egg Heist PvP.",
+    eggheist: "Like Interlink: you control the Aniimo in slot 2 and pick its skills. The other three support with their Core skills.",
+    pvpfair: "Fair PvP: four Aniimo against another player's team. Its rules aren't known yet (work in progress).",
+    pvpunfair: "Unfair PvP: four Aniimo against another player's team. Its rules aren't known yet (work in progress).",
+    eggheistpvp: "Egg Heist against other players, like Interlink: you control the Aniimo in slot 2 and pick its skills. The other three support with their Core skills.",
   });
   const WHO_LABELS = Object.freeze({
     self: "Self",
@@ -627,16 +629,25 @@
     return el("span", `team-pill${modifier ? ` team-pill--${modifier}` : ""}`, text);
   }
 
+  // The slot whose skills are picked when the others only support (Interlink, Egg Heist), or null.
+  function mainSlot() {
+    const main = MODES.find((mode) => mode.id === model.mode)?.main;
+    return Number.isInteger(main) ? main : null;
+  }
+
   function slotRole(index) {
     if (model.mode === "interlink") return index === 0 ? "Controlled Aniimo" : `Interlink ally ${index}`;
+    const main = mainSlot();
+    if (main !== null) return index === main ? "Main Aniimo" : `Support ${index < main ? index + 1 : index}`;
     if (model.mode === "holosim" && index === RESERVE_SLOT) return "Reserve";
     return `Team slot ${index + 1}`;
   }
 
-  // Interlink allies only bring their Core skills; everyone else has their picks plus the Ultimate
-  // that comes with the Aniimo.
+  // Interlink allies and Egg Heist supports only bring their Core skills; everyone else has their picks plus the
+  // Ultimate that comes with the Aniimo.
   function supportOnly(index) {
-    return model.mode === "interlink" && index > 0;
+    const main = mainSlot();
+    return main !== null && index !== main;
   }
 
   function memberSkills(member, index) {
@@ -1311,6 +1322,8 @@
     const heading = el("div", "team-section-heading");
     heading.append(el("div", "", "Team overview"), el("small", "", {
       interlink: "1 controlled + 3 Core allies",
+      eggheist: "1 main (slot 2) + 3 Core supports",
+      eggheistpvp: "1 main (slot 2) + 3 Core supports",
       holosim: "4 in battle + 1 reserve",
     }[model.mode] || "Up to 4 Aniimo"));
     const grid = el("div", "team-overview-grid");
@@ -1702,7 +1715,7 @@
   function renderSkillPicks(member, form, index) {
     const section = el("section", "team-config-section");
     if (supportOnly(index)) {
-      section.append(sectionHeading("Skills", "Interlink allies bring their Core skill"));
+      section.append(sectionHeading("Skills", `${model.mode === "interlink" ? "Interlink allies" : "Supports"} bring their Core skill`));
       const core = coreSkill(form);
       section.append(core ? compactSkill(core, "Core skill") : el("p", "team-empty-copy", "This Aniimo has no Core skill."));
       return section;
@@ -1759,8 +1772,13 @@
   }
 
   // The rest of the team on the card: who they are, their held item and the skills they bring in this mode (an
-  // Interlink ally its Core skill; otherwise the two picks, plus the switch-skill when it isn't one of them).
+  // Interlink ally or Egg Heist support its Core skill; otherwise the two picks, plus the switch-skill when it isn't one of them).
   // No stats or CP: those are only for the Aniimo the card is about.
+  // A form's traits as the card shows them (always active, in every mode).
+  function cardTraits(form) {
+    return (form?.traits || []).map((trait) => ({ name: trait.name || "Trait", icon: trait.icon ? host.contentUrl(trait.icon) : "" }));
+  }
+
   function cardTeammates(index) {
     return slotIndexes().filter((slot) => slot !== index).map((slot) => {
       const member = model.members[slot];
@@ -1773,6 +1791,7 @@
         icon: entry?.icon ? host.contentUrl(entry.icon) : "",
         skills: memberSkills(member, slot).filter(({ slot: kind }) => kind !== "Ultimate")
           .map(({ skill, slot: kind }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot: kind, core: Boolean(skill.core) })),
+        traits: cardTraits(form),
         heldItem: cardHeldItem(member),
       };
     }).filter(Boolean);
@@ -1804,6 +1823,7 @@
       stats: CARD_STATS.map((stat) => ({ stat, value: totals?.total?.[stat] ?? null, potential: totals?.potential?.[stat]?.total || 0 })),
       skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot, core: Boolean(skill.core) })),
       heldItem: cardHeldItem(member),
+      traits: cardTraits(form),
       slot: slotRole(index),
       mode: (({ card, label } = {}) => card || label || "")(MODES.find((mode) => mode.id === model.mode)),
       team: cardTeammates(index),

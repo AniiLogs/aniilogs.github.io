@@ -4,7 +4,8 @@
 // { name, formLabel, role, icon, elements: [{ name, color }], level, cp, personality, perfect,
 //   stats: [{ stat, value, potential }], skills: [{ name, icon, slot }], heldItem: { name, icon, rarity, level } | null,
 //   starUp: { stage, level } | null, research: [labels], aniilog: { forms, prismana }, footer,
-//   mode, team: [{ name, role, icon, skills: [{ name, icon }], heldItem }] } (the rest of the team: no stats or CP)
+//   mode, team: [{ name, role, icon, skills: [{ name, icon }], traits, heldItem }] } (the rest of the team: no stats or CP);
+//   traits: [{ name, icon }], always active, in teal beside the elements and on each teammate's tile.
 (() => {
   "use strict";
 
@@ -104,7 +105,7 @@
   const TEAM_LINE = 25;
 
   function teamTileHeight(team) {
-    const lines = Math.max(1, ...team.map((mate) => mate.skills.length + 1));
+    const lines = Math.max(1, ...team.map((mate) => mate.skills.length + (mate.traits || []).length + 1));
     return 76 + lines * TEAM_LINE + 4;
   }
 
@@ -130,6 +131,11 @@
         skillName(ctx, skill, x + 40, line + 15, { size: 14, max: tileW - 52 });
         line += TEAM_LINE;
       });
+      (mate.traits || []).forEach((trait) => {
+        drawIcon(ctx, images.get(trait.icon), x + 12, line, 20);
+        text(ctx, trait.name, x + 40, line + 15, { size: 14, color: COLORS.accent, max: tileW - 52 });
+        line += TEAM_LINE;
+      });
       if (mate.heldItem) {
         drawIcon(ctx, images.get(mate.heldItem.icon), x + 12, line, 20);
         text(ctx, mate.heldItem.name, x + 40, line + 15, { size: 14, weight: 600, color: RARITY[mate.heldItem.rarity] || COLORS.text, max: tileW - 52 });
@@ -149,7 +155,9 @@
     const [portrait, held, ...skillIcons] = await Promise.all([
       loadImage(spec.icon), loadImage(spec.heldItem?.icon), ...(spec.skills || []).map((skill) => loadImage(skill.icon)),
     ]);
-    const teamUrls = [...new Set(team.flatMap((mate) => [mate.icon, mate.heldItem?.icon, ...mate.skills.map((skill) => skill.icon)]).filter(Boolean))];
+    const traitIcons = await Promise.all((spec.traits || []).map((trait) => loadImage(trait.icon)));
+    const teamUrls = [...new Set(team.flatMap((mate) => [mate.icon, mate.heldItem?.icon, ...mate.skills.map((skill) => skill.icon),
+      ...(mate.traits || []).map((trait) => trait.icon)]).filter(Boolean))];
     const teamImages = new Map(await Promise.all(teamUrls.map(async (url) => [url, await loadImage(url)])));
 
     // Background: dark, tinted by the first element.
@@ -168,6 +176,12 @@
     text(ctx, [spec.formLabel, spec.role].filter(Boolean).join(" · "), left, 410, { size: 18, color: COLORS.muted, max: 380 });
     let chipX = left;
     (spec.elements || []).forEach((element) => { chipX += chip(ctx, element.name, chipX, 426, element.color || COLORS.accent) + 8; });
+    // The trait(s) on the same line, after the elements.
+    (spec.traits || []).forEach((trait, index) => {
+      if (chipX > left + 330) return;
+      drawIcon(ctx, traitIcons[index], chipX + 4, 428, 22);
+      chipX += 32 + text(ctx, trait.name, chipX + 32, 445, { size: 16, weight: 600, color: COLORS.accent, max: left + 380 - chipX - 32 }) + 8;
+    });
 
     panel(ctx, left, 472, 380, 116);
     text(ctx, "LEVEL", left + 20, 502, { size: 13, weight: 700, color: COLORS.muted });
