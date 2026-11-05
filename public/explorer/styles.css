@@ -1223,7 +1223,7 @@ ul.team-skill-operations .team-skill-operation {
   flex: 0 0 auto;
 }
 
-/* One equal column per option: the mode switch has three (Standard, Interlink, Holo-Sim). */
+/* One equal column per option: the page tabs, PvE / PvP, and the tabs of the open group (up to four). */
 .team-mode-switch {
   grid-template-columns: none;
   grid-auto-columns: minmax(0, 1fr);
@@ -13964,9 +13964,9 @@ details.guide-toc summary {
   display: block;
 }
 
-/* Team Builder's four page tabs (Team, Type matchups, 1v1, Try-Hard Guide) sit two by two on narrow screens. */
+/* Team Builder: on narrow screens the mode tabs (up to four) sit two by two. */
 @media (max-width: 560px) {
-  .team-header-controls > .team-mode-switch:first-child {
+  .team-header-controls > .team-mode-switch:not(.team-group-switch) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-auto-flow: row;
     width: 100%;

@@ -20,15 +20,30 @@
   const RESERVE_SLOT = 4;
   const MEMBER_SLOTS = 5;
   const MAX_ACTIVE_SKILLS = 2;
+  // Team setups, under PvE or PvP (Team Builder's second row of tabs). 1v1 is a PvP tab too, but its own page
+  // (duel.js): DUEL_TAB below. card: how the share card names the mode.
   const MODES = Object.freeze([
-    Object.freeze({ id: "standard", label: "Standard", share: "s" }),
-    Object.freeze({ id: "interlink", label: "Interlink", share: "c" }),
-    Object.freeze({ id: "holosim", label: "Holo-Sim", share: "h" }),
+    Object.freeze({ id: "standard", label: "Standard", share: "s", group: "pve" }),
+    Object.freeze({ id: "interlink", label: "Interlink", share: "c", group: "pve" }),
+    Object.freeze({ id: "holosim", label: "Holo-Sim", share: "h", group: "pve" }),
+    Object.freeze({ id: "eggheist", label: "Egg Heist", share: "e", group: "pve" }),
+    Object.freeze({ id: "pvpfair", label: "Fair", share: "f", group: "pvp", card: "PvP · Fair" }),
+    Object.freeze({ id: "pvpunfair", label: "Unfair", share: "u", group: "pvp", card: "PvP · Unfair" }),
+    Object.freeze({ id: "eggheistpvp", label: "Egg Heist PvP", share: "x", group: "pvp" }),
   ]);
+  const MODE_GROUPS = Object.freeze([
+    Object.freeze({ id: "pve", label: "PvE" }),
+    Object.freeze({ id: "pvp", label: "PvP" }),
+  ]);
+  const DUEL_TAB = ["duel", "1v1"];
   const MODE_NOTES = Object.freeze({
     standard: "Four Aniimo, each with two picked active skills. Each Aniimo's Core switch-skill and Ultimate are always available.",
     interlink: "You control the first Aniimo and pick its skills. The other three bring their Core skills.",
     holosim: "Like Standard, plus a reserve you can swap in and out between battles in the Holo-Battle Simulator.",
+    eggheist: "Four Aniimo, each with two picked active skills, for Egg Heist runs.",
+    pvpfair: "Fair PvP: four Aniimo against another player's team, each with two picked active skills.",
+    pvpunfair: "Unfair PvP: four Aniimo against another player's team, each with two picked active skills.",
+    eggheistpvp: "Four Aniimo, each with two picked active skills, for Egg Heist PvP.",
   });
   const WHO_LABELS = Object.freeze({
     self: "Self",
@@ -67,9 +82,11 @@
         page: /^#guide-/u.test(window.location.hash) ? "guide" : pageFromAddress() || (["types", "duel", "guide"].includes(saved?.page) ? saved.page : "team"),
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
         memberTab: String(saved?.memberTab || "build"),
+        lastPve: String(saved?.lastPve || ""),
+        lastPvp: String(saved?.lastPvp || ""),
       };
     } catch {
-      return { page: "team", types: [], memberTab: "build" };
+      return { page: "team", types: [], memberTab: "build", lastPve: "", lastPvp: "" };
     }
   }
 
@@ -1081,18 +1098,64 @@
 
   // --- Layout ---------------------------------------------------------------------------------
 
+  // PvE or PvP: the 1v1 page counts as PvP; otherwise the team's mode decides.
+  function currentGroup() {
+    if (viewState.page === DUEL_TAB[0]) return "pvp";
+    return MODES.find((mode) => mode.id === model.mode)?.group || "pve";
+  }
+
+  function selectMode(id) {
+    model.mode = id;
+    model.activeSlot = Math.min(model.activeSlot, slotCount() - 1);
+    persist();
+    viewState[MODES.find((mode) => mode.id === id)?.group === "pvp" ? "lastPvp" : "lastPve"] = id;
+    if (viewState.page !== "team") {
+      goToPage("team");
+      return;
+    }
+    saveViewState();
+    render();
+  }
+
+  function openDuel() {
+    viewState.lastPvp = DUEL_TAB[0];
+    goToPage(DUEL_TAB[0]);
+  }
+
+  // PvE / PvP, back to the tab last open there (1v1 first in PvP, Standard in PvE).
+  function renderGroupSwitch() {
+    const group = el("div", "team-mode-switch team-group-switch");
+    group.setAttribute("role", "tablist");
+    MODE_GROUPS.forEach(({ id, label }) => {
+      const control = button(label, "team-mode-button", () => {
+        if (currentGroup() === id) return;
+        const last = MODES.find((mode) => mode.group === id && mode.id === viewState[id === "pvp" ? "lastPvp" : "lastPve"]);
+        if (last) selectMode(last.id);
+        else if (id === "pvp") openDuel();
+        else selectMode("standard");
+      });
+      control.setAttribute("role", "tab");
+      control.setAttribute("aria-selected", String(currentGroup() === id));
+      group.append(control);
+    });
+    return group;
+  }
+
+  // The tabs of the open group: PvE's team setups, or PvP's 1v1 and team setups.
   function renderModeSwitch(compact = false) {
     const group = el("div", compact ? "team-mode-switch team-mode-switch--compact" : "team-mode-switch");
     group.setAttribute("role", "tablist");
-    MODES.forEach((mode) => {
-      const control = button(mode.label, "team-mode-button", () => {
-        model.mode = mode.id;
-        model.activeSlot = Math.min(model.activeSlot, slotCount() - 1);
-        persist();
-        render();
-      });
+    const open = currentGroup();
+    if (open === "pvp") {
+      const duel = button(DUEL_TAB[1], "team-mode-button", openDuel);
+      duel.setAttribute("role", "tab");
+      duel.setAttribute("aria-selected", String(viewState.page === DUEL_TAB[0]));
+      group.append(duel);
+    }
+    MODES.filter((mode) => mode.group === open).forEach((mode) => {
+      const control = button(mode.label, "team-mode-button", () => selectMode(mode.id));
       control.setAttribute("role", "tab");
-      control.setAttribute("aria-selected", String(model.mode === mode.id));
+      control.setAttribute("aria-selected", String(viewState.page === "team" && model.mode === mode.id));
       group.append(control);
     });
     return group;
@@ -1742,7 +1805,7 @@
       skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot, core: Boolean(skill.core) })),
       heldItem: cardHeldItem(member),
       slot: slotRole(index),
-      mode: MODES.find((mode) => mode.id === model.mode)?.label || "",
+      mode: (({ card, label } = {}) => card || label || "")(MODES.find((mode) => mode.id === model.mode)),
       team: cardTeammates(index),
       starUp: member.starUp?.stage ? { stage: Number(member.starUp.stage), level: Number(member.starUp.level) || 0 } : null,
       research: (form?.form_research || []).filter((row) => researched.has(String(row.form_id))).map((row) => row.form_label || "Form"),
@@ -2205,11 +2268,12 @@
   function renderPageSwitch() {
     const group = el("div", "team-mode-switch");
     group.setAttribute("role", "tablist");
-    [["team", "Team"], ["types", "Type matchups"], ["duel", "1v1"], ["guide", window.AniilogsGuide?.title || "Guide"]].forEach(([id, label]) => {
+    [["team", "Team Builder"], ["types", "Type matchups"], ["guide", window.AniilogsGuide?.title || "Guide"]].forEach(([id, label]) => {
       if (id === "guide" && !window.AniilogsGuidePage) return;
       const control = button(label, "team-mode-button", () => goToPage(id));
       control.setAttribute("role", "tab");
-      control.setAttribute("aria-selected", String(viewState.page === id));
+      // 1v1 is under Team Builder (PvP).
+      control.setAttribute("aria-selected", String(viewState.page === id || (id === "team" && viewState.page === DUEL_TAB[0] && Boolean(window.AniilogsDuel))));
       group.append(control);
     });
     return group;
@@ -2235,7 +2299,7 @@
           : MODE_NOTES[model.mode]));
     const controls = el("div", "team-header-controls");
     controls.append(renderPageSwitch());
-    if (!typesPage && !duelPage && !guidePage) controls.append(renderModeSwitch());
+    if (!typesPage && !guidePage) controls.append(renderGroupSwitch(), renderModeSwitch());
     header.append(copy, controls);
     panel.append(header);
     if (typesPage) panel.append(renderTypesPage());
