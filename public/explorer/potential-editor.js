@@ -1,9 +1,9 @@
-// game-audit: unaudited potential, Star Up and held-item rules (pet_resonance_property_data, core_carry tables)
-// Potential, Star Up and held item for one Aniimo, shared by the Team Builder Build tab and the 1v1 sides.
+// game-audit: unaudited potential, Star-Up and held-item rules (pet_resonance_property_data, core_carry tables)
+// Potential, Star-Up and held item for one Aniimo, shared by the Team Builder Build tab and the 1v1 sides.
 // A "build" is { level, potential: { HP, ATK, "P.DEF", REGEN, "M.DEF", BREAK } (or one number for all),
 // starUp: { stage, level } | null, heldItem: { itemId, level } | null, personality: [letters],
 // formResearch: [researched form ids], coreUpgraded, formsCaught, prismanaCaught } (the last three only feed CP).
-// Each stat's potential is your own (rolled + Capability Awakening, 0-20) plus extra from Star Up and the
+// Each stat's potential is your own (rolled + Capability Awakening, 0-20) plus extra from Star-Up and the
 // held item's tiers, which go past 20; stats use the total (damage-model.js statTotals).
 (() => {
   const STATS = ["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"];
@@ -102,16 +102,16 @@
     const update = (patch) => onChange({ ...build, ...patch });
     const box = el("div", "potential-editor");
 
-    // Star Up stage and level (pet_resonance_property_data), and the held item with its level.
+    // Star-Up stage and level (pet_resonance_property_data), and the held item with its level.
     const stages = Object.keys(data?.star_up || {}).map(Number).sort((a, b) => a - b);
     const stage = Number(build?.starUp?.stage) || 0;
     const stageLevels = stage ? Object.keys(data?.star_up?.[stage] || {}).map(Number).sort((a, b) => a - b) : [];
     const sources = el("div", "potential-sources");
-    sources.append(field("Star Up", selectInput([{ value: 0, label: "None" }, ...stages.map((value) => ({ value, label: `Stage ${value}` }))],
-      stage, (value) => update({ starUp: Number(value) ? { stage: Number(value), level: 0 } : null }), "Star Up stage")));
+    sources.append(field("Star-Up", selectInput([{ value: 0, label: "None" }, ...stages.map((value) => ({ value, label: `Stage ${value}` }))],
+      stage, (value) => update({ starUp: Number(value) ? { stage: Number(value), level: 0 } : null }), "Star-Up stage")));
     if (stageLevels.length > 1) {
-      sources.append(field("Star Up level", selectInput(stageLevels.map((value) => ({ value, label: `Level ${value}` })),
-        Number(build.starUp.level) || 0, (value) => update({ starUp: { stage, level: Number(value) } }), "Star Up level")));
+      sources.append(field("Star-Up level", selectInput(stageLevels.map((value) => ({ value, label: `Level ${value}` })),
+        Number(build.starUp.level) || 0, (value) => update({ starUp: { stage, level: Number(value) } }), "Star-Up level")));
     }
     // Held item: the shared picker (every item, each rarity at its top level, optional "Legendary only").
     if (window.AniilogsHeldItems) {
@@ -166,10 +166,10 @@
     sources.append(caught, prismana);
     box.append(sources);
 
-    // Per stat: your own potential (0-20) and what Star Up and the held item add on top.
+    // Per stat: your own potential (0-20) and what Star-Up and the held item add on top.
     const table = el("table", "potential-table");
     const head = el("tr");
-    ["Stat", `Own (0–${maxOwn})`, "Star Up", "Item", "Total"].forEach((text) => head.append(el("th", "", text)));
+    ["Stat", `Own (0–${maxOwn})`, "Star-Up", "Item", "Total"].forEach((text) => head.append(el("th", "", text)));
     table.append(el("thead"), el("tbody"));
     table.tHead.append(head);
     for (const stat of STATS) {
@@ -182,7 +182,7 @@
       table.tBodies[0].append(row);
     }
     box.append(table, el("p", "potential-note",
-      "Own = rolled at capture plus Capability Awakening, up to 20 per stat. Star Up and held items add extra potential on top of that cap. Stats use the total."));
+      "Own = rolled at capture plus Capability Awakening, up to 20 per stat. Star-Up and held items add extra potential on top of that cap. Stats use the total."));
     return box;
   }
 

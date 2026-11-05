@@ -7577,7 +7577,7 @@ function afpGrownStat(growth, label, base, level, points = 0) {
   return Math.floor(total * (1 + percent));
 }
 
-// The stats the Aniilog tab's Growth panel is set to (level, your potential, Star Up, held item), worked out by the
+// The stats the Aniilog tab's Growth panel is set to (level, your potential, Star-Up, held item), worked out by the
 // Team Builder's model; null without the data yet.
 function afpCurrentStats(entry) {
   const model = window.AniilogsDamage;
@@ -7617,7 +7617,7 @@ const AFP_EXTRA_POTENTIAL_KEYS = Object.freeze({
   "M.DEF": "pet_individual_point_def_mag", REGEN: "pet_individual_point_ep_regen_force", BREAK: "pet_individual_point_bp_atk",
 });
 
-// What Star Up and the chosen held item add to each stat at one level: the Team Builder's stat model (damage-model.js
+// What Star-Up and the chosen held item add to each stat at one level: the Team Builder's stat model (damage-model.js
 // statTotals) with and without them, so their flat and percent stats, the item's per-level conversion and the extra
 // potential they give count exactly as on the Team Builder. { label: { gain, star, item } } (star/item: the extra
 // potential each adds), or null with neither chosen or without the data.
@@ -7703,10 +7703,10 @@ function renderAfpStats(entry) {
   const cap = growth.level_cap || 70;
   // Potential per stat: your own (rolled + Capability Awakening) up to max_level (pet_prop_level_max, 20), plus
   // extra potential. The game allows up to extra_max_level extra (pet_config_data.newPropExtraMaxLv, 10), but the
-  // game files only give +4 from Star Up stage 7 (pet_resonance_property_data, group 110: +1/+2/+4 at stages
+  // game files only give +4 from Star-Up stage 7 (pet_resonance_property_data, group 110: +1/+2/+4 at stages
   // 5/6/7, not added together) and +2 from one Epic or Legendary held item at item level 10 (core_carry_data
   // energyEffects). So every stat stops at 24, and the stats the chosen held item boosts reach 24 + its potential.
-  // The box is your own potential (0-20); Star Up (the stage chosen below) and the held item add theirs on top (+N).
+  // The box is your own potential (0-20); Star-Up (the stage chosen below) and the held item add theirs on top (+N).
   const ownMax = growth.potentials?.max_level || 20;
   const controls = document.createElement("div");
   controls.className = "afp-growth-controls";
@@ -7745,7 +7745,7 @@ function renderAfpStats(entry) {
   const earnedNote = document.createElement("p");
   earnedNote.className = "afp-growth-note";
   controls.append(levelLabel, presets);
-  // Star Up stage and level: the Team Builder's (pet_resonance_property_data, team_builder_data.json star_up).
+  // Star-Up stage and level: the Team Builder's (pet_resonance_property_data, team_builder_data.json star_up).
   if (!state.afpTeamData) loadAfpTeamData();
   const starTable = state.afpTeamData?.star_up;
   if (starTable && Object.keys(starTable).length) {
@@ -7768,13 +7768,13 @@ function renderAfpStats(entry) {
       const stage = Number(settings.starUp?.stage) || 0;
       const levels = stage ? Object.keys(starTable[stage] || {}).map(Number).sort((a, b) => a - b) : [];
       if (stage && !levels.includes(Number(settings.starUp.level))) settings.starUp = { stage, level: levels[0] ?? 0 };
-      starField.replaceChildren(makeSelect("Star Up", [[0, "None"], ...stages.map((value) => [value, `Stage ${value}`])], stage, (value) => {
+      starField.replaceChildren(makeSelect("Star-Up", [[0, "None"], ...stages.map((value) => [value, `Stage ${value}`])], stage, (value) => {
         settings.starUp = value ? { stage: value, level: 0 } : null;
         renderStar();
         renderTable();
       }));
       if (stage && levels.length > 1) {
-        starField.append(makeSelect("Star Up level", levels.map((value) => [value, `Level ${value}`]), settings.starUp.level, (value) => {
+        starField.append(makeSelect("Star-Up level", levels.map((value) => [value, `Level ${value}`]), settings.starUp.level, (value) => {
           settings.starUp = { stage, level: value };
           renderTable();
         }));
@@ -7810,7 +7810,7 @@ function renderAfpStats(entry) {
       head.append(cell);
     });
     table.append(head);
-    // The saved potential is your own (0-20); Star Up and the held item add their extra potential and stats on top.
+    // The saved potential is your own (0-20); Star-Up and the held item add their extra potential and stats on top.
     stats.forEach((stat) => {
       settings.potentials[stat.label] = Math.max(0, Math.min(ownMax, Math.round(Number(settings.potentials[stat.label]) || 0)));
     });
@@ -7842,7 +7842,7 @@ function renderAfpStats(entry) {
       name.scope = "row";
       name.textContent = stat.display;
       const potentialCell = document.createElement("td");
-      // The box is your own potential; Star Up's and the held item's extra potential shows beside it (+N).
+      // The box is your own potential; Star-Up's and the held item's extra potential shows beside it (+N).
       const fromStar = item?.star || 0;
       const fromItem = item?.item || 0;
       const input = document.createElement("input");
@@ -7860,7 +7860,7 @@ function renderAfpStats(entry) {
         const extra = document.createElement("span");
         extra.className = "afp-item-gain";
         extra.textContent = `+${fromStar + fromItem}`;
-        extra.title = [fromStar ? `${fromStar} from Star Up` : "", fromItem ? `${fromItem} from the held item` : ""]
+        extra.title = [fromStar ? `${fromStar} from Star-Up` : "", fromItem ? `${fromItem} from the held item` : ""]
           .filter(Boolean).join(", ") + `: ${points + fromStar + fromItem} in all`;
         potentialCell.append(extra);
       }
@@ -7878,7 +7878,7 @@ function renderAfpStats(entry) {
         const gain = document.createElement("span");
         gain.className = "afp-item-gain";
         gain.textContent = `+${formatNumber(item.gain, 0)}`;
-        gain.title = `From ${[settings.starUp ? "Star Up" : "", settings.heldItem ? "the held item" : ""].filter(Boolean).join(" and ")}`;
+        gain.title = `From ${[settings.starUp ? "Star-Up" : "", settings.heldItem ? "the held item" : ""].filter(Boolean).join(" and ")}`;
         valueCell.append(" ", gain);
       }
       row.append(name, potentialCell, curveCell, valueCell);
@@ -7887,7 +7887,7 @@ function renderAfpStats(entry) {
     const earnedPoints = growth.potentials?.points_by_level?.[level - 1];
     earnedNote.textContent = Number.isFinite(earnedPoints) ? `${formatNumber(earnedPoints, 0)} potential points earned by level ${level}.` : "";
     window.setTimeout(() => afpRefreshScalingNotes(entry), 0);   // the skills' stat-scaled numbers follow these stats
-    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat. Star Up adds stats at every stage and extra potential from stage 5 (+1, +2 at stage 6, +4 at stage 7); an Epic or Legendary held item (at item level 10) adds 2 more to the stat it boosts (Giant Tortoise Shell boosts both P.DEF and M.DEF). What they add shows beside the box and the value (+N), worked out as on the Team Builder. Values are before personality, talents and buffs. Formulas from the game scripts.`));
+    earnedNote.append(" ", afpInfo(`Each potential level adds 0.8% to the stat, and every 4 levels add 4% more. Your own potential goes up to ${ownMax} per stat. Star-Up adds stats at every stage and extra potential from stage 5 (+1, +2 at stage 6, +4 at stage 7); an Epic or Legendary held item (at item level 10) adds 2 more to the stat it boosts (Giant Tortoise Shell boosts both P.DEF and M.DEF). What they add shows beside the box and the value (+N), worked out as on the Team Builder. Values are before personality, talents and buffs. Formulas from the game scripts.`));
   }
   renderTable();
   void earned;

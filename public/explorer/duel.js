@@ -142,7 +142,7 @@
     return stats;
   }
 
-  // A side's build (level, per-stat potential, Star Up, held item, personality) through statTotals.
+  // A side's build (level, per-stat potential, Star-Up, held item, personality) through statTotals.
   function sideTotals(aniilog, data, entry, side) {
     const model = window.AniilogsDamage;
     if (!model?.statTotals || !data?.forms?.[String(entry?.form_id)]) return null;
@@ -494,7 +494,7 @@
       })),
     );
     card.append(fields);
-    // Per-stat potential, Star Up and held item (potential-editor.js).
+    // Per-stat potential, Star-Up and held item (potential-editor.js).
     const editor = window.AniilogsPotentialEditor;
     if (editor && model.entry) {
       card.append(editor.render({

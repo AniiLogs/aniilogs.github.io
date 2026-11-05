@@ -695,7 +695,7 @@
     return sentences.join(" ");
   }
 
-  // The stats of the member whose skills and traits are being drawn (their stat card: level, potential, Star Up,
+  // The stats of the member whose skills and traits are being drawn (their stat card: level, potential, Star-Up,
   // held item...), so values that scale with a stat show their number for this build. Null outside that.
   let scalingStats = null;
   function memberCardStats(member) {
@@ -1418,7 +1418,7 @@
   // From pet_data's recommend* fields (team_builder_data.json `recommended`), the Aniilog's stat_growth
   // through duel.js's grownStat, and pet_talent_data personality traits (`personality`).
 
-  // Build: everything the player chooses (skills, level, personality, potential, Star Up, held item, Aniilog) and
+  // Build: everything the player chooses (skills, level, personality, potential, Star-Up, held item, Aniilog) and
   // the card it makes. Skills: how each chosen skill works. Recommended: the game's suggestions and reference.
   const MEMBER_TABS = Object.freeze([
     { id: "build", label: "Build" },
@@ -1709,7 +1709,7 @@
         role: slotRole(slot),
         icon: entry?.icon ? host.contentUrl(entry.icon) : "",
         skills: memberSkills(member, slot).filter(({ slot: kind }) => kind !== "Ultimate")
-          .map(({ skill, slot: kind }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot: kind })),
+          .map(({ skill, slot: kind }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot: kind, core: Boolean(skill.core) })),
         heldItem: cardHeldItem(member),
       };
     }).filter(Boolean);
@@ -1739,7 +1739,7 @@
       personality: [...(member.personality || [])].sort((a, b) => PERSONALITY_ORDER.indexOf(a) - PERSONALITY_ORDER.indexOf(b)).join(""),
       perfect: Boolean(member.perfect),
       stats: CARD_STATS.map((stat) => ({ stat, value: totals?.total?.[stat] ?? null, potential: totals?.potential?.[stat]?.total || 0 })),
-      skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot })),
+      skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot, core: Boolean(skill.core) })),
       heldItem: cardHeldItem(member),
       slot: slotRole(index),
       mode: MODES.find((mode) => mode.id === model.mode)?.label || "",
@@ -1840,7 +1840,7 @@
   const CARD_STATS = Object.freeze(["HP", "ATK", "P.DEF", "REGEN", "M.DEF", "BREAK"]);
 
   // The game's stat card for this member (damage-model.js statTotals): base stats from level and potential, then
-  // personality, Star Up, held item and Form Research bonuses, and CP.
+  // personality, Star-Up, held item and Form Research bonuses, and CP.
   function renderCardCalculator(member, entry) {
     const model = window.AniilogsDamage;
     const growth = aniilog?.stat_growth;
@@ -1877,9 +1877,9 @@
       level: clampInt(member.level ?? cap, 1, cap, cap), potential: member.potential ?? 0, personality: member.personality || [],
     };
     const totals = model.statTotals(data, aniilog, member.formId, options);
-    // Per-stat potential, Star Up and held item (potential-editor.js), saved on the member.
+    // Per-stat potential, Star-Up and held item (potential-editor.js), saved on the member.
     if (editor) {
-      box.append(el("h3", "team-build-subheading", "Star Up, held item, Aniilog and potential"));
+      box.append(el("h3", "team-build-subheading", "Star-Up, held item, Aniilog and potential"));
       box.append(editor.render({
         data, aniilog, formId: member.formId, build: member, totals,
         onChange: (next) => {
@@ -1916,8 +1916,8 @@
       cp.append(el("strong", "", "CP "), totals.cp.toLocaleString());
       box.append(cp);
     }
-    box.append(el("p", "team-data-note", "Card total = (base + Star Up flat stats) × (1 + potential, personality, Star Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at its rarity's top level (Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
-    if (Number.isFinite(totals.cp)) box.append(el("p", "team-data-note", "CP is the game's formula: species stats and level, your own potential, Star Up, the held item, an upgraded Core skill, and the forms and Prismana forms you have caught."));
+    box.append(el("p", "team-data-note", "Card total = (base + Star-Up flat stats) × (1 + potential, personality, Star-Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at its rarity's top level (Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
+    if (Number.isFinite(totals.cp)) box.append(el("p", "team-data-note", "CP is the game's formula: species stats and level, your own potential, Star-Up, the held item, an upgraded Core skill, and the forms and Prismana forms you have caught."));
     return box;
   }
 

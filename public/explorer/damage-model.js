@@ -1,4 +1,4 @@
-// game-audit: 1.1.3857679 2026-11-03 formula_data 3001 3003 3004 3007 3008 3018 3023 3100 3110 3512 3513 and 3025-3030/13025-13030/23025-23030, crit and element code, property_data crit/BREAK bar, Star Up and held-item level tables, role ATK
+// game-audit: 1.1.3857679 2026-11-03 formula_data 3001 3003 3004 3007 3008 3018 3023 3100 3110 3512 3513 and 3025-3030/13025-13030/23025-23030, crit and element code, property_data crit/BREAK bar, Star-Up and held-item level tables, role ATK
 // Damage and stat model from the game's own scripts (build 3846247; re-checked against 1.1 build 3857679).
 // Pure functions for the 1v1 tab, the Guide and the Team Builder Build tab; no DOM. Every rule says where it
 // comes from:
@@ -96,8 +96,8 @@
   // A pet's six stats the way PetAttributeCalcUtils adds them up (exact unless noted):
   //   stat = (formula value + flat base bonuses) x (1 + % bonuses) + flat bonuses + conversions
   // The formula value uses the stat's total potential: your own (rolled + awakened, up to 20,
-  // BaseProperty.indLv) plus extra potential from other sources (iLvEx: Star Up, held-item tiers), and
-  // the +4% per 4 potential uses the same total. Sources: personality traits; Star Up (resonance) stage
+  // BaseProperty.indLv) plus extra potential from other sources (iLvEx: Star-Up, held-item tiers), and
+  // the +4% per 4 potential uses the same total. Sources: personality traits; Star-Up (resonance) stage
   // and level; held items (base stat x (1 + level's enhance ratio), per-pet-level conversions, tiers
   // switched on at item level 10 / 15); Form Research bonuses (each researched form of the species adds its
   // entry to every Aniimo of that species, form.form_research). Not modelled: held-item talents.
@@ -146,7 +146,7 @@
       trait?.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value, `Personality: ${trait.name}`)));
     });
     const star = data.star_up?.[options.starUp?.stage]?.[options.starUp?.level ?? 0];
-    star?.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value, `Star Up ${options.starUp.stage}`, "star_up")));
+    star?.stats.forEach((stat) => stat.keys.forEach((key) => add(key, stat.value, `Star-Up ${options.starUp.stage}`, "star_up")));
     (options.heldItems || []).forEach(({ itemId, level: itemLevel }) => {
       const item = data.held_item_catalog?.[itemId];
       if (!item) return;
@@ -192,7 +192,7 @@
       result.total[stat] = base === null ? null
         : Math.ceil((base + b.v) * (1 + potentialPercent + b.p) + b.fix + b.conv - 1e-9);
     });
-    // CP counts only your own potential (Utils.getCpValue reads indLv) and the Star Up step's CP.
+    // CP counts only your own potential (Utils.getCpValue reads indLv) and the Star-Up step's CP.
     result.cp = combatPower(data, form, species, level, Object.fromEntries(STATS.map((stat) => [stat, potential[stat].own])),
       { ...options, resonanceCp: star?.cp ?? options.resonanceCp });
     return result;

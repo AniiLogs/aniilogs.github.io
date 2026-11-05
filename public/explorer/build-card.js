@@ -62,6 +62,17 @@
     return ctx.measureText(shown).width;
   }
 
+  // A skill's name with " (Core)" after it in gold when it is the Aniimo's Core skill; centred or from the left.
+  function skillName(ctx, skill, x, y, { size, weight = 400, align = "left", max }) {
+    const tag = skill.core ? " (Core)" : "";
+    ctx.font = `${weight} ${size}px ${FONT}`;
+    const tagW = tag ? ctx.measureText(tag).width : 0;
+    const nameW = Math.min(ctx.measureText(skill.name).width, max - tagW);
+    const startX = align === "center" ? x - (nameW + tagW) / 2 : x;
+    const drawn = text(ctx, skill.name, startX, y, { size, weight, max: max - tagW });
+    if (tag) text(ctx, tag, startX + drawn, y, { size, weight: 700, color: COLORS.gold });
+  }
+
   function drawIcon(ctx, image, x, y, size) {
     if (!image) {
       roundRect(ctx, x, y, size, size, size / 5);
@@ -100,11 +111,14 @@
   function drawTeam(ctx, team, images, mode) {
     const left = 40;
     const width = WIDTH - 80;
-    text(ctx, mode ? `TEAM · ${mode.toUpperCase()}` : "TEAM", left, TEAM_TOP + 16, { size: 13, weight: 700, color: COLORS.muted });
+    text(ctx, mode ? `TEAM · ${mode.toUpperCase()}` : "TEAM", WIDTH / 2, TEAM_TOP + 16, { size: 13, weight: 700, color: COLORS.muted, align: "center" });
+    // Tiles keep a quarter of the row each and sit centred, however many teammates there are.
     const tileW = (width - 30) / 4;
     const tileH = teamTileHeight(team);
-    team.slice(0, 4).forEach((mate, index) => {
-      const x = left + index * (tileW + 10);
+    const shown = team.slice(0, 4);
+    const start = left + (width - (shown.length * tileW + (shown.length - 1) * 10)) / 2;
+    shown.forEach((mate, index) => {
+      const x = start + index * (tileW + 10);
       const y = TEAM_TOP + 28;
       panel(ctx, x, y, tileW, tileH);
       drawIcon(ctx, images.get(mate.icon), x + 12, y + 12, 52);
@@ -113,7 +127,7 @@
       let line = y + 74;
       mate.skills.forEach((skill) => {
         drawIcon(ctx, images.get(skill.icon), x + 12, line, 20);
-        text(ctx, skill.name, x + 40, line + 15, { size: 14, max: tileW - 52 });
+        skillName(ctx, skill, x + 40, line + 15, { size: 14, max: tileW - 52 });
         line += TEAM_LINE;
       });
       if (mate.heldItem) {
@@ -186,12 +200,12 @@
       const ultimate = skill.slot === "Ultimate";
       panel(ctx, x, 280, skillW, 132, ultimate ? "#2a2416" : COLORS.panel);
       drawIcon(ctx, skillIcons[index], x + (skillW - 56) / 2, 290, 56);
-      text(ctx, skill.name, x + skillW / 2, 372, { size: 16, weight: 600, align: "center", max: skillW - 16 });
+      skillName(ctx, skill, x + skillW / 2, 372, { size: 16, weight: 600, align: "center", max: skillW - 16 });
       text(ctx, skill.slot, x + skillW / 2, 396, { size: 13, color: ultimate ? COLORS.gold : COLORS.muted, align: "center", max: skillW - 16 });
     });
     if (!skills.length) text(ctx, "No skills chosen", rx, 320, { size: 16, color: COLORS.muted });
 
-    // Held item, Star Up and the Aniilog bonuses.
+    // Held item, Star-Up and the Aniilog bonuses.
     const boxW = (rw - 20) / 3;
     const by = 428;
     panel(ctx, rx, by, boxW, 160);
@@ -206,7 +220,7 @@
 
     const sx = rx + boxW + 10;
     panel(ctx, sx, by, boxW, 160);
-    text(ctx, "STAR UP", sx + 16, by + 26, { size: 13, weight: 700, color: COLORS.muted });
+    text(ctx, "STAR-UP", sx + 16, by + 26, { size: 13, weight: 700, color: COLORS.muted });
     if (spec.starUp?.stage) {
       text(ctx, "★".repeat(Math.min(7, spec.starUp.stage)), sx + 16, by + 70, { size: 26, color: COLORS.gold, max: boxW - 32 });
       text(ctx, `Stage ${spec.starUp.stage}${spec.starUp.level ? ` · Level ${spec.starUp.level}` : ""}`, sx + 16, by + 98, { size: 16 });

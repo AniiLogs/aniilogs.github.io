@@ -39,3 +39,11 @@ test("the card shows the rest of the team: who they are, the skills they bring i
   assert.match(card, /function drawTeam\(ctx, team, images, mode\)/u);
   assert.doesNotMatch(card.slice(card.indexOf("function drawTeam"), card.indexOf("async function draw(")), /\.cp|stats/u);
 });
+
+test("the card centres the team row, tags each Core skill (Core) in gold, and says Star-Up as the game does", () => {
+  assert.match(card, /const start = left \+ \(width - \(shown\.length \* tileW \+ \(shown\.length - 1\) \* 10\)\) \/ 2;/u);
+  assert.match(card, /const tag = skill\.core \? " \(Core\)" : "";/u);
+  assert.match(team, /slot, core: Boolean\(skill\.core\) \}\)\),/u);
+  assert.match(card, /"STAR-UP"/u);
+  assert.doesNotMatch(team + card, /Star Up/u);
+});
