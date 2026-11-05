@@ -330,7 +330,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.21.20-checklist-tabs/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.21.21-build-tab/u);
   assert.match(teamBuilder, /times\(STRONG \* STRONG\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.

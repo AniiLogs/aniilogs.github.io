@@ -1,5 +1,5 @@
 // game-audit: unaudited held-item catalog and top levels per rarity (core_carry_level_data needQuality)
-// The held-item dropdown shared by the Team Builder (Stats tab, 1v1 sides) and the Aniilog page's Growth table:
+// The held-item dropdown shared by the Team Builder (Build tab, 1v1 sides) and the Aniilog page's Growth table:
 // every held item an Aniimo can equip (team_builder_data.json held_item_catalog), each rarity at its own top
 // level, with a remembered "Legendary only" toggle. Type-to-filter through aniimo-picker.js; the items the game
 // recommends for the Aniimo come first. What an item adds is worked out by damage-model.js statTotals (heldItems).

@@ -462,7 +462,7 @@
     }
     select.addEventListener("change", change(rerender, (target) => {
       side.formId = target.value;
-      // A team member brings the level and potential from its Stats tab.
+      // A team member brings the level and potential from its Build tab.
       const member = options.memberStats?.[target.value];
       if (member) copyBuild(side, member, options.aniilog.stat_growth?.level_cap || 70);
     }));

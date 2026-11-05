@@ -14503,3 +14503,94 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
 .duel-cell-rate .aniimo-picker-clear {
   display: none;
 }
+
+/* Team Builder Build tab: the player's choices, with the Ultimate under the skills, and the share card. */
+.team-build-subheading {
+  margin: 14px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.team-build-skills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.team-build-skill {
+  display: flex;
+  min-width: 0;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(var(--background-rgb), 0.36);
+  padding: 8px 10px;
+}
+
+.team-build-skill .team-skill-copy {
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-build-skill small {
+  color: var(--muted);
+}
+
+.team-share-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.team-share-bar .team-data-note {
+  margin: 0;
+  flex: 1 1 220px;
+}
+
+.team-share-card-button {
+  width: auto;
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.team-card-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 14px;
+}
+
+.team-card-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.team-card-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.team-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.team-card-actions .team-loadout-action {
+  width: auto;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}

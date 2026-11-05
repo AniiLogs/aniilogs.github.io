@@ -1,5 +1,5 @@
 // game-audit: unaudited potential, Star Up and held-item rules (pet_resonance_property_data, core_carry tables)
-// Potential, Star Up and held item for one Aniimo, shared by the Team Builder Stats tab and the 1v1 sides.
+// Potential, Star Up and held item for one Aniimo, shared by the Team Builder Build tab and the 1v1 sides.
 // A "build" is { level, potential: { HP, ATK, "P.DEF", REGEN, "M.DEF", BREAK } (or one number for all),
 // starUp: { stage, level } | null, heldItem: { itemId, level } | null, personality: [letters],
 // formResearch: [researched form ids], coreUpgraded, formsCaught, prismanaCaught } (the last three only feed CP).

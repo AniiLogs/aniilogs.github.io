@@ -66,10 +66,10 @@
         // A shared link to a Guide section (#guide-…) opens the Guide.
         page: /^#guide-/u.test(window.location.hash) ? "guide" : pageFromAddress() || (["types", "duel", "guide"].includes(saved?.page) ? saved.page : "team"),
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
-        memberTab: String(saved?.memberTab || "skills"),
+        memberTab: String(saved?.memberTab || "build"),
       };
     } catch {
-      return { page: "team", types: [], memberTab: "skills" };
+      return { page: "team", types: [], memberTab: "build" };
     }
   }
 
@@ -160,7 +160,7 @@
       : [];
     while (activeSkills.length < MAX_ACTIVE_SKILLS) activeSkills.push("");
     const member = { formId: String(value?.formId || ""), activeSkills };
-    // Stats tab inputs (also read by the 1v1 tab); unset means level cap and no potential.
+    // Build tab inputs (also read by the 1v1 tab); unset means level cap and no potential.
     if (Number.isFinite(Number(value?.level)) && value?.level !== null && value?.level !== "") member.level = Math.round(Number(value.level));
     // Potential: one number per stat (older saves stored one number for all six).
     if (value?.potential && typeof value.potential === "object") {
@@ -179,7 +179,7 @@
     if (value?.starUp && Number(value.starUp.stage) > 0) {
       member.starUp = { stage: Math.round(Number(value.starUp.stage)), level: Math.max(0, Math.round(Number(value.starUp.level) || 0)) };
     }
-    // Stats tab card calculator: personality letters (one per pair) and one held item with its level.
+    // Build tab card calculator: personality letters (one per pair) and one held item with its level.
     if (Array.isArray(value?.personality)) member.personality = value.personality.map(String).filter((letter) => /^[EISNTFJP]$/u.test(letter)).slice(0, 4);
     if (value?.heldItem && Number.isFinite(Number(value.heldItem.itemId))) {
       member.heldItem = { itemId: String(value.heldItem.itemId), level: Math.max(0, Math.round(Number(value.heldItem.level) || 0)) };
@@ -1284,38 +1284,10 @@
     const allyOnly = supportOnly(index);
     heading.append(el("div", "", allyOnly ? "Core skills brought to the team" : "Skill loadout"));
     section.append(heading);
-    if (!allyOnly) {
-      const skills = skillsOf(form, "skill");
-      const grid = el("div", "team-field-grid");
-      for (let position = 0; position < MAX_ACTIVE_SKILLS; position += 1) {
-        const other = member.activeSkills[position === 0 ? 1 : 0];
-        const options = [{ value: "", label: "Choose a skill" }, ...skills.map((skill) => ({
-          value: String(skill.id),
-          label: `${skill.core ? "Core · " : ""}${skill.name}`,
-          disabled: other === String(skill.id),
-        }))];
-        grid.append(selectControl(`Active skill ${position + 1}`, options, member.activeSkills[position], (value) => {
-          member.activeSkills[position] = value;
-          validateMember(member);
-          persist();
-          render();
-        }));
-      }
-      section.append(grid);
-      const core = coreSkill(form);
-      const ultimate = skillsOf(form, "ultimate")[0];
-      section.append(
-        el("p", "team-skill-variant-note", core
-          ? `Switch-skill: ${core.name} (its Core skill, always usable with the switch shortcut).`
-          : "This Aniimo has no Core skill, so no switch-skill."),
-        el("p", "team-skill-variant-note", ultimate
-          ? `Ultimate: ${ultimate.name} (comes with this Aniimo).`
-          : "This Aniimo has no Ultimate."),
-      );
-    }
+    if (!allyOnly) section.append(el("p", "team-skill-variant-note", "Skills are picked on the Build tab."));
     const chosen = memberSkills(member, index);
     if (!chosen.length) {
-      section.append(el("p", "team-empty-copy", allyOnly ? "This Aniimo has no Core skill." : "Choose skills to see how they work."));
+      section.append(el("p", "team-empty-copy", allyOnly ? "This Aniimo has no Core skill." : "Choose skills on the Build tab to see how they work."));
     } else {
       const cards = el("div", "team-skill-cards");
       chosen.forEach(({ skill, slot }) => cards.append(renderSkillCard(skill, slot, member.formId)));
@@ -1422,8 +1394,8 @@
     const tab = memberTab();
     const body = el("div", "team-member-tab-panel");
     body.setAttribute("role", "tabpanel");
-    if (tab === "build") body.append(renderBuild(member, form));
-    else if (tab === "stats") body.append(renderStats(member, entry));
+    if (tab === "build") body.append(renderBuild(member, form, entry, index));
+    else if (tab === "recommended") body.append(renderRecommended(member, form, entry));
     else {
       scalingStats = memberCardStats(member);
       try { body.append(renderSkillLoadout(member, form, index), renderTraits(form)); } finally { scalingStats = null; }
@@ -1446,10 +1418,12 @@
   // From pet_data's recommend* fields (team_builder_data.json `recommended`), the Aniilog's stat_growth
   // through duel.js's grownStat, and pet_talent_data personality traits (`personality`).
 
+  // Build: everything the player chooses (skills, level, personality, potential, Star Up, held item, Aniilog) and
+  // the card it makes. Skills: how each chosen skill works. Recommended: the game's suggestions and reference.
   const MEMBER_TABS = Object.freeze([
-    { id: "skills", label: "Skills" },
     { id: "build", label: "Build" },
-    { id: "stats", label: "Stats" },
+    { id: "skills", label: "Skills" },
+    { id: "recommended", label: "Recommended" },
   ]);
   let developerOverlay = null;
 
@@ -1571,7 +1545,7 @@
   }
 
   function memberTab() {
-    return MEMBER_TABS.some((tab) => tab.id === viewState.memberTab) ? viewState.memberTab : "skills";
+    return MEMBER_TABS.some((tab) => tab.id === viewState.memberTab) ? viewState.memberTab : "build";
   }
 
   function renderMemberTabs() {
@@ -1610,7 +1584,7 @@
     return card;
   }
 
-  function renderBuild(member, form) {
+  function renderRecommended(member, form, entry) {
     const recommended = form.recommended || {};
     const wrap = el("div", "team-build");
     const items = el("section", "team-config-section");
@@ -1636,8 +1610,184 @@
       presets.append(card);
     });
     if (rows.length) presets.append(el("p", "team-data-note", "The percentage is the one the game shows on each preset."));
-    wrap.append(items, presets);
+    wrap.append(items, presets, renderPersonality(entry));
     return wrap;
+  }
+
+  // --- Build tab: every choice the player makes for this Aniimo, and the card it gives -------------
+
+  // A skill as one line: icon, name, what slot it fills, and its numbers.
+  function compactSkill(skill, slotLabel) {
+    const card = el("article", "team-build-skill");
+    if (skill.icon) card.append(icon(skill.icon, "team-skill-icon"));
+    const copy = el("div", "team-skill-copy");
+    const top = el("div", "team-skill-top");
+    top.append(el("strong", "", skill.name), pill(slotLabel));
+    copy.append(top);
+    const meta = [
+      skill.might !== null && skill.might !== undefined ? `Might ${skill.might}` : "",
+      Number(skill.ep_cost) > 0 ? `EP ${skill.ep_cost}` : "",
+      Number(skill.cooldown) > 0 ? `Cooldown ${formatNumber(skill.cooldown)}s` : "",
+      ...(skill.tags || []),
+    ].filter(Boolean).join(" · ");
+    if (meta) copy.append(el("small", "", meta));
+    card.append(copy);
+    return card;
+  }
+
+  // The two active picks and the switch-skill, then the Ultimate in its own part underneath.
+  function renderSkillPicks(member, form, index) {
+    const section = el("section", "team-config-section");
+    if (supportOnly(index)) {
+      section.append(sectionHeading("Skills", "Interlink allies bring their Core skill"));
+      const core = coreSkill(form);
+      section.append(core ? compactSkill(core, "Core skill") : el("p", "team-empty-copy", "This Aniimo has no Core skill."));
+      return section;
+    }
+    section.append(sectionHeading("Skills", "Two active skills"));
+    const skills = skillsOf(form, "skill");
+    const grid = el("div", "team-field-grid");
+    for (let position = 0; position < MAX_ACTIVE_SKILLS; position += 1) {
+      const other = member.activeSkills[position === 0 ? 1 : 0];
+      const options = [{ value: "", label: "Choose a skill" }, ...skills.map((skill) => ({
+        value: String(skill.id),
+        label: `${skill.core ? "Core · " : ""}${skill.name}`,
+        disabled: other === String(skill.id),
+      }))];
+      grid.append(selectControl(`Active skill ${position + 1}`, options, member.activeSkills[position], (value) => {
+        member.activeSkills[position] = value;
+        validateMember(member);
+        persist();
+        render();
+      }));
+    }
+    section.append(grid);
+    const picks = el("div", "team-build-skills");
+    memberSkills(member, index).filter(({ slot }) => slot !== "Ultimate")
+      .forEach(({ skill, slot }) => picks.append(compactSkill(skill, slot)));
+    if (picks.childElementCount) section.append(picks);
+    const core = coreSkill(form);
+    section.append(el("p", "team-skill-variant-note", core
+      ? `Switch-skill: ${core.name} (its Core skill, always usable with the switch shortcut).`
+      : "This Aniimo has no Core skill, so no switch-skill."));
+
+    const ultimate = skillsOf(form, "ultimate")[0];
+    section.append(el("h3", "team-build-subheading", "Ultimate"));
+    section.append(ultimate ? compactSkill(ultimate, "Ultimate") : el("p", "team-empty-copy", "This Aniimo has no Ultimate."));
+    if (ultimate) section.append(el("p", "team-skill-variant-note", "Comes with this Aniimo: there is nothing to pick."));
+    return section;
+  }
+
+  function renderBuild(member, form, entry, index) {
+    const wrap = el("div", "team-build team-build--player");
+    wrap.append(renderShareBar(member, index), renderSkillPicks(member, form, index), renderStatTable(member, entry));
+    return wrap;
+  }
+
+  // --- Share card: a picture of this build, drawn on the player's device (build-card.js) ------------
+
+  const PERSONALITY_ORDER = "EISNTFJP";
+
+  function buildCardSpec(member, index) {
+    const form = formFor(member);
+    const entry = entryForForm(member.formId);
+    const damage = window.AniilogsDamage;
+    const growth = aniilog?.stat_growth;
+    const cap = Number(growth?.level_cap) || 70;
+    const editor = window.AniilogsPotentialEditor;
+    const options = editor ? editor.totalsOptions(member, cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
+    const totals = damage?.statTotals && growth ? damage.statTotals(data, aniilog, member.formId, options) : null;
+    const held = window.AniilogsHeldItems?.normalize(data, member.heldItem) || null;
+    const heldItem = held ? data?.held_item_catalog?.[held.itemId] : null;
+    const researched = new Set((member.formResearch || []).map(String));
+    const baseId = entry?.base_id;
+    const forms = baseId ? (aniilog?.entries || []).filter((row) => row.base_id === baseId).length : 1;
+    const build = window.ANIILOGS_CONFIG?.gameBuild;
+    return {
+      name: entry?.name || form?.name || "Aniimo",
+      formLabel: entry?.form_label || "",
+      role: typeof entry?.role === "string" ? entry.role : "",
+      icon: entry?.icon ? host.contentUrl(entry.icon) : "",
+      elements: (form?.elements || []).map((id) => ({ name: element(id)?.name || String(id), color: element(id)?.color || "" })),
+      level: options.level ?? cap,
+      cp: totals?.cp,
+      personality: [...(member.personality || [])].sort((a, b) => PERSONALITY_ORDER.indexOf(a) - PERSONALITY_ORDER.indexOf(b)).join(""),
+      perfect: Boolean(member.perfect),
+      stats: CARD_STATS.map((stat) => ({ stat, value: totals?.total?.[stat] ?? null, potential: totals?.potential?.[stat]?.total || 0 })),
+      skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot })),
+      heldItem: heldItem ? { name: heldItem.name, icon: heldItem.icon ? host.contentUrl(heldItem.icon) : "", rarity: heldItem.quality_label || "", level: held.level } : null,
+      starUp: member.starUp?.stage ? { stage: Number(member.starUp.stage), level: Number(member.starUp.level) || 0 } : null,
+      research: (form?.form_research || []).filter((row) => researched.has(String(row.form_id))).map((row) => row.form_label || "Form"),
+      aniilog: { forms: member.formsCaught ?? 1, total: forms > 1 ? forms : 0, prismana: member.prismanaCaught ?? 0 },
+      coreUpgraded: Boolean(member.coreUpgraded),
+      footer: `aniilogs.github.io${build ? ` · game build ${build}` : ""}`,
+    };
+  }
+
+  function renderShareBar(member, index) {
+    const bar = el("section", "team-share-bar");
+    const make = button("Make share card", "team-loadout-action team-share-card-button", async () => {
+      if (!window.AniilogsBuildCard) return;
+      make.disabled = true;
+      make.textContent = "Drawing card…";
+      try {
+        const spec = buildCardSpec(member, index);
+        const canvas = await window.AniilogsBuildCard.draw(spec);
+        openCardDialog(await window.AniilogsBuildCard.toBlob(canvas), spec.name);
+      } catch (error) {
+        status = error instanceof Error ? error.message : "The card could not be drawn.";
+        render();
+        return;
+      }
+      make.disabled = false;
+      make.textContent = "Make share card";
+    });
+    if (!window.AniilogsBuildCard) make.disabled = true;
+    bar.append(make, el("span", "team-data-note", "A picture of this build and its stats to paste or save. It's made on your device: nothing is uploaded."));
+    return bar;
+  }
+
+  function cardFileName(name) {
+    return `${String(name).replace(/[^\w.-]+/gu, "-").replace(/^-+|-+$/gu, "") || "aniimo"}-build.png`;
+  }
+
+  function openCardDialog(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const dialog = el("dialog", "team-card-dialog");
+    const preview = el("img", "team-card-preview");
+    preview.src = url;
+    preview.alt = `${name} build card`;
+    const note = el("p", "team-data-note", "Copy it and paste it into Discord or a chat, or save the picture.");
+    const actions = el("div", "team-card-actions");
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      actions.append(button("Copy image", "team-loadout-action", async () => {
+        try {
+          await navigator.clipboard.write([new window.ClipboardItem({ "image/png": blob })]);
+          note.textContent = "Copied. Paste it anywhere.";
+        } catch {
+          note.textContent = "Your browser didn't allow copying the picture. Save it instead.";
+        }
+      }));
+    }
+    const save = el("a", "team-loadout-action", "Save PNG");
+    save.href = url;
+    save.download = cardFileName(name);
+    actions.append(save);
+    const file = typeof File === "function" ? new File([blob], cardFileName(name), { type: "image/png" }) : null;
+    if (file && navigator.canShare?.({ files: [file] })) {
+      actions.append(button("Share…", "team-loadout-action", async () => {
+        try { await navigator.share({ files: [file], title: `${name} build` }); } catch { /* closed the share sheet */ }
+      }));
+    }
+    actions.append(button("Close", "team-loadout-action", () => dialog.close()));
+    dialog.addEventListener("close", () => {
+      URL.revokeObjectURL(url);
+      dialog.remove();
+    });
+    dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+    dialog.append(preview, note, actions);
+    document.body.append(dialog);
+    dialog.showModal();
   }
 
   function clampInt(value, min, max, fallback) {
@@ -1670,8 +1820,8 @@
     const box = el("div", "team-card-calc");
     const traits = data?.personality?.traits || [];
     const chosen = new Set(member.personality || []);
+    box.append(el("h3", "team-build-subheading", "Personality"));
     const pairs = el("div", "team-card-personality");
-    pairs.append(el("span", "team-field-label", "Personality"));
     PERSONALITY_PAIRS.forEach((pair) => {
       const group = el("div", "team-card-pair");
       group.setAttribute("role", "group");
@@ -1701,6 +1851,7 @@
     const totals = model.statTotals(data, aniilog, member.formId, options);
     // Per-stat potential, Star Up and held item (potential-editor.js), saved on the member.
     if (editor) {
+      box.append(el("h3", "team-build-subheading", "Star Up, held item, Aniilog and potential"));
       box.append(editor.render({
         data, aniilog, formId: member.formId, build: member, totals,
         onChange: (next) => {
@@ -1714,6 +1865,7 @@
       }));
     }
     if (!totals) return box;
+    box.append(el("h3", "team-build-subheading", "Card stats"));
     const table = el("table", "team-stats-table team-card-table");
     const head = el("tr");
     ["Stat", "Species", "Base", "Card total"].forEach((text) => head.append(el("th", "", text)));
@@ -1749,7 +1901,7 @@
     if (calculator && growth) {
       const cap = Number(growth.level_cap) || 70;
       const level = clampInt(member.level ?? cap, 1, cap, cap);
-      section.append(sectionHeading("Stats", `Level ${level}`));
+      section.append(sectionHeading("Level, personality and bonuses", `Level ${level}`));
       const inputs = el("div", "team-stats-inputs");
       inputs.append(numberField(`Level (1–${cap})`, level, 1, cap, (next) => { member.level = next; persist(); render(); }));
       section.append(inputs);
@@ -1814,12 +1966,6 @@
         el("p", "team-data-note", "Natures are flavour only: the game gives them no stat change."));
     }
     return section;
-  }
-
-  function renderStats(member, entry) {
-    const wrap = el("div", "team-stats");
-    wrap.append(renderStatTable(member, entry), renderPersonality(entry));
-    return wrap;
   }
 
   // --- Type matchups -------------------------------------------------------------------------
@@ -2075,7 +2221,7 @@
       aniilog,
       data,
       members: model.members.map((member) => member?.formId).filter(Boolean).map(String),
-      // The level and potential set on each member’s Stats tab (unset level = the cap).
+      // The level and potential set on each member’s Build tab (unset level = the cap).
       memberStats: Object.fromEntries(model.members.filter((member) => member?.formId)
         .map((member) => [String(member.formId), { level: member.level, potential: member.potential, starUp: member.starUp,
           heldItem: member.heldItem, personality: member.personality, perfect: member.perfect, formResearch: member.formResearch,
