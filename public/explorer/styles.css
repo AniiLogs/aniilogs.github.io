@@ -14729,3 +14729,86 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
   bottom: 8px;
   background: var(--panel);
 }
+
+/* Phones, Team Builder: the floating button is a quick-actions menu (four squares; an X while open). */
+.catalog-search-shortcut svg.is-menu,
+.catalog-search-shortcut svg.is-close,
+.catalog-search-shortcut[data-mode="menu"] svg.is-search,
+.catalog-search-shortcut[data-mode="menu"] svg.is-contents,
+.catalog-search-shortcut[data-mode="menu"].is-open svg.is-menu {
+  display: none;
+}
+
+.catalog-search-shortcut[data-mode="menu"] svg.is-menu,
+.catalog-search-shortcut[data-mode="menu"].is-open svg.is-close {
+  display: block;
+}
+
+.quick-action-menu {
+  position: fixed;
+  right: 16px;
+  bottom: calc(138px + env(safe-area-inset-bottom, 0px));
+  z-index: 71;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  animation: catalog-search-shortcut-in 160ms ease-out;
+}
+
+.quick-action-menu[hidden] {
+  display: none;
+}
+
+.quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 16px 0 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 999px;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.quick-action svg {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.quick-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.quick-action-note {
+  margin: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.quick-action-note:empty {
+  display: none;
+}
+
+/* Team Builder: Copy team link and Generate Team Card side by side under the team. */
+.team-share-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.team-share-actions .team-share-button {
+  min-height: 40px;
+  padding: 6px 8px;
+  line-height: 1.2;
+}

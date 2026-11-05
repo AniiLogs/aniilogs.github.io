@@ -131,7 +131,7 @@ test("the Team Builder tab lives in the address and Back returns to it", () => {
   assert.match(teamBuilder, /url\.searchParams\.set\("tab", page\);[\s\S]*?host\.pushAddress\(url/u);
   assert.match(teamBuilder, /function goToPage\(page\) \{\s*if \(viewState\.page !== page\) writePageAddress\(true, page\);/u);
   assert.match(teamBuilder, /const control = button\(label, "team-mode-button", \(\) => goToPage\(id\)\);/u);
-  assert.match(teamBuilder, /window\.AniilogsTeamBuilder = Object\.freeze\(\{ show, applyAddress \}\);/u);
+  assert.match(teamBuilder, /window\.AniilogsTeamBuilder = Object\.freeze\(\{ show, applyAddress, quickActions \}\);/u);
   assert.match(app, /dataUrl: TEAM_BUILDER_DATA_URL,\s*pushAddress,/u);
 });
 

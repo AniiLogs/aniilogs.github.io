@@ -11874,9 +11874,87 @@ function returnToCatalogSearch() {
   return true;
 }
 
+// On phones in Team Builder the floating button is a small menu instead (like an app's quick actions): back to the
+// team list, Copy team link and Make share card. It stays up there, since those buttons are far up the page.
+function teamQuickActions() {
+  if (state.sidebarView !== "team" || !window.matchMedia(PHONE_CATALOG_QUERY).matches) return [];
+  return window.AniilogsTeamBuilder?.quickActions?.() || [];
+}
+
+function closeQuickMenu() {
+  const menu = document.getElementById("quickActionMenu");
+  const button = document.getElementById("catalogSearchShortcut");
+  if (menu) menu.hidden = true;
+  button?.setAttribute("aria-expanded", "false");
+  button?.classList.remove("is-open");
+}
+
+function openQuickMenu(actions) {
+  const button = document.getElementById("catalogSearchShortcut");
+  let menu = document.getElementById("quickActionMenu");
+  if (!menu) {
+    menu = document.createElement("div");
+    menu.id = "quickActionMenu";
+    menu.className = "quick-action-menu";
+    menu.setAttribute("role", "menu");
+    document.body.append(menu);
+    document.addEventListener("pointerdown", (event) => {
+      if (menu.hidden || menu.contains(event.target) || button?.contains(event.target)) return;
+      closeQuickMenu();
+    }, true);
+  }
+  menu.replaceChildren();
+  const note = document.createElement("p");
+  note.className = "quick-action-note";
+  note.setAttribute("role", "status");
+  const item = (label, icon, onClick, disabled = false) => {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = "quick-action";
+    node.setAttribute("role", "menuitem");
+    node.disabled = disabled;
+    node.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${icon}"/></svg><span></span>`;
+    node.querySelector("span").textContent = label;
+    node.addEventListener("click", onClick);
+    menu.append(node);
+  };
+  const icons = {
+    top: "M12 19V5M5 12l7-7 7 7",
+    link: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7",
+    card: "M4 5h16v14H4zM8 15l3-3 2 2 3-4 2 5M8.5 9.5h.01",
+  };
+  item("Back to team", icons.top, () => {
+    closeQuickMenu();
+    returnToCatalogSearch();
+  });
+  actions.forEach((action) => item(action.label, icons[action.id] || icons.card, async () => {
+    if (action.id === "card") closeQuickMenu();
+    const result = await action.run();
+    if (typeof result === "string" && result) {
+      note.textContent = result;
+      window.setTimeout(closeQuickMenu, 1400);
+    }
+  }, action.disabled));
+  menu.append(note);
+  menu.hidden = false;
+  button?.setAttribute("aria-expanded", "true");
+  button?.classList.add("is-open");
+}
+
 function updateCatalogSearchShortcut() {
   const button = document.getElementById("catalogSearchShortcut");
   if (!button) return;
+  const quick = teamQuickActions().length > 0;
+  if (quick) {
+    button.hidden = false;
+    button.dataset.mode = "menu";
+    button.setAttribute("aria-label", "Quick actions");
+    button.setAttribute("aria-haspopup", "menu");
+    button.title = "Quick actions";
+    return;
+  }
+  button.removeAttribute("aria-haspopup");
+  if (button.dataset.mode === "menu") closeQuickMenu();
   const input = catalogSearchShortcutTarget();
   let show = false;
   if (input && window.matchMedia(PHONE_CATALOG_QUERY).matches) {
@@ -11886,9 +11964,10 @@ function updateCatalogSearchShortcut() {
     show = rect.bottom < bar || rect.top > window.innerHeight;
   }
   button.hidden = !show;
-  const contents = input?.id === "guide-contents";
+  // An up arrow when it goes back to a heading (the Guide's contents, Team Builder's other pages), a magnifier for search.
+  const contents = Boolean(input) && !input.matches("input");
   button.dataset.mode = contents ? "contents" : "search";
-  button.setAttribute("aria-label", contents ? "Back to contents" : "Back to search");
+  button.setAttribute("aria-label", input?.id === "guide-contents" ? "Back to contents" : contents ? "Back to top" : "Back to search");
   button.title = button.getAttribute("aria-label");
 }
 
@@ -11902,8 +11981,21 @@ function initCatalogSearchShortcut() {
   button.setAttribute("aria-label", "Back to search");
   button.title = "Back to search";
   button.innerHTML = '<svg class="is-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>'
-    + '<svg class="is-contents" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
-  button.addEventListener("click", returnToCatalogSearch);
+    + '<svg class="is-contents" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>'
+    + '<svg class="is-menu" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg>'
+    + '<svg class="is-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  button.addEventListener("click", () => {
+    if (button.dataset.mode !== "menu") {
+      returnToCatalogSearch();
+      return;
+    }
+    if (button.classList.contains("is-open")) {
+      closeQuickMenu();
+      return;
+    }
+    const actions = teamQuickActions();
+    if (actions.length) openQuickMenu(actions);
+  });
   document.body.append(button);
   let frame = 0;
   const schedule = () => {

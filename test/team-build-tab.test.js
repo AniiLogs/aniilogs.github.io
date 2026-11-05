@@ -13,7 +13,7 @@ test("Build is the first and default member tab; Stats is gone and the game's su
   assert.match(team, /\{ id: "build", label: "Build" \},\r?\n    \{ id: "skills", label: "Skills" \},\r?\n    \{ id: "recommended", label: "Recommended" \},/u);
   assert.match(team, /viewState\.memberTab : "build";/u);
   assert.doesNotMatch(team, /function renderStats\(/u);
-  assert.match(team, /wrap\.append\(renderShareBar\(member, index\), renderSkillPicks\(member, form, index\), renderStatTable\(member, entry\)\);/u);
+  assert.match(team, /wrap\.append\(renderSkillPicks\(member, form, index\), renderStatTable\(member, entry\)\);/u);
   assert.match(team, /wrap\.append\(items, presets, renderPersonality\(entry\)\);/u);
 });
 
@@ -91,7 +91,7 @@ test("a filled slot has a Remove button (sidebar and overview); when the team is
 test("in Interlink and both Egg Heist modes the share card is always about the main Aniimo, whichever slot is open", () => {
   assert.match(team, /const index = main \?\? selectedIndex;/u);
   assert.match(team, /const member = main === null \? selectedMember : model\.members\[main\];/u);
-  assert.match(team, /if \(mainEmpty\) make\.disabled = true;/u);
+  assert.match(team, /make\.disabled = !window\.AniilogsBuildCard \|\| !formFor\(target\.member\);/u);
 });
 
 test("the Core skill says whether it is enhanced (the game's word): a toggle beside it, and on the card", () => {
@@ -100,4 +100,15 @@ test("the Core skill says whether it is enhanced (the game's word): a toggle bes
   assert.match(team, /function renderCoreEnhanced\(member, core\)/u);
   assert.match(team, /coreToggle: false,/u);
   assert.match(card, /skill\.enhanced \? " \(Core · Enhanced\)" : " \(Core\)"/u);
+});
+
+test("Generate Team Card sits next to Copy team link; on phones the floating button is a quick-actions menu with both", () => {
+  const app = read("app.js");
+  assert.match(team, /window\.AniilogsTeamBuilder = Object\.freeze\(\{ show, applyAddress, quickActions \}\);/u);
+  assert.match(team, /\{ id: "link", label: "Copy team link"/u);
+  assert.match(team, /\{ id: "card", label: "Generate Team Card"/u);
+  assert.match(team, /shareRow\.append\(button\("Copy team link", "team-share-button", shareTeam\), renderCardButton\(\)\);/u);
+  assert.match(app, /if \(state\.sidebarView !== "team" \|\| !window\.matchMedia\(PHONE_CATALOG_QUERY\)\.matches\) return \[\];/u);
+  assert.match(app, /item\("Back to team", icons\.top/u);
+  assert.match(app, /const contents = Boolean\(input\) && !input\.matches\("input"\);/u);
 });

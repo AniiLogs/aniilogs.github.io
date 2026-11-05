@@ -1330,7 +1330,9 @@
     const slots = el("div", "team-sidebar-slots");
     slotIndexes().forEach((index) => slots.append(renderSidebarSlot(model.members[index], index)));
     const shareWrap = el("div", "team-share-wrap");
-    shareWrap.append(button("Copy team link", "team-share-button", shareTeam));
+    const shareRow = el("div", "team-share-actions");
+    shareRow.append(button("Copy team link", "team-share-button", shareTeam), renderCardButton());
+    shareWrap.append(shareRow);
     if (status) shareWrap.append(el("p", "team-share-status", status));
     sidebar.append(slots, shareWrap);
   }
@@ -1833,7 +1835,7 @@
 
   function renderBuild(member, form, entry, index) {
     const wrap = el("div", "team-build team-build--player");
-    wrap.append(renderShareBar(member, index), renderSkillPicks(member, form, index), renderStatTable(member, entry));
+    wrap.append(renderSkillPicks(member, form, index), renderStatTable(member, entry));
     return wrap;
   }
 
@@ -1914,37 +1916,59 @@
 
   // Interlink and both Egg Heist modes: the card is always about the main Aniimo (Interlink slot 1, Egg Heist slot 2),
   // whichever slot is open, with the supports in the team row. Other modes: the Aniimo you have selected.
-  function renderShareBar(selectedMember, selectedIndex) {
+  // Which Aniimo the share card is about: the main one in Interlink and both Egg Heist modes, else the selected one.
+  function cardTarget(selectedMember, selectedIndex) {
     const main = mainSlot();
     const index = main ?? selectedIndex;
     const member = main === null ? selectedMember : model.members[main];
-    const bar = el("section", "team-share-bar");
-    const make = button("Make share card", "team-loadout-action team-share-card-button", async () => {
-      if (!window.AniilogsBuildCard) return;
+    return { main, index, member, mainEmpty: main !== null && !formFor(member) };
+  }
+
+  // Draws the card and opens it to copy, save or share. Returns false when it could not be drawn.
+  async function makeShareCard({ member, index }) {
+    if (!window.AniilogsBuildCard || !formFor(member)) return false;
+    try {
+      const spec = buildCardSpec(member, index);
+      const canvas = await window.AniilogsBuildCard.draw(spec);
+      openCardDialog(await window.AniilogsBuildCard.toBlob(canvas), spec.name);
+      return true;
+    } catch (error) {
+      status = error instanceof Error ? error.message : "The card could not be drawn.";
+      render();
+      return false;
+    }
+  }
+
+  // The phone's floating button (app.js) offers these on the team page.
+  function quickActions() {
+    if (!host || !data || viewState.page !== "team") return [];
+    const target = cardTarget(model.members[model.activeSlot], model.activeSlot);
+    return [
+      { id: "link", label: "Copy team link", run: async () => { await shareTeam(); return status; } },
+      { id: "card", label: "Generate Team Card", disabled: !window.AniilogsBuildCard || !formFor(target.member), run: () => makeShareCard(target) },
+    ];
+  }
+
+  // Generate Team Card, next to Copy team link: a picture of the selected Aniimo's build (the main Aniimo in Interlink and
+  // both Egg Heist modes) with the rest of the team. Made on the device: nothing is uploaded.
+  function renderCardButton() {
+    const target = cardTarget(model.members[model.activeSlot], model.activeSlot);
+    const { main, mainEmpty } = target;
+    const label = "Generate Team Card";
+    const make = button(label, "team-share-button team-share-card-button", async () => {
       make.disabled = true;
       make.textContent = "Drawing card…";
-      try {
-        const spec = buildCardSpec(member, index);
-        const canvas = await window.AniilogsBuildCard.draw(spec);
-        openCardDialog(await window.AniilogsBuildCard.toBlob(canvas), spec.name);
-      } catch (error) {
-        status = error instanceof Error ? error.message : "The card could not be drawn.";
-        render();
-        return;
-      }
+      if (!(await makeShareCard(target))) return;
       make.disabled = false;
-      make.textContent = "Make share card";
+      make.textContent = label;
     });
-    if (!window.AniilogsBuildCard) make.disabled = true;
-    const mainEmpty = main !== null && !formFor(member);
-    if (mainEmpty) make.disabled = true;
-    const note = mainEmpty
+    make.disabled = !window.AniilogsBuildCard || !formFor(target.member);
+    make.title = mainEmpty
       ? `Add the ${slotRole(main)} (slot ${main + 1}) first: in this mode the card is about it.`
-      : main !== null && main !== selectedIndex
-        ? `The card shows the ${slotRole(main)} (slot ${main + 1}), with the rest of the team below. It's made on your device: nothing is uploaded.`
-        : "A picture of this build and its stats to paste or save. It's made on your device: nothing is uploaded.";
-    bar.append(make, el("span", "team-data-note", note));
-    return bar;
+      : !formFor(target.member)
+        ? "Pick an Aniimo for the selected slot first."
+        : `A picture of ${main !== null ? `the ${slotRole(main)}` : "the selected Aniimo"}'s build with the rest of the team. Made on your device: nothing is uploaded.`;
+    return make;
   }
 
   function cardFileName(name) {
@@ -2491,5 +2515,5 @@
     document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
-  window.AniilogsTeamBuilder = Object.freeze({ show, applyAddress });
+  window.AniilogsTeamBuilder = Object.freeze({ show, applyAddress, quickActions });
 })();
