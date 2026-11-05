@@ -77,3 +77,13 @@ test("the Core skill has its own slot: never an active pick, always listed; the 
   assert.match(card, /const y = 280 \+ row \* 71;/u);
   assert.match(card, /tall\(ultimate, mx \+ cellW \+ 10, "No Ultimate"/u);
 });
+
+test("a filled slot has a Remove button (sidebar and overview); when the team is full, Add to team becomes Replace with a list of the team", () => {
+  assert.match(team, /const remove = button\("Remove", "team-slot-remove"/u);
+  assert.match(team, /function removeFromTeam\(index\)/u);
+  assert.match(team, /const holder = el\("div", "team-overview-slot"\);/u);
+  assert.match(team, /menu\.append\(el\("summary", "team-loadout-action team-partners-add", "Replace"\)\);/u);
+  assert.match(team, /const option = button\("", "team-replace-option", \(\) => addToTeam\(formId, index\)\);/u);
+  assert.match(team, /card\.append\(copy, renderAddControl\(formId\)\);/u);
+  assert.doesNotMatch(team, /label: "Replace…"/u);
+});

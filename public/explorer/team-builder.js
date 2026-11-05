@@ -1196,7 +1196,19 @@
     const header = el("div", "team-sidebar-slot-header");
     header.append(el("span", "team-sidebar-slot-role", slotRole(index)));
     const slotLink = form ? aniimoLink(member.formId, entry, form) : null;
-    if (slotLink) header.append(slotLink);
+    const headerActions = el("div", "team-sidebar-slot-actions");
+    if (slotLink) headerActions.append(slotLink);
+    if (form) {
+      const name = entry?.name || form.name;
+      const remove = button("Remove", "team-slot-remove", (event) => {
+        event.stopPropagation();
+        removeFromTeam(index);
+      });
+      remove.setAttribute("aria-label", `Remove ${name} from ${slotRole(index).toLocaleLowerCase()}`);
+      remove.addEventListener("keydown", (event) => event.stopPropagation());
+      headerActions.append(remove);
+    }
+    if (headerActions.childElementCount) header.append(headerActions);
     const identity = el("div", "team-sidebar-slot-identity");
     if (entry?.icon) identity.append(icon(entry.icon, "team-sidebar-slot-icon"));
     else identity.append(el("span", "team-sidebar-slot-icon team-sidebar-slot-icon--empty", String(index + 1)));
@@ -1349,7 +1361,17 @@
       );
       card.append(copy);
       // The card picks the slot; the link in its corner opens the Aniimo's page.
-      grid.append(form && window.AniilogsAniimoLink ? window.AniilogsAniimoLink.wrapCorner(card, member.formId, formLabel(entry, form)) : card);
+      const slotCard = form && window.AniilogsAniimoLink ? window.AniilogsAniimoLink.wrapCorner(card, member.formId, formLabel(entry, form)) : card;
+      if (!form) {
+        grid.append(slotCard);
+        return;
+      }
+      // Remove sits beside the card (a button can't hold another button), in its bottom corner.
+      const holder = el("div", "team-overview-slot");
+      const remove = button("Remove", "team-slot-remove", () => removeFromTeam(index));
+      remove.setAttribute("aria-label", `Remove ${entry?.name || form.name} from ${slotRole(index).toLocaleLowerCase()}`);
+      holder.append(slotCard, remove);
+      grid.append(holder);
     });
     section.append(heading, renderPartners(), grid);
     return section;
@@ -1568,16 +1590,41 @@
     return [...partners.values()];
   }
 
-  function renderPartnerAdd(formId) {
+  // Add to team while a slot is free; when the team is full, Replace opens a list of the team's Aniimo to swap out.
+  function renderAddControl(formId) {
+    if (slotIndexes().some((index) => model.members[index].formId === formId)) {
+      const inTeam = button("In team", "team-loadout-action team-partners-add");
+      inTeam.disabled = true;
+      return inTeam;
+    }
     const empty = slotIndexes().find((index) => !model.members[index].formId);
     if (empty !== undefined) return button("Add to team", "team-loadout-action team-partners-add", () => addToTeam(formId));
-    const options = slotIndexes().map((index) => {
+    const menu = el("details", "team-replace-menu");
+    menu.append(el("summary", "team-loadout-action team-partners-add", "Replace"));
+    const list = el("div", "team-replace-list");
+    slotIndexes().forEach((index) => {
       const member = model.members[index];
-      return { value: String(index), label: `${slotRole(index)}: ${entryForForm(member.formId)?.name || formFor(member)?.name || "Empty"}` };
+      const entry = entryForForm(member.formId);
+      const option = button("", "team-replace-option", () => addToTeam(formId, index));
+      if (entry?.icon) option.append(icon(entry.icon, "team-replace-icon"));
+      const copy = el("span", "team-replace-copy");
+      copy.append(el("strong", "", entry?.name || formFor(member)?.name || "Empty"), el("small", "", slotRole(index)));
+      option.append(copy);
+      list.append(option);
     });
-    return selectControl("Add to team", [{ value: "", label: "Replace…" }, ...options], "", (value) => {
-      if (value !== "") addToTeam(formId, Number(value));
-    }, "team-partners-replace");
+    menu.append(list);
+    // One list open at a time; it closes when you tap anywhere else.
+    menu.addEventListener("toggle", () => {
+      if (!menu.open) return;
+      document.querySelectorAll(".team-replace-menu[open]").forEach((other) => { if (other !== menu) other.open = false; });
+      const close = (event) => {
+        if (menu.contains(event.target)) return;
+        menu.open = false;
+        document.removeEventListener("pointerdown", close, true);
+      };
+      document.addEventListener("pointerdown", close, true);
+    });
+    return menu;
   }
 
   function renderPartnerChip(partner) {
@@ -1600,13 +1647,16 @@
     if (elements.length) copy.append(chipRow(elements));
     copy.append(el("small", "", `Recommended for ${partner.by.join(", ")}`));
     chip.append(copy);
-    if (!extra) chip.append(renderPartnerAdd(partner.formId));
+    if (!extra) chip.append(renderAddControl(partner.formId));
     return chip;
   }
 
   function renderPartners() {
     const strip = el("section", "team-partners");
-    strip.append(sectionHeading("Recommended partners", "The game’s suggested teammates for this team"));
+    const full = !slotIndexes().some((index) => !model.members[index].formId);
+    strip.append(sectionHeading("Recommended partners", full
+      ? "The team is full: Replace swaps one in for an Aniimo you pick"
+      : "The game’s suggested teammates for this team"));
     const partners = recommendedPartners();
     if (!partners.length) {
       const anyone = slotIndexes().some((index) => formFor(model.members[index]));
@@ -2122,6 +2172,16 @@
         || String(left.entry?.name || left.form.name).localeCompare(String(right.entry?.name || right.form.name)));
   }
 
+  function removeFromTeam(index) {
+    const member = model.members[index];
+    const name = entryForForm(member.formId)?.name || formFor(member)?.name || "Aniimo";
+    model.members[index] = defaultMember();
+    model.activeSlot = index;
+    persist();
+    status = `Removed ${name} from ${slotRole(index).toLocaleLowerCase()}.`;
+    render();
+  }
+
   function addToTeam(formId, targetSlot) {
     const empty = slotIndexes().find((index) => !model.members[index].formId);
     const slot = targetSlot ?? empty ?? model.activeSlot;
@@ -2233,10 +2293,7 @@
           el("small", "", [entry?.form_label, entry?.role].filter(Boolean).join(" · ")),
           chipRow(form.elements),
         );
-        const inTeam = slotIndexes().some((index) => model.members[index].formId === formId);
-        const add = button(inTeam ? "In team" : "Add to team", "team-loadout-action", () => addToTeam(formId));
-        add.disabled = inTeam;
-        card.append(copy, add);
+        card.append(copy, renderAddControl(formId));
         grid.append(card);
       });
       section.append(grid);

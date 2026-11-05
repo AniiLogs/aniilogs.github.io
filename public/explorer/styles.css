@@ -14594,3 +14594,138 @@ html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
   display: inline-flex;
   align-items: center;
 }
+
+/* ---- Team Builder: remove an Aniimo from its slot, and Replace (a list of the team to swap one out). */
+.team-sidebar-slot-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.team-slot-remove {
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.team-slot-remove:hover,
+.team-slot-remove:focus-visible {
+  border-color: #e26d6d;
+  color: #ff9a9a;
+}
+
+.team-replace-menu {
+  position: relative;
+  flex: none;
+}
+
+.team-replace-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.team-replace-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.team-replace-menu > summary::after {
+  content: "\25BE";
+  margin-left: 6px;
+}
+
+.team-replace-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  display: grid;
+  gap: 2px;
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.team-replace-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.team-replace-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
+.team-replace-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.team-replace-copy small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.team-replace-option:hover,
+.team-replace-option:focus-visible {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.13);
+}
+
+/* Phones: the list opens in place under the button instead of floating over the next card. */
+@media (max-width: 560px) {
+  .team-replace-menu {
+    flex-basis: 100%;
+  }
+
+  .team-replace-menu > summary {
+    width: 100%;
+  }
+
+  .team-replace-list {
+    position: static;
+    margin-top: 4px;
+    box-shadow: none;
+  }
+}
+
+.team-overview-slot {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+
+.team-overview-slot > .team-slot-remove {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  background: var(--panel);
+}
