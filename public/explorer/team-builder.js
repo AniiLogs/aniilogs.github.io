@@ -533,7 +533,8 @@
       Object.assign(member, defaultMember(), { formId: member.formId && data?.forms?.[member.formId] ? member.formId : "" });
       return;
     }
-    const combat = new Set(skillsOf(form, "skill").map((skill) => String(skill.id)));
+    // The Core skill has its own slot, so it is never one of the two active picks.
+    const combat = new Set(skillsOf(form, "skill").filter((skill) => !skill.core).map((skill) => String(skill.id)));
     const seen = new Set();
     member.activeSkills = member.activeSkills.map((id) => {
       if (!combat.has(id) || seen.has(id)) return "";
@@ -656,11 +657,11 @@
     if (supportOnly(index)) {
       return skillsOf(form, "skill").filter((skill) => skill.core).map((skill) => ({ skill, slot: "Core skill" }));
     }
-    // The Core skill is the switch-skill: always usable through the switch shortcut, picked or not.
+    // Two active skills plus the Core skill, which has its own slot (the switch-skill) and is always there.
     const core = coreSkill(form);
-    const rows = member.activeSkills.map((id) => skillFor(form, id)).filter(Boolean)
-      .map((skill) => ({ skill, slot: skill === core ? "Active · Switch-skill" : "Active" }));
-    if (core && !rows.some((row) => row.skill === core)) rows.push({ skill: core, slot: "Switch-skill" });
+    const rows = member.activeSkills.map((id) => skillFor(form, id)).filter((skill) => skill && skill !== core)
+      .map((skill) => ({ skill, slot: "Active" }));
+    if (core) rows.push({ skill: core, slot: "Core skill" });
     skillsOf(form, "ultimate").forEach((skill) => rows.push({ skill, slot: "Ultimate" }));
     return rows;
   }
@@ -1711,7 +1712,7 @@
     return card;
   }
 
-  // The two active picks and the switch-skill, then the Ultimate in its own part underneath.
+  // The two active picks and the Core skill, then the Ultimate in its own part underneath.
   function renderSkillPicks(member, form, index) {
     const section = el("section", "team-config-section");
     if (supportOnly(index)) {
@@ -1720,14 +1721,14 @@
       section.append(core ? compactSkill(core, "Core skill") : el("p", "team-empty-copy", "This Aniimo has no Core skill."));
       return section;
     }
-    section.append(sectionHeading("Skills", "Two active skills"));
-    const skills = skillsOf(form, "skill");
+    section.append(sectionHeading("Skills", "Two active skills, plus the Core skill"));
+    const skills = skillsOf(form, "skill").filter((skill) => !skill.core);
     const grid = el("div", "team-field-grid");
     for (let position = 0; position < MAX_ACTIVE_SKILLS; position += 1) {
       const other = member.activeSkills[position === 0 ? 1 : 0];
       const options = [{ value: "", label: "Choose a skill" }, ...skills.map((skill) => ({
         value: String(skill.id),
-        label: `${skill.core ? "Core · " : ""}${skill.name}`,
+        label: skill.name,
         disabled: other === String(skill.id),
       }))];
       grid.append(selectControl(`Active skill ${position + 1}`, options, member.activeSkills[position], (value) => {
@@ -1744,7 +1745,7 @@
     if (picks.childElementCount) section.append(picks);
     const core = coreSkill(form);
     section.append(el("p", "team-skill-variant-note", core
-      ? `Switch-skill: ${core.name} (its Core skill, always usable with the switch shortcut).`
+      ? `Core skill: ${core.name}, in its own slot (the switch-skill) on top of the two active skills.`
       : "This Aniimo has no Core skill, so no switch-skill."));
 
     const ultimate = skillsOf(form, "ultimate")[0];
@@ -1772,7 +1773,7 @@
   }
 
   // The rest of the team on the card: who they are, their held item and the skills they bring in this mode (an
-  // Interlink ally or Egg Heist support its Core skill; otherwise the two picks, plus the switch-skill when it isn't one of them).
+  // Interlink ally or Egg Heist support its Core skill; otherwise the two active skills and the Core skill).
   // No stats or CP: those are only for the Aniimo the card is about.
   // A form's traits as the card shows them (always active, in every mode).
   function cardTraits(form) {

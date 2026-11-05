@@ -205,19 +205,38 @@
       if (row.potential) text(ctx, `Potential ${row.potential}`, x + cellW - 14, y + 26, { size: 13, color: COLORS.accent, align: "right" });
     });
 
-    // Skills: the picks, the switch-skill, then the Ultimate.
+    // Skills, in the stats' three columns: the Core skill on the left, the two active skills stacked in the middle,
+    // the Ultimate on the right.
     text(ctx, "SKILLS", rx, 268, { size: 13, weight: 700, color: COLORS.muted });
-    const skills = spec.skills || [];
-    const skillW = skills.length ? (rw - 10 * (skills.length - 1)) / skills.length : rw;
-    skills.forEach((skill, index) => {
-      const x = rx + index * (skillW + 10);
-      const ultimate = skill.slot === "Ultimate";
-      panel(ctx, x, 280, skillW, 132, ultimate ? "#2a2416" : COLORS.panel);
-      drawIcon(ctx, skillIcons[index], x + (skillW - 56) / 2, 290, 56);
-      skillName(ctx, skill, x + skillW / 2, 372, { size: 16, weight: 600, align: "center", max: skillW - 16 });
-      text(ctx, skill.slot, x + skillW / 2, 396, { size: 13, color: ultimate ? COLORS.gold : COLORS.muted, align: "center", max: skillW - 16 });
+    const skills = (spec.skills || []).map((skill, index) => ({ skill, image: skillIcons[index] }));
+    const core = skills.find(({ skill }) => skill.core && skill.slot !== "Ultimate");
+    const ultimate = skills.find(({ skill }) => skill.slot === "Ultimate");
+    const actives = skills.filter((entry) => entry !== core && entry !== ultimate).slice(0, 2);
+    const tall = (entry, x, empty, fill, subColor) => {
+      panel(ctx, x, 280, cellW, 132, fill);
+      if (!entry) {
+        text(ctx, empty, x + cellW / 2, 352, { size: 15, color: COLORS.muted, align: "center", max: cellW - 16 });
+        return;
+      }
+      drawIcon(ctx, entry.image, x + (cellW - 56) / 2, 290, 56);
+      skillName(ctx, entry.skill, x + cellW / 2, 372, { size: 16, weight: 600, align: "center", max: cellW - 16 });
+      text(ctx, entry.skill.slot, x + cellW / 2, 396, { size: 13, color: subColor, align: "center", max: cellW - 16 });
+    };
+    tall(core, rx, "No Core skill", COLORS.panel, COLORS.muted);
+    const mx = rx + cellW + 10;
+    [0, 1].forEach((row) => {
+      const entry = actives[row];
+      const y = 280 + row * 71;
+      panel(ctx, mx, y, cellW, 61);
+      if (!entry) {
+        text(ctx, "No active skill picked", mx + 16, y + 36, { size: 14, color: COLORS.muted, max: cellW - 32 });
+        return;
+      }
+      drawIcon(ctx, entry.image, mx + 12, y + 12, 38);
+      skillName(ctx, entry.skill, mx + 60, y + 29, { size: 16, weight: 600, max: cellW - 72 });
+      text(ctx, "Active", mx + 60, y + 49, { size: 13, color: COLORS.muted, max: cellW - 72 });
     });
-    if (!skills.length) text(ctx, "No skills chosen", rx, 320, { size: 16, color: COLORS.muted });
+    tall(ultimate, mx + cellW + 10, "No Ultimate", "#2a2416", COLORS.gold);
 
     // Held item, Star-Up and the Aniilog bonuses.
     const boxW = (rw - 20) / 3;

@@ -68,3 +68,12 @@ test("both Egg Heist modes work like Interlink with the main Aniimo in slot 2; e
   assert.match(team, /traits: cardTraits\(form\),/u);
   assert.match(card, /\(mate\.traits \|\| \[\]\)\.forEach\(\(trait\) => \{/u);
 });
+
+test("the Core skill has its own slot: never an active pick, always listed; the card puts Core left, actives stacked, Ultimate right", () => {
+  assert.match(team, /const skills = skillsOf\(form, "skill"\)\.filter\(\(skill\) => !skill\.core\);/u);
+  assert.match(team, /skillsOf\(form, "skill"\)\.filter\(\(skill\) => !skill\.core\)\.map\(\(skill\) => String\(skill\.id\)\)/u);
+  assert.match(team, /if \(core\) rows\.push\(\{ skill: core, slot: "Core skill" \}\);/u);
+  assert.match(card, /tall\(core, rx, "No Core skill"/u);
+  assert.match(card, /const y = 280 \+ row \* 71;/u);
+  assert.match(card, /tall\(ultimate, mx \+ cellW \+ 10, "No Ultimate"/u);
+});
