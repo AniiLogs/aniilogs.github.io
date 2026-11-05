@@ -87,3 +87,9 @@ test("a filled slot has a Remove button (sidebar and overview); when the team is
   assert.match(team, /card\.append\(copy, renderAddControl\(formId\)\);/u);
   assert.doesNotMatch(team, /label: "Replace…"/u);
 });
+
+test("in Interlink and both Egg Heist modes the share card is always about the main Aniimo, whichever slot is open", () => {
+  assert.match(team, /const index = main \?\? selectedIndex;/u);
+  assert.match(team, /const member = main === null \? selectedMember : model\.members\[main\];/u);
+  assert.match(team, /if \(mainEmpty\) make\.disabled = true;/u);
+});

@@ -1886,7 +1886,12 @@
     };
   }
 
-  function renderShareBar(member, index) {
+  // Interlink and both Egg Heist modes: the card is always about the main Aniimo (Interlink slot 1, Egg Heist slot 2),
+  // whichever slot is open, with the supports in the team row. Other modes: the Aniimo you have selected.
+  function renderShareBar(selectedMember, selectedIndex) {
+    const main = mainSlot();
+    const index = main ?? selectedIndex;
+    const member = main === null ? selectedMember : model.members[main];
     const bar = el("section", "team-share-bar");
     const make = button("Make share card", "team-loadout-action team-share-card-button", async () => {
       if (!window.AniilogsBuildCard) return;
@@ -1905,7 +1910,14 @@
       make.textContent = "Make share card";
     });
     if (!window.AniilogsBuildCard) make.disabled = true;
-    bar.append(make, el("span", "team-data-note", "A picture of this build and its stats to paste or save. It's made on your device: nothing is uploaded."));
+    const mainEmpty = main !== null && !formFor(member);
+    if (mainEmpty) make.disabled = true;
+    const note = mainEmpty
+      ? `Add the ${slotRole(main)} (slot ${main + 1}) first: in this mode the card is about it.`
+      : main !== null && main !== selectedIndex
+        ? `The card shows the ${slotRole(main)} (slot ${main + 1}), with the rest of the team below. It's made on your device: nothing is uploaded.`
+        : "A picture of this build and its stats to paste or save. It's made on your device: nothing is uploaded.";
+    bar.append(make, el("span", "team-data-note", note));
     return bar;
   }
 
