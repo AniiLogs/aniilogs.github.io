@@ -166,8 +166,8 @@
       basis: "exact",
       paragraphs: [
         "CP comes from the Aniimo's listed species values, not its current stats: HP + 2 × ATK + P.DEF + M.DEF + REGEN + BREAK. ATK counts double. When that total is exactly 654 the game takes 16 off.",
-        "That total is multiplied by a level factor (6 × level + 35, up to level 80) and by 0.005. An upgraded Core skill adds 5% to that part, and potential adds a little more.",
-        "On top come: +20 for an upgraded Core skill, your held item's CP (its base CP plus a fixed amount per item level), 30% of your potential CP, resonance CP, and +5 for each extra form or rainbow form of that Aniimo you've collected.",
+        "That total is multiplied by a level factor (6 × level + 35, up to level 80) and by 0.005. An enhanced Core skill adds 5% to that part, and potential adds a little more.",
+        "On top come: +20 for an enhanced Core skill, your held item's CP (its base CP plus a fixed amount per item level), 30% of your potential CP, resonance CP, and +5 for each extra form or rainbow form of that Aniimo you've collected.",
         "Potential CP is 6 per potential level in each stat, counted twice in the stats the game recommends for that Aniimo.",
       ],
     },

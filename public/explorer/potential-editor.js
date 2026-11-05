@@ -95,7 +95,8 @@
 
   // render({ data, aniilog, formId, build, onChange(nextBuild), totals }) -> element. `totals` is the
   // statTotals result for this build, so the breakdown shows where each stat's potential comes from.
-  function render({ data, aniilog, formId, build, onChange, totals }) {
+  // coreToggle: false when the page shows the Core skill's enhanced toggle itself (Team Builder, next to the skill).
+  function render({ data, aniilog, formId, build, onChange, totals, coreToggle = true }) {
     const growth = aniilog?.stat_growth;
     const maxOwn = Number(growth?.attribute_points_max) || 20;
     const own = ownPotential(build?.potential, maxOwn);
@@ -145,14 +146,14 @@
     }
     // CP inputs (Utils.getCpValue): an upgraded Core skill adds 5% to the level part and 20 more; each form
     // of the species caught after the first and each Prismana form caught add 5.
-    if ((data?.forms?.[formId]?.skills || []).some((skill) => skill.core && skill.upgrade)) {
+    if (coreToggle && (data?.forms?.[formId]?.skills || []).some((skill) => skill.core && skill.upgrade)) {
       const upgraded = el("input");
       upgraded.type = "checkbox";
       upgraded.checked = Boolean(build?.coreUpgraded);
       upgraded.addEventListener("change", () => update({ coreUpgraded: upgraded.checked }));
       const upgradedLabel = el("label", "potential-check");
-      upgradedLabel.title = "The Core skill's upgrade is unlocked. CP only: +5% on the level part of CP and +20.";
-      upgradedLabel.append(upgraded, el("span", "", "Core skill upgraded"));
+      upgradedLabel.title = "Enhanced with a Prismatic Stone. CP: +5% on the level part of CP and +20.";
+      upgradedLabel.append(upgraded, el("span", "", "Core skill enhanced"));
       sources.append(upgradedLabel);
     }
     const baseId = aniilog?.entries?.find((row) => String(row.form_id) === String(formId))?.base_id;

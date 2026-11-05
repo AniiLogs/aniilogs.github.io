@@ -65,7 +65,7 @@
 
   // A skill's name with " (Core)" after it in gold when it is the Aniimo's Core skill; centred or from the left.
   function skillName(ctx, skill, x, y, { size, weight = 400, align = "left", max }) {
-    const tag = skill.core ? " (Core)" : "";
+    const tag = skill.core ? (skill.enhanced ? " (Core · Enhanced)" : " (Core)") : "";
     ctx.font = `${weight} ${size}px ${FONT}`;
     const tagW = tag ? ctx.measureText(tag).width : 0;
     const nameW = Math.min(ctx.measureText(skill.name).width, max - tagW);
@@ -219,8 +219,11 @@
         return;
       }
       drawIcon(ctx, entry.image, x + (cellW - 56) / 2, 290, 56);
-      skillName(ctx, entry.skill, x + cellW / 2, 372, { size: 16, weight: 600, align: "center", max: cellW - 16 });
-      text(ctx, entry.skill.slot, x + cellW / 2, 396, { size: 13, color: subColor, align: "center", max: cellW - 16 });
+      // The Core box: "(Core)" after the name, and underneath whether it is enhanced, in gold when it is.
+      const isCore = entry.skill.core && entry.skill.slot !== "Ultimate";
+      skillName(ctx, isCore ? { ...entry.skill, enhanced: false } : entry.skill, x + cellW / 2, 372, { size: 16, weight: 600, align: "center", max: cellW - 16 });
+      const sub = isCore ? (entry.skill.enhanced ? "Enhanced" : "Not enhanced") : entry.skill.slot;
+      text(ctx, sub, x + cellW / 2, 396, { size: 13, color: isCore && entry.skill.enhanced ? COLORS.gold : subColor, align: "center", max: cellW - 16 });
     };
     tall(core, rx, "No Core skill", COLORS.panel, COLORS.muted);
     const mx = rx + cellW + 10;
@@ -266,7 +269,6 @@
       spec.aniilog ? `Forms caught ${spec.aniilog.forms}${spec.aniilog.total ? `/${spec.aniilog.total}` : ""}` : "",
       spec.aniilog?.prismana ? `Prismana caught ${spec.aniilog.prismana}` : "",
       ...(spec.research || []).map((label) => `${label} researched`),
-      spec.coreUpgraded ? "Core skill upgraded" : "",
     ].filter(Boolean);
     lines.slice(0, 5).forEach((line, index) => text(ctx, line, ax + 16, by + 56 + index * 22, { size: 15, max: boxW - 32 }));
 

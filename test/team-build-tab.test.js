@@ -42,8 +42,8 @@ test("the card shows the rest of the team: who they are, the skills they bring i
 
 test("the card centres the team row, tags each Core skill (Core) in gold, and says Star-Up as the game does", () => {
   assert.match(card, /const start = left \+ \(width - \(shown\.length \* tileW \+ \(shown\.length - 1\) \* 10\)\) \/ 2;/u);
-  assert.match(card, /const tag = skill\.core \? " \(Core\)" : "";/u);
-  assert.match(team, /slot, core: Boolean\(skill\.core\) \}\)\),/u);
+  assert.match(card, /const tag = skill\.core \? \(skill\.enhanced \? " \(Core · Enhanced\)" : " \(Core\)"\) : "";/u);
+  assert.match(team, /slot, core: Boolean\(skill\.core\), enhanced: Boolean\(enhanced\) \}\)\),/u);
   assert.match(card, /"STAR-UP"/u);
   assert.doesNotMatch(team + card, /Star Up/u);
 });
@@ -72,7 +72,7 @@ test("both Egg Heist modes work like Interlink with the main Aniimo in slot 2; e
 test("the Core skill has its own slot: never an active pick, always listed; the card puts Core left, actives stacked, Ultimate right", () => {
   assert.match(team, /const skills = skillsOf\(form, "skill"\)\.filter\(\(skill\) => !skill\.core\);/u);
   assert.match(team, /skillsOf\(form, "skill"\)\.filter\(\(skill\) => !skill\.core\)\.map\(\(skill\) => String\(skill\.id\)\)/u);
-  assert.match(team, /if \(core\) rows\.push\(\{ skill: core, slot: "Core skill" \}\);/u);
+  assert.match(team, /if \(core\) rows\.push\(coreRow\(core\)\);/u);
   assert.match(card, /tall\(core, rx, "No Core skill"/u);
   assert.match(card, /const y = 280 \+ row \* 71;/u);
   assert.match(card, /tall\(ultimate, mx \+ cellW \+ 10, "No Ultimate"/u);
@@ -92,4 +92,12 @@ test("in Interlink and both Egg Heist modes the share card is always about the m
   assert.match(team, /const index = main \?\? selectedIndex;/u);
   assert.match(team, /const member = main === null \? selectedMember : model\.members\[main\];/u);
   assert.match(team, /if \(mainEmpty\) make\.disabled = true;/u);
+});
+
+test("the Core skill says whether it is enhanced (the game's word): a toggle beside it, and on the card", () => {
+  assert.match(team, /function coreEnhanced\(member, skill\)/u);
+  assert.match(team, /slot: coreEnhanced\(member, skill\) \? "Core skill · Enhanced" : "Core skill"/u);
+  assert.match(team, /function renderCoreEnhanced\(member, core\)/u);
+  assert.match(team, /coreToggle: false,/u);
+  assert.match(card, /skill\.enhanced \? " \(Core · Enhanced\)" : " \(Core\)"/u);
 });

@@ -654,16 +654,21 @@
   function memberSkills(member, index) {
     const form = formFor(member);
     if (!form) return [];
-    if (supportOnly(index)) {
-      return skillsOf(form, "skill").filter((skill) => skill.core).map((skill) => ({ skill, slot: "Core skill" }));
-    }
+    const coreRow = (skill) => ({ skill, slot: coreEnhanced(member, skill) ? "Core skill · Enhanced" : "Core skill", enhanced: coreEnhanced(member, skill) });
+    if (supportOnly(index)) return skillsOf(form, "skill").filter((skill) => skill.core).map(coreRow);
     // Two active skills plus the Core skill, which has its own slot (the switch-skill) and is always there.
     const core = coreSkill(form);
     const rows = member.activeSkills.map((id) => skillFor(form, id)).filter((skill) => skill && skill !== core)
       .map((skill) => ({ skill, slot: "Active" }));
-    if (core) rows.push({ skill: core, slot: "Core skill" });
+    if (core) rows.push(coreRow(core));
     skillsOf(form, "ultimate").forEach((skill) => rows.push({ skill, slot: "Ultimate" }));
     return rows;
+  }
+
+  // The Core skill is enhanced (the game's word; a Prismatic Stone does it) when the player says so and it has an
+  // enhanced version.
+  function coreEnhanced(member, skill) {
+    return Boolean(member?.coreUpgraded && skill?.core && skill.upgrade);
   }
 
   // Every form has at most one Core skill in the current data.
@@ -869,7 +874,7 @@
   // The upgraded Core skill, shown as only what differs from the normal version.
   function renderUpgrade(base, upgrade) {
     const section = el("details", "team-skill-description team-upgrade");
-    section.append(el("summary", "", upgrade.name === base.name ? "Upgraded version" : `Upgraded: ${upgrade.name}`));
+    section.append(el("summary", "", upgrade.name === base.name ? "Enhanced version" : `Enhanced: ${upgrade.name}`));
     const changes = el("ul", "team-upgrade-changes");
     const change = (label, from, to) => {
       const row = el("li");
@@ -891,10 +896,10 @@
     if (changes.childElementCount) section.append(changes);
     const textChanged = Boolean(upgrade.description) && upgrade.description !== base.description;
     if (textChanged) {
-      section.append(el("p", "team-upgrade-label", "Upgraded game description"), el("p", "", upgrade.description));
+      section.append(el("p", "team-upgrade-label", "Enhanced game description"), el("p", "", upgrade.description));
     }
     if (!effectsKnown) {
-      section.append(el("p", "team-skill-caveat", "The game data links no effect record to the upgraded version, so only its stats and text are compared."));
+      section.append(el("p", "team-skill-caveat", "The game data links no effect record to the enhanced version, so only its stats and text are compared."));
     }
     section.append(el("p", "team-skill-variant-note", changes.childElementCount || textChanged
       ? "Everything not listed here is the same as the normal version."
@@ -1768,7 +1773,9 @@
     if (supportOnly(index)) {
       section.append(sectionHeading("Skills", `${model.mode === "interlink" ? "Interlink allies" : "Supports"} bring their Core skill`));
       const core = coreSkill(form);
-      section.append(core ? compactSkill(core, "Core skill") : el("p", "team-empty-copy", "This Aniimo has no Core skill."));
+      section.append(core ? compactSkill(core, coreEnhanced(member, core) ? "Core skill · Enhanced" : "Core skill") : el("p", "team-empty-copy", "This Aniimo has no Core skill."));
+      const toggle = renderCoreEnhanced(member, core);
+      if (toggle) section.append(toggle);
       return section;
     }
     section.append(sectionHeading("Skills", "Two active skills, plus the Core skill"));
@@ -1794,6 +1801,8 @@
       .forEach(({ skill, slot }) => picks.append(compactSkill(skill, slot)));
     if (picks.childElementCount) section.append(picks);
     const core = coreSkill(form);
+    const toggle = renderCoreEnhanced(member, core);
+    if (toggle) section.append(toggle);
     section.append(el("p", "team-skill-variant-note", core
       ? `Core skill: ${core.name}, in its own slot (the switch-skill) on top of the two active skills.`
       : "This Aniimo has no Core skill, so no switch-skill."));
@@ -1803,6 +1812,23 @@
     section.append(ultimate ? compactSkill(ultimate, "Ultimate") : el("p", "team-empty-copy", "This Aniimo has no Ultimate."));
     if (ultimate) section.append(el("p", "team-skill-variant-note", "Comes with this Aniimo: there is nothing to pick."));
     return section;
+  }
+
+  // Whether this Aniimo's Core skill is enhanced: changes the skill and adds to CP.
+  function renderCoreEnhanced(member, core) {
+    if (!core?.upgrade) return null;
+    const check = el("input");
+    check.type = "checkbox";
+    check.checked = Boolean(member.coreUpgraded);
+    check.addEventListener("change", () => {
+      member.coreUpgraded = check.checked;
+      persist();
+      render();
+    });
+    const label = el("label", "potential-check team-core-enhanced");
+    label.title = "Enhanced with a Prismatic Stone. Also adds to CP: +5% on the level part and +20.";
+    label.append(check, el("span", "", `${core.name} is enhanced`));
+    return label;
   }
 
   function renderBuild(member, form, entry, index) {
@@ -1841,7 +1867,7 @@
         role: slotRole(slot),
         icon: entry?.icon ? host.contentUrl(entry.icon) : "",
         skills: memberSkills(member, slot).filter(({ slot: kind }) => kind !== "Ultimate")
-          .map(({ skill, slot: kind }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot: kind, core: Boolean(skill.core) })),
+          .map(({ skill, slot: kind, enhanced }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot: kind, core: Boolean(skill.core), enhanced: Boolean(enhanced) })),
         traits: cardTraits(form),
         heldItem: cardHeldItem(member),
       };
@@ -1872,7 +1898,7 @@
       personality: [...(member.personality || [])].sort((a, b) => PERSONALITY_ORDER.indexOf(a) - PERSONALITY_ORDER.indexOf(b)).join(""),
       perfect: Boolean(member.perfect),
       stats: CARD_STATS.map((stat) => ({ stat, value: totals?.total?.[stat] ?? null, potential: totals?.potential?.[stat]?.total || 0 })),
-      skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot, core: Boolean(skill.core) })),
+      skills: memberSkills(member, index).map(({ skill, slot, enhanced }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot, core: Boolean(skill.core), enhanced: Boolean(enhanced) })),
       heldItem: cardHeldItem(member),
       traits: cardTraits(form),
       slot: slotRole(index),
@@ -2027,6 +2053,7 @@
     if (editor) {
       box.append(el("h3", "team-build-subheading", "Star-Up, held item, Aniilog and potential"));
       box.append(editor.render({
+        coreToggle: false,
         data, aniilog, formId: member.formId, build: member, totals,
         onChange: (next) => {
           for (const key of ["potential", "starUp", "heldItem", "perfect", "formResearch", "coreUpgraded", "formsCaught", "prismanaCaught"]) {
@@ -2063,7 +2090,7 @@
       box.append(cp);
     }
     box.append(el("p", "team-data-note", "Card total = (base + Star-Up flat stats) × (1 + potential, personality, Star-Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at its rarity's top level (Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
-    if (Number.isFinite(totals.cp)) box.append(el("p", "team-data-note", "CP is the game's formula: species stats and level, your own potential, Star-Up, the held item, an upgraded Core skill, and the forms and Prismana forms you have caught."));
+    if (Number.isFinite(totals.cp)) box.append(el("p", "team-data-note", "CP is the game's formula: species stats and level, your own potential, Star-Up, the held item, an enhanced Core skill, and the forms and Prismana forms you have caught."));
     return box;
   }
 
