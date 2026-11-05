@@ -565,6 +565,7 @@ const state = {
   expandedMapGroups: new Set(),
   collapsedMiscGroups: new Set(),
   renderedMapGroups: new Map(),
+  renderedSpawnGroups: new Map(),
   activeMapId: REQUESTED_MAP_ID || "country-of-time",
   undergroundLayerVisible: false,
   undergroundForegroundPlans: new Map(),
@@ -13548,8 +13549,14 @@ function createMapItemRow(item, { child = false, expandable = false } = {}) {
   return row;
 }
 
+// A chest row is named after its area, so chests in one area are numbered; other rows by their shared name.
+function spawnSequenceKey(spawn) {
+  return spawn.marker_type === "treasure_chest" ? areaDetailValue(spawn) || mapRegionForSpawn(spawn) : spawn.display_name;
+}
+
 function duplicateSpawnSequence(spawn, siblings = [], siblingIndex = 0) {
-  const matchingNames = siblings.filter((entry) => entry.spawn.display_name === spawn.display_name);
+  const key = spawnSequenceKey(spawn);
+  const matchingNames = siblings.filter((entry) => spawnSequenceKey(entry.spawn) === key);
   if (matchingNames.length < 2) return "";
   const duplicateIndex = matchingNames.findIndex((entry) => entry.index === siblings[siblingIndex]?.index);
   return String(Math.max(0, duplicateIndex) + 1);
@@ -13612,6 +13619,13 @@ function spawnChildDisplayParts(spawn, siblings = [], siblingIndex = 0) {
       typeLabel: "",
     };
   }
+  if (spawn.marker_type === "treasure_chest") {
+    return {
+      name: areaDetailValue(spawn) || mapRegionForSpawn(spawn),
+      sequence,
+      typeLabel: window.AniipediaI18n.translate(spawn.display_type_label || "Chest"),
+    };
+  }
   if (spawn.marker_type === "collectible_pickup") {
     const localizedTitle = localizedSpawnTitle(spawn);
     return {
@@ -13645,12 +13659,14 @@ function createSpawnChildRow(entry, siblings = [], siblingIndex = 0) {
     refreshVisibility();
   });
 
-  const icon = iconWithSpecialBadge(
-    makeIcon("item-icon", spawn.icon || item?.icon),
-    spawn,
-    item,
-    "item-icon-badge-frame",
-  );
+  const icon = CHEST_TIER_COLORS[spawn.chest_tier]
+    ? chestGlyph(chestIconClasses("item-icon", spawn.chest_tier, isAncientChest(spawn)), spawn.icon || item?.icon)
+    : iconWithSpecialBadge(
+      makeIcon("item-icon", spawn.icon || item?.icon),
+      spawn,
+      item,
+      "item-icon-badge-frame",
+    );
   const text = document.createElement("span");
   text.className = "item-text";
   const strong = document.createElement("strong");
@@ -13663,7 +13679,7 @@ function createSpawnChildRow(entry, siblings = [], siblingIndex = 0) {
   }
   strong.title = spawn.display_name;
   const small = document.createElement("small");
-  const area = areaDetailValue(spawn) || mapRegionForSpawn(spawn);
+  const area = spawn.marker_type === "treasure_chest" ? "" : areaDetailValue(spawn) || mapRegionForSpawn(spawn);
   small.textContent = [display.typeLabel, area].filter(Boolean).join(" \u2022 ");
   small.title = `${spawn.display_name} - ${small.textContent}`;
   text.append(strong, small);
@@ -13677,8 +13693,129 @@ function appendMapItemWithChildren(container, item, { child = false, allowExpans
   container.append(createMapItemRow(item, { child, expandable }));
   if (!expandable || !state.expandedMapGroups.has(item.item_id)) return;
   const { wrapper, list } = createMapChildrenContainer(item.item_id, item.display_name);
-  entries.forEach((entry, index) => list.append(createSpawnChildRow(entry, entries, index)));
+  if (entries.some(({ spawn }) => CHEST_TIER_COLORS[spawn.chest_tier])) appendChestTierGroups(list, item, entries);
+  else entries.forEach((entry, index) => list.append(createSpawnChildRow(entry, entries, index)));
   container.append(wrapper);
+}
+
+// The Chests filter opens into one group per tier, the same tabs as the Chests checklist (Basic, Exquisite,
+// Magnificent, Ancient): each selects its chests together and opens with its own + into its chests, by area.
+const CHEST_TIER_ORDER = Object.freeze({ blue: 0, purple: 1, gold: 2, red: 3 });
+
+function chestIconClasses(base, tier, ancient) {
+  return [base, "checklist-chest", `checklist-chest-${tier}`, ancient ? "checklist-chest-ancient" : ""]
+    .filter(Boolean).join(" ");
+}
+
+function chestTierEntries(entries, tab) {
+  return entries
+    .filter(({ spawn }) => (
+      tab.tier ? spawn.chest_tier === tab.tier && !isAncientChest(spawn) : isAncientChest(spawn)
+    ))
+    .sort((a, b) => (
+      (CHEST_TIER_ORDER[a.spawn.chest_tier] ?? 9) - (CHEST_TIER_ORDER[b.spawn.chest_tier] ?? 9)
+      || spawnSequenceKey(a.spawn).localeCompare(spawnSequenceKey(b.spawn))
+      || (a.spawn.y - b.spawn.y)
+      || (a.spawn.x - b.spawn.x)
+    ));
+}
+
+function selectedSpawnCount(itemId, entries) {
+  if (!state.enabled.has(itemId)) return 0;
+  return entries.filter(({ spawn }) => !state.disabledSpawnIds.has(spawnSelectionId(spawn))).length;
+}
+
+// Select or clear some of an item's pins, leaving its other pins as they are.
+function setSpawnEntriesSelection(itemId, entries, select) {
+  const selection = itemSelectionState(itemId);
+  const ids = entries.map(({ spawn }) => spawnSelectionId(spawn));
+  if (select) {
+    if (!selection.enabled) {
+      state.enabled.add(itemId);
+      selection.entries.forEach(({ spawn }) => state.disabledSpawnIds.add(spawnSelectionId(spawn)));
+    }
+    ids.forEach((id) => state.disabledSpawnIds.delete(id));
+    return;
+  }
+  if (!selection.enabled) return;
+  ids.forEach((id) => state.disabledSpawnIds.add(id));
+  if (!selectedSpawnCount(itemId, selection.entries)) setItemSelection(itemId, false);
+}
+
+function appendChestTierGroups(list, item, entries) {
+  CHEST_CHECKLIST_TABS.forEach((tab) => {
+    const tierEntries = chestTierEntries(entries, tab);
+    if (!tierEntries.length) return;
+    const groupKey = `${item.item_id}#${tab.id}`;
+    const label = window.AniipediaI18n.translate(tab.label);
+    const expanded = state.expandedMapGroups.has(groupKey);
+    const group = document.createElement("section");
+    group.className = "map-item-group map-chest-tier-group";
+    group.dataset.mapGroupKey = groupKey;
+
+    const parent = document.createElement("div");
+    parent.className = "map-group-row map-chest-tier-row";
+    parent.dataset.mapGroupKey = groupKey;
+    parent.dataset.chestTier = tab.id;
+    parent.tabIndex = 0;
+    parent.setAttribute("role", "button");
+    const toggleSelection = () => {
+      clearLocatedSpawn();
+      setSpawnEntriesSelection(item.item_id, tierEntries, selectedSpawnCount(item.item_id, tierEntries) < tierEntries.length);
+      refreshVisibility();
+    };
+    parent.addEventListener("mousedown", preventControlFocus);
+    parent.addEventListener("click", (event) => {
+      event.preventDefault();
+      toggleSelection();
+    });
+    parent.addEventListener("keydown", (event) => {
+      if (event.target !== parent || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      toggleSelection();
+    });
+
+    const icon = chestGlyph(chestIconClasses("item-icon", tab.tier || "gold", !tab.tier), item.icon);
+    const text = document.createElement("span");
+    text.className = "item-text";
+    const strong = document.createElement("strong");
+    strong.textContent = label;
+    const small = document.createElement("small");
+    small.textContent = `${tierEntries.length} locations`;
+    text.append(strong, small);
+    const actions = document.createElement("span");
+    actions.className = "item-row-actions";
+    const count = document.createElement("span");
+    count.className = "item-count";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "map-group-toggle";
+    toggle.textContent = expanded ? "-" : "+";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${label}`);
+    toggle.addEventListener("mousedown", preventControlFocus);
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (expanded) collapseMapGroup(groupKey);
+      else {
+        state.expandedMapGroups.add(groupKey);
+        renderItems();
+        refreshVisibility();
+      }
+    });
+    actions.append(count, toggle);
+    parent.append(icon, text, actions);
+    group.append(parent);
+
+    if (expanded) {
+      const { wrapper, list: tierList } = createMapChildrenContainer(groupKey, label);
+      tierEntries.forEach((entry, index) => tierList.append(createSpawnChildRow(entry, tierEntries, index)));
+      group.append(wrapper);
+    }
+    list.append(group);
+    state.renderedSpawnGroups.set(groupKey, { parent, itemId: item.item_id, entries: tierEntries, count });
+  });
 }
 
 function mapItemsFullySelected(items) {
@@ -14130,6 +14267,16 @@ function refreshGroupedItemControls() {
     }
   }
 
+  state.renderedSpawnGroups.forEach(({ parent, itemId, entries, count }) => {
+    const selected = selectedSpawnCount(itemId, entries);
+    const full = entries.length > 0 && selected === entries.length;
+    const partial = selected > 0 && !full;
+    parent.classList.toggle("enabled", full);
+    parent.classList.toggle("partially-enabled", partial);
+    parent.setAttribute("aria-pressed", partial ? "mixed" : String(full));
+    count.textContent = partial ? `${selected}/${entries.length}` : entries.length;
+  });
+
   state.renderedMapGroups.forEach(({ group, parent, items, label, count }) => {
     const selections = items.map((item) => itemSelectionState(item.item_id));
     const total = selections.reduce((sum, selection) => sum + selection.total, 0);
@@ -14198,6 +14345,7 @@ function renderItems() {
   els.layerTabs.textContent = "";
   els.itemList.textContent = "";
   state.renderedMapGroups.clear();
+  state.renderedSpawnGroups.clear();
   const mapItems = activeMapItems();
   const layers = state.data.layers?.length
     ? state.data.layers

@@ -45,3 +45,12 @@ test("the Chests checklist has its own tabs like Lumin's: Basic, Exquisite, Magn
   assert.match(app, /chests: \{ tabs: CHEST_CHECKLIST_TABS, stateKey: "chestChecklistTab"/u);
   assert.match(app, /if \(subTabs\) renderChecklistSubTabs\(subTabs\);/u);
 });
+
+test("the map's Chests filter opens into tier groups, each with its own + and select-all, its chests by area", () => {
+  assert.match(app, /if \(entries\.some\(\(\{ spawn \}\) => CHEST_TIER_COLORS\[spawn\.chest_tier\]\)\) appendChestTierGroups\(list, item, entries\);/u);
+  assert.match(app, /CHEST_CHECKLIST_TABS\.forEach\(\(tab\) => \{\r?\n    const tierEntries = chestTierEntries\(entries, tab\);/u);
+  assert.match(app, /const groupKey = `\$\{item\.item_id\}#\$\{tab\.id\}`;/u);
+  assert.match(app, /setSpawnEntriesSelection\(item\.item_id, tierEntries, selectedSpawnCount\(item\.item_id, tierEntries\) < tierEntries\.length\);/u);
+  assert.match(app, /\|\| spawnSequenceKey\(a\.spawn\)\.localeCompare\(spawnSequenceKey\(b\.spawn\)\)/u);
+  assert.match(app, /state\.renderedSpawnGroups\.forEach\(/u);
+});
