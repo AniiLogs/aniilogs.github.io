@@ -31,3 +31,11 @@ test("the share card is drawn in the browser and copied, saved or shared: nothin
   assert.match(team, /save\.download = cardFileName\(name\);/u);
   assert.doesNotMatch(card, /shareApiUrl|apiUrl|method: "POST"/u);
 });
+
+test("the card shows the rest of the team: who they are, the skills they bring in this mode and their held item, no stats", () => {
+  assert.match(team, /function cardTeammates\(index\)/u);
+  assert.match(team, /memberSkills\(member, slot\)\.filter\(\(\{ slot: kind \}\) => kind !== "Ultimate"\)/u);
+  assert.match(team, /team: cardTeammates\(index\),/u);
+  assert.match(card, /function drawTeam\(ctx, team, images, mode\)/u);
+  assert.doesNotMatch(card.slice(card.indexOf("function drawTeam"), card.indexOf("async function draw(")), /\.cp|stats/u);
+});

@@ -1688,6 +1688,33 @@
 
   const PERSONALITY_ORDER = "EISNTFJP";
 
+  // A held item as the card shows it (at its rarity's top level, as the picker counts it), or null.
+  function cardHeldItem(member) {
+    const held = window.AniilogsHeldItems?.normalize(data, member.heldItem) || null;
+    const item = held ? data?.held_item_catalog?.[held.itemId] : null;
+    return item ? { name: item.name, icon: item.icon ? host.contentUrl(item.icon) : "", rarity: item.quality_label || "", level: held.level } : null;
+  }
+
+  // The rest of the team on the card: who they are, their held item and the skills they bring in this mode (an
+  // Interlink ally its Core skill; otherwise the two picks, plus the switch-skill when it isn't one of them).
+  // No stats or CP: those are only for the Aniimo the card is about.
+  function cardTeammates(index) {
+    return slotIndexes().filter((slot) => slot !== index).map((slot) => {
+      const member = model.members[slot];
+      const form = formFor(member);
+      if (!form) return null;
+      const entry = entryForForm(member.formId);
+      return {
+        name: entry?.name || form.name,
+        role: slotRole(slot),
+        icon: entry?.icon ? host.contentUrl(entry.icon) : "",
+        skills: memberSkills(member, slot).filter(({ slot: kind }) => kind !== "Ultimate")
+          .map(({ skill, slot: kind }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot: kind })),
+        heldItem: cardHeldItem(member),
+      };
+    }).filter(Boolean);
+  }
+
   function buildCardSpec(member, index) {
     const form = formFor(member);
     const entry = entryForForm(member.formId);
@@ -1697,8 +1724,6 @@
     const editor = window.AniilogsPotentialEditor;
     const options = editor ? editor.totalsOptions(member, cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
     const totals = damage?.statTotals && growth ? damage.statTotals(data, aniilog, member.formId, options) : null;
-    const held = window.AniilogsHeldItems?.normalize(data, member.heldItem) || null;
-    const heldItem = held ? data?.held_item_catalog?.[held.itemId] : null;
     const researched = new Set((member.formResearch || []).map(String));
     const baseId = entry?.base_id;
     const forms = baseId ? (aniilog?.entries || []).filter((row) => row.base_id === baseId).length : 1;
@@ -1715,7 +1740,10 @@
       perfect: Boolean(member.perfect),
       stats: CARD_STATS.map((stat) => ({ stat, value: totals?.total?.[stat] ?? null, potential: totals?.potential?.[stat]?.total || 0 })),
       skills: memberSkills(member, index).map(({ skill, slot }) => ({ name: skill.name, icon: skill.icon ? host.contentUrl(skill.icon) : "", slot })),
-      heldItem: heldItem ? { name: heldItem.name, icon: heldItem.icon ? host.contentUrl(heldItem.icon) : "", rarity: heldItem.quality_label || "", level: held.level } : null,
+      heldItem: cardHeldItem(member),
+      slot: slotRole(index),
+      mode: MODES.find((mode) => mode.id === model.mode)?.label || "",
+      team: cardTeammates(index),
       starUp: member.starUp?.stage ? { stage: Number(member.starUp.stage), level: Number(member.starUp.level) || 0 } : null,
       research: (form?.form_research || []).filter((row) => researched.has(String(row.form_id))).map((row) => row.form_label || "Form"),
       aniilog: { forms: member.formsCaught ?? 1, total: forms > 1 ? forms : 0, prismana: member.prismanaCaught ?? 0 },

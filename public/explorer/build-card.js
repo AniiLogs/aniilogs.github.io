@@ -3,7 +3,8 @@
 // draw(spec) -> Promise<HTMLCanvasElement>; spec is plain data built by team-builder.js (buildCardSpec):
 // { name, formLabel, role, icon, elements: [{ name, color }], level, cp, personality, perfect,
 //   stats: [{ stat, value, potential }], skills: [{ name, icon, slot }], heldItem: { name, icon, rarity, level } | null,
-//   starUp: { stage, level } | null, research: [labels], aniilog: { forms, prismana }, footer }
+//   starUp: { stage, level } | null, research: [labels], aniilog: { forms, prismana }, footer,
+//   mode, team: [{ name, role, icon, skills: [{ name, icon }], heldItem }] } (the rest of the team: no stats or CP)
 (() => {
   "use strict";
 
@@ -87,20 +88,59 @@
     return w;
   }
 
+  // The rest of the team, under the main card: one tile each with its skills and held item, one per line.
+  const TEAM_TOP = 606;
+  const TEAM_LINE = 25;
+
+  function teamTileHeight(team) {
+    const lines = Math.max(1, ...team.map((mate) => mate.skills.length + 1));
+    return 76 + lines * TEAM_LINE + 4;
+  }
+
+  function drawTeam(ctx, team, images, mode) {
+    const left = 40;
+    const width = WIDTH - 80;
+    text(ctx, mode ? `TEAM · ${mode.toUpperCase()}` : "TEAM", left, TEAM_TOP + 16, { size: 13, weight: 700, color: COLORS.muted });
+    const tileW = (width - 30) / 4;
+    const tileH = teamTileHeight(team);
+    team.slice(0, 4).forEach((mate, index) => {
+      const x = left + index * (tileW + 10);
+      const y = TEAM_TOP + 28;
+      panel(ctx, x, y, tileW, tileH);
+      drawIcon(ctx, images.get(mate.icon), x + 12, y + 12, 52);
+      text(ctx, mate.name, x + 74, y + 36, { size: 18, weight: 700, max: tileW - 86 });
+      text(ctx, mate.role, x + 74, y + 56, { size: 12, color: COLORS.muted, max: tileW - 86 });
+      let line = y + 74;
+      mate.skills.forEach((skill) => {
+        drawIcon(ctx, images.get(skill.icon), x + 12, line, 20);
+        text(ctx, skill.name, x + 40, line + 15, { size: 14, max: tileW - 52 });
+        line += TEAM_LINE;
+      });
+      if (mate.heldItem) {
+        drawIcon(ctx, images.get(mate.heldItem.icon), x + 12, line, 20);
+        text(ctx, mate.heldItem.name, x + 40, line + 15, { size: 14, weight: 600, color: RARITY[mate.heldItem.rarity] || COLORS.text, max: tileW - 52 });
+      } else text(ctx, "No held item", x + 40, line + 15, { size: 14, color: COLORS.muted });
+    });
+  }
+
   async function draw(spec) {
+    const team = (spec.team || []).slice(0, 4);
+    const height = team.length ? TEAM_TOP + 28 + teamTileHeight(team) + 56 : HEIGHT;
     const canvas = document.createElement("canvas");
     canvas.width = WIDTH;
-    canvas.height = HEIGHT;
+    canvas.height = height;
     const ctx = canvas.getContext("2d");
     const lead = spec.elements?.[0]?.color || COLORS.accent;
 
     const [portrait, held, ...skillIcons] = await Promise.all([
       loadImage(spec.icon), loadImage(spec.heldItem?.icon), ...(spec.skills || []).map((skill) => loadImage(skill.icon)),
     ]);
+    const teamUrls = [...new Set(team.flatMap((mate) => [mate.icon, mate.heldItem?.icon, ...mate.skills.map((skill) => skill.icon)]).filter(Boolean))];
+    const teamImages = new Map(await Promise.all(teamUrls.map(async (url) => [url, await loadImage(url)])));
 
     // Background: dark, tinted by the first element.
     ctx.fillStyle = COLORS.bg;
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.fillRect(0, 0, WIDTH, height);
     const glow = ctx.createRadialGradient(220, 230, 20, 220, 230, 520);
     glow.addColorStop(0, `${lead}55`);
     glow.addColorStop(1, "transparent");
@@ -183,9 +223,11 @@
     ].filter(Boolean);
     lines.slice(0, 5).forEach((line, index) => text(ctx, line, ax + 16, by + 56 + index * 22, { size: 15, max: boxW - 32 }));
 
+    if (team.length) drawTeam(ctx, team, teamImages, spec.mode);
+
     // Footer.
-    text(ctx, spec.footer || "aniilogs.github.io", WIDTH - 40, HEIGHT - 28, { size: 14, color: COLORS.muted, align: "right" });
-    text(ctx, "aLogs Team Builder", left, HEIGHT - 28, { size: 14, weight: 700, color: COLORS.accent });
+    text(ctx, spec.footer || "aniilogs.github.io", WIDTH - 40, height - 24, { size: 14, color: COLORS.muted, align: "right" });
+    text(ctx, [spec.slot, "aLogs Team Builder"].filter(Boolean).join(" · "), left, height - 24, { size: 14, weight: 700, color: COLORS.accent });
     return canvas;
   }
 
