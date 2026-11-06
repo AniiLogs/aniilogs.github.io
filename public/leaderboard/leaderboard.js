@@ -421,6 +421,8 @@
     }
     const setup = simSetup(entry.extra?.setup);
     if (setup) parts.push(setup);
+    const teams = partyPanel({ lineup: entry.extra?.lineup });         // each player's team (the buffs are below)
+    if (teams) parts.push(teams);
     if (entry.buffs?.length) {
       parts.push(el("div", { class: "lb-buffs" }, el("strong", { text: "Rogue buffs" }),
         el("ol", {}, entry.buffs.map((buff) => el("li", { text: `${buff.floor ? `F${buff.floor} · ` : ""}${buff.name}${buff.level ? ` Lv ${buff.level}` : ""}` })))));
@@ -491,52 +493,77 @@
     const weeks = Math.max(1, Math.ceil((now - week.end) / (7 * 86400)));
     return weeks === 1 ? "last week" : `${weeks} weeks ago`;
   }
-  // A picture icon next to a name when the run has its result screenshot, for anyone: hover it to see the screenshot
-  // as large as the window allows, click (or tap) to keep it open.
-  const proofImages = new Map();                       // submission id -> object URL, loaded once per page
-  // shot: "summary" (the result screen) or "battle" (Battle Data)
+  // A picture icon next to a name when the run has proof pictures, for anyone: hover it to see them side by side (the
+  // result screen, Battle Data, Holo-Battle Sim's Gizmo screen), click (or tap) to keep them open, one per tab.
+  const proofImages = new Map();                       // submission id|shot -> object URL, loaded once per page
+  // shot: "summary" (the result screen), "battle" (Battle Data), "gizmo1"... (Holo-Battle Sim's Gizmo screen, a view
+  // per part of its list) or "party" (the Party screen the run started from)
   async function proofImage(submissionId, shot = "summary") {
     const key = `${submissionId}|${shot}`;
     if (!proofImages.has(key)) {
       proofImages.set(key, (async () => {
-        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence${shot === "battle" ? "?shot=battle" : ""}`);
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence${shot === "summary" ? "" : `?shot=${shot}`}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return URL.createObjectURL(await response.blob());
       })().catch((error) => { proofImages.delete(key); throw error; }));
     }
     return proofImages.get(key);
   }
+  // Which pictures a run has, in the order they were on screen, with each player's team and the run's buffs (the
+  // API's ?shot=list)
+  const proofLists = new Map();
+  function proofDetails(submissionId) {
+    if (!proofLists.has(submissionId)) {
+      proofLists.set(submissionId, (async () => {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence?shot=list`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const details = await response.json();
+        return { ...details, shots: Array.isArray(details.shots) && details.shots.length ? details.shots : ["summary"] };
+      })().catch(() => ({ shots: ["summary", "battle"] })));     // an older API: the two it always had
+    }
+    return proofLists.get(submissionId);
+  }
+
+  // What each player went in with (the Party screen when the battle started) and the run's buffs
+  function partyPanel(details) {
+    const aniimo = (m) => [m.aniimo, Number.isInteger(m.aniimoLevel) ? `Lv ${m.aniimoLevel}` : "", Number.isInteger(m.cp) ? `CP ${number(m.cp)}` : ""]
+      .filter(Boolean).join(" ");
+    const players = (details.lineup || []).filter((p) => p.name || p.aniimo);
+    const buffs = details.buffs || [];
+    if (!players.length && !buffs.length) return null;
+    return el("div", { class: "lb-proof-party" },
+      players.length ? el("ul", { class: "lb-party-players" }, players.map((p) => {
+        const team = (p.team || []).filter((m) => m.aniimo && m.aniimo !== p.aniimo).map(aniimo);
+        return el("li", {}, el("strong", { text: p.name || "—" }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null,
+          p.aniimo ? el("span", { class: "lb-party-lead", text: aniimo(p) }) : null,
+          team.length ? el("span", { class: "lb-party-team", text: `with ${team.join(", ")}` }) : null);
+      })) : null,
+      buffs.length ? el("p", { class: "lb-party-buffs" }, el("strong", { text: "Buffs " }),
+        buffs.map((b) => `${b.name}${b.level ? ` Lv ${b.level}` : ""}`).join(" · ")) : null);
+  }
+  function shotLabel(shot, shots) {
+    if (shot === "battle") return "Battle Data";
+    if (shot === "party") return "Party";
+    if (shot.startsWith("gizmo")) return shots.filter((s) => s.startsWith("gizmo")).length > 1 ? `Gizmos ${shot.slice(5)}` : "Gizmos";
+    return "Summary";
+  }
+  const HOVER_OPEN_MS = 350;                           // a hover this long opens the viewer; passing over the icon doesn't
   function proofButton(submissionId, check = null) {
     if (!submissionId) return null;
-    const button = el("button", { type: "button", class: "lb-proof", title: "Hover to see this run's screenshot, click to keep it open",
-      "aria-label": "View this run's screenshot", onclick: () => { hideProofPreview(); openProof(submissionId, check); } });
+    const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots (they stay open until you click outside)",
+      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check); } });
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
-    // hover (mouse or pen only: a tap goes straight to the click)
-    button.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") showProofPreview(submissionId); });
-    button.addEventListener("pointerleave", hideProofPreview);
-    button.addEventListener("focus", () => showProofPreview(submissionId));
-    button.addEventListener("blur", hideProofPreview);
+    // hover (mouse or pen only: a tap goes straight to the click) opens the same viewer as a click
+    button.addEventListener("pointerenter", (event) => {
+      if (event.pointerType === "touch") return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => openProof(submissionId, check), HOVER_OPEN_MS);
+    });
+    button.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
     return button;
   }
-  let previewFor = null;
-  async function showProofPreview(submissionId) {
-    previewFor = submissionId;
-    let preview = document.querySelector(".lb-proof-preview");
-    if (!preview) { preview = el("div", { class: "lb-proof-preview", "aria-hidden": "true" }); document.body.append(preview); }
-    preview.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
-    preview.hidden = false;
-    try {
-      const url = await proofImage(submissionId);
-      if (previewFor === submissionId) preview.replaceChildren(el("img", { src: url, alt: "" }));
-    } catch {
-      if (previewFor === submissionId) preview.replaceChildren(el("p", { class: "lb-empty", text: "This screenshot isn't available." }));
-    }
-  }
-  function hideProofPreview() {
-    previewFor = null;
-    const preview = document.querySelector(".lb-proof-preview");
-    if (preview) preview.hidden = true;
-  }
+  let hoverTimer = null;
+  let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
   async function openProof(submissionId, check = null) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
     if (!dialog) {
@@ -547,31 +574,38 @@
       document.body.append(dialog);
     }
     const body = dialog.querySelector(".lb-proof-body");
-    dialog.showModal();
-    // the result screen, and the run's Battle Data when it was sent with it
+    let tabs = dialog.querySelector(".lb-proof-tabs");
+    if (!tabs) { tabs = el("div", { class: "lb-proof-tabs", role: "tablist" }); dialog.insertBefore(tabs, body); }
+    if (dialog.open && proofOpenFor === submissionId) return;
+    proofOpenFor = submissionId;
+    tabs.replaceChildren();
+    dialog.querySelector(".lb-proof-party")?.remove();
+    body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshots…" }));
+    if (!dialog.open) dialog.showModal();             // it stays until a click outside it, × or Esc
+    const details = await proofDetails(submissionId);
+    if (proofOpenFor !== submissionId) return;
+    const shots = details.shots;
+    dialog.querySelector(".lb-proof-party")?.remove();
+    const party = partyPanel(details);
+    if (party) dialog.append(party);
+    // a tab for each picture the run has
     const show = async (shot) => {
+      for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(tab.dataset.proofShot === shot));
       body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
       try {
         const url = await proofImage(submissionId, shot);
-        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: shot === "battle" ? "The run's Battle Data" : "The run's result screen" }));
+        if (proofOpenFor !== submissionId) return;
+        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: `This run's ${shotLabel(shot, shots)} screen` }));
       } catch {
-        body.replaceChildren(el("p", { class: "lb-empty", text: shot === "battle" ? "This run has no Battle Data screenshot." : "This screenshot isn't available." }));
+        body.replaceChildren(el("p", { class: "lb-empty", text: `This run has no ${shotLabel(shot, shots)} screenshot.` }));
       }
-      for (const tab of dialog.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(tab.dataset.proofShot === shot));
     };
-    let tabs = dialog.querySelector(".lb-proof-tabs");
-    if (!tabs) {
-      tabs = el("div", { class: "lb-proof-tabs", role: "tablist" },
-        el("button", { type: "button", role: "tab", "data-proof-shot": "summary", text: "Summary" }),
-        el("button", { type: "button", role: "tab", "data-proof-shot": "battle", text: "Battle Data" }));
-      dialog.insertBefore(tabs, body);
-    }
-    for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.onclick = () => show(tab.dataset.proofShot);
+    tabs.append(...shots.map((shot) => el("button", { type: "button", role: "tab", "data-proof-shot": shot, text: shotLabel(shot, shots),
+      onclick: () => show(shot) })));
     // the run check's badge beside the tabs
-    tabs.querySelector(".lb-check")?.remove();
     const badge = checkBadge(check);
     if (badge) tabs.append(badge);
-    await show("summary");
+    await show(shots[0]);
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   // Explanations behind the (i) next to a column name, in a popover (one shared element per explanation)

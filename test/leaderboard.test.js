@@ -377,6 +377,57 @@ test("aLogs B2 sends the cropped proof and the whole screens: all four stored, s
   assert.equal(EVIDENCE.objects.size, 1);                                             // only the older run's crop is left
 });
 
+test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, served, and deleted with it", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const sim = { kind: "sim_run", clientRunId: "sim-1", trial: "Training of Fire", difficulty: "Hard", clearTimeS: 400, cleared: true, partySize: 1,
+    extra: { proofGizmos: ["evidence/someone-else.jpg"] } };                         // the app can't name stored pictures
+  const form = new FormData();
+  form.set("submission", JSON.stringify(sim));
+  form.set("evidence", jpeg(1), "victory.jpg");
+  for (const [i, mark] of [[1, 11], [2, 12], [3, 13]]) form.set(`gizmo${i}`, jpeg(mark), `gizmo${i}.jpg`);
+  const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  const base = `/api/leaderboard/submissions/${submissionId}/evidence`;
+  assert.deepEqual((await (await call(env, `${base}?shot=list`)).json()).shots, ["summary", "gizmo1", "gizmo2", "gizmo3"]);
+  const mark = async (shot) => new Uint8Array(await (await call(env, `${base}?shot=${shot}`)).arrayBuffer())[3];
+  assert.deepEqual([await mark("gizmo1"), await mark("gizmo2"), await mark("gizmo3")], [11, 12, 13]);
+  assert.equal((await call(env, `${base}?shot=gizmo4`)).status, 404);
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=sim_run&trial=Fire&difficulty=Hard")).json()).entries[0];
+  assert.equal(entry.extra?.proofGizmos, undefined);                                  // storage keys stay private
+  // a re-send with fewer views replaces them (the extra one is deleted)
+  const again = new FormData();
+  again.set("submission", JSON.stringify({ ...sim, extra: {} }));
+  again.set("evidence", jpeg(1), "victory.jpg");
+  again.set("gizmo1", jpeg(21), "gizmo1.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: again })).status, 200);
+  assert.deepEqual((await (await call(env, `${base}?shot=list`)).json()).shots, ["summary", "gizmo1"]);
+  assert.equal(await mark("gizmo1"), 21);
+  assert.equal(EVIDENCE.objects.size, 2);
+  // an Interlink run lists its Battle Data after the result screen
+  const run = new FormData();
+  run.set("submission", JSON.stringify({ kind: "interlink_run", clientRunId: "il-1", cycle: "3005", boss: { id: "80000109", name: "Omega Sherro", level: 60 },
+    score: 20000, stars: 20, clearTimeS: 180, partySize: 2, buffs: [{ name: "Overtime", level: 2 }],
+    extra: { lineup: [{ slot: 0, name: "MinMax", self: true, aniimo: "Pawney", aniimoLevel: 60, cp: 41000,
+      team: [{ aniimo: "Pawney", aniimoLevel: 60, cp: 41000 }, { aniimo: "Emberpup" }] }, { slot: 1, name: "Bot", ai: true }] } }));
+  run.set("evidence", jpeg(2), "result.jpg");
+  run.set("battle", jpeg(3), "battle.jpg");
+  const runSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: run });
+  assert.ok([200, 201].includes(runSent.status), String(runSent.status));
+  const runId = (await runSent.json()).submissionId;
+  const details = await (await call(env, `/api/leaderboard/submissions/${runId}/evidence?shot=list`)).json();
+  assert.deepEqual(details.shots, ["summary", "battle"]);
+  assert.deepEqual(details.buffs, [{ name: "Overtime", level: 2 }]);                  // what the party went in with
+  assert.deepEqual(details.lineup.map((p) => [p.name, p.aniimo ?? null, (p.team || []).map((m) => m.aniimo)]),
+    [["MinMax", "Pawney", ["Pawney", "Emberpup"]], ["Bot", null, []]]);
+  // deleting the sim run removes every picture of it
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 200);
+  assert.equal(EVIDENCE.objects.size, 2);                                             // the Interlink run's two are left
+});
+
 test("second reading (shadow mode): Workers AI re-reads the whole screens; a mismatch is listed for review, never held", async () => {
   const EVIDENCE = evidenceStore();
   // a stand-in for Workers AI: the result screen reads score 20000 / 20 stars / 3:00, the Battle Data card MinMax 25913

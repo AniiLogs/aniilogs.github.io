@@ -185,14 +185,15 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-proof-body { display: grid; min-height: 120px; place-items: center; }
 .lb-proof-image { display: block; width: 100%; height: auto; border-radius: 14px; }
 
-/* hover preview: the screenshot centred, as large as the window allows (never larger than its own 1280x720) */
-.lb-proof-preview { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 2vmin; pointer-events: none; }
-.lb-proof-preview[hidden] { display: none; }
-.lb-proof-preview img { max-width: min(640px, 70vw); max-height: 60vh; width: auto; height: auto; border-radius: 12px;
-  border: 1px solid var(--line); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55); }
-.lb-proof-preview .lb-empty { padding: 0.8rem 1.1rem; border-radius: 10px; background: rgb(var(--panel-rgb)); }
+/* what each player went in with, under the pictures (and in an expanded row) */
+.lb-proof-party { padding: 4px 12px 12px; font-size: 0.88rem; }
+.lb-party-players { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lb-party-players li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.lb-party-lead { font-weight: 650; }
+.lb-party-team, .lb-party-buffs { color: var(--ink-soft); }
+.lb-party-buffs { margin: 6px 0 0; }
 .lb-proof-dialog { width: auto; max-width: min(1280px, 96vw); }
-.lb-proof-image { max-height: 90vh; width: auto; max-width: 100%; }
+.lb-proof-image { max-height: 78vh; width: auto; max-width: 100%; }
 
 .lb-proof-tabs { display: flex; gap: 6px; padding: 8px 52px 8px 10px; }
 .lb-proof-tabs button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }

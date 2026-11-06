@@ -1879,6 +1879,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         hasBattleEvidence: Boolean(row.battle_evidence_key),
         hasFullScreens: Object.keys(extra.proofFull || {}),
         hasPartyScreen: Boolean(extra.proofParty),
+        gizmoShots: Array.isArray(extra.proofGizmos) ? extra.proofGizmos.length : 0,
         captures: Math.max(1, Number(row.captures) || 0),     // how many players' apps captured this run
         proofPrunedAt: row.proof_pruned_at || null,
         check: runCheckBadge(row.verify_state),
@@ -1966,14 +1967,15 @@ async function pruneProofs(env, max) {
     const crops = (await env.DB.prepare(
       `SELECT c.submission_id AS submissionId, c.evidence_key AS evidenceKey, c.battle_evidence_key AS battleKey, c.extra_json AS extraJson
        FROM leaderboard_submissions c
-       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL OR json_extract(c.extra_json, '$.proofParty') IS NOT NULL)
+       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL OR json_extract(c.extra_json, '$.proofParty') IS NOT NULL
+              OR json_extract(c.extra_json, '$.proofGizmos') IS NOT NULL)
          AND c.proof_pruned_at IS NULL AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
     ).bind(now - RETENTION.cropsS, max).all()).results || [];
     for (const row of crops) {
       for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
       await env.DB.prepare(`UPDATE leaderboard_submissions SET evidence_key = NULL, battle_evidence_key = NULL, proof_pruned_at = ?,
-        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty') WHERE submission_id = ?`).bind(now, row.submissionId).run();
+        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty', '$.proofGizmos') WHERE submission_id = ?`).bind(now, row.submissionId).run();
       pruned += 1;
     }
   } catch (error) {
@@ -2311,9 +2313,11 @@ const MAX_SUBMISSION_BYTES = 64 * 1024;
 // at 4K), the whole screen ("evidence_full", at most 1920 wide, ~0.2-0.4 MB) and the same pair for Battle Data
 // ("battle", "battle_full"), and the Party screen as it was when the battle started ("party": the leader or anyone can
 // still change their Aniimo until then, so it's the last capture). Each image is capped here; anything larger isn't a
-// screenshot from the app.
+// screenshot from the app. Holo-Battle Sim's run also sends its Gizmo screen, a whole screen for each part of the list
+// ("gizmo1"...), at most MAX_GIZMO_SHOTS of them.
 const MAX_EVIDENCE_BYTES = 1536 * 1024;
-const EVIDENCE_PARTS = 5;
+const MAX_GIZMO_SHOTS = 12;
+const EVIDENCE_PARTS = 5 + MAX_GIZMO_SHOTS;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -2698,8 +2702,14 @@ async function readSubmissionRequest(request) {
   const evidence = picture("evidence");
   const battle = evidence ? picture("battle") : null;
   // the whole screens the crops came from (aLogs B2 on): kept for a second reading and for review
+  const gizmos = [];
+  for (let i = 1; evidence && i <= MAX_GIZMO_SHOTS; i += 1) {
+    const view = picture(`gizmo${i}`);
+    if (!view) break;
+    gizmos.push(view);
+  }
   return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null,
-    party: picture("party") };
+    party: picture("party"), gizmos };
 }
 
 // Two app users in one Interlink run both send it: same week and boss, played and sent within five minutes of each
@@ -2851,13 +2861,28 @@ async function submitLeaderboardRecord(request, env) {
     proofParty = `evidence/${account.discordId}/${submissionId}-party.${EVIDENCE_TYPES[parsed.party.type]}`;
     await env.EVIDENCE.put(proofParty, parsed.party.stream(), { httpMetadata: { contentType: parsed.party.type } });
   }
-  if (record.extraJson || Object.keys(proofFull).length || proofParty) {
+  // Holo-Battle Sim's Gizmo screen, a view per part of the list (server-only extra.proofGizmos): a re-send with views
+  // replaces them all
+  let proofGizmos = (parseJsonColumn(existing?.extraJson) || {}).proofGizmos || null;
+  if (parsed.gizmos?.length && env.EVIDENCE) {
+    const views = [];
+    for (const [i, part] of parsed.gizmos.entries()) {
+      const key = `evidence/${account.discordId}/${submissionId}-gizmo${i + 1}.${EVIDENCE_TYPES[part.type]}`;
+      await env.EVIDENCE.put(key, part.stream(), { httpMetadata: { contentType: part.type } });
+      views.push(key);
+    }
+    for (const key of proofGizmos || []) if (!views.includes(key)) await env.EVIDENCE.delete(key);
+    proofGizmos = views;
+  }
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos) {
     const extra = parseJsonColumn(record.extraJson) || {};
     delete extra.proofFull;
     delete extra.proofParty;
+    delete extra.proofGizmos;
     delete extra.sharedRun;
     if (Object.keys(proofFull).length) extra.proofFull = proofFull;
     if (proofParty) extra.proofParty = proofParty;
+    if (proofGizmos?.length) extra.proofGizmos = proofGizmos;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -4483,7 +4508,8 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+        ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
         ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
@@ -4574,7 +4600,7 @@ async function moderateSubmission(request, env, submissionId) {
 function proofKeys(row) {
   const extra = parseJsonColumn(row?.extraJson) || {};
   const full = extra.proofFull || {};
-  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty].filter(Boolean);
+  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || [])].filter(Boolean);
 }
 
 async function deleteSubmission(request, env, submissionId) {
@@ -4598,12 +4624,21 @@ async function deleteSubmission(request, env, submissionId) {
 // name); a hidden entry's only its submitter and developers.
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status FROM leaderboard_submissions WHERE submission_id = ?",
+    `SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status,
+       buffs_json AS buffsJson FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
-  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
-  const key = shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
-    : shot === "party" ? (parseJsonColumn(row?.extraJson) || {}).proofParty : row?.evidenceKey;
+  const extra = parseJsonColumn(row?.extraJson) || {};
+  const full = extra.proofFull || {};
+  const gizmos = Array.isArray(extra.proofGizmos) ? extra.proofGizmos : [];
+  const gizmo = /^gizmo([1-9]\d?)$/u.exec(shot || "");
+  // ?shot=list: the run's pictures, in the order they were on screen (the viewer's tabs), with what each player went in
+  // with (the Party screen's lineup: lead, level, CP, team) and the run's buffs - public on the boards already
+  const shots = row ? [row.evidenceKey && "summary", row.battleKey && "battle", ...gizmos.map((_, i) => `gizmo${i + 1}`),
+    extra.proofParty && "party"].filter(Boolean) : [];
+  const key = shot === "list" ? (shots.length ? "list" : null)
+    : shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
+    : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1] : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
@@ -4612,6 +4647,15 @@ async function submissionEvidence(request, env, submissionId) {
     if (row.discordId !== account.discordId && !account.developerModeAvailable) {
       return json({ error: "This entry is hidden: its proof is visible to its submitter and developers only." }, 403);
     }
+  }
+  if (shot === "list") {
+    const lineup = publicLineup(extra.lineup);
+    const buffs = (parseJsonColumn(row.buffsJson) || []).slice(0, 12).filter((buff) => buff?.name)
+      .map((buff) => ({ name: String(buff.name).slice(0, 60), ...(Number.isInteger(buff.level) ? { level: buff.level } : {}),
+        ...(Number.isInteger(buff.floor) ? { floor: buff.floor } : {}) }));
+    const listed = json({ shots, ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
+    listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
+    return listed;
   }
   const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
