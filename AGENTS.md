@@ -7,6 +7,8 @@
 - Two developers share this repository. Follow the working agreement in the aLogs repository,
   https://github.com/AniiLogs/aLogs/blob/main/docs/working-together.md: claim an issue first, small short-lived
   branches, `git pull --rebase origin main` before pushing, never force-push.
+- **First thing in every session:** `gh pr list --author @me`. Fix your own red or conflicted PRs first: rebase on
+  `main`, fix, and push to the same branch. Auto-merge carries on; don't open a new PR.
 - **Keep it cheap:**
   - Catch up with `git log --oneline -20` and `git diff --stat`. Open a full diff only for the files you will touch.
   - grep and read only the lines you need. `src/index.js` and the `public/` scripts are long.
