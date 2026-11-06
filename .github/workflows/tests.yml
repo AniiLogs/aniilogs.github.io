@@ -30,3 +30,5 @@ jobs:
         run: npm test
       - name: Repository boundary (no private files)
         run: npm run repo:validate
+      - name: Release review pin matches public/ (else the Pages deploy refuses it after merging)
+        run: npm run release:validate
