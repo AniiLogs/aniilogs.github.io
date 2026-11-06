@@ -712,9 +712,14 @@ test("every real teammate gets a row; only a UID recorded with the run claims it
   assert.equal((await send(a, run("t1", { gameUid: "302000000001", boss: sherro, score: 14000, stars: 14, players: [
     { name: "MinMax", self: true, ai: false }, { name: "Kaela", ai: false, uid: "302000000002" },
     { name: "Rook", ai: false }, { name: "Tammy", ai: true }] }))).status, 201);
-  const board = async () => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries;
+  const board = async (unlinked = "1") => (await (await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=${unlinked}`)).json()).bosses.find((x) => x.id === "80000109").entries;
   assert.deepEqual((await board()).map((e) => [e.player, e.score, e.uid, e.unclaimed]),
     [["MinMax", 14000, "302000000001", false], ["Kaela", 14000, null, true], ["Rook", 14000, null, true]]);   // no AI row
+  // without "Show unlinked" the board lists linked players only
+  assert.deepEqual((await board("0")).map((e) => e.player), ["MinMax"]);
+  const linkedRuns = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries.map((e) => e.player);
+  const allRuns = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&unlinked=1")).json()).entries.map((e) => e.player);
+  assert.deepEqual([linkedRuns.sort(), allRuns.sort()], [["MinMax"], ["Kaela", "MinMax", "Rook"]]);
 
   // someone proves the name "Rook" later: a name alone claims nothing, so Rook's row stays where it is
   await link(c, "302000000099", "Rook");
@@ -750,7 +755,7 @@ test("two app users sending the same run vouch for each other: each teammate slo
   // a different run (another score) sent by someone else is not the same run
   await send(c, run("x1", { ...shared, score: 15000, gameUid: "302000000003", players: [{ name: "Rook", ai: false, self: true }, { name: "MinMax", ai: false }] }));
 
-  const entries = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000100").entries;
+  const entries = (await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json()).bosses.find((x) => x.id === "80000100").entries;
   // MinMax and Kaela once each (their teammate rows merged into their own), plus Rook's run with its unclaimed MinMax row
   assert.deepEqual(entries.map((e) => [e.player, e.score, e.unclaimed]).sort(),
     [["Kaela", 16064, false], ["MinMax", 15000, true], ["MinMax", 16064, false], ["Rook", 15000, false]].sort());
@@ -914,7 +919,7 @@ test("boss boards show each player's one best run, its Battle Data and its pictu
   // run 1: best score; run 2: a clear, and my best DPS; Kaela's numbers come from the runs she was in
   const high = await send("r1", { stars: 16, score: 20000 }, [{ avgDps: 15000, breakValue: 280000, damageTaken: 4000, heal: 0 }, { avgDps: 16000, heal: 900 }]);
   const fast = await send("r2", { stars: 15, score: 16000, cleared: true, clearTimeS: 140 }, [{ avgDps: 19000, breakValue: 200000, damageTaken: 6000, heal: 50 }, { avgDps: 12000, heal: 1200 }]);
-  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json();
   const rows = week.bosses.find((b) => b.id === "80000109").entries;
   const me = rows.find((e) => e.player === "DevOne");
   // one run per row, the best (most stars, then score): all its figures and its pictures, never another run's
@@ -924,7 +929,7 @@ test("boss boards show each player's one best run, its Battle Data and its pictu
   assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 900, high, high]);
 
   // "All runs" ranks by those stats too: each player's own card, their best run for it
-  const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}`)).json()).entries;
+  const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}&unlinked=1`)).json()).entries;
   assert.deepEqual((await all("p_dps")).map((e) => [e.player, e.avgDps]), [["DevOne", 19000], ["Kaela", 16000]]);
   assert.deepEqual((await all("p_heal")).map((e) => [e.player, e.heal]), [["Kaela", 1200], ["DevOne", 50]]);
   assert.deepEqual((await all("p_break")).map((e) => [e.player, e.breakValue, e.submissionId]), [["DevOne", 280000, high]]);

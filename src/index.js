@@ -3797,6 +3797,14 @@ const CREDITED_RUNS = `(
 // A record from an account with no character yet (its app couldn't read the name) stays saved and shows up under the
 // name once that player's app links one - nobody is listed as a generic "Pathfinder".
 const NAMED_ON_BOARDS = "(s.teammate IS NOT NULL OR EXISTS (SELECT 1 FROM game_characters named WHERE named.discord_id = s.who AND named.character_name IS NOT NULL))";
+// By default the boards list linked players only: an aLogs account with a character, and a teammate whose UID a run
+// recorded. "Show unlinked" (?unlinked=1) adds everyone else - a teammate known only by the name read off the screen,
+// and an account whose app never read its character's name - so doubles and misread names can be found (the owner,
+// 6 Nov).
+function onBoards(unlinked, alias = "s") {
+  const named = NAMED_ON_BOARDS.replaceAll("s.who", `${alias}.who`).replaceAll("s.teammate", `${alias}.teammate`);
+  return unlinked ? "1 = 1" : `(${named} AND ${alias}.who NOT LIKE 'name:%')`;
+}
 
 // Whether a name nobody claimed looks like a claimed character's name (same skeleton): the boards mark it, since only a
 // UID tells two such players apart. A name is never matched to a UID - only a UID recorded with the run is.
@@ -4185,7 +4193,7 @@ function clearedSql(kind, list = []) {
 // everything on their row (score, clear, DPS, BREAK, damage, healing, team DPS) is that run's, its pictures the proof
 // for all of it (the owner, 2 Nov: a row is one run, not each figure's best from a different run). With each
 // player's in-game name and public profile id (if public).
-async function interlinkBests(env, cycles, list, server = null) {
+async function interlinkBests(env, cycles, list, server = null, unlinked = false) {
   if (!cycles.length) return [];
   const { results } = await env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, s.boss_name AS bossName, s.run_score AS score, s.stars,
@@ -4212,7 +4220,7 @@ async function interlinkBests(env, cycles, list, server = null) {
            FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_RUNS} c) r
            WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}
-             AND ${NAMED_ON_BOARDS.replaceAll("s.who", "r.who").replaceAll("s.teammate", "r.teammate")}) s
+             AND ${onBoards(unlinked, "r")}) s
      WHERE s.pick = 1`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
   // a teammate's name nobody claimed yet: marked when it looks like a claimed one
@@ -4280,6 +4288,7 @@ async function interlinkBoards(request, env) {
   const list = await interlinkCycles(env);
   const server = String(params.get("server") || "").trim().slice(0, 40) || null;
   const servers = await gameServers(env, "interlink");
+  const unlinked = params.get("unlinked") === "1";            // "Show unlinked": everyone's records, not only linked players
   const weeks = list.map(publicCycle);
   const seasonParam = params.get("season");
   if (seasonParam !== null) {
@@ -4292,7 +4301,7 @@ async function interlinkBoards(request, env) {
     const cycles = inSeason.filter((cycle) => split === null || interlinkSplitOf(cycle.id) === split).map((cycle) => cycle.id);
     if (!inSeason.length) return json({ error: "Unknown season." }, 404);
     const players = new Map();
-    for (const row of await interlinkBests(env, cycles, list, server)) {
+    for (const row of await interlinkBests(env, cycles, list, server, unlinked)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
         total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt, updatedAt: row.firstAt };
@@ -4319,7 +4328,7 @@ async function interlinkBoards(request, env) {
   }
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
-  const rows = await interlinkBests(env, [cycle.id], list, server);
+  const rows = await interlinkBests(env, [cycle.id], list, server, unlinked);
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
     const { runId, hasProof } = row; delete row.runId; delete row.hasProof;
     row.proofIds = hasProof ? Object.fromEntries(Object.entries(ROW_FIGURES)
@@ -4403,7 +4412,7 @@ async function leaderboardEntries(request, env) {
   if (params.get("mine") === "1" && account) {
     where.push("s.who = ?");
     binds.push(account.discordId);
-  } else where.push(NAMED_ON_BOARDS);   // your own list shows everything; the boards only players with a name
+  } else where.push(onBoards(params.get("unlinked") === "1"));   // your own list shows everything; the boards linked players
   const sortKey = Object.hasOwn(LEADERBOARD_SORTS, params.get("sort") || "")
     ? params.get("sort")
     : LEADERBOARD_DEFAULT_SORT[kind] || "score";

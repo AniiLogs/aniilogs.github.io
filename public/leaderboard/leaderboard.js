@@ -71,7 +71,7 @@
     boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"),
-    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), unlinked: $("[data-unlinked]"),
     interlink: $("[data-interlink]"), tableWrap: $("[data-table-wrap]"),
   };
   const state = {
@@ -118,6 +118,8 @@
   function nameMarks(entry) {
     return [
       entry.unclaimed ? el("span", { class: "lb-mark", title: "From a teammate's run. Not claimed: no UID was recorded for this player with the run.", text: "unclaimed" }) : null,
+      // shown with "Show unlinked": an app user whose character name was never read (no UID to show either)
+      !entry.unclaimed && !entry.uid && state.unlinked && entry.player === "Pathfinder" ? el("span", { class: "lb-mark", title: "An aLogs user whose app hasn't read their character's name yet.", text: "no character" }) : null,
       entry.lookalike ? el("span", { class: "lb-mark lb-lookalike", title: "This name looks like a claimed player's name but isn't theirs. Only the UID tells players apart.", text: "≈" }) : null,
     ];
   }
@@ -152,6 +154,7 @@
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
     state.season = params.get("season") || ""; state.split = params.get("split") || ""; state.rank = params.get("rank") === "stars" ? "stars" : "score";
     state.server = params.get("server") || "";
+    state.unlinked = params.get("unlinked") === "1"; els.unlinked.checked = state.unlinked;
     for (const name of ["cycle", "boss", "level", "difficulty", "trial", "style", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
@@ -164,6 +167,7 @@
   function query() {
     const params = new URLSearchParams({ mode: state.mode, kind: state.kind });
     if (state.server) params.set("server", state.server);              // every board: one game server, or all
+    if (state.unlinked) params.set("unlinked", "1");                   // every board: everyone's records, not only linked players
     if (board().custom === "boss") {
       if (state.week) params.set("week", state.week);
       if (state.viewBoss) {
@@ -767,6 +771,7 @@
     state.ladders[key] = ladderOf(ladderId).id;
     const ask = new URLSearchParams({ cycle: cycleId, boss: bossId, ladder: state.ladders[key], limit: String(BOARD_ROWS) });
     if (state.server) ask.set("server", state.server);
+    if (state.unlinked) ask.set("unlinked", "1");
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
     const boss = response.ok ? markPairs(await response.json()).bosses?.[0] : null;
     const old = els.interlink.querySelector(`[data-week="${CSS.escape(cycleId)}"][data-board-id="${CSS.escape(bossId)}"]`);
@@ -926,6 +931,7 @@
   async function loadInterlink(requestId) {
     const ask = new URLSearchParams();
     if (state.server) ask.set("server", state.server);
+    if (state.unlinked) ask.set("unlinked", "1");
     const get = async (params) => {
       const response = await apiFetch(`/leaderboard/interlink?${params}`);
       return response.ok ? markPairs(await response.json()) : null;
@@ -1088,6 +1094,7 @@
   els.filters.addEventListener("change", (event) => { if (pickers.has(event.target)) onFilter(event.target); });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
+  els.unlinked.addEventListener("change", () => { state.unlinked = els.unlinked.checked; state.offset = 0; void loadEntries(); });
   // a board opened with "View all" pages by FULL_ROWS, the record boards by PAGE_SIZE
   const pageSize = () => (board().custom ? FULL_ROWS : PAGE_SIZE);
   els.prev.addEventListener("click", () => {
