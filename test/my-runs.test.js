@@ -60,3 +60,19 @@ test("the Interlink card: the current season part, its weeks as a tree (week > b
   assert.match(app, /runsOpen: !publicId \|\| \(Array\.isArray\(overview\.parts\) && overview\.parts\.includes\("history"\)\)/u);
   assert.match(app, /new URLSearchParams\(\{ page: "1", limit: "50", mode: "interlink", boss: boss\.id, cycle: week\.cycle \}\)/u);
 });
+
+test("every row that opens on the profile shows whether it is open: a turning chevron, aria-expanded, an accent bar", () => {
+  const styles = read("public/styles.css");
+  assert.match(app, /const sync = \(\) => summary\.setAttribute\("aria-expanded", String\(details\.open\)\);/u);
+  // the Interlink weeks and bosses and the Battle History runs all use it
+  assert.match(app, /details\.append\(summary\);\s*disclosure\(details\);\s*const bosses/u);
+  assert.match(app, /inner\.append\(head, holder\);\s*disclosure\(inner\);/u);
+  assert.match(app, /summary\.append\(title, numbers, chips\);\s*details\.append\(summary\);\s*disclosure\(details\);/u);
+  assert.match(styles, /\.disclosure\[open\] > summary \.disclosure-chevron \{ transform: rotate\(90deg\);/u);
+  assert.match(styles, /\.disclosure\[open\] > summary \{[^}]*box-shadow: inset 3px 0 0 var\(--teal\);/u);
+  // a run's party: a block per player, the lead not repeated among the team chips
+  assert.match(app, /if \(leadAt >= 0\) team\.splice\(leadAt, 1\);/u);
+  assert.doesNotMatch(app, /"Team: "/u);
+  // Battle Data in a narrow card: labelled figures, no sideways scroll
+  assert.match(styles, /@container \(max-width: 459px\) \{\s*\.history-party, \.history-party tbody, \.history-party tr \{ display: block; \}/u);
+});

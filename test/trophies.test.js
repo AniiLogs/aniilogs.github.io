@@ -177,6 +177,44 @@ test("trophies follow the profile's leaderboard standing: public, Custom without
   assert.equal((await (await call(env, "/api/profile/overview", SESSIONS.alpha)).json()).trophies, null);
 });
 
+test("the owner picks which trophies visitors see: all by default, hidden ones never sent, bad ids refused", async () => {
+  const { env, sqlite } = await setup();
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubtroph1' WHERE discord_id = ?").run(IDS.alpha);
+  const save = (body, session = SESSIONS.alpha) => worker.fetch(new Request("https://api.aniilogs.example/api/profile/trophies", {
+    method: "PUT", body: JSON.stringify(body),
+    headers: { origin: ORIGIN, "content-type": "application/json", ...(session ? { authorization: `Bearer ${session}` } : {}) },
+  }), env);
+  const own = async () => (await (await call(env, "/api/profile/overview", SESSIONS.alpha)).json());
+  const visitor = async () => (await (await call(env, "/api/profiles/pubtroph1")).json()).trophies.map((trophy) => trophy.id);
+  // default: every trophy shows, nothing hidden
+  const all = (await own()).trophies.map((trophy) => trophy.id);
+  assert.deepEqual((await own()).hiddenTrophies, []);
+  assert.deepEqual(await visitor(), all);
+  // the owner hides one: visitors never receive it, the owner still has it (and the list)
+  assert.equal((await save({ hidden: ["interlink-dps"] }, "")).status, 401);
+  const saved = await save({ hidden: ["interlink-dps", "interlink-dps", "sim-9-gone"] });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).hidden, ["interlink-dps", "sim-9-gone"]);       // a trophy not earned yet may be listed
+  assert.deepEqual(await visitor(), all.filter((id) => id !== "interlink-dps"));
+  const shown = await (await call(env, "/api/profiles/pubtroph1")).json();
+  assert.equal(JSON.stringify(shown).includes("interlink-dps"), false);
+  assert.equal(shown.hiddenTrophies, undefined);
+  assert.deepEqual((await own()).trophies.map((trophy) => trophy.id), all);
+  assert.deepEqual((await own()).hiddenTrophies, ["interlink-dps", "sim-9-gone"]);
+  // bad ids and shapes are refused and change nothing
+  for (const body of [{ hidden: ["Interlink DPS"] }, { hidden: "interlink-dps" }, { hidden: [42] }, { hidden: ["x".repeat(65)] }, {},
+    { hidden: Array.from({ length: 101 }, (_, i) => `t-${i}`) }]) {
+    assert.equal((await save(body)).status, 400, JSON.stringify(body).slice(0, 40));
+  }
+  assert.deepEqual((await own()).hiddenTrophies, ["interlink-dps", "sim-9-gone"]);
+  // other preferences are kept; an empty list shows everything again
+  sqlite.prepare(`UPDATE profiles SET preferences_json = json_set(preferences_json, '$.theme', json('{"id":"pawney"}')) WHERE discord_id = ?`).run(IDS.alpha);
+  assert.deepEqual((await (await save({ hidden: [] })).json()).hidden, []);
+  assert.deepEqual(await visitor(), all);
+  const prefs = JSON.parse(sqlite.prepare("SELECT preferences_json FROM profiles WHERE discord_id = ?").get(IDS.alpha).preferences_json);
+  assert.deepEqual([prefs.theme.id, prefs.hiddenTrophies], ["pawney", undefined]);
+});
+
 test("the Trophies card: a profile panel of tiles, placement linking to the board, the shared proof viewer", () => {
   const read = (path) => readFileSync(resolve(import.meta.dirname, "..", path), "utf8").replaceAll("\r\n", "\n");
   const home = read("public/index.html");
@@ -184,7 +222,12 @@ test("the Trophies card: a profile panel of tiles, placement linking to the boar
   const viewer = read("public/proof-viewer.js");
   // one of the grid's cards (so Arrange cards takes it in), hidden until there is a trophy
   assert.match(home, /<div class="profile-overview-grid">\s*<article class="profile-panel profile-trophies" data-overview-panel="trophies" hidden>/u);
-  assert.match(app, /renderTrophies\(overview\.leaderboards \? overview\.trophies : null\);/u);
+  assert.match(app, /renderTrophies\(overview\.leaderboards \? overview\.trophies : null, \{ owner: !publicId, hidden: overview\.hiddenTrophies \}\);/u);
+  // the owner's Choose trophies: a switch per tile, saved to /api/profile/trophies; visitors get no toolbar
+  assert.match(app, /apiFetch\("\/profile\/trophies", \{\s*method: "PUT",/u);
+  assert.match(app, /body: JSON\.stringify\(\{ hidden: \[\.\.\.trophyCard\.draft\] \}\)/u);
+  assert.match(app, /box\.dataset\.trophyKey = trophy\.id;/u);
+  assert.match(app, /if \(!trophyCard\.owner\) \{ bar\?\.remove\(\); return; \}/u);
   assert.match(app, /panel\.hidden = !list\.length;/u);
   assert.match(app, /link\.href = `\/leaderboard\/\?\$\{new URLSearchParams\(trophy\.board \|\| \{\}\)\}`;/u);
   assert.match(app, /window\.AniilogsProof\.button\(proof\.id, proof\.check \|\| null, proof\.menuId \|\| null, \{ shot: proof\.shot, note \}\)/u);
