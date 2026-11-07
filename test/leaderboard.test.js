@@ -777,7 +777,7 @@ test("two app users sending the same run vouch for each other: each teammate slo
   assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side
 });
 
-test("a run that ties the menu's best doesn't take its row; its pictures are added to the menu proof and the other ladders", async () => {
+test("a menu best that matches a run's score goes onto that run: the run keeps the row and opens with the menu picture", async () => {
   const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
   const token = await desktopToken(env, SESSIONS.dev);
   const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
@@ -802,12 +802,25 @@ test("a run that ties the menu's best doesn't take its row; its pictures are add
   const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
     .find((e) => e.player === "MinMax");
   assert.equal(row.score, 25000);
-  assert.equal(row.proofId, menuId);                        // the score ladder: the first in keeps its picture
-  assert.equal(row.avgDps, 9000);                           // the DPS ladder: the run's figure, and its pictures
-  assert.equal(row.proofIds.dps, tieId);
-  const details = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
-  assert.equal(details.menu, true);
-  assert.equal(details.runProof, tieId);                    // the tying run's result screen and Battle Data come with it
+  assert.equal(row.proofId, tieId);                         // the run's row, though the menu best came first
+  assert.equal(row.clearTimeS, 150);
+  assert.equal(row.avgDps, 9000);
+  assert.equal(row.menuProofId, menuId);                    // its pictures open with the menu's
+  // a higher menu best gets a row of its own, with the run's pictures beside it
+  const higher = new FormData();
+  higher.set("submission", JSON.stringify({ kind: "interlink_best", clientRunId: "best-3005-80000109-b", cycle: "3005", boss: sherro, score: 26000, stars: 20 }));
+  higher.set("evidence", jpeg(5), "menu.jpg");
+  const higherSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: higher });
+  assert.ok([200, 201].includes(higherSent.status), String(higherSent.status));
+  const higherId = (await higherSent.json()).submissionId;
+  const row2 = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
+    .find((e) => e.player === "MinMax");
+  assert.equal(row2.score, 26000);
+  assert.equal(row2.proofId, higherId);
+  assert.equal(row2.menuProofId, undefined);
+  assert.equal(row2.proofIds.dps, tieId);                   // the DPS ladder: the run's figure and pictures
+  const details = await (await call(env, `/api/leaderboard/submissions/${higherId}/evidence?shot=list`)).json();
+  assert.equal(details.runProof, tieId);
 });
 
 test("a menu best's viewer shows the run a teammate's app sent for that player, as the boards do", async () => {
@@ -833,8 +846,8 @@ test("a menu best's viewer shows the run a teammate's app sent for that player, 
     players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false, uid: "302000000001", avgDps: 9000 }] }, [["evidence", 2], ["battle", 3]]);
   const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
     .find((e) => e.player === "MinMax");
-  assert.equal(row.proofId, menuId);
-  assert.equal(row.proofIds.clear, runId);
+  assert.equal(row.proofId, runId);                         // the tying run a teammate's app sent keeps the row
+  assert.equal(row.menuProofId, menuId);
   const details = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
   assert.equal(details.runProof, runId);                    // the same run the clear ladder shows
 });

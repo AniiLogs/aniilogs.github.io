@@ -4217,7 +4217,8 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
        s.created_at AS firstAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
-             ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC, r.created_at ASC) AS pick
+             ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
+               CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.created_at ASC) AS pick
            FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_RUNS} c) r
            WHERE r.status = 'visible' AND r.kind IN (${kinds})${proofOnly ? " AND r.evidence_key IS NOT NULL AND COALESCE(r.outcome, '') <> 'invalid'" : ""} AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}
@@ -4225,9 +4226,18 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
      WHERE s.pick = 1`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
   const { results } = await bests("'interlink_run', 'interlink_best'", false);
-  // A row is the first record of its best score - the score ladder shows its picture (the owner, 7 Nov). When that's a
-  // best sent from the game's menu (score and stars only), the other figures and their pictures come from the player's
-  // best run with pictures of that boss and week, so the DPS, clear, BREAK, damage and healing ladders show that run.
+  // A best sent from the game's menu that matches a run's score goes onto that run: the run keeps the row, and its
+  // pictures open with the menu's (menuProofId). Only a menu best higher than every run (or with no run at all) has
+  // a row of its own (the owner, 7 Nov). Such a row's other figures and their pictures come from the player's best
+  // run with pictures of that boss and week, so the DPS, clear, BREAK, damage and healing ladders show that run.
+  if ((results || []).some((row) => row.kind === "interlink_run")) {
+    const menus = new Map(((await bests("'interlink_best'", true)).results || [])
+      .map((menu) => [`${menu.discordId}|${menu.cycle}|${menu.bossId}`, menu]));
+    for (const row of results || []) {
+      const menu = row.kind === "interlink_run" && menus.get(`${row.discordId}|${row.cycle}|${row.bossId}`);
+      if (menu && menu.stars === row.stars && menu.score === row.score) row.menuProofId = menu.runId;
+    }
+  }
   if ((results || []).some((row) => row.kind === "interlink_best")) {
     const runs = new Map(((await bests("'interlink_run'", true)).results || [])
       .map((run) => [`${run.discordId}|${run.cycle}|${run.bossId}`, run]));
