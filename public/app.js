@@ -1024,8 +1024,29 @@ function placeCards(list) {
   for (const card of list) {
     const panel = cardPanel(card.id);
     panel.classList.toggle("is-arranged-off", card.hidden);
+    for (const width of window.AniiProfileCards.WIDTHS) panel.classList.toggle(`card-w${width}`, card.width === width && width > 1);
+    for (const height of window.AniiProfileCards.HEIGHTS) if (height) panel.classList.toggle(`card-h-${height}`, card.height === height);
     cardGrid.append(panel);
   }
+  fitCardHeights();
+}
+// By default no card is taller than the Collection card: its content's height (not the row's) caps the others.
+const HEIGHT_REFERENCE = "collection";
+function fitCardHeights() {
+  const reference = cardPanel(HEIGHT_REFERENCE);
+  const shown = reference && !reference.hidden && !reference.classList.contains("is-arranged-off") && reference.offsetParent;
+  if (!shown) { cardGrid.style.removeProperty("--profile-card-max"); return; }
+  const last = [...reference.children].filter((node) => node.offsetParent).at(-1);
+  if (!last) return;
+  const pad = parseFloat(getComputedStyle(reference).paddingBottom) || 0;
+  const height = Math.ceil(last.getBoundingClientRect().bottom - reference.getBoundingClientRect().top + reference.scrollTop + pad);
+  if (height > 120) cardGrid.style.setProperty("--profile-card-max", `${height}px`);
+}
+if (cardPanel(HEIGHT_REFERENCE)) {
+  const reference = cardPanel(HEIGHT_REFERENCE);
+  reference.classList.add("is-height-reference");
+  new ResizeObserver(() => fitCardHeights()).observe(reference.querySelector("[data-overview-body]"));
+  window.addEventListener("resize", () => fitCardHeights());
 }
 function applyCardLayout(layout) {
   savedLayout = layout || { order: [], hidden: [] };
@@ -1051,10 +1072,33 @@ function arrangeTools(card, index, count) {
     renderDraft(card.id);
   });
   toggle.setAttribute("aria-pressed", String(card.hidden));
+  const choice = (label, value, options, change) => {
+    const select = element("select", "profile-card-size");
+    select.setAttribute("aria-label", `${label}: ${card.title}`);
+    select.title = label;
+    for (const [optionValue, text] of options) {
+      const option = element("option", "", text);
+      option.value = String(optionValue);
+      option.selected = optionValue === value;
+      select.append(option);
+    }
+    select.addEventListener("change", () => {
+      draftCards = draftCards.map((item) => (item.id === card.id ? change(item, select.value) : item));
+      renderDraft();
+      cardPanel(card.id).querySelector(`[data-card-tools] select[title="${label}"]`)?.focus();
+    });
+    return select;
+  };
+  const isReference = card.id === HEIGHT_REFERENCE;
+  const width = choice("Width", card.width, [[1, "1 column"], [2, "2 columns"], [3, "3 columns"]],
+    (item, value) => ({ ...item, width: Number(value) }));
+  const height = choice("Max height", card.height, [["", isReference ? "Height: fits (sets the others)" : "Height: like Collection"],
+    ["short", "Height: short"], ["medium", "Height: medium"], ["tall", "Height: tall"], ["none", "Height: no limit"]],
+    (item, value) => ({ ...item, height: value }));
   tools.append(handle,
     button("Move up", "↑", () => { draftCards = window.AniiProfileCards.moveCard(draftCards, card.id, { step: -1 }); renderDraft(card.id, "up"); }, index === 0),
     button("Move down", "↓", () => { draftCards = window.AniiProfileCards.moveCard(draftCards, card.id, { step: 1 }); renderDraft(card.id, "down"); }, index === count - 1),
-    toggle);
+    toggle, width, height);
   if (card.hidden) tools.append(element("span", "profile-card-hidden-label", "Hidden"));
   return tools;
 }

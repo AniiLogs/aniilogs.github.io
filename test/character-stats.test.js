@@ -249,6 +249,12 @@ test("the owner arranges the profile's cards; a card added later shows up withou
   const saved = await layout({ order: ["sim", "interlink", "fake-new-card", "sim"], hidden: ["photos"] });
   assert.deepEqual((await saved.json()).layout, { order: ["sim", "interlink", "fake-new-card"], hidden: ["photos"] });
   assert.deepEqual((await overview()).layout, { order: ["sim", "interlink", "fake-new-card"], hidden: ["photos"] });
+  // a card's width and max height ride along; bad sizes are refused
+  const sized = await layout({ order: ["sim"], hidden: [], widths: { sim: 3 }, heights: { interlink: "tall" } });
+  assert.deepEqual((await sized.json()).layout, { order: ["sim"], hidden: [], widths: { sim: 3 }, heights: { interlink: "tall" } });
+  assert.equal((await layout({ order: [], hidden: [], widths: { sim: 4 } })).status, 400);
+  assert.equal((await layout({ order: [], hidden: [], heights: { sim: "huge" } })).status, 400);
+  await layout({ order: ["sim", "interlink", "fake-new-card"], hidden: ["photos"] });
   assert.equal((await layout({ order: ["Bad Id"] })).status, 400);
   assert.equal((await layout({ order: "sim" })).status, 400);
   // the public view shows the owner's arrangement; "own" only for the owner

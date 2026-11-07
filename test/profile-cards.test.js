@@ -43,3 +43,16 @@ test("moving: up and down stop at the ends; drag drops at an index", () => {
   assert.deepEqual(ids(moveCard(list, "interlink", { to: 3 })), ["sim", "eggheist", "collection", "interlink", "photos"]);
   assert.deepEqual(ids(moveCard(list, "nope", { step: 1 })), ids(list));
 });
+
+test("sizes: a card's width (1-3 columns) and max height are kept with the layout; defaults save nothing", () => {
+  const list = arrangeCards(CARDS, null);
+  assert.deepEqual(list.map((card) => [card.width, card.height]), CARDS.map(() => [1, ""]));
+  const sized = list.map((card) => (card.id === "sim" ? { ...card, width: 3 } : card.id === "photos" ? { ...card, height: "none" } : card));
+  const saved = layoutOf(sized, CARDS);
+  assert.deepEqual(saved, { order: CARDS.map((card) => card.id), hidden: [], widths: { sim: 3 }, heights: { photos: "none" } });
+  const back = arrangeCards(CARDS, saved);
+  assert.deepEqual([back[1].width, back[4].height], [3, "none"]);
+  // anything else saved reads as the default
+  const odd = arrangeCards(CARDS, { widths: { sim: 9 }, heights: { sim: "huge" } });
+  assert.deepEqual([odd[1].width, odd[1].height], [1, ""]);
+});

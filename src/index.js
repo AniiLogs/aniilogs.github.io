@@ -2081,7 +2081,22 @@ function cleanProfileLayout(raw) {
     ? [...new Set(value.map(String))] : null);
   const order = list(raw.order ?? []);
   const hidden = list(raw.hidden ?? []);
-  return order && hidden ? { order, hidden } : null;
+  if (!order || !hidden) return null;
+  // a card's width in columns (2 or 3; 1 is the default) and its tallest height before it scrolls
+  const sizes = (value, allowed) => {
+    if (value === undefined || value === null) return {};
+    if (typeof value !== "object" || Array.isArray(value)) return null;
+    const entries = Object.entries(value);
+    if (entries.length > 32 || !entries.every(([id, size]) => PROFILE_CARD_ID.test(id) && allowed.includes(size))) return null;
+    return Object.fromEntries(entries);
+  };
+  const widths = sizes(raw.widths, [2, 3]);
+  const heights = sizes(raw.heights, ["short", "medium", "tall", "none"]);
+  if (!widths || !heights) return null;
+  const layout = { order, hidden };
+  if (Object.keys(widths).length) layout.widths = widths;
+  if (Object.keys(heights).length) layout.heights = heights;
+  return layout;
 }
 function storedProfileLayout(prefsJson) {
   try {
@@ -2091,7 +2106,7 @@ function storedProfileLayout(prefsJson) {
   }
 }
 
-// PUT /api/profile/layout {order, hidden}: the owner's arrangement; empty lists put it back to the site's default.
+// PUT /api/profile/layout {order, hidden, widths?, heights?}: the owner's arrangement; empty lists put it back to the site's default.
 async function saveProfileLayout(request, env) {
   if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await currentAccount(request, env);
@@ -2103,9 +2118,9 @@ async function saveProfileLayout(request, env) {
     return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
   }
   const layout = cleanProfileLayout(body);
-  if (!layout) return json({ error: "layout must be { order, hidden }: lists of card ids." }, 400);
+  if (!layout) return json({ error: "layout must be { order, hidden }: lists of card ids, with optional widths (2 or 3) and heights (short, medium, tall, none)." }, 400);
   const now = Math.floor(Date.now() / 1000);
-  const empty = !layout.order.length && !layout.hidden.length;
+  const empty = !layout.order.length && !layout.hidden.length && !layout.widths && !layout.heights;
   await env.DB.prepare(
     `INSERT INTO profiles (discord_id, display_name, bio, is_public, public_id, created_at, updated_at, preferences_json)
      VALUES (?1, NULL, NULL, 1, lower(hex(randomblob(8))), ?2, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE json_object('profileLayout', json(?3)) END)
