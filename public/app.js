@@ -404,6 +404,13 @@ function interlinkWeek(week, { publicId, runsOpen }) {
 }
 function renderInterlink(boards, { publicId = null, runsOpen = false } = {}) {
   const body = overviewBody("interlink");
+  // an API from before the season parts: its season standing alone
+  const season = boards.interlinkSeason;
+  if (boards.interlinkParts === undefined && season?.total) {
+    body.replaceChildren(interlinkPartLine({ label: `Season ${season.season}`, season: season.season, split: "", total: season.total, stars: season.stars,
+      weeksPlayed: season.weeks, rank: season.rank, players: season.players }, { current: true }));
+    return;
+  }
   const parts = boards.interlinkParts;
   if (!parts || (!parts.current?.weeksPlayed && !parts.previous?.length)) {
     body.replaceChildren(element("p", "", "No Interlink scores yet. The desktop app sends them after each boss fight."));
