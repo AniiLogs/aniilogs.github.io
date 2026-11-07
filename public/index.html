@@ -20,7 +20,8 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.14.3-type-to-filter">
+    <link rel="stylesheet" href="/styles.css?v=0.15.0-my-runs">
+    <link rel="stylesheet" href="/proof-viewer.css?v=0.1.0">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261104-build3857679-chests-r87" defer></script>
     <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
@@ -29,7 +30,8 @@
     <script src="/aniimo-link.js?v=0.1.1" defer></script>
     <script src="/profile-cards.js?v=0.1.0" defer></script>
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
-    <script src="/app.js?v=0.11.5-two-boss" defer></script>
+    <script src="/proof-viewer.js?v=0.1.0" defer></script>
+    <script src="/app.js?v=0.12.0-my-runs" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -268,14 +270,24 @@
             <h3 id="history-title">Battle History</h3>
             <a class="profile-tool-button" href="/?view=profile" data-history-back>Back to the profile</a>
           </div>
-          <p class="profile-history-intro">Every run captured by aLogs, newest first, including runs a teammate's app captured with this player in the party. The leaderboards keep only each player's best.</p>
+          <p class="profile-history-intro" data-history-intro>Every run captured by aLogs, newest first, including runs a teammate's app captured with this player in the party. The leaderboards keep only each player's best.</p>
           <div class="profile-history-filters">
+            <label class="myruns-search" data-myruns-only hidden><span>Search</span><input type="search" data-history-search placeholder="Boss, teammate, mode or date" autocomplete="off" maxlength="80" enterkeyhint="search"></label>
             <label><span>Mode</span><select data-history-filter="mode"><option value="">All modes</option></select></label>
             <label><span>Boss</span><select data-history-filter="boss"><option value="">All bosses</option></select></label>
             <label><span>Week</span><select data-history-filter="cycle"><option value="">All weeks</option></select></label>
+            <label data-myruns-only hidden><span>Per page</span><select data-history-page-size><option value="20">20</option><option value="30">30</option><option value="50">50</option></select></label>
+          </div>
+          <p class="myruns-summary" data-myruns-summary data-myruns-only hidden></p>
+          <div class="myruns-wrap" data-myruns-only hidden>
+            <table class="myruns-table">
+              <thead><tr><th scope="col">Mode</th><th scope="col">Fight</th><th scope="col">Played</th><th scope="col">Result</th><th scope="col">Party</th><th scope="col">Proof</th></tr></thead>
+              <tbody data-myruns-rows></tbody>
+            </table>
           </div>
           <ol class="profile-history-list" data-history-list></ol>
           <p class="profile-history-status" role="status" aria-live="polite" data-history-status></p>
+          <nav class="myruns-pager" aria-label="My runs pages" data-myruns-pager data-myruns-only hidden></nav>
           <button class="profile-tool-button" type="button" data-history-more hidden>Load more</button>
         </section>
         <div class="profile-directory" data-profile-directory hidden>

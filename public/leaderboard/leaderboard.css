@@ -172,33 +172,6 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-server[hidden] { display: none; }
 .lb-unlinked { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0; color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; cursor: pointer; }
 
-/* the run's screenshot: a camera next to the name, and the viewer */
-.lb-proof { display: inline-grid; width: 1.4rem; height: 1.4rem; place-items: center; margin-left: 4px; padding: 0; border: 0;
-  background: none; color: var(--ink-soft); vertical-align: middle; cursor: pointer; }
-.lb-proof:hover { color: var(--teal); }
-.lb-proof:focus-visible { color: var(--teal); outline: 2px solid var(--teal); outline-offset: 1px; border-radius: 4px; }
-.lb-proof svg { width: 0.95rem; height: 0.95rem; }
-.lb-proof-dialog { width: min(1280px, calc(100vw - 2rem)); padding: 0; border: 1px solid var(--line); border-radius: 14px;
-  background: rgb(var(--panel-rgb)); color: var(--ink); box-shadow: var(--shadow); }
-.lb-proof-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-.lb-proof-dialog form { position: absolute; top: 6px; right: 6px; margin: 0; }
-.lb-proof-close { width: 2rem; height: 2rem; border: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 1.3rem; line-height: 1; cursor: pointer; }
-.lb-proof-body { display: grid; min-height: 120px; place-items: center; }
-.lb-proof-image { display: block; width: 100%; height: auto; border-radius: 14px; }
-
-/* what each player went in with, under the pictures (and in an expanded row) */
-.lb-proof-party { padding: 4px 12px 12px; font-size: 0.88rem; }
-.lb-party-players { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.lb-party-players li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
-.lb-party-lead { font-weight: 650; }
-.lb-party-team, .lb-party-buffs { color: var(--ink-soft); }
-.lb-party-buffs { margin: 6px 0 0; }
-.lb-proof-dialog { width: auto; max-width: min(1280px, 96vw); }
-.lb-proof-image { max-height: 78vh; width: auto; max-width: 100%; }
-
-.lb-proof-tabs { display: flex; gap: 6px; padding: 8px 52px 8px 10px; }
-.lb-proof-tabs button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
-.lb-proof-tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
 
 
 /* Egg Heist: the Ladders dropdown in place of board tabs (styled like the other board dropdowns) */
@@ -234,15 +207,6 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   .lb-pager { gap: 0.5rem; }
 }
 
-/* The run check's badge: Verified (read again and agrees) or Pending (waiting for that check) */
-.lb-check { display: inline-grid; place-items: center; min-width: 1.5em; height: 1.5em; margin-left: 6px; border-radius: 999px; font-size: 0.72em;
-  font-weight: 900; line-height: 1; vertical-align: middle; cursor: help; white-space: nowrap; }
-.lb-check.is-verified { background: color-mix(in srgb, #3ddc84 20%, transparent); color: color-mix(in srgb, #3ddc84 75%, var(--text)); }
-.lb-check.is-pending { background: color-mix(in srgb, #f2c230 22%, transparent); color: color-mix(in srgb, #f2c230 80%, var(--text)); font-family: Georgia, serif; font-style: italic; }
-.lb-check.is-pending, .lb-check.is-invalid { box-shadow: inset 0 0 0 1.5px currentColor; }   /* a drawn circle round the i and the x */
-.lb-check.is-invalid { background: color-mix(in srgb, #ef5350 22%, transparent); color: color-mix(in srgb, #ef5350 80%, var(--text)); }
-.lb-check-legend .lb-check { margin: 0 2px 0 0; }
-.lb-proof-tabs .lb-check { align-self: center; margin-left: auto; font-size: 0.8rem; }
 
 /* Interlink: Per Boss (three boards, one a phone at a time) and Season Ladder */
 .lb-interlink { --lb-left: #6fa8ff; --lb-center: #f2a93b; --lb-right: #c792ff; display: grid; gap: 0.8rem; margin-bottom: 0.8rem; }

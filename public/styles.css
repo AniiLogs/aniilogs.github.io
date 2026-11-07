@@ -579,6 +579,64 @@ body.profile-history-view .profile-arrange-bar, body.profile-history-view [data-
   .profile-history-filters select, .profile-history-filters .aniimo-picker-input { min-width: 0; width: 100%; }
   .profile-history-filters label { flex: 1 1 100%; }
 }
+/* My runs: your own runs in a table (cards on a phone), search, pages */
+.myruns-search { flex: 1 1 16rem; }
+.myruns-search input { width: 100%; min-height: 36px; padding: 0.3rem 0.7rem; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--cream); color: var(--ink); font: inherit; font-size: 0.9rem; }
+.myruns-search input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.profile-history-filters [data-history-page-size] { min-width: 5rem; }
+.myruns-summary { margin: 0 0 0.5rem; color: var(--ink-soft); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.myruns-summary:empty { display: none; }
+.myruns-wrap { border: 1px solid var(--line); border-radius: 14px; overflow-x: auto; transition: opacity 120ms ease; }
+.profile-history-full.is-loading .myruns-wrap { opacity: 0.6; }
+.myruns-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.myruns-table th { position: sticky; top: 0; padding: 0.5rem 0.7rem; background: rgb(var(--panel-rgb)); color: var(--teal); font-size: 0.68rem;
+  font-weight: 900; letter-spacing: 0.08em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.myruns-table td { padding: 0.55rem 0.7rem; border-top: 1px solid var(--line); color: var(--ink); vertical-align: top; }
+.myruns-table tbody tr:hover { background: color-mix(in srgb, var(--teal) 5%, transparent); }
+.myruns-table tr:target { background: color-mix(in srgb, var(--teal) 12%, transparent); }
+.myruns-mode { color: var(--ink-soft); font-weight: 700; white-space: nowrap; }
+.myruns-fight { display: grid; gap: 0.1rem; min-width: 9rem; }
+.myruns-fight strong { color: var(--ink); }
+.myruns-fight small { color: var(--ink-soft); font-size: 0.76rem; }
+.myruns-played { color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.myruns-result { display: grid; gap: 0.3rem; min-width: 8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.myruns-party { display: grid; gap: 0.3rem; margin: 0; padding: 0; list-style: none; min-width: 17rem; }
+.myruns-party li { display: grid; gap: 0.05rem; }
+.myruns-who { font-weight: 800; }
+.myruns-who a { color: var(--ink); }
+.myruns-who .history-chip { margin-left: 0.35rem; }
+.myruns-stats { display: flex; flex-wrap: wrap; gap: 0.1rem 0.7rem; color: var(--ink); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.myruns-stats > span { white-space: nowrap; }
+.myruns-stats small { color: var(--ink-soft); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+.myruns-table .lb-proof.myruns-proof { display: inline-flex; width: auto; height: auto; gap: 0.35rem; margin: 0; padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink); font: inherit; font-size: 0.8rem; font-weight: 700; white-space: nowrap; }
+.myruns-table .lb-proof.myruns-proof { justify-self: start; }
+.myruns-table .lb-proof.myruns-proof:hover { border-color: var(--teal); color: var(--teal); }
+.myruns-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.35rem; margin-top: 0.9rem; }
+.myruns-pager button { min-width: 2.4rem; min-height: 36px; padding: 0.25rem 0.7rem; border: 1px solid var(--line); border-radius: 10px;
+  background: transparent; color: var(--ink); font: inherit; font-size: 0.86rem; font-weight: 700; cursor: pointer; font-variant-numeric: tabular-nums; }
+.myruns-pager button:hover:not(:disabled) { border-color: var(--teal); color: var(--teal); }
+.myruns-pager button:disabled { opacity: 0.45; cursor: default; }
+.myruns-pager button.is-current { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--ink); opacity: 1; }
+.myruns-gap { color: var(--ink-soft); padding: 0 0.15rem; }
+/* a phone: each run is a card, each cell a labelled line */
+@media (max-width: 900px) {
+  .myruns-wrap { border: 0; overflow: visible; }
+  .myruns-table, .myruns-table tbody, .myruns-table tr, .myruns-table td { display: block; }
+  .myruns-table thead { display: none; }
+  .myruns-table tr { margin-bottom: 0.6rem; padding: 0.4rem 0.75rem 0.6rem; border: 1px solid var(--line); border-radius: 14px; }
+  .myruns-table tr[hidden] { display: none; }
+  .myruns-table td { display: grid; grid-template-columns: 4.6rem minmax(0, 1fr); gap: 0.6rem; padding: 0.3rem 0; border-top: 0; }
+  .myruns-table td::before { content: attr(data-label); color: var(--teal); font-size: 0.66rem; font-weight: 900; letter-spacing: 0.08em;
+    text-transform: uppercase; padding-top: 0.2rem; }
+  .myruns-fight, .myruns-result, .myruns-party { min-width: 0; }
+  .myruns-pager button { min-width: 2.75rem; min-height: 44px; }
+}
+@media (max-width: 560px) {
+  .profile-history-full.is-my-runs .profile-history-filters { gap: 0.5rem 0.6rem; }
+  .profile-history-full.is-my-runs .profile-history-filters label:not(.myruns-search) { flex: 1 1 calc(50% - 0.6rem); min-width: 0; }
+}
 /* Online now and Recently joined, under the profile */
 .profile-directory { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; margin-top: 1rem; }
 .profile-directory-list { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
