@@ -197,7 +197,7 @@ test("the site and the app share Show my online status and the theme, through th
     ? await app(env, token, "/api/account/preferences", body)
     : await worker.fetch(new Request("https://api.aniilogs.example/api/account/preferences", {
       headers: { authorization: `Bearer ${token}`, origin: "http://tauri.localhost" } }), env)).json());
-  assert.deepEqual(await prefs(), { showPresence: true, theme: null });            // defaults
+  assert.deepEqual(await prefs(), { showPresence: true, theme: null, nameShown: "game" });   // defaults
   sqlite.prepare("UPDATE game_characters SET verified_at = 1, presence_state = 'online', presence_at = ? WHERE game_uid = ?")
     .run(Math.floor(Date.now() / 1000), "302000105986");
   assert.equal((await prefs({ showPresence: false })).showPresence, false);        // from the app
@@ -223,7 +223,7 @@ test("the site and the app share Show my online status and the theme, through th
 test("the Profiles page's directory: public profiles only by name, private players online only counted", async () => {
   const { env, sqlite } = await setup();
   const directory = async () => (await (await site(env, "/api/profiles/directory")).json());
-  assert.deepEqual(await directory(), { recent: [], online: { players: [], others: 0 } });
+  assert.deepEqual(await directory(), { recent: [], online: { players: [], others: 0 }, counts: { online: 0, joinedThisWeek: 2 } });
   const now = Math.floor(Date.now() / 1000);
   sqlite.prepare("UPDATE game_characters SET verified_at = 1, presence_state = 'online', presence_at = ?").run(now);
   sqlite.prepare("INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at, verified_at, presence_state, presence_at) VALUES (?, ?, ?, 'meter', ?, ?, 1, 'afk', ?)")
@@ -238,6 +238,71 @@ test("the Profiles page's directory: public profiles only by name, private playe
   sqlite.prepare("UPDATE game_characters SET presence_at = presence_at - 301").run();
   assert.deepEqual((await directory()).online, { players: [], others: 0 });            // nothing heard for 5 minutes
   assert.equal(JSON.stringify(await directory()).includes(IDS.owner), false);
+});
+
+test("the sidebar's counts: everyone online (listed or only counted) and accounts made in the last 7 days", async () => {
+  const { env, sqlite } = await setup();
+  const directory = async () => (await (await site(env, "/api/profiles/directory")).json());
+  const now = Math.floor(Date.now() / 1000);
+  sqlite.prepare("UPDATE profiles SET created_at = ? WHERE discord_id = ?").run(now - 8 * 86400, IDS.other);   // joined last week
+  sqlite.prepare("UPDATE game_characters SET presence_state = 'online', presence_at = ?").run(now);
+  sqlite.prepare("INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at, presence_state, presence_at) VALUES (?, ?, ?, 'meter', ?, ?, 'afk', ?)")
+    .run("302000200001", IDS.other, "Hidden", now, now, now);
+  assert.deepEqual((await directory()).counts, { online: 2, joinedThisWeek: 1 });     // both private: only counted
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pub12345' WHERE discord_id = ?").run(IDS.owner);
+  const open = await directory();
+  assert.deepEqual([open.counts, open.online.players.length, open.online.others], [{ online: 2, joinedThisWeek: 1 }, 1, 1]);
+  sqlite.prepare("UPDATE game_characters SET presence_at = presence_at - 301").run();
+  assert.equal((await directory()).counts.online, 0);
+});
+
+test("Show me by: the in-game name by default, the Discord name only for a player who picks it", async () => {
+  const { env, sqlite } = await setup();
+  const now = Math.floor(Date.now() / 1000);
+  sqlite.prepare("UPDATE users SET discord_global_name = ?, discord_username = ? WHERE discord_id = ?").run("Owner On Discord", "owner_handle", IDS.owner);
+  sqlite.prepare("UPDATE users SET discord_global_name = ?, discord_username = ? WHERE discord_id = ?").run("Other On Discord", "other_handle", IDS.other);
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pub12345' WHERE discord_id = ?").run(IDS.owner);
+  sqlite.prepare("INSERT INTO game_characters (game_uid, discord_id, character_name, source, linked_at, last_seen_at) VALUES (?, ?, ?, 'meter', ?, ?)")
+    .run("302000200001", IDS.other, "OtherChar", now, now);
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pub67890' WHERE discord_id = ?").run(IDS.other);
+  const everywhere = async () => JSON.stringify([
+    await (await site(env, "/api/profiles/directory")).json(),
+    await (await site(env, "/api/profiles/pub12345")).json(),
+    await (await site(env, "/api/profiles/pub67890")).json(),
+    await (await site(env, "/api/profiles/search?q=minmax")).json(),
+    await (await site(env, "/api/profiles/search?q=otherchar")).json(),
+    await (await site(env, "/api/profiles/search?q=discord")).json(),
+    await (await site(env, "/api/profiles/302000105986")).json(),
+  ]);
+  // the default: the in-game name, and no Discord name is ever sent
+  assert.equal((await (await site(env, "/api/profile", { session: SESSIONS.owner })).json()).profile.nameShown, "game");
+  let shown = await everywhere();
+  for (const secret of ["On Discord", "_handle", '"nameSource"']) assert.equal(shown.includes(secret), false, secret);
+  assert.equal((await (await site(env, "/api/profiles/pub12345")).json()).profile.displayName, "MinMax");
+  assert.deepEqual((await (await site(env, "/api/profiles/search?q=discord")).json()).results, []);   // not searchable either
+  // a bad choice is refused
+  const save = (body) => site(env, "/api/profile", { session: SESSIONS.owner, method: "PATCH", body: { displayName: "owner name", ...body } });
+  assert.equal((await save({ nameShown: "username" })).status, 400);
+  assert.equal((await site(env, "/api/account/preferences", { session: SESSIONS.owner, method: "POST", body: { nameShown: true } })).status, 400);
+  // picked in Edit profile: the Discord name with its mark, on the profile, the directory, the search and the owner's own page
+  assert.equal((await (await save({ nameShown: "discord" })).json()).profile.nameShown, "discord");
+  const profile = (await (await site(env, "/api/profiles/pub12345")).json()).profile;
+  assert.deepEqual([profile.displayName, profile.nameSource], ["Owner On Discord", "discord"]);
+  const directory = await (await site(env, "/api/profiles/directory")).json();
+  assert.deepEqual(directory.recent.map((row) => [row.name, row.nameSource || null]).sort(), [["OtherChar", null], ["Owner On Discord", "discord"]]);
+  const byCharacter = (await (await site(env, "/api/profiles/search?q=minmax")).json()).results[0];
+  assert.deepEqual([byCharacter.displayName, byCharacter.nameSource, byCharacter.characters.map((c) => c.name)], ["Owner On Discord", "discord", ["MinMax"]]);
+  assert.deepEqual((await (await site(env, "/api/profiles/search?q=discord")).json()).results.map((row) => row.publicId), ["pub12345"]);
+  const own = (await (await site(env, "/api/profile/overview", { session: SESSIONS.owner })).json()).profile;
+  assert.deepEqual([own.displayName, own.nameSource], ["Owner On Discord", "discord"]);
+  // the other player never picked it: their Discord name never leaves the server
+  shown = await everywhere();
+  assert.equal(shown.includes("Other On Discord"), false);
+  assert.equal(shown.includes("_handle"), false);
+  // back to the in-game name (from the app's preferences this time): gone everywhere
+  assert.equal((await (await site(env, "/api/account/preferences", { session: SESSIONS.owner, method: "POST", body: { nameShown: "game" } })).json()).nameShown, "game");
+  assert.equal((await everywhere()).includes("On Discord"), false);
+  assert.equal(JSON.parse(sqlite.prepare("SELECT preferences_json FROM profiles WHERE discord_id = ?").get(IDS.owner).preferences_json).nameShown, undefined);
 });
 
 test("the owner arranges the profile's cards; a card added later shows up without a server change", async () => {

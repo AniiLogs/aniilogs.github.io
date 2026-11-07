@@ -2240,3 +2240,27 @@ test("every star at the clock's end is Timed Out (the team hit for score until t
   const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((b) => b.id === "80000107").entries[0];
   assert.deepEqual([row.score, row.outcome, row.runTimeS], [20062, "time-up", 180]);   // "Timed Out: 3:00"
 });
+
+test("Show me by: a board row carries the account's Discord name only when its player picked it", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  sqlite.prepare("UPDATE users SET discord_global_name = 'Dev On Discord' WHERE discord_id = ?").run(IDS.dev);
+  sqlite.prepare("UPDATE users SET discord_global_name = 'User On Discord' WHERE discord_id = ?").run(IDS.user);
+  assert.equal((await sendRun(env, await namedToken(env, SESSIONS.dev), run("name-dev", { score: 21000 }))).status, 201);
+  assert.equal((await sendRun(env, await namedToken(env, SESSIONS.user), run("name-user", { score: 15000, players: [{ name: "UserOne" }] }))).status, 201);
+  const boards = async () => [
+    await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json(),
+    await (await call(env, "/api/leaderboard/interlink?season=1")).json(),
+    await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json(),
+  ];
+  const named = (rows) => rows.map((row) => [row.player, row.discordName || null]);
+  // nobody picked it: the in-game names, and no Discord name anywhere
+  assert.equal(JSON.stringify(await boards()).includes("On Discord"), false);
+  // the dev picks their Discord name: their rows carry it (the character name stays), the other player's don't
+  assert.equal((await call(env, "/api/profile", { session: SESSIONS.dev, method: "PATCH", body: { displayName: "Dev", nameShown: "discord" } })).status, 200);
+  const [week, season, entries] = await boards();
+  assert.deepEqual(named(week.bosses.find((boss) => boss.id === "80000107").entries), [["DevOne", "Dev On Discord"], ["UserOne", null]]);
+  assert.deepEqual(named(week.week), [["DevOne", "Dev On Discord"], ["UserOne", null]]);
+  assert.deepEqual(named(entries.entries), [["DevOne", "Dev On Discord"], ["UserOne", null]]);
+  assert.deepEqual(named(season.standings), [["DevOne", "Dev On Discord"], ["UserOne", null]]);
+  assert.equal(JSON.stringify(await boards()).includes("User On Discord"), false);
+});

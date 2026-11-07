@@ -20,21 +20,23 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.17.1-profile">
+    <link rel="stylesheet" href="/styles.css?v=0.17.2-site-sidebar">
     <link rel="stylesheet" href="/proof-viewer.css?v=0.2.0">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
+    <link rel="stylesheet" href="/site-sidebar.css?v=0.1.0">
     <script src="/explorer/app-config.js?v=20261104-build3857679-chests-r87" defer></script>
     <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
+    <script src="/site-sidebar.js?v=0.1.0" defer></script>
     <script src="/aniimo-link.js?v=0.1.1" defer></script>
     <script src="/profile-cards.js?v=0.1.0" defer></script>
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
     <script src="/proof-viewer.js?v=0.2.0" defer></script>
     <script src="/table-sort.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.14.1-profile" defer></script>
+    <script src="/app.js?v=0.14.2-site-sidebar" defer></script>
   </head>
-  <body class="site-chrome-page">
+  <body class="site-chrome-page" data-site-sidebar="profile">
     <div class="sky-speckles" aria-hidden="true"></div>
     <header class="app-topbar" data-chrome-page="home">
       <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
@@ -298,17 +300,6 @@
           <nav class="myruns-pager" aria-label="My runs pages" data-myruns-pager data-myruns-only hidden></nav>
           <button class="profile-tool-button" type="button" data-history-more hidden>Load more</button>
         </section>
-        <div class="profile-directory" data-profile-directory hidden>
-          <article class="profile-panel">
-            <h3>Online now</h3>
-            <ul class="profile-directory-list" data-directory-online></ul>
-            <p class="profile-directory-note" data-directory-others></p>
-          </article>
-          <article class="profile-panel">
-            <h3>Recently joined</h3>
-            <ul class="profile-directory-list" data-directory-recent></ul>
-          </article>
-        </div>
         <form class="profile-editor" data-profile-editor hidden>
           <div class="profile-editor-heading">
             <strong>My profile</strong>
@@ -318,6 +309,16 @@
             <span>Display name</span>
             <input type="text" name="displayName" maxlength="80" autocomplete="nickname" required data-profile-display-name>
           </label>
+          <div class="profile-visibility profile-name-shown" data-profile-name-shown-row hidden>
+            <label>
+              <span>Show me by</span>
+              <select name="nameShown" data-profile-name-shown>
+                <option value="game">My in-game name</option>
+                <option value="discord">My Discord name</option>
+              </select>
+            </label>
+            <small>How the site names you everywhere: your profile, Online now, Recently joined, the player search and your leaderboard rows. In-game name (the default): your main character's name, or your display name while "Let players find me by my display name" is on. Discord name: your Discord name with the Discord logo, and players can search for it. Your Discord name is never shown unless you pick it here.</small>
+          </div>
           <label>
             <span>About me</span>
             <textarea name="bio" maxlength="500" rows="3" placeholder="A little about your Aniimo adventure…" data-profile-bio></textarea>
@@ -331,7 +332,7 @@
                 <option value="private">Private: only me</option>
               </select>
             </label>
-            <small>Never your Discord account, and your display name only if you tick the box below. Your runs on the leaderboards are public either way.</small>
+            <small>Never your Discord account (your Discord name only if you pick it under Show me by), and your display name only if you tick the box below. Your runs on the leaderboards are public either way.</small>
             <fieldset class="profile-parts" data-profile-parts hidden>
               <legend>Public parts</legend>
               <label><input type="checkbox" value="standings"> Leaderboard standing</label>

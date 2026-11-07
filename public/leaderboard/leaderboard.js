@@ -113,10 +113,23 @@
   }
   // A name linked to its owner's public profile (only profiles their owners made public carry an id). A claimed
   // character shows its UID on hover: names can look alike (or use lookalike letters), UIDs can't.
-  function profileName(name, profileId, props = {}, uid = null) {
-    const title = [uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""].filter(Boolean).join(" · ") || null;
-    if (!profileId) return el("span", { ...props, title, text: name });
-    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}`, title, text: name });
+  // character: set when name is the player's Discord name (they picked it under Show me by): the Discord logo goes
+  // before it and the character that played stays on hover.
+  function profileName(name, profileId, props = {}, uid = null, character = null) {
+    const title = [character ? `Discord name · character ${character}` : "", uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""]
+      .filter(Boolean).join(" · ") || null;
+    const label = character ? shownName(name, "discord") : null;
+    if (!profileId) return el("span", { ...props, title, text: label ? null : name }, label);
+    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}`, title, text: label ? null : name }, label);
+  }
+  // a player's name as they chose to be shown (site-sidebar.js draws the Discord logo)
+  function shownName(text, nameSource) {
+    return window.AniiSite?.playerName(text, nameSource) || document.createTextNode(String(text || ""));
+  }
+  // a board row's name: its Discord name when its player picked that, else the character's
+  function rowName(entry, props = {}) {
+    return entry.discordName ? profileName(entry.discordName, entry.profileId, props, entry.uid, entry.player)
+      : profileName(entry.player, entry.profileId, props, entry.uid);
   }
   // Marks after a name: a teammate's row nobody claimed yet, and a name that looks like a claimed one.
   function nameMarks(entry) {
@@ -470,14 +483,14 @@
       const cells = [
         el("td", { class: "lb-rank", text: String(entry.rank) }),
         el("td", { class: "lb-player" }, el("button", {
-          type: "button", class: "lb-expand", "aria-expanded": String(open), text: entry.player || "—",
-          title: entry.uid ? `UID ${entry.uid}` : null,
+          type: "button", class: "lb-expand", "aria-expanded": String(open), text: entry.discordName ? null : entry.player || "—",
+          title: [entry.discordName ? `Discord name · character ${entry.player}` : "", entry.uid ? `UID ${entry.uid}` : ""].filter(Boolean).join(" · ") || null,
           onclick: () => {
             if (state.expanded.has(entry.submissionId)) state.expanded.delete(entry.submissionId);
             else state.expanded.add(entry.submissionId);
             renderRows(entries);
           },
-        }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
+        }, entry.discordName ? shownName(entry.discordName, "discord") : null), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
         entry.hasEvidence ? proofButton(entry.submissionId) : null,
         entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
@@ -617,7 +630,7 @@
     return Object.keys(entry.proofIds || {}).length ? entry.checks?.[ladder.proof] || entry.checks?.score : "invalid";
   }
   function playerName(entry, proofId, check = null) {
-    return el("span", { class: "lb-who-name" }, profileName(entry.player, entry.profileId, {}, entry.uid),
+    return el("span", { class: "lb-who-name" }, rowName(entry),
       entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), checkBadge(check), proofButton(proofId, check));
   }
   function bossHead(boss, className, detail = "") {
@@ -797,7 +810,7 @@
   // The Season Ladder's columns and how a header click sorts them. The whole list comes in one answer, so it's sorted
   // here; the API ranks it (the # column) by combined score, or by total stars when that's the sort (?sort=stars).
   const SEASON_SORTS = Object.freeze({
-    player: { label: "Player", natural: "asc", value: (e) => e.player || "" },
+    player: { label: "Player", natural: "asc", value: (e) => e.discordName || e.player || "" },
     score: { label: "Combined score", natural: "desc", value: (e) => Number(e.total) || 0 },
     stars: { label: "Total stars", natural: "desc", value: (e) => Number(e.stars) || 0 },
     weeks: { label: "Weeks", natural: "desc", value: (e) => Number(e.weeks) || 0, small: true },

@@ -1328,6 +1328,25 @@ const LISTED_PROFILE = `(p.is_public = 1 AND p.public_id IS NOT NULL
   AND (COALESCE(json_extract(p.preferences_json, '$.visibility.mode'), 'public') <> 'custom'
     OR EXISTS (SELECT 1 FROM json_each(COALESCE(p.preferences_json, '{}'), '$.visibility.parts') WHERE value = 'directory')))`;
 
+// Shown by: each player picks the name the site shows for them (Edit profile > Show me by, or the app through
+// /api/account/preferences): their in-game name (the default; their display name instead while "Let players find me by
+// my display name" is on) or their Discord name (global name, else username), drawn with a Discord logo. Kept in
+// profiles.preferences_json as $.nameShown = "discord"; the in-game choice is the key's absence. The Discord name only
+// ever leaves the server for a player who picked it.
+const NAME_CHOICES = Object.freeze(["game", "discord"]);
+function nameShownOf(prefsJson) {
+  try { return JSON.parse(prefsJson || "{}")?.nameShown === "discord" ? "discord" : "game"; } catch { return "game"; }
+}
+// SQL: the Discord name of account <who> when, and only when, its owner picked it; else NULL
+const discordNameSql = (who) => `(SELECT COALESCE(dn.discord_global_name, dn.discord_username) FROM users dn
+  JOIN profiles dp ON dp.discord_id = dn.discord_id
+  WHERE dn.discord_id = ${who} AND json_extract(dp.preferences_json, '$.nameShown') = 'discord')`;
+async function saveNameShown(env, discordId, choice) {
+  await env.DB.prepare(`UPDATE profiles SET preferences_json = CASE WHEN ? = 'discord'
+      THEN json_set(COALESCE(preferences_json, '{}'), '$.nameShown', 'discord')
+      ELSE json_remove(COALESCE(preferences_json, '{}'), '$.nameShown') END WHERE discord_id = ?`).bind(choice, discordId).run();
+}
+
 async function ownProfile(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
@@ -1339,7 +1358,7 @@ async function ownProfile(request, env) {
   const { mode, parts, runsPublic } = profileVisibility(row?.isPublic, prefs);
   // profileUid: the main character's game UID, the address of the profile link (?profile=<UID>)
   const main = await mainCharacter(env, account.discordId);
-  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, runsPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
+  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, runsPublic, nameShown: nameShownOf(prefs), findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1371,6 +1390,9 @@ async function updateOwnProfile(request, env) {
   }
   if (body.runsPublic !== undefined && typeof body.runsPublic !== "boolean") {
     return json({ error: "runsPublic must be true or false." }, 400);
+  }
+  if (body.nameShown !== undefined && !NAME_CHOICES.includes(body.nameShown)) {
+    return json({ error: "nameShown must be game or discord." }, 400);
   }
   if (body.visibility !== undefined && !["public", "private", "custom"].includes(body.visibility)) {
     return json({ error: "visibility must be public, private or custom." }, 400);
@@ -1408,9 +1430,10 @@ async function updateOwnProfile(request, env) {
     await env.DB.prepare("UPDATE profiles SET preferences_json = json_set(COALESCE(preferences_json, '{}'), '$.runsPublic', json(?)) WHERE discord_id = ?")
       .bind(body.runsPublic ? "true" : "false", account.discordId).run();
   }
+  if (body.nameShown !== undefined) await saveNameShown(env, account.discordId, body.nameShown);
   const saved = await env.DB.prepare("SELECT preferences_json AS prefs FROM profiles WHERE discord_id = ?").bind(account.discordId).first();
   const { mode, parts, runsPublic } = profileVisibility(isPublic ? 1 : 0, saved?.prefs);
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, runsPublic, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, runsPublic, nameShown: nameShownOf(saved?.prefs), findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1619,7 +1642,10 @@ async function ownProfileOverview(request, env) {
   if (leaderboardAllowed(account, env)) ({ leaderboards, trophies } = await profileBoards(env, account.discordId));
   return json({
     profile: {
-      displayName: profile?.displayName || account.globalName || account.username,
+      // the owner's own page: their display name, or their Discord name (with the logo) when they picked it
+      ...(nameShownOf(profile?.prefs) === "discord"
+        ? { displayName: account.globalName || account.username, nameSource: "discord" }
+        : { displayName: profile?.displayName || account.globalName || account.username }),
       bio: profile?.bio || null,
       avatarUrl: account.avatarUrl,
       isPublic: Number(profile?.isPublic || 0) === 1,
@@ -1652,29 +1678,33 @@ async function searchProfiles(request, env) {
   const byUid = /^\d{4,24}$/u.test(q);
   const like = `%${q.toLowerCase().replace(/[\\%_]/gu, (c) => `\\${c}`)}%`;
   const { results } = await env.DB.prepare(
-    `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid
+    `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid, ${discordNameSql("p.discord_id")} AS discordName
      FROM game_characters gc JOIN profiles p ON p.discord_id = gc.discord_id
      WHERE ${LISTED_PROFILE} AND gc.character_name IS NOT NULL
        AND ${byUid ? "gc.game_uid LIKE ?" : "LOWER(gc.character_name) LIKE ? ESCAPE '\\'"}
      ORDER BY gc.last_seen_at DESC LIMIT 30`,
   ).bind(byUid ? `${q}%` : like).all();
   const named = byUid ? { results: [] } : await env.DB.prepare(
-    `SELECT p.public_id AS publicId, p.display_name AS displayName,
+    `SELECT p.public_id AS publicId, CASE WHEN p.findable_by_name = 1 THEN p.display_name END AS displayName,
+       ${discordNameSql("p.discord_id")} AS discordName,
        (SELECT json_group_array(json_object('name', gc.character_name, 'gameUid', gc.game_uid)) FROM game_characters gc
         WHERE gc.discord_id = p.discord_id AND gc.character_name IS NOT NULL) AS charactersJson
      FROM profiles p
-     WHERE ${LISTED_PROFILE} AND p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ? ESCAPE '\\'
+     WHERE ${LISTED_PROFILE} AND ((p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ?1 ESCAPE '\\')
+       OR LOWER(${discordNameSql("p.discord_id")}) LIKE ?1 ESCAPE '\\')
      ORDER BY p.updated_at DESC LIMIT 10`,
   ).bind(like).all();
   const seen = new Map();
   for (const row of named.results || []) {
     let characters = [];
     try { characters = JSON.parse(row.charactersJson || "[]"); } catch { characters = []; }
-    seen.set(row.publicId, { publicId: row.publicId, displayName: row.displayName, characters });
+    seen.set(row.publicId, { publicId: row.publicId, ...(row.discordName ? { displayName: row.discordName, nameSource: "discord" }
+      : { displayName: row.displayName }), characters });
   }
+  const byName = new Set(seen.keys());
   for (const row of results || []) {
-    const entry = seen.get(row.publicId) || { publicId: row.publicId, characters: [] };
-    if (!entry.displayName) entry.characters.push({ name: row.name, gameUid: row.gameUid });
+    const entry = seen.get(row.publicId) || { publicId: row.publicId, ...(row.discordName ? { displayName: row.discordName, nameSource: "discord" } : {}), characters: [] };
+    if (!byName.has(row.publicId)) entry.characters.push({ name: row.name, gameUid: row.gameUid });
     seen.set(row.publicId, entry);
   }
   return json({ results: [...seen.values()].slice(0, 10) });
@@ -1690,30 +1720,41 @@ const PUBLIC_NAME_SQL = `COALESCE(CASE WHEN p.findable_by_name = 1 THEN p.displa
 // GET /api/profiles/directory: the Profiles page's Recently joined (public profiles, newest first) and Online now
 // (public profiles showing their status). Players online with a private profile are only counted, never named.
 async function profilesDirectory(env) {
-  const fresh = Math.floor(Date.now() / 1000) - PRESENCE_FRESH_S;
-  const [recent, online, others] = await Promise.all([
+  const now = Math.floor(Date.now() / 1000);
+  const fresh = now - PRESENCE_FRESH_S;
+  const onlineListed = `${LISTED_PROFILE} AND COALESCE(p.show_presence, 1) = 1
+         AND EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
+           AND gc.presence_state IN ('online', 'afk'))`;
+  const [recent, online, others, counts] = await Promise.all([
     env.DB.prepare(
-      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, p.created_at AS joinedAt FROM profiles p
+      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, ${discordNameSql("p.discord_id")} AS discordName,
+         p.created_at AS joinedAt FROM profiles p
        WHERE ${LISTED_PROFILE} ORDER BY p.created_at DESC LIMIT 8`,
     ).all(),
     env.DB.prepare(
-      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name,
+      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, ${discordNameSql("p.discord_id")} AS discordName,
          CASE WHEN EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
            AND gc.presence_state = 'online') THEN 'online' ELSE 'afk' END AS state
        FROM profiles p
-       WHERE ${LISTED_PROFILE} AND COALESCE(p.show_presence, 1) = 1
-         AND EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
-           AND gc.presence_state IN ('online', 'afk'))
+       WHERE ${onlineListed}
        ORDER BY state = 'online' DESC, p.updated_at DESC LIMIT 24`,
     ).bind(fresh).all(),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT gc.discord_id) AS count FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id
        WHERE gc.presence_at > ? AND gc.presence_state IN ('online', 'afk') AND NOT COALESCE(${LISTED_PROFILE}, 0)`,
     ).bind(fresh).first(),
+    // the sidebar's one-line summary on phones: everyone online (listed or only counted) and accounts made this week
+    env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM profiles p WHERE ${onlineListed}) AS listedOnline,
+         (SELECT COUNT(*) FROM profiles WHERE created_at > ?2) AS joinedThisWeek`,
+    ).bind(fresh, now - 7 * 86400).first(),
   ]);
+  // a player's name as they chose it: the Discord name (marked) only for those who picked it
+  const named = ({ discordName, name, ...row }) => ({ ...row, name: discordName || name, ...(discordName ? { nameSource: "discord" } : {}) });
   return json({
-    recent: (recent.results || []).map((row) => ({ publicId: row.publicId, name: row.name, joinedAt: Number(row.joinedAt) || null })),
-    online: { players: online.results || [], others: Number(others?.count || 0) },
+    recent: (recent.results || []).map((row) => named({ ...row, joinedAt: Number(row.joinedAt) || null })),
+    online: { players: (online.results || []).map(named), others: Number(others?.count || 0) },
+    counts: { online: Number(counts?.listedOnline || 0) + Number(others?.count || 0), joinedThisWeek: Number(counts?.joinedThisWeek || 0) },
   });
 }
 
@@ -2186,7 +2227,8 @@ async function publicProfile(request, env, id) {
   if (resolved.private) return json({ error: "This profile is private.", private: true }, 404);
   const publicId = resolved.publicId;
   const profile = await env.DB.prepare(
-    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1",
+    `SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch, preferences_json AS prefs,
+       ${discordNameSql("pr.discord_id")} AS discordName FROM profiles pr WHERE public_id = ? AND is_public = 1`,
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
   // the owner opening their own link: the page shows them their own profile (with Edit) at this address
@@ -2217,7 +2259,9 @@ async function publicProfile(request, env, id) {
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
-    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: shows("about") ? profile.bio || null : null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
+    // or their Discord name (marked) when they picked it
+    profile: { ...(profile.discordName ? { displayName: profile.discordName, nameSource: "discord" }
+      : { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder" }), bio: shows("about") ? profile.bio || null : null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
     main: main?.name ? { name: main.name } : null,
     ...(viewer?.discordId === profile.discordId ? { own: true } : {}),
     parts,                                 // the parts this profile shows (the page leaves out the rest)
@@ -3626,6 +3670,7 @@ async function accountPreferences(request, env) {
       return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
     }
     if (body.showPresence !== undefined && typeof body.showPresence !== "boolean") return json({ error: "showPresence must be true or false." }, 400);
+    if (body.nameShown !== undefined && !NAME_CHOICES.includes(body.nameShown)) return json({ error: "nameShown must be game or discord." }, 400);
     const theme = body.theme === undefined ? undefined : cleanTheme(body.theme);
     if (theme === null) return json({ error: "theme must be { id, custom? } with #rrggbb colours." }, 400);
     const now = Math.floor(Date.now() / 1000);
@@ -3640,12 +3685,13 @@ async function accountPreferences(request, env) {
       await env.DB.prepare("UPDATE profiles SET preferences_json = json_set(COALESCE(preferences_json, '{}'), '$.theme', json(?)), updated_at = ? WHERE discord_id = ?")
         .bind(JSON.stringify(theme), now, account.discordId).run();
     }
+    if (body.nameShown !== undefined) await saveNameShown(env, account.discordId, body.nameShown);
   }
   const row = await env.DB.prepare("SELECT show_presence AS showPresence, preferences_json AS prefs FROM profiles WHERE discord_id = ?")
     .bind(account.discordId).first();
   let theme = null;
   try { theme = cleanTheme(JSON.parse(row?.prefs || "{}").theme); } catch { theme = null; }
-  return json({ showPresence: Number(row?.showPresence ?? 1) === 1, theme });
+  return json({ showPresence: Number(row?.showPresence ?? 1) === 1, theme, nameShown: nameShownOf(row?.prefs) });
 }
 
 // The profile's presence: "online" if any of its characters is, else "afk", else "offline" (the game or aLogs isn't
@@ -4341,6 +4387,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
          (SELECT game_uid FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS uid,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
+       ${discordNameSql("s.who")} AS discordName,
        s.created_at AS firstAt, COALESCE(s.played_at, s.created_at) AS playedAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
@@ -4384,6 +4431,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
   for (const row of results || []) {
     row.unclaimed = String(row.discordId).startsWith("name:");
     row.lookalike = row.unclaimed && identities(row.player).lookalike;
+    if (!row.discordName) delete row.discordName;          // only for players who picked their Discord name
   }
   // A week the game data lists only counts its own three bosses: a misread boss name (the battle prep screen's name
   // sits over the boss art) can't add a fourth board or count a score twice.
@@ -4758,6 +4806,7 @@ async function interlinkBoards(request, env) {
     const players = new Map();
     for (const row of await interlinkBests(env, cycles, list, server, unlinked)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
+        ...(row.discordName ? { discordName: row.discordName } : {}),
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
         total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt, updatedAt: row.firstAt };
       player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
@@ -4846,6 +4895,7 @@ async function interlinkBoards(request, env) {
   const totals = new Map();
   for (const row of rows) {
     const player = totals.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
+      ...(row.discordName ? { discordName: row.discordName } : {}),
       profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
       total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt, updatedAt: row.firstAt };
     player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.scores[row.bossId] = row.score;
@@ -4925,6 +4975,7 @@ async function leaderboardEntries(request, env) {
       (SELECT game_uid FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
        ORDER BY last_seen_at DESC LIMIT 1) AS anyUid,
       CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
+      ${discordNameSql("s.who")} AS discordName,
       ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${pickBy("s.")}, s.created_at ASC) AS playerRank
     FROM ${CREDITED_RUNS} s
     JOIN users u ON u.discord_id = s.discord_id
@@ -4953,6 +5004,8 @@ async function leaderboardEntries(request, env) {
       // the run's own linked character, else any the account linked; for a teammate's row, the name in the party.
       // Never a party slot for the sender: the sender isn't always 1P.
       player: row.teammate || row.characterName || row.anyCharacter || "Pathfinder",
+      // the account's Discord name, only when its owner picked it (Show me by); the site shows it with the logo
+      ...(row.discordName ? { discordName: row.discordName } : {}),
       character: row.teammate || row.characterName || null,
       uid: (row.teammate ? row.teammate_uid : (row.characterName ? row.game_uid : row.anyUid)) || null,
       teammate: Boolean(row.teammate),

@@ -23,6 +23,13 @@ const profileShowPresence = document.querySelector("[data-profile-presence]");
 const profilePresenceRow = document.querySelector("[data-profile-presence-row]");
 const profileSearchRow = document.querySelector("[data-profile-search-row]");
 const profileListedInSearch = document.querySelector("[data-profile-search]");
+// Show me by: the in-game name (default) or the Discord name, everywhere the site names this player
+const profileNameShown = document.querySelector("[data-profile-name-shown]");
+const profileNameShownRow = document.querySelector("[data-profile-name-shown-row]");
+// a player's name as they chose to be shown (site-sidebar.js draws the Discord logo for a Discord name)
+function shownName(text, nameSource) {
+  return window.AniiSite?.playerName(text, nameSource) || document.createTextNode(String(text || ""));
+}
 // /?view=profile is the profile page: your own profile (or a sign-in prompt), with a search for anyone else's.
 // /?profile=<id> shows someone's public profile (read-only) in the same view; <id> can be a character's game UID
 // (the profile of the account that linked it, or "This profile is private").
@@ -143,6 +150,7 @@ function showSignedIn(account) {
   profileFindableRow.hidden = false;
   profilePresenceRow.hidden = false;
   profileSearchRow.hidden = false;
+  profileNameShownRow.hidden = false;
   void loadPrivateProfile(name);
   if (PROFILE_VIEW) {
     document.querySelector("[data-profile-signin]").hidden = true;
@@ -174,6 +182,7 @@ function showVisibility(profile) {
   profileFindable.checked = Boolean(profile.findableByName);
   profileListedInSearch.checked = profile.listedInSearch !== false;
   profileShowPresence.checked = profile.showPresence !== false;
+  profileNameShown.value = profile.nameShown === "discord" ? "discord" : "game";
   profileStatus.textContent = { public: "Public · anyone with the link can see it", custom: "Custom · anyone with the link sees the parts you picked",
     private: "Private · visible only to you" }[profilePublic.value];
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
@@ -776,7 +785,7 @@ async function loadProfileOverview(publicId = "") {
     const avatar = profileOverview.querySelector("[data-overview-avatar]");
     avatar.hidden = !overview.profile?.avatarUrl;
     if (overview.profile?.avatarUrl) avatar.src = overview.profile.avatarUrl;
-    profileOverview.querySelector("[data-overview-name]").textContent = overview.profile?.displayName || "My profile";
+    profileOverview.querySelector("[data-overview-name]").replaceChildren(shownName(overview.profile?.displayName || "My profile", overview.profile?.nameSource));
     profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
       : overview.profile?.visibility === "custom" ? "Custom · anyone with your link sees the parts you picked"
         : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
@@ -881,7 +890,7 @@ profileEditor.addEventListener("submit", async (event) => {
     const response = await apiFetch("/profile", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName, bio, ...visibility }),
+      body: JSON.stringify({ displayName, bio, ...visibility, ...(profileNameShownRow.hidden ? {} : { nameShown: profileNameShown.value }) }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.profile) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -1015,7 +1024,9 @@ if (PROFILE_VIEW) {
           // a display-name match (its owner opted in) shows that name over their characters
           const [first, ...others] = result.characters;
           if (result.displayName) {
-            link.append(element("strong", "", result.displayName));
+            const strong = element("strong");
+            strong.append(shownName(result.displayName, result.nameSource));
+            link.append(strong);
             if (result.characters.length) link.append(element("small", "", result.characters.map((c) => c.name).join(", ")));
           } else {
             link.append(element("strong", "", first.name), element("small", "", `UID ${first.gameUid}`));
@@ -1083,7 +1094,6 @@ function showAsOwner() {
   ownAtLink = true;
   document.querySelector("[data-profile-back]").hidden = true;
   document.querySelector("[data-profile-edit]").hidden = false;
-  void loadProfileDirectory();
 }
 
 // ---------------------------------------------------------------- the profile's cards (Arrange cards)
@@ -1808,48 +1818,6 @@ if (HISTORY_VIEW) {
   });
   historyFull.querySelector("[data-history-more]").addEventListener("click", () => void loadHistoryPage(false));
 }
-
-// ---------------------------------------------------------------- Online now and Recently joined
-// Public profiles only, by the name they show publicly; players online with a private profile are just a number.
-async function loadProfileDirectory() {
-  const box = profileOverview.querySelector("[data-profile-directory]");
-  const link = (row) => {
-    const anchor = element("a", "profile-directory-player");
-    anchor.href = profileHref({ profile: row.publicId });
-    anchor.append(element("strong", "", row.name));
-    return anchor;
-  };
-  try {
-    const response = await apiFetch("/profiles/directory");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const { recent = [], online = {} } = await response.json();
-    const players = (online.players || []).map((row) => {
-      const item = element("li");
-      const anchor = link(row);
-      const state = element("span", "profile-presence", row.state === "afk" ? "AFK" : "Online");
-      state.dataset.state = row.state;
-      anchor.append(state);
-      item.append(anchor);
-      return item;
-    });
-    box.querySelector("[data-directory-online]").replaceChildren(...(players.length ? players
-      : [element("li", "profile-directory-empty", "No public profiles online right now.")]));
-    const others = Number(online.others || 0);
-    box.querySelector("[data-directory-others]").textContent = others
-      ? `${players.length ? "And " : ""}${others} ${others === 1 ? "player" : "players"} online who keep their profile out of these lists.` : "";
-    box.querySelector("[data-directory-recent]").replaceChildren(...(recent.length ? recent.map((row) => {
-      const item = element("li");
-      const anchor = link(row);
-      if (row.joinedAt) anchor.append(element("small", "", `joined ${new Date(row.joinedAt * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`));
-      item.append(anchor);
-      return item;
-    }) : [element("li", "profile-directory-empty", "No public profiles yet.")]));
-    box.hidden = false;
-  } catch {
-    box.hidden = true;
-  }
-}
-if (PROFILE_VIEW && !PUBLIC_PROFILE_ID && !HISTORY_VIEW) void loadProfileDirectory();
 
 if (!API_URL) {
   for (const link of loginLinks) {
