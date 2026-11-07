@@ -14864,10 +14864,23 @@ html[data-theme] .catalog-itemlog-record {
 }
 
 .catalog-itemlog-hero .catalog-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   color: color-mix(in srgb, rgb(var(--catalog-tier-rgb)) 55%, var(--text));
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* The quality tag on the category line: its own case and size, not the line's small caps. */
+.catalog-itemlog-hero .catalog-eyebrow .catalog-quality {
+  margin-left: 0;
+  font-size: 12px;
+  letter-spacing: normal;
+  padding: 3px 10px;
+  text-transform: none;
 }
 
 .catalog-itemlog-hero .catalog-identity h2 {
@@ -15035,6 +15048,17 @@ html[data-theme] .catalog-itemlog-record {
   .catalog-itemlog-hero .catalog-hero-icon {
     width: 72px;
     height: 72px;
+  }
+
+  /* Phones: a smaller tag, so the category line stays one short row above the name. */
+  .catalog-itemlog-hero .catalog-eyebrow {
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .catalog-itemlog-hero .catalog-eyebrow .catalog-quality {
+    font-size: 11px;
+    padding: 2px 8px;
   }
 
   .catalog-itemlog-hero .catalog-description {

@@ -9645,11 +9645,13 @@ function renderItemLogCatalogRecord(entry) {
   identity.append(icon, copy);
   const actions = document.createElement("div");
   actions.className = "catalog-identity-actions";
+  // The quality tag sits on the category line ("HELD ITEM  Legendary"), next to what it describes, not out at the
+  // card's far edge; the mobile sticky header shows it the same way.
   if (entry.quality) {
     const quality = document.createElement("span");
     quality.className = `catalog-quality catalog-quality--${qualityClassName(entry.quality)}`;
     quality.textContent = entry.quality_display || entry.quality;
-    actions.append(quality);
+    eyebrow.append(quality);
   }
   if (Array.isArray(entry.map_targets) && entry.map_targets.length) {
     const locate = document.createElement("button");
@@ -9786,6 +9788,8 @@ function renderItemlogJumpLinks(record) {
 }
 
 // Quick category chips above the record; they set the same category as the sidebar's Category menu.
+// Categories with a chip even when they aren't among the biggest (exact category names).
+const ITEMLOG_PINNED_CATEGORIES = ["Held Item"];
 function renderItemlogCategoryChips(allEntries) {
   const strip = document.createElement("nav");
   strip.className = "catalog-itemlog-chips";
@@ -9796,12 +9800,17 @@ function renderItemlogCategoryChips(allEntries) {
     .map((category) => ({ id: category, label: category, count: Number(itemlogCategoryCount(category, allEntries)) || 0 }))
     .filter((category) => category.count > 0)
     .sort((left, right) => right.count - left.count);
+  // The biggest categories, plus the ones players look up most, which are always there however few they hold.
+  const biggest = counted.slice(0, 8);
+  const pinned = counted.filter((category) => ITEMLOG_PINNED_CATEGORIES.includes(category.id)
+    && !biggest.some((chip) => chip.id === category.id));
   const chips = [
     { id: "all", label: "All", count: Number(countedEntries(allEntries)) || 0 },
     ...ITEMLOG_CATEGORY_COLLECTIONS.map((collection) => ({
       id: collection.id, label: collection.label, count: Number(itemlogCategoryCount(collection.id, allEntries)) || 0,
     })).filter((collection) => collection.count > 0),
-    ...counted.slice(0, 8),
+    ...biggest,
+    ...pinned,
   ];
   // Keep the chosen category visible even when it isn't one of the biggest.
   if (!chips.some((chip) => chip.id === active)) {
@@ -10600,7 +10609,8 @@ function syncMobileCatalogStickyIdentity() {
     const stickyEyebrow = stickyIdentity.querySelector(".catalog-eyebrow");
     const stickyName = stickyIdentity.querySelector("h2");
     const stickyActions = stickyIdentity.querySelector(".catalog-identity-actions");
-    const stickyQuality = stickyActions?.querySelector(".catalog-quality");
+    // The Item-log's tag is already on the category line; the sticky header puts it first either way.
+    const stickyQuality = stickyActions?.querySelector(".catalog-quality") || stickyEyebrow?.querySelector(".catalog-quality");
     if (stickyEyebrow && stickyQuality) stickyEyebrow.prepend(stickyQuality);
     if (stickyName && stickyEyebrow) stickyName.after(stickyEyebrow);
     if (stickyActions && !stickyActions.childElementCount) stickyActions.remove();
