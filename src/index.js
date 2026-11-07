@@ -4024,16 +4024,28 @@ function onBoards(unlinked, alias = "s") {
   return unlinked ? "1 = 1" : `(${named} AND ${alias}.who NOT LIKE 'name:%')`;
 }
 
+// D1 takes at most 100 bound values per query: a long IN (...) list is asked in chunks and the rows put together.
+// build(placeholders) returns the SQL with the list's "?, ?, ..." in place; the list's values are its only binds.
+const D1_IN_CHUNK = 90;
+async function allIn(env, values, build) {
+  const rows = [];
+  for (let i = 0; i < values.length; i += D1_IN_CHUNK) {
+    const chunk = values.slice(i, i + D1_IN_CHUNK);
+    const { results } = await env.DB.prepare(build(chunk.map(() => "?").join(", "))).bind(...chunk).all();
+    rows.push(...(results || []));
+  }
+  return rows;
+}
+
 // Whether a name nobody claimed looks like a claimed character's name (same skeleton): the boards mark it, since only a
 // UID tells two such players apart. A name is never matched to a UID - only a UID recorded with the run is.
 async function nameIdentities(env, names) {
   const list = [...new Set(names.filter(Boolean).map((name) => String(name)))].slice(0, 300);
   const skeletons = [...new Set(list.map(nameSkeleton))];
-  const rows = skeletons.length ? (await env.DB.prepare(
+  const rows = await allIn(env, skeletons, (list) =>
     `SELECT cn.character_name AS name, cn.skeleton, cn.game_uid AS gameUid, cn.verified, cn.last_seen_at AS lastSeenAt
      FROM character_names cn JOIN game_characters gc ON gc.game_uid = cn.game_uid
-     WHERE cn.skeleton IN (${skeletons.map(() => "?").join(", ")})`,
-  ).bind(...skeletons).all()).results || [] : [];
+     WHERE cn.skeleton IN (${list})`);
   return (name) => {
     if (!name) return { lookalike: false };
     const skeleton = nameSkeleton(name);
@@ -4057,12 +4069,11 @@ async function partyProfiles(env, rows) {
   const identities = await nameIdentities(env, shown);
   if (!names.size) return Object.assign(new Map(), { identities });
   const list = [...names].slice(0, 200);
-  const { results } = await env.DB.prepare(
+  const results = await allIn(env, list, (names) =>
     `SELECT lower(gc.character_name) AS name, p.public_id AS publicId FROM game_characters gc
      JOIN profiles p ON p.discord_id = gc.discord_id
-     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND lower(gc.character_name) IN (${list.map(() => "?").join(", ")})`,
-  ).bind(...list).all();
-  return Object.assign(new Map((results || []).map((row) => [row.name, row.publicId])), { identities });
+     WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND lower(gc.character_name) IN (${names})`);
+  return Object.assign(new Map(results.map((row) => [row.name, row.publicId])), { identities });
 }
 function withProfiles(players, profiles) {
   if (!Array.isArray(players)) return players;
@@ -5405,11 +5416,12 @@ async function listLogReports(request, env) {
     return { ...report, ...(body ? { body } : {}), screenshots: report.clearedAt ? 0 : reportScreenshots({ shotsJson }).length };
   });
   if (reports.length) {
-    const { results: notes } = await env.DB.prepare(
-      `SELECT n.report_id AS reportId, n.note, n.created_at AS createdAt, COALESCE(u.discord_global_name, u.discord_username, n.discord_id) AS author
+    const notes = (await allIn(env, reports.map((r) => r.id), (ids) =>
+      `SELECT n.report_id AS reportId, n.note, n.created_at AS createdAt, n.note_id AS noteId, COALESCE(u.discord_global_name, u.discord_username, n.discord_id) AS author
        FROM log_report_notes n LEFT JOIN users u ON u.discord_id = n.discord_id
-       WHERE n.report_id IN (${reports.map(() => "?").join(",")}) ORDER BY n.created_at, n.note_id`,
-    ).bind(...reports.map((r) => r.id)).all();
+       WHERE n.report_id IN (${ids})`))
+      .sort((a, b) => a.createdAt - b.createdAt || String(a.noteId).localeCompare(String(b.noteId), undefined, { numeric: true }))
+      .map(({ noteId: _noteId, ...note }) => note);
     for (const report of reports) {
       report.notes = (notes || []).filter((n) => n.reportId === report.id).map(({ reportId, ...n }) => n);
     }
