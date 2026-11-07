@@ -1484,9 +1484,10 @@ export function collectionSummary(completedIds, checklist = null) {
 }
 
 // The owner's best entry on each board (as the board shows it) and its position among every player on that board.
-// Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone.
-async function boardStandings(env, discordId, kind) {
-  const sortKey = LEADERBOARD_DEFAULT_SORT[kind];
+// Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone. sort: another of the board's
+// sorts (Egg Heist matches by fastest escape or most defeats), ranked as the board ranks it with that sort.
+async function boardStandings(env, discordId, kind, sort = null) {
+  const sortKey = sort && Object.hasOwn(LEADERBOARD_SORTS, sort) ? sort : LEADERBOARD_DEFAULT_SORT[kind];
   const order = LEADERBOARD_SORTS[sortKey];
   const orderBy = (prefix) => (sortKey === "standing"
     ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
@@ -1530,6 +1531,9 @@ async function boardStandings(env, discordId, kind) {
     clearTimeS: row.clear_time_s,
     floors: row.floors,
     partySize: row.party_size,
+    ...(kind === "sim_run" ? { trial: row.trial || null, trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null } : {}),
+    ...(kind === "sim_run" || kind === "eggheist_match" ? { difficulty: row.difficulty || null } : {}),
+    ...(kind === "eggheist_match" ? { defeats: row.defeats ?? null, cleared: row.cleared == null ? null : Boolean(row.cleared) } : {}),
     playedAt: row.played_at,
   }));
 }
@@ -1609,14 +1613,10 @@ async function ownProfileOverview(request, env) {
     completed = [];
   }
   // Board positions follow the leaderboard gate: hidden while leaderboards are a preview the owner can't read.
+  // Trophies (each personal best with its place on the board) go with the standing.
   let leaderboards = null;
-  if (leaderboardAllowed(account, env)) {
-    const kinds = Object.keys(LEADERBOARD_KINDS);
-    const standings = await Promise.all(kinds.map((kind) => boardStandings(env, account.discordId, kind)));
-    leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
-    leaderboards.interlinkSeason = await interlinkSeasonStanding(env, account.discordId);
-    leaderboards.interlinkParts = await interlinkProfileParts(env, account.discordId);
-  }
+  let trophies = null;
+  if (leaderboardAllowed(account, env)) ({ leaderboards, trophies } = await profileBoards(env, account.discordId));
   return json({
     profile: {
       displayName: profile?.displayName || account.globalName || account.username,
@@ -1634,6 +1634,7 @@ async function ownProfileOverview(request, env) {
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     presence: await profilePresence(env, account.discordId),
     leaderboards,
+    trophies,
     photos: await profilePhotos(env, account.discordId, true),
     gameStats: await characterStats(env, main),
     collection: collectionSummary(completed, await releaseChecklist(env)),
@@ -1968,7 +1969,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         ...(row.kind === "interlink_run" && menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`)
           ? { menuProofId: menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`) } : {}),
         ...(owner && row.status !== "visible" ? { hidden: true } : {}),
-        playedAt: row.played_at || row.created_at,
+        playedAt: row.played_at,
       };
     }),
     next: (results || []).length > limit && last ? `${last.at}.${last.submission_id}` : null,
@@ -2188,13 +2189,12 @@ async function publicProfile(request, env, id) {
   } catch {
     completed = [];
   }
+  // board standing and trophies: only with the "standings" part (Custom), never a UID
   let leaderboards = null;
+  let trophies = null;
   if (leaderboardPublic(env) && shows("standings")) {
-    const kinds = Object.keys(LEADERBOARD_KINDS);
-    const standings = await Promise.all(kinds.map((kind) => boardStandings(env, profile.discordId, kind)));
-    leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index].map(({ gameUid, ...entry }) => entry)]));
-    leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
-    leaderboards.interlinkParts = await interlinkProfileParts(env, profile.discordId);
+    ({ leaderboards, trophies } = await profileBoards(env, profile.discordId));
+    for (const kind of Object.keys(LEADERBOARD_KINDS)) leaderboards[kind] = leaderboards[kind].map(({ gameUid, ...entry }) => entry);
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
@@ -2206,6 +2206,7 @@ async function publicProfile(request, env, id) {
     characters: shows("about") ? (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })) : [],
     presence: await profilePresence(env, profile.discordId),
     leaderboards,
+    trophies,
     photos: shows("photos") ? await profilePhotos(env, profile.discordId, false) : [],
     gameStats: shows("collection") ? await characterStats(env, main) : null,
     collection: shows("collection") ? collectionSummary(completed, await releaseChecklist(env)) : null,
@@ -4317,7 +4318,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
          (SELECT game_uid FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS uid,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
-       s.created_at AS firstAt
+       s.created_at AS firstAt, COALESCE(s.played_at, s.created_at) AS playedAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
                CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.created_at ASC) AS pick
@@ -4416,8 +4417,9 @@ async function interlinkSeasonStanding(env, discordId, season = null) {
 // weeks 3000-3005, 1.1 started at the 4000 reset): its total only counts its own weeks (the owner, 7 Nov: 1.0's scores
 // never count toward 1.1). The current part comes with its weeks, newest first, each with this player's best of each
 // boss (as the boards count them); earlier parts with their totals only. Ranks are among every player on the boards.
-async function interlinkProfileParts(env, discordId) {
-  const list = await interlinkCycles(env);
+// pre: { list, rows } already read (the weeks and interlinkBests over all of them), so the profile reads them once
+async function interlinkProfileParts(env, discordId, pre = null) {
+  const list = pre?.list || await interlinkCycles(env);
   if (!list.length) return null;
   const now = Math.floor(Date.now() / 1000);
   const currentWeek = currentInterlinkCycle(list, now);
@@ -4430,7 +4432,7 @@ async function interlinkProfileParts(env, discordId) {
     });
   }
   for (const cycle of list) parts.get(`${cycle.season}|${interlinkSplitOf(cycle.id)}`)?.cycles.push(cycle);
-  const rows = await interlinkBests(env, list.map((cycle) => cycle.id), list);
+  const rows = pre?.rows || await interlinkBests(env, list.map((cycle) => cycle.id), list);
   const partOf = (cycleId) => {
     const cycle = interlinkCycle(list, cycleId);
     return cycle ? parts.get(`${cycle.season}|${interlinkSplitOf(cycle.id)}`) : null;
@@ -4487,6 +4489,229 @@ function bossLabel(cycle, row) {
   return boss?.second?.name ? `${boss.name || row.bossName} + ${boss.second.name}` : row.bossName || boss?.name || null;
 }
 
+// ---------------------------------------------------------------- trophies
+// A profile's trophies: the player's personal best of each measure a board ranks, with its place on that board's
+// ladder ("#3 of 41", ranked as the board ranks it: each player's best) and the run behind it, whose pictures are its
+// proof. Only figures the public boards already show, so a profile shows them with its leaderboard standing (the
+// "standings" part). Interlink: every week and boss board, each ladder (INTERLINK_LADDERS, but stars: a cap many
+// share), and the best week total; Holo-Battle Sim: the fastest clear of each trial at the hardest difficulty cleared;
+// Egg Heist: the best season standing, best loot, fastest escape and most Total Defeats.
+// - shot: the picture the figure is read from first. Battle Data ("battle") shows the whole party: the meter sends it
+//   as one crop, with no rectangle per player, so the viewer opens the whole screen and says whose row it is (slice).
+const INTERLINK_TROPHIES = Object.freeze([
+  Object.freeze({ id: "interlink-score", ladder: "score", proof: "score", label: "Best Interlink score", unit: "score" }),
+  Object.freeze({ id: "interlink-clear", ladder: "clear", proof: "clear", label: "Fastest Interlink clear", unit: "time" }),
+  Object.freeze({ id: "interlink-dps", ladder: "dps", proof: "dps", label: "Best Avg DPS", unit: "number", shot: "battle" }),
+  Object.freeze({ id: "interlink-team-dps", ladder: "teamDps", proof: "score", label: "Best team DPS", unit: "number" }),
+  Object.freeze({ id: "interlink-break", ladder: "break", proof: "break", label: "Best BREAK damage", unit: "number", shot: "battle" }),
+  Object.freeze({ id: "interlink-heal", ladder: "heal", proof: "heal", label: "Best healing", unit: "number", shot: "battle" }),
+]);
+const LADDER_FIGURE_NAMES = Object.freeze({ dps: "Avg DPS", break: "BREAK", heal: "Healing" });
+
+// a better trophy candidate: the better figure, then the better place, then the earlier
+function betterTrophy(candidate, best, ascending) {
+  if (!best) return true;
+  if (candidate.value !== best.value) return ascending ? candidate.value < best.value : candidate.value > best.value;
+  return candidate.position < best.position || (candidate.position === best.position && candidate.firstAt < best.firstAt);
+}
+
+// rows: interlinkBests over every week (every player's best of each week and boss, as the boards count them)
+function interlinkTrophies(rows, list, discordId) {
+  const mine = rows.filter((row) => row.discordId === discordId);
+  if (!mine.length) return [];
+  const boards = new Map();
+  for (const row of rows) {
+    const key = `${row.cycle}|${row.bossId}`;
+    if (!boards.has(key)) boards.set(key, []);
+    boards.get(key).push(row);
+  }
+  const rankings = new Map();                       // "<week>|<boss>|<ladder>" -> that board ranked by that ladder
+  const rankedBoard = (row, ladder) => {
+    const key = `${row.cycle}|${row.bossId}|${ladder}`;
+    if (!rankings.has(key)) rankings.set(key, rankedLadder(boards.get(`${row.cycle}|${row.bossId}`).slice(), ladder));
+    return rankings.get(key);
+  };
+  const trophies = [];
+  for (const trophy of INTERLINK_TROPHIES) {
+    const ladder = INTERLINK_LADDERS[trophy.ladder];
+    let best = null;
+    for (const row of mine) {
+      const board = rankedBoard(row, trophy.ladder);
+      const placed = board.find((entry) => entry.discordId === discordId);
+      if (!placed) continue;
+      const candidate = { value: Number(placed[ladder.key]), position: placed.rank, players: board.length, firstAt: row.firstAt, row };
+      if (betterTrophy(candidate, best, ladder.ascending)) best = candidate;
+    }
+    if (!best) continue;
+    const { row } = best;
+    const week = interlinkCycle(list, row.cycle);
+    // the board's proof for this figure: the row's one run, or the run a menu best took the figure from
+    const proofId = row.figureRuns?.[trophy.proof] || (row.hasProof ? row.runId : null);
+    trophies.push({
+      id: trophy.id, mode: "interlink", label: trophy.label, unit: trophy.unit, value: best.value,
+      ...(trophy.unit === "score" ? { stars: row.stars ?? null } : {}),
+      context: { boss: { id: String(row.bossId), name: week ? bossLabel(week, row) : row.bossName || null },
+        week: week ? { cycle: week.id, start: week.start, end: week.end } : { cycle: row.cycle } },
+      character: row.player || null,
+      submissionId: row.figureRuns?.[trophy.proof] || row.runId,
+      placement: { position: best.position, players: best.players },
+      board: { mode: "interlink", kind: "interlink_boss", week: String(row.cycle), boss: String(row.bossId), ladder: trophy.ladder },
+      proof: proofId ? { id: proofId, shot: trophy.shot || "summary", ...(trophy.proof === "score" && row.menuProofId ? { menuId: row.menuProofId } : {}),
+        ...(trophy.shot === "battle" ? { slice: { figure: LADDER_FIGURE_NAMES[trophy.ladder], player: row.player || null } } : {}) } : null,
+    });
+  }
+  // the best week: its bosses' bests added up, ranked as the week's total board ranks it
+  const weeks = new Map();
+  for (const row of rows) {
+    if (!weeks.has(row.cycle)) weeks.set(row.cycle, new Map());
+    const players = weeks.get(row.cycle);
+    const player = players.get(row.discordId) || { discordId: row.discordId, total: 0, stars: 0, firstAt: row.firstAt };
+    player.total += Number(row.score) || 0;
+    player.stars += Number(row.stars) || 0;
+    player.firstAt = Math.min(player.firstAt, row.firstAt);
+    players.set(row.discordId, player);
+  }
+  let bestWeek = null;
+  for (const [cycle, players] of weeks) {
+    if (!players.has(discordId)) continue;
+    const board = ranked([...players.values()], "total");
+    const placed = board.find((entry) => entry.discordId === discordId);
+    const candidate = { value: placed.total, stars: placed.stars, position: placed.rank, players: board.length, firstAt: placed.firstAt, cycle };
+    if (betterTrophy(candidate, bestWeek, false)) bestWeek = candidate;
+  }
+  if (bestWeek?.value > 0) {
+    const week = interlinkCycle(list, bestWeek.cycle);
+    trophies.push({
+      id: "interlink-week", mode: "interlink", label: "Best Interlink week", unit: "score", value: bestWeek.value, stars: bestWeek.stars,
+      context: { week: week ? { cycle: week.id, start: week.start, end: week.end } : { cycle: bestWeek.cycle } },
+      submissionId: null,                     // three bosses' runs: each boss's proof is on the Interlink card and the board
+      placement: { position: bestWeek.position, players: bestWeek.players },
+      board: { mode: "interlink", kind: "interlink_boss", week: String(bestWeek.cycle) },
+      proof: null,
+    });
+  }
+  return trophies;
+}
+
+// Holo-Battle Sim: each trial's fastest clear at the hardest difficulty this player cleared it on (one tile a trial)
+function simTrophies(entries) {
+  const byTrial = new Map();
+  for (const entry of entries || []) {
+    if (!entry.trial || entry.clearTimeS == null) continue;
+    const season = simSeasonOf(entry.trial, null, entry.cycle);
+    const hardness = season ? season.difficulties.indexOf(entry.difficulty) : -1;
+    const key = `${entry.cycle}|${entry.trial}`;
+    const held = byTrial.get(key);
+    if (!held || hardness > held.hardness || (hardness === held.hardness && entry.clearTimeS < held.entry.clearTimeS)) byTrial.set(key, { entry, hardness });
+  }
+  return [...byTrial.values()].sort((a, b) => String(b.entry.cycle).localeCompare(String(a.entry.cycle)) || a.entry.trial.localeCompare(b.entry.trial))
+    .map(({ entry }) => ({
+      id: `sim-${entry.cycle}-${entry.trial}`.toLowerCase(), mode: "sim", label: `Fastest ${entry.trialName || entry.trial}`, unit: "time",
+      value: entry.clearTimeS,
+      context: { trial: entry.trial, trialName: entry.trialName || entry.trial, difficulty: entry.difficulty || null, season: entry.cycle },
+      character: entry.character || null,
+      submissionId: entry.submissionId,
+      placement: { position: entry.position, players: entry.players },
+      board: { mode: "sim", kind: "sim_run", cycle: String(entry.cycle), trial: entry.trial, ...(entry.difficulty ? { difficulty: entry.difficulty } : {}) },
+      proof: { id: entry.submissionId, shot: "summary" },
+    }));
+}
+
+// Egg Heist: the best season standing (highest rank, then Emperor stars, then rank points; the newer season on a tie),
+// the best loot, the fastest escape and the most Total Defeats in a match
+function eggHeistTrophies(seasons, loot, escape, defeats) {
+  const trophies = [];
+  const tierOf = (entry) => [entry.seasonRank?.tier || 0, entry.stars || 0, entry.score || 0];
+  const best = [...(seasons || [])].sort((a, b) => {
+    const [x, y] = [tierOf(a), tierOf(b)];
+    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2] || String(b.cycle).localeCompare(String(a.cycle));
+  })[0];
+  if (best) {
+    trophies.push({
+      id: "eggheist-season", mode: "eggheist", label: "Best Egg Heist season", unit: "rank",
+      value: best.seasonRank?.name || (best.seasonRank?.tier ? `Tier ${best.seasonRank.tier}` : "Unranked"),
+      rank: best.seasonRank ? { tier: best.seasonRank.tier, name: best.seasonRank.name || null } : null,
+      ...(best.seasonRank?.tier === 7 ? { stars: best.stars ?? null } : { points: best.score ?? null }),
+      context: { season: best.cycle },
+      character: best.character || null,
+      submissionId: best.submissionId,
+      placement: { position: best.position, players: best.players },
+      board: { mode: "eggheist", kind: "eggheist_season", cycle: String(best.cycle) },
+      proof: { id: best.submissionId, shot: "summary" },
+    });
+  }
+  const match = (entry, id, label, unit, value, sort) => entry && value != null && trophies.push({
+    id, mode: "eggheist", label, unit, value,
+    context: { difficulty: entry.difficulty || null, season: entry.cycle || null },
+    character: entry.character || null,
+    submissionId: entry.submissionId,
+    placement: { position: entry.position, players: entry.players },
+    board: { mode: "eggheist", kind: "eggheist_match", ...(sort ? { sort } : {}) },
+    proof: { id: entry.submissionId, shot: "summary" },
+  });
+  match(loot?.[0], "eggheist-loot", "Best Egg Heist loot", "score", loot?.[0]?.score, null);
+  match(escape?.[0], "eggheist-escape", "Fastest Egg Heist escape", "time", escape?.[0]?.clearTimeS, "clear_time_s");
+  match(defeats?.[0], "eggheist-defeats", "Most Egg Heist defeats", "number", defeats?.[0]?.defeats, "defeats");
+  return trophies;
+}
+
+// Every trophy of a player. pre: what the profile already read - the weeks (list), interlinkBests over all of them
+// (rows) and boardStandings by kind (leaderboards). One query more for each extra Egg Heist ladder, and one for the
+// proof pictures, the check badge and the date of the runs behind the trophies.
+async function profileTrophies(env, discordId, { list, rows, leaderboards }) {
+  const [escape, defeats] = await Promise.all([
+    boardStandings(env, discordId, "eggheist_match", "clear_time_s"),
+    boardStandings(env, discordId, "eggheist_match", "defeats"),
+  ]);
+  const trophies = [
+    ...interlinkTrophies(rows, list, discordId),
+    ...simTrophies(leaderboards.sim_run),
+    ...eggHeistTrophies(leaderboards.eggheist_season, leaderboards.eggheist_match, escape, defeats),
+  ];
+  const ids = [...new Set(trophies.flatMap((trophy) => [trophy.submissionId, trophy.proof?.id]).filter(Boolean))];
+  const runs = new Map();
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const { results } = await env.DB.prepare(
+      `SELECT submission_id AS id, COALESCE(played_at, created_at) AS at, verify_state AS state, proof_pruned_at AS prunedAt,
+         evidence_key IS NOT NULL AS summary, battle_evidence_key IS NOT NULL AS battle,
+         json_extract(extra_json, '$.proofParty') IS NOT NULL AS party, json_extract(extra_json, '$.proofGizmos') IS NOT NULL AS gizmos
+       FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
+    ).bind(...chunk).all();
+    for (const run of results || []) runs.set(run.id, run);
+  }
+  return trophies.map((trophy) => {
+    const run = runs.get(trophy.submissionId);
+    const shown = runs.get(trophy.proof?.id);
+    let proof = null;
+    if (trophy.proof && shown && !shown.prunedAt && [shown.summary, shown.battle, shown.party, shown.gizmos].some((has) => Number(has) === 1)) {
+      // no Battle Data picture: the run's first one, and nothing to say about rows
+      const battle = trophy.proof.shot === "battle" && Number(shown.battle) === 1;
+      const { slice, ...rest } = trophy.proof;
+      proof = { ...rest, shot: battle ? "battle" : "summary", check: runCheckBadge(shown.state), ...(battle && slice ? { slice } : {}) };
+    }
+    return { ...trophy, playedAt: run ? Number(run.at) || null : null, proof };
+  });
+}
+
+// The board standing a profile shows (leaderboards) and its trophies, read together: the Interlink weeks' bests once.
+async function profileBoards(env, discordId) {
+  const kinds = Object.keys(LEADERBOARD_KINDS);
+  const standings = await Promise.all(kinds.map((kind) => boardStandings(env, discordId, kind)));
+  const leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
+  const list = await interlinkCycles(env);
+  const rows = list.length ? await interlinkBests(env, list.map((cycle) => cycle.id), list) : [];
+  leaderboards.interlinkSeason = await interlinkSeasonStanding(env, discordId);
+  leaderboards.interlinkParts = await interlinkProfileParts(env, discordId, { list, rows });
+  let trophies = [];
+  try {
+    trophies = await profileTrophies(env, discordId, { list, rows, leaderboards });
+  } catch (error) {
+    console.error("Could not gather the profile's trophies", error);    // the rest of the profile still shows
+  }
+  return { leaderboards, trophies };
+}
+
 async function interlinkBoards(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
@@ -4537,7 +4762,7 @@ async function interlinkBoards(request, env) {
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
   const rows = await interlinkBests(env, [cycle.id], list, server, unlinked);
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
-    const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind;
+    const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind; delete row.playedAt;
     row.proofIds = Object.fromEntries(Object.entries(ROW_FIGURES).filter(([, figure]) => row[figure] != null)
       .map(([metric]) => [metric, figureRuns[metric] || (hasProof ? runId : null)]).filter(([, id]) => id));
     row.proofId = row.proofIds.score || null;
