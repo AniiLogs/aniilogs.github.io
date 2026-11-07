@@ -56,8 +56,8 @@
   const API_URL = String(window.ANIILOGS_CONFIG?.apiUrl || window.ANIILOGS_CONFIG?.shareApiUrl || "").replace(/\/+$/u, "");
   if (!API_URL) return;
 
-  // the page and its sidebar side by side: [sidebar | main]
-  const layout = element("div", "site-layout");
+  // The page itself stays exactly where it was (centred): the sidebar sits in the empty margin to its left when
+  // that margin is wide enough, and otherwise as a one-line strip at the top of the page.
   const sidebar = element("aside", "site-sidebar");
   sidebar.setAttribute("aria-label", "Community");
   const toggle = element("button", "site-sidebar-toggle");
@@ -71,8 +71,16 @@
   const panels = element("div", "site-sidebar-panels");
   panels.id = "site-sidebar-panels";
   sidebar.append(toggle, panels);
-  main.before(layout);
-  layout.append(sidebar, main);
+  // docked once the margin beside the page (1180px wide, centred) fits a 200px column with 16px either side;
+  // site-sidebar.css works out the column's width and place from the same numbers
+  const wide = window.matchMedia("(min-width: 1644px)");
+  function place() {
+    sidebar.classList.toggle("is-docked", wide.matches);
+    if (wide.matches) { if (sidebar.parentNode !== document.body) document.body.append(sidebar); }
+    else if (sidebar.parentNode !== main) main.prepend(sidebar);
+  }
+  place();
+  wide.addEventListener("change", place);
   document.body.classList.add("has-site-sidebar");
 
   // phones: the strip opens and closes the panels in place
@@ -153,8 +161,8 @@
       summary.textContent = [`${onlineCount} online`, Number.isFinite(joined) ? `${joined} joined this week` : ""].filter(Boolean).join(" · ");
     } catch {
       // the lists can't be read right now: the page goes on without its sidebar
-      layout.before(main);
-      layout.remove();
+      wide.removeEventListener("change", place);
+      sidebar.remove();
       document.body.classList.remove("has-site-sidebar");
     }
   }
