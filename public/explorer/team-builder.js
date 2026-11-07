@@ -211,6 +211,9 @@
     if (Array.isArray(value?.personality)) member.personality = value.personality.map(String).filter((letter) => /^[EISNTFJP]$/u.test(letter)).slice(0, 4);
     if (value?.heldItem && Number.isFinite(Number(value.heldItem.itemId))) {
       member.heldItem = { itemId: String(value.heldItem.itemId), level: Math.max(0, Math.round(Number(value.heldItem.level) || 0)) };
+    } else if (value?.heldItem === null) {
+      // "No held item" picked on purpose; unset means the default (held-item-picker.js defaultFor).
+      member.heldItem = null;
     }
     return member;
   }
@@ -741,13 +744,25 @@
   // The stats of the member whose skills and traits are being drawn (their stat card: level, potential, Star-Up,
   // held item...), so values that scale with a stat show their number for this build. Null outside that.
   let scalingStats = null;
+
+  // The held item a member uses: the one picked, or until then its signature or first recommended item.
+  function heldItemOf(member) {
+    const items = window.AniilogsHeldItems;
+    return items?.chosen ? items.chosen(data, aniilog, member?.formId, member?.heldItem) : member?.heldItem || null;
+  }
+
+  // A member's build with that held item filled in, for the stat card, CP and the editors.
+  function memberBuild(member) {
+    return { ...member, heldItem: heldItemOf(member) };
+  }
+
   function memberCardStats(member) {
     const damage = window.AniilogsDamage;
     const growth = aniilog?.stat_growth;
     if (!damage?.statTotals || !growth || !member?.formId) return null;
     const cap = Number(growth.level_cap) || 70;
     const editor = window.AniilogsPotentialEditor;
-    const options = editor ? editor.totalsOptions(member, cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
+    const options = editor ? editor.totalsOptions(memberBuild(member), cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
     return damage.statTotals(data, aniilog, member.formId, options)?.total || null;
   }
   // " At this build's 929 ATK: 33.4%." after a scaling note, or "" without the member's stats.
@@ -1854,7 +1869,7 @@
 
   // A held item as the card shows it (at its rarity's top level, as the picker counts it), or null.
   function cardHeldItem(member) {
-    const held = window.AniilogsHeldItems?.normalize(data, member.heldItem) || null;
+    const held = heldItemOf(member);
     const item = held ? data?.held_item_catalog?.[held.itemId] : null;
     return item ? { name: item.name, icon: item.icon ? host.contentUrl(item.icon) : "", rarity: item.quality_label || "", level: held.level } : null;
   }
@@ -1892,7 +1907,7 @@
     const growth = aniilog?.stat_growth;
     const cap = Number(growth?.level_cap) || 70;
     const editor = window.AniilogsPotentialEditor;
-    const options = editor ? editor.totalsOptions(member, cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
+    const options = editor ? editor.totalsOptions(memberBuild(member), cap, data) : { level: member.level ?? cap, potential: member.potential ?? 0 };
     const totals = damage?.statTotals && growth ? damage.statTotals(data, aniilog, member.formId, options) : null;
     const researched = new Set((member.formResearch || []).map(String));
     const baseId = entry?.base_id;
@@ -2078,7 +2093,7 @@
 
     const cap = Number(growth.level_cap) || 70;
     const editor = window.AniilogsPotentialEditor;
-    const options = editor ? editor.totalsOptions(member, cap, data) : {
+    const options = editor ? editor.totalsOptions(memberBuild(member), cap, data) : {
       level: clampInt(member.level ?? cap, 1, cap, cap), potential: member.potential ?? 0, personality: member.personality || [],
     };
     const totals = model.statTotals(data, aniilog, member.formId, options);
@@ -2087,10 +2102,12 @@
       box.append(el("h3", "team-build-subheading", "Star-Up, held item, Aniilog and potential"));
       box.append(editor.render({
         coreToggle: false,
-        data, aniilog, formId: member.formId, build: member, totals,
+        data, aniilog, formId: member.formId, build: memberBuild(member), totals,
         onChange: (next) => {
           for (const key of ["potential", "starUp", "heldItem", "perfect", "formResearch", "coreUpgraded", "formsCaught", "prismanaCaught"]) {
-            if (next[key] === null || next[key] === undefined) delete member[key];
+            // A held item set to none stays none (null); otherwise the default would come back.
+            if (key === "heldItem" && next[key] === null) member[key] = null;
+            else if (next[key] === null || next[key] === undefined) delete member[key];
             else member[key] = next[key];
           }
           persist();
@@ -2463,7 +2480,7 @@
       // The level and potential set on each member’s Build tab (unset level = the cap).
       memberStats: Object.fromEntries(model.members.filter((member) => member?.formId)
         .map((member) => [String(member.formId), { level: member.level, potential: member.potential, starUp: member.starUp,
-          heldItem: member.heldItem, personality: member.personality, perfect: member.perfect, formResearch: member.formResearch,
+          heldItem: heldItemOf(member), personality: member.personality, perfect: member.perfect, formResearch: member.formResearch,
           coreUpgraded: member.coreUpgraded, formsCaught: member.formsCaught, prismanaCaught: member.prismanaCaught }])),
       formLabel,
       contentUrl: host.contentUrl,

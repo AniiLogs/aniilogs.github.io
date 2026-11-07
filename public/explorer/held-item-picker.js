@@ -40,6 +40,64 @@
     return { itemId: id, level: maxLevel(data, item.quality) };
   }
 
+  // The form ids in formId's evolution line: aniilog entries' evolution.from / .to ("aniimo:<form id>"), and
+  // the other forms of each species there (same base_id; a Prismana form lists no evolution of its own).
+  function evolutionLine(aniilog, formId) {
+    const links = new Map();
+    const link = (a, b) => {
+      if (!links.has(a)) links.set(a, new Set());
+      links.get(a).add(b);
+    };
+    const species = new Map();
+    for (const entry of aniilog?.entries || []) {
+      if (entry.base_id === undefined || entry.base_id === null) continue;
+      const id = String(entry.form_id);
+      const first = species.get(String(entry.base_id));
+      if (first) { link(id, first); link(first, id); } else species.set(String(entry.base_id), id);
+    }
+    for (const entry of aniilog?.entries || []) {
+      const id = String(entry.form_id);
+      for (const other of [...(entry.evolution?.from || []), ...(entry.evolution?.to || [])]) {
+        const otherId = String(other?.id || "").replace(/^aniimo:/u, "");
+        if (otherId) { link(id, otherId); link(otherId, id); }
+      }
+    }
+    const line = new Set([String(formId)]);
+    const queue = [String(formId)];
+    while (queue.length) {
+      for (const next of links.get(queue.shift()) || []) if (!line.has(next)) { line.add(next); queue.push(next); }
+    }
+    return line;
+  }
+
+  // The held item an Aniimo has until you pick one, as { itemId, level } at its top level, or null: its signature
+  // item (one the game recommends only within this Aniimo's evolution line, e.g. Irisalis' Floral Rainbow
+  // Feather), else the game's first recommended item. The Legendary version where there is one.
+  function defaultFor(data, aniilog, formId) {
+    const groups = data?.forms?.[formId]?.recommended?.held_items || [];
+    if (!groups.length) return null;
+    const line = evolutionLine(aniilog, formId);
+    const recommendedBy = (group) => Object.entries(data.forms)
+      .filter(([, form]) => (form.recommended?.held_items || []).some((other) => other.name === group.name))
+      .map(([id]) => id);
+    const signature = groups.find((group) => recommendedBy(group).every((id) => line.has(id)));
+    for (const group of signature ? [signature, ...groups] : groups) {
+      const tiers = [...(group.tiers || [])].sort((a, b) => Number(b.quality) - Number(a.quality));
+      for (const tier of tiers) {
+        const held = normalize(data, { itemId: tier.item_id });
+        if (held) return held;
+      }
+    }
+    return null;
+  }
+
+  // The held item a build uses: the one picked, none when "no held item" was picked (null), and the default
+  // above while nothing has been picked (undefined).
+  function chosen(data, aniilog, formId, heldItem) {
+    if (heldItem === undefined) return defaultFor(data, aniilog, formId);
+    return normalize(data, heldItem);
+  }
+
   function legendaryOnly() {
     try { return window.localStorage?.getItem(STORAGE_KEY) === "1"; } catch { return false; }
   }
@@ -135,5 +193,5 @@
     return field;
   }
 
-  window.AniilogsHeldItems = Object.freeze({ LEGENDARY, maxLevel, listItems, normalize, describe, legendaryOnly, setLegendaryOnly, render });
+  window.AniilogsHeldItems = Object.freeze({ LEGENDARY, maxLevel, listItems, normalize, defaultFor, chosen, describe, legendaryOnly, setLegendaryOnly, render });
 })();
