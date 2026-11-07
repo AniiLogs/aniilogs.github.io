@@ -1234,14 +1234,233 @@ async function loadHistoryCard() {
     if (!runs.length) { body.replaceChildren(element("p", "", "No runs captured yet. aLogs adds every run it sees here.")); return; }
     const list = element("ol", "profile-history-list is-compact");
     list.append(...runs.map((run) => historyRow(run)));
-    const more = element("a", "history-see-all", "See all");
+    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all");
     more.href = historyLink(true);
     body.replaceChildren(list, more);
   } catch {
     body.replaceChildren(element("p", "", "Battle History couldn't be loaded right now."));
   }
 }
-// the full view: filters, a page at a time
+// the filter menus, from the first page's counts (once)
+function fillHistoryFilters(filters) {
+  if (historyFull.dataset.filtersReady) return;
+  historyFull.dataset.filtersReady = "1";
+  const fill = (name, items) => {
+    const select = historyFull.querySelector(`[data-history-filter="${name}"]`);
+    select.append(...items.map(([value, label]) => { const option = element("option", "", label); option.value = value; return option; }));
+    select.closest("label").hidden = items.length < 2;
+  };
+  fill("mode", filters.modes.map((row) => [row.value, `${HISTORY_MODE_NAMES[row.value] || row.value} (${row.count})`]));
+  fill("boss", filters.bosses.map((row) => [row.id, `${row.name || row.id} (${row.count})`]));
+  fill("cycle", filters.weeks.map((row) => [row.value, `${weekLabel(row) || `Week ${row.value}`} (${row.count})`]));
+  // the long lists get the site's type-to-filter box (/explorer/aniimo-picker.js); a pick fires the select's "change"
+  for (const name of ["boss", "cycle"]) {
+    const select = historyFull.querySelector(`[data-history-filter="${name}"]`);
+    window.AniilogsPicker?.makeCombobox(select, { placeholder: select.options[0]?.text || "Type to filter", emptyText: "No matches" });
+  }
+}
+// ---------------------------------------------------------------- My runs
+// The full Battle History on your own profile: only you see it (the owner-only /api/profile/history). Every run in a
+// row: its mode, the fight and its week, when it was played, the result, who you were with and what each did (Battle
+// Data), and its pictures in the leaderboards' proof viewer (/proof-viewer.js). A search box that filters as you type
+// (boss, teammate, mode, date), numbered pages of 20, 30 or 50 (remembered), counted on the server.
+const MY_RUNS_PAGE_SIZE_KEY = "aniilogs:my-runs:page-size:v1";
+const MY_RUNS_PAGE_SIZES = [20, 30, 50];
+const MY_RUNS_SEARCH_WAIT_MS = 250;
+const HISTORY_MODE_NAMES = { interlink: "Holo-Battle Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist", menu: "Menu bests" };
+const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null };
+function myRunsPageSize() {
+  try {
+    const saved = Number(window.localStorage.getItem(MY_RUNS_PAGE_SIZE_KEY));
+    return MY_RUNS_PAGE_SIZES.includes(saved) ? saved : 20;
+  } catch { return 20; }
+}
+function runModeLabel(run) {
+  if (run.kind === "interlink_best") return "Interlink · menu best";
+  if (run.kind === "eggheist_season") return "Egg Heist · season rank";
+  return HISTORY_MODE_NAMES[run.mode] || run.mode || "Run";
+}
+function runFightWhen(run) {
+  if (run.mode === "interlink") return weekLabel(run.week) || (run.cycle ? `Week ${run.cycle}` : "");
+  return run.cycle ? `Season ${run.cycle}` : "";
+}
+function runResult(run) {
+  if (run.kind === "interlink_best") {
+    return [run.score != null ? `${numberFormat.format(run.score)} pts` : "", run.stars != null ? `★ ${run.stars}` : "", "from the game's menu"].filter(Boolean).join(" · ");
+  }
+  if (run.kind === "eggheist_season") return [run.rank?.name, run.score != null ? `${numberFormat.format(run.score)} rank points` : ""].filter(Boolean).join(" · ") || "—";
+  return historyNumbers(run) || "—";
+}
+// each player on a line: their name, then what they did, as on Battle Data
+function runPartyCell(run) {
+  let players = (run.players || []).filter((player) => player && (player.name || player.avgDps != null));
+  if (!players.length && Array.isArray(run.lineup)) players = run.lineup.filter((item) => item?.name).map(({ name, ai, self }) => ({ name, ai, self }));
+  if (!players.length) return element("span", "history-empty", run.kind === "interlink_best" ? "Not on the menu" : "No party read");
+  const list = element("ul", "myruns-party");
+  for (const [index, player] of players.entries()) {
+    const item = element("li");
+    const who = element("span", "myruns-who");
+    if (player.profileId && !player.ai) {
+      const link = element("a", "", player.name);
+      link.href = profileHref({ profile: player.profileId });
+      who.append(link);
+    } else who.append(document.createTextNode(player.name || `Player ${index + 1}`));
+    if (player.ai) who.append(element("span", "history-chip is-ai", "AI"));
+    if (player.self && run.credited) who.append(element("span", "history-chip is-self", "captured it"));
+    item.append(who);
+    const figures = [["DPS", player.avgDps], ["BREAK", player.breakValue], ["Taken", player.damageTaken], ["Heal", player.heal]]
+      .filter(([, value]) => value != null);
+    if (figures.length) {
+      const stats = element("span", "myruns-stats");
+      for (const [label, value] of figures) {
+        const stat = element("span");
+        stat.append(element("small", "", label), document.createTextNode(` ${numberFormat.format(value)}`));
+        stats.append(stat);
+      }
+      item.append(stats);
+    }
+    list.append(item);
+  }
+  return list;
+}
+function runProofCell(run) {
+  if (run.proofPrunedAt) return element("span", "history-empty", "No longer kept");
+  const has = run.hasEvidence || run.hasBattleEvidence || run.hasPartyScreen || Number(run.gizmoShots) > 0 || run.menuProofId;
+  const button = has && window.AniilogsProof ? window.AniilogsProof.button(run.submissionId, run.check, run.menuProofId || null) : null;
+  if (!button) return element("span", "history-empty", "None");
+  button.classList.add("myruns-proof");
+  button.append(element("span", "", "View"));
+  return button;
+}
+function myRunRow(run) {
+  const row = element("tr");
+  row.id = `run-${run.submissionId}`;
+  const cell = (label, ...children) => {
+    const td = element("td");
+    td.dataset.label = label;
+    td.append(...children.filter(Boolean));
+    row.append(td);
+  };
+  cell("Mode", element("span", "myruns-mode", runModeLabel(run)));
+  const fight = element("span", "myruns-fight");
+  fight.append(element("strong", "", historyTitle(run)));
+  const when = runFightWhen(run);
+  if (when) fight.append(element("small", "", when));
+  cell("Fight", fight);
+  const played = run.playedAt ? new Date(run.playedAt * 1000) : null;
+  const time = element("time", "myruns-played", played
+    ? played.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—");
+  if (played) time.dateTime = played.toISOString();
+  cell("Played", time);
+  const result = element("span", "myruns-result");
+  result.append(element("span", "", runResult(run)));
+  const chips = element("span", "history-chips");
+  chips.append(...historyChips(run));
+  if (chips.childElementCount) result.append(chips);
+  cell("Result", result);
+  cell("Party", runPartyCell(run));
+  cell("Proof", runProofCell(run));
+  return row;
+}
+// the page buttons: Previous, 1 … 4 5 6 … 12, Next
+function renderMyRunsPager(page, pages) {
+  const pager = historyFull.querySelector("[data-myruns-pager]");
+  pager.replaceChildren();
+  pager.hidden = pages <= 1;
+  if (pages <= 1) return;
+  const go = (label, target, { current = false, disabled = false, aria = "" } = {}) => {
+    const button = element("button", current ? "is-current" : "", label);
+    button.type = "button";
+    button.disabled = disabled || current;
+    if (current) button.setAttribute("aria-current", "page");
+    if (aria) button.setAttribute("aria-label", aria);
+    button.addEventListener("click", () => {
+      myRuns.page = target;
+      void loadMyRuns();
+      historyFull.querySelector("[data-myruns-summary]")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    pager.append(button);
+  };
+  go("‹ Previous", page - 1, { disabled: page <= 1, aria: "Previous page" });
+  const shown = [...new Set([1, page - 1, page, page + 1, pages].filter((n) => n >= 1 && n <= pages))].sort((a, b) => a - b);
+  shown.forEach((n, index) => {
+    if (index && n - shown[index - 1] > 1) pager.append(element("span", "myruns-gap", "…"));
+    go(String(n), n, { current: n === page, aria: `Page ${n}` });
+  });
+  go("Next ›", page + 1, { disabled: page >= pages, aria: "Next page" });
+}
+// while a search waits for the server, the rows already shown are narrowed at once
+function narrowShownRuns(text) {
+  const words = text.toLowerCase().split(/\s+/u).filter(Boolean);
+  for (const row of historyFull.querySelectorAll("[data-myruns-rows] tr")) {
+    const haystack = row.textContent.toLowerCase();
+    row.hidden = words.some((word) => !haystack.includes(word));
+  }
+}
+async function loadMyRuns() {
+  const rows = historyFull.querySelector("[data-myruns-rows]");
+  const status = historyFull.querySelector("[data-history-status]");
+  const summary = historyFull.querySelector("[data-myruns-summary]");
+  const params = new URLSearchParams({ page: String(myRuns.page), limit: String(myRuns.pageSize), tz: String(-new Date().getTimezoneOffset()) });
+  for (const select of historyFull.querySelectorAll("[data-history-filter]")) if (select.value) params.set(select.dataset.historyFilter, select.value);
+  const search = historyFull.querySelector("[data-history-search]").value.trim();
+  if (search) params.set("q", search);
+  const request = ++myRuns.request;
+  if (!rows.childElementCount) status.textContent = "Loading…";
+  historyFull.classList.add("is-loading");
+  try {
+    const page = await fetchHistory(params);
+    if (request !== myRuns.request) return;              // a newer search or page is on its way
+    if (page.filters) fillHistoryFilters(page.filters);
+    // past the last page (the list got shorter): the last page
+    // (an API from before My runs sends one page and no counts)
+    const pages = Number(page.pages) || 1;
+    const current = Number(page.page) || 1;
+    const total = Number(page.total ?? page.runs.length) || 0;
+    if (!page.runs.length && total && myRuns.page > pages) { myRuns.page = pages; void loadMyRuns(); return; }
+    rows.replaceChildren(...page.runs.map(myRunRow));
+    const first = (current - 1) * (Number(page.pageSize) || myRuns.pageSize) + 1;
+    summary.textContent = total
+      ? `${numberFormat.format(first)}–${numberFormat.format(first + page.runs.length - 1)} of ${numberFormat.format(total)} run${total === 1 ? "" : "s"}` : "";
+    historyFull.querySelector(".myruns-wrap").hidden = !page.runs.length;
+    const filtered = search || ["mode", "boss", "cycle"].some((name) => params.has(name));
+    status.textContent = page.runs.length ? "" : filtered ? "No runs match." : "No runs captured yet. aLogs adds every run it sees here.";
+    renderMyRunsPager(current, pages);
+    if (window.location.hash.startsWith("#run-")) document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "center" });
+  } catch {
+    if (request === myRuns.request) status.textContent = "My runs couldn't be loaded right now.";
+  } finally {
+    if (request === myRuns.request) historyFull.classList.remove("is-loading");
+  }
+}
+function startMyRuns() {
+  myRuns.on = true;
+  myRuns.pageSize = myRunsPageSize();
+  historyFull.classList.add("is-my-runs");
+  historyFull.querySelector("#history-title").textContent = "My runs";
+  historyFull.querySelector("[data-history-intro]").textContent = "Only you can see this list: every run aLogs captured for you, newest first, "
+    + "including runs a teammate's app captured with you in the party, and your menu bests.";
+  for (const node of historyFull.querySelectorAll("[data-myruns-only]")) node.hidden = false;
+  historyFull.querySelector("[data-history-list]").hidden = true;
+  historyFull.querySelector("[data-history-more]").hidden = true;
+  const size = historyFull.querySelector("[data-history-page-size]");
+  size.value = String(myRuns.pageSize);
+  size.addEventListener("change", () => {
+    myRuns.pageSize = MY_RUNS_PAGE_SIZES.includes(Number(size.value)) ? Number(size.value) : 20;
+    try { window.localStorage.setItem(MY_RUNS_PAGE_SIZE_KEY, String(myRuns.pageSize)); } catch { /* not remembered */ }
+    myRuns.page = 1;
+    void loadMyRuns();
+  });
+  const search = historyFull.querySelector("[data-history-search]");
+  search.addEventListener("input", () => {
+    narrowShownRuns(search.value);
+    clearTimeout(myRuns.timer);
+    myRuns.timer = setTimeout(() => { myRuns.page = 1; void loadMyRuns(); }, MY_RUNS_SEARCH_WAIT_MS);
+  });
+  void loadMyRuns();
+}
+
+// the full view on someone else's public profile: filters, a page at a time
 async function loadHistoryPage(reset) {
   const list = historyFull.querySelector("[data-history-list]");
   const status = historyFull.querySelector("[data-history-status]");
@@ -1254,23 +1473,7 @@ async function loadHistoryPage(reset) {
   more.hidden = true;
   try {
     const page = await fetchHistory(params);
-    if (page.filters && !historyFull.dataset.filtersReady) {
-      historyFull.dataset.filtersReady = "1";
-      const fill = (name, items) => {
-        const select = historyFull.querySelector(`[data-history-filter="${name}"]`);
-        select.append(...items.map(([value, label]) => { const option = element("option", "", label); option.value = value; return option; }));
-        select.closest("label").hidden = items.length < 2;
-      };
-      const modeNames = { interlink: "Holo-Battle Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist" };
-      fill("mode", page.filters.modes.map((row) => [row.value, `${modeNames[row.value] || row.value} (${row.count})`]));
-      fill("boss", page.filters.bosses.map((row) => [row.id, `${row.name || row.id} (${row.count})`]));
-      fill("cycle", page.filters.weeks.map((row) => [row.value, `${weekLabel(row) || `Week ${row.value}`} (${row.count})`]));
-      // the long lists get the site's type-to-filter box (/explorer/aniimo-picker.js); a pick fires the select's "change"
-      for (const name of ["boss", "cycle"]) {
-        const select = historyFull.querySelector(`[data-history-filter="${name}"]`);
-        window.AniilogsPicker?.makeCombobox(select, { placeholder: select.options[0]?.text || "Type to filter", emptyText: "No matches" });
-      }
-    }
+    if (page.filters) fillHistoryFilters(page.filters);
     list.append(...page.runs.map((run) => historyRow(run, { open: window.location.hash === `#run-${run.submissionId}` })));
     historyNext = page.next;
     more.hidden = !historyNext;
@@ -1285,12 +1488,23 @@ function showBattleHistory(publicId) {
   if (HISTORY_VIEW) {
     historyFull.hidden = false;
     historyFull.querySelector("[data-history-back]").href = historyLink(false);
-    if (!historyFull.dataset.started) { historyFull.dataset.started = "1"; void loadHistoryPage(true); }
-  } else void loadHistoryCard();
+    if (!historyFull.dataset.started) {
+      historyFull.dataset.started = "1";
+      if (publicId) void loadHistoryPage(true); else startMyRuns();
+    }
+  } else {
+    // your own profile's card leads to My runs
+    if (!publicId) profileOverview.querySelector('[data-overview-panel="history"] h3').textContent = "My runs";
+    void loadHistoryCard();
+  }
 }
 if (HISTORY_VIEW) {
   document.body.classList.add("profile-history-view");
-  for (const select of historyFull.querySelectorAll("[data-history-filter]")) select.addEventListener("change", () => { historyNext = null; void loadHistoryPage(true); });
+  for (const select of historyFull.querySelectorAll("[data-history-filter]")) select.addEventListener("change", () => {
+    if (myRuns.on) { myRuns.page = 1; void loadMyRuns(); return; }
+    historyNext = null;
+    void loadHistoryPage(true);
+  });
   historyFull.querySelector("[data-history-more]").addEventListener("click", () => void loadHistoryPage(false));
 }
 

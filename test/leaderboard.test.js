@@ -1718,6 +1718,97 @@ test("Battle History follows the profile, credits teammates' copies by proven UI
   assert.equal((await call(env, "/api/profiles/pubdev01/history")).status, 404);
 });
 
+test("My runs: numbered pages of 20, 30 or 50 with the total, and search as you type, on the owner's own view only", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const userToken = await namedToken(env, SESSIONS.user);
+  for (let i = 0; i < 55; i += 1) {
+    const boss = i % 5 ? { id: "80000107", name: "Omega Infergon", level: 60 } : { id: "80000109", name: "Omega Sherro", level: 60 };
+    const players = [{ name: "DevOne", self: true, avgDps: 9000 }, { name: i === 7 ? "Kirabelle" : "Pathmate", uid: "301000000003", ai: false, avgDps: 4000 }];
+    assert.equal((await sendRun(env, token, run(`m${i}`, { boss, players, score: 10000 + i, playedAt: 1792700000 + i * 3600 }))).status, 201);
+  }
+  await sendRun(env, token, { kind: "sim_run", clientRunId: "sim1", trial: "Training of Water", difficulty: "Hard", cleared: true, clearTimeS: 400,
+    playedAt: 1792900000, extra: { lineup: [{ slot: 1, name: "DevOne", self: true }, { slot: 2, name: "Lineupfriend" }] } });
+  // another player's run: never in DevOne's list
+  await sendRun(env, userToken, run("not-mine", { players: [{ name: "UserOne", self: true }], playedAt: 1792950000 }));
+  const mine = (query) => historyOf(env, `/api/profile/history?${query}`, SESSIONS.dev);
+
+  const first = await mine("page=1");
+  assert.deepEqual([first.runs.length, first.total, first.pages, first.page, first.pageSize], [20, 56, 3, 1, 20]);
+  assert.equal(first.runs[0].kind, "sim_run");
+  assert.ok(first.filters);
+  const third = await mine("page=3&limit=20");
+  assert.deepEqual(third.runs.map((r) => r.score), [10015, ...Array.from({ length: 15 }, (_, i) => 10014 - i)]);
+  assert.equal(third.filters, undefined);
+  assert.equal((await mine("page=1&limit=30")).runs.length, 30);
+  const fifty = await mine("page=2&limit=50");
+  assert.deepEqual([fifty.runs.length, fifty.pages], [6, 2]);
+  assert.equal((await mine("page=1&limit=1000")).pageSize, 20);          // only 20, 30 or 50
+  assert.equal((await mine("page=9")).runs.length, 0);
+  assert.ok((await mine("page=1")).runs.every((r) => r.players.every((p) => p.name !== "UserOne")));
+
+  // search: boss, teammate (Battle Data or the Party screen), mode, date; every word has to match
+  assert.equal((await mine("page=1&q=sherro")).total, 11);
+  assert.equal((await mine("page=1&q=SHERRO%20omega")).total, 11);
+  assert.deepEqual((await mine("page=1&q=kirab")).runs.map((r) => r.score), [10007]);
+  assert.deepEqual((await mine("page=1&q=lineupfriend")).runs.map((r) => r.kind), ["sim_run"]);
+  assert.equal((await mine("page=1&q=holo-battle%20sim")).total, 1);
+  assert.equal((await mine("page=1&q=egg")).total, 0);
+  const day = new Date(1792700000 * 1000).toISOString().slice(0, 10);
+  const sameDay = (await mine(`page=1&q=${day}`)).runs;
+  assert.ok(sameDay.length > 0 && sameDay.every((r) => new Date(r.playedAt * 1000).toISOString().slice(0, 10) === day));
+  // the viewer's time zone moves a run across midnight
+  const utcCount = (await mine(`page=1&q=${day}`)).total;
+  assert.notEqual((await mine(`page=1&q=${day}&tz=600`)).total, utcCount);
+  const month = new Date(1792700000 * 1000).toLocaleString("en", { month: "long", timeZone: "UTC" });
+  assert.equal((await mine(`page=1&q=${month.slice(0, 3).toLowerCase()}`)).total > 0, true);
+  // never a UID, and LIKE's wildcards are plain characters
+  assert.equal((await mine("page=1&q=301000000003")).total, 0);
+  assert.equal((await mine("page=1&q=%25")).total, 0);
+  assert.equal((await mine("page=1&q=_")).total, 0);
+  // filters still apply alongside
+  assert.equal((await mine("page=1&mode=sim&q=sherro")).total, 0);
+
+  // the public history and other players: no numbered pages, no search, no total; logged out: nothing
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01' WHERE discord_id = ?").run(IDS.dev);
+  const shown = await historyOf(env, "/api/profiles/pubdev01/history?page=2&q=sherro&limit=50", SESSIONS.user);
+  assert.equal(shown.total, undefined);
+  assert.equal(shown.runs.length, 50);
+  assert.ok(shown.runs.some((r) => r.boss?.name !== "Omega Sherro"));
+  const theirs = await historyOf(env, "/api/profile/history?page=1", SESSIONS.user);
+  assert.deepEqual(theirs.runs.map((r) => r.score), [20000]);            // UserOne sees only their own
+  assert.equal(theirs.total, 1);
+  assert.equal((await call(env, "/api/profile/history?page=1&q=sherro")).status, 401);
+});
+
+test("My runs: menu bests have their own filter, and a run a menu best matches opens with the menu picture", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.dev);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const send = async (submission, parts) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(submission));
+    for (const [name, mark] of parts) form.set(name, jpeg(mark), `${name}.jpg`);
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    return (await sent.json()).submissionId;
+  };
+  const menuId = await send({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 25000, stars: 20 }, [["evidence", 4]]);
+  const tieId = await send({ kind: "interlink_run", clientRunId: "il-tie", cycle: "3005", boss: sherro, score: 25000, stars: 20, clearTimeS: 150,
+    cleared: true, partySize: 1, players: [{ name: "MinMax", ai: false, self: true, avgDps: 9000 }] }, [["evidence", 2], ["battle", 3]]);
+  const lowId = await send({ kind: "interlink_run", clientRunId: "il-low", cycle: "3005", boss: sherro, score: 20000, stars: 18, clearTimeS: 170,
+    cleared: true, partySize: 1, players: [{ name: "MinMax", ai: false, self: true, avgDps: 8000 }] }, [["evidence", 5]]);
+  const page = await historyOf(env, "/api/profile/history?page=1", SESSIONS.dev);
+  const byId = new Map(page.runs.map((r) => [r.submissionId, r]));
+  assert.equal(byId.get(tieId).menuProofId, menuId);
+  assert.equal(byId.get(lowId).menuProofId, undefined);
+  assert.equal(byId.get(menuId).kind, "interlink_best");
+  assert.ok(page.filters.modes.some((m) => m.value === "menu" && m.count === 1));
+  assert.deepEqual((await historyOf(env, "/api/profile/history?page=1&mode=menu", SESSIONS.dev)).runs.map((r) => r.submissionId), [menuId]);
+  assert.deepEqual((await historyOf(env, "/api/profile/history?page=1&q=menu", SESSIONS.dev)).runs.map((r) => r.submissionId), [menuId]);
+});
+
 test("at most DAILY_RUN_LIMIT new records an account a day; re-sends still go through", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true", DAILY_RUN_LIMIT: "3" });
   const token = await namedToken(env, SESSIONS.dev);

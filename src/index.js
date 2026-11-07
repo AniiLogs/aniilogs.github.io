@@ -1706,6 +1706,31 @@ async function profilesDirectory(env) {
 // boards stay best-per-player; this is the whole record. It follows the profile: the owner's own, or a public
 // profile's for anyone. Names as on screen, a profile link only for public profiles, never a UID.
 const HISTORY_PAGE = 20;
+const HISTORY_PAGE_SIZES = Object.freeze([20, 30, 50]);
+// My runs' search box (the owner's own view only): every word has to match something about the run - the boss, the
+// trial or rank, a teammate's name (Battle Data or the Party screen), the mode, or the day it was played (in the
+// viewer's time zone, ?tz= minutes east of UTC: "2026-11-03", "Nov", "November 3"). Never a UID.
+const HISTORY_MODE_WORDS = Object.freeze({ interlink: "holo-battle interlink", sim: "holo-battle sim simulation trial training", eggheist: "egg heist eggheist" });
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function historySearch(params, binds) {
+  const words = String(params.get("q") || "").slice(0, 80).toLowerCase().split(/\s+/u).filter(Boolean).slice(0, 6).map((word) => word.slice(0, 40));
+  if (!words.length) return [];
+  const tz = Number.parseInt(params.get("tz") || "0", 10);
+  const shift = Number.isInteger(tz) && Math.abs(tz) <= 14 * 60 ? tz * 60 : 0;
+  const local = `at + ${shift}, 'unixepoch'`;
+  const day = `strftime('%Y-%m-%d', ${local}) || ' ' || (CASE strftime('%m', ${local}) ${MONTH_NAMES.map((name, i) => `WHEN '${String(i + 1).padStart(2, "0")}' THEN '${name}'`).join(" ")} END)
+    || ' ' || CAST(strftime('%d', ${local}) AS INTEGER)`;
+  const like = (n) => `LIKE ?${n} ESCAPE '\\'`;
+  const names = (column, path, n) => `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${column}) THEN ${column} END, '${path}') item
+    WHERE json_extract(item.value, '$.name') ${like(n)})`;
+  return words.map((word) => {
+    const n = binds.push(`%${word.replace(/[\\%_]/gu, (c) => `\\${c}`)}%`);
+    const modes = Object.entries(HISTORY_MODE_WORDS).filter(([, text]) => text.includes(word)).map(([mode]) => `'${mode}'`);
+    return `(${["boss_name", "rank_name", "trial", "difficulty"].map((column) => `${column} ${like(n)}`).join(" OR ")}
+      OR ${names("players_json", "$", n)} OR ${names("extra_json", "$.lineup", n)}
+      OR (${day}) ${like(n)}${modes.length ? ` OR mode IN (${modes.join(", ")})` : ""}${"menu best".includes(word) ? " OR kind = 'interlink_best'" : ""})`;
+  });
+}
 // aLogs' Party-screen lineup (extra.lineup) as the site passes it on: for every player, slot, name, AI, and when read
 // their lead Aniimo, its level, CP and team comp; self marks the player who sent the run.
 function publicLineup(lineup) {
@@ -1804,6 +1829,9 @@ async function battleHistory(env, discordId, params, { owner }) {
   const binds = [discordId];
   const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "";
   if (mode) { where.push(`mode = ?${binds.push(mode)}`); }
+  // My runs (the owner's own view only): menu bests on their own, and the search box
+  if (owner && params.get("mode") === "menu") where.push("kind = 'interlink_best'");
+  if (owner) where.push(...historySearch(params, binds));
   const boss = String(params.get("boss") || "");
   if (/^[A-Za-z0-9_-]{1,40}$/u.test(boss)) where.push(`boss_id = ?${binds.push(boss)}`);
   const cycle = String(params.get("cycle") || "");
@@ -1814,16 +1842,37 @@ async function battleHistory(env, discordId, params, { owner }) {
   const page = before
     ? `SELECT * FROM (${filtered}) WHERE at < ?${binds.push(Number(before[1]))} OR (at = ?${binds.length} AND submission_id < ?${binds.push(before[2])})`
     : filtered;
-  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || String(HISTORY_PAGE), 10) || HISTORY_PAGE, 1), 50);
-  const { results } = await env.DB.prepare(`${page} ORDER BY at DESC, submission_id DESC LIMIT ${limit + 1}`).bind(...binds).all();
+  // My runs pages by number (?page=, 20, 30 or 50 a page) with the total; everyone else by "before"
+  const pageNumber = owner && !before ? Number.parseInt(params.get("page") || "", 10) : NaN;
+  const numbered = Number.isInteger(pageNumber) && pageNumber >= 1 && pageNumber <= 10000;
+  const limit = numbered ? (HISTORY_PAGE_SIZES.includes(Number(params.get("limit"))) ? Number(params.get("limit")) : HISTORY_PAGE)
+    : Math.min(Math.max(Number.parseInt(params.get("limit") || String(HISTORY_PAGE), 10) || HISTORY_PAGE, 1), 50);
+  const pageBinds = [...binds];
+  const [{ results }, counted] = await Promise.all([
+    env.DB.prepare(`${page} ORDER BY at DESC, submission_id DESC LIMIT ${limit + 1}${numbered ? ` OFFSET ${(pageNumber - 1) * limit}` : ""}`).bind(...binds).all(),
+    numbered ? env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...pageBinds).first() : null,
+  ]);
   const rows = (results || []).slice(0, limit);
+  // My runs: a run whose stars and score a menu best of the same boss and week matches opens with the menu's picture
+  // beside its own (as on the boards, menuProofId)
+  const menuOf = new Map();
+  if (owner && rows.some((row) => row.kind === "interlink_run")) {
+    const { results: menus } = await env.DB.prepare(
+      `SELECT submission_id AS id, cycle, boss_id AS bossId, stars, score FROM leaderboard_submissions
+       WHERE discord_id = ? AND kind = 'interlink_best' AND status = 'visible' AND evidence_key IS NOT NULL ORDER BY created_at ASC`,
+    ).bind(discordId).all();
+    for (const menu of menus || []) {
+      const key = `${menu.cycle}|${menu.bossId}|${menu.stars}|${menu.score}`;
+      if (!menuOf.has(key)) menuOf.set(key, menu.id);
+    }
+  }
   const profiles = await partyProfiles(env, rows);
   // a week's dates, for its label ("Week of Oct 28")
   const weekList = await interlinkCycles(env);
   const weekDates = (id) => { const week = interlinkCycle(weekList, id); return week ? { start: week.start, end: week.end } : {}; };
   // the filter menus (first page only): what this player's record has
   let filters;
-  if (!before) {
+  if (!before && (!numbered || pageNumber === 1)) {
     const facet = async (sql) => (await env.DB.prepare(sql).bind(discordId).all()).results || [];
     const [modes, bosses, weeks] = await Promise.all([
       facet(`SELECT mode AS value, COUNT(*) AS count FROM (${all}) GROUP BY mode ORDER BY count DESC`),
@@ -1831,6 +1880,10 @@ async function battleHistory(env, discordId, params, { owner }) {
       facet(`SELECT cycle AS value, COUNT(*) AS count FROM (${all}) WHERE cycle IS NOT NULL AND mode = 'interlink' GROUP BY cycle ORDER BY CAST(cycle AS INTEGER) DESC`),
     ]);
     filters = { modes, bosses, weeks: weeks.map((row) => ({ ...row, ...weekDates(row.value) })) };
+    if (owner) {
+      const [menus] = await facet(`SELECT COUNT(*) AS count FROM (${all}) WHERE kind = 'interlink_best'`);
+      if (menus?.count) filters.modes.push({ value: "menu", count: menus.count });
+    }
   }
   // the other copies of shared runs (sent by teammates), for the players their apps read
   const shared = [...new Set(rows.map((row) => parseJsonColumn(row.extra_json)?.sharedRun).filter((id) => typeof id === "string"))];
@@ -1883,11 +1936,15 @@ async function battleHistory(env, discordId, params, { owner }) {
         captures: Math.max(1, Number(row.captures) || 0),     // how many players' apps captured this run
         proofPrunedAt: row.proof_pruned_at || null,
         check: runCheckBadge(row.verify_state),
+        ...(owner && row.kind === "interlink_run" && menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`)
+          ? { menuProofId: menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`) } : {}),
         ...(owner && row.status !== "visible" ? { hidden: true } : {}),
         playedAt: row.played_at || row.created_at,
       };
     }),
     next: (results || []).length > limit && last ? `${last.at}.${last.submission_id}` : null,
+    ...(numbered ? { page: pageNumber, pageSize: limit, total: Number(counted?.total) || 0,
+      pages: Math.max(1, Math.ceil((Number(counted?.total) || 0) / limit)) } : {}),
     ...(filters ? { filters } : {}),
   };
 }
