@@ -214,4 +214,14 @@
   }
 
   window.AniilogsGuide = Object.freeze({ title: TITLE, sections: SECTIONS, explanations: EXPLANATIONS, explanationFor });
+
+  // The Guides page (/guides/) lists every guide registered here; this one is "damage".
+  window.AniilogsGuides = window.AniilogsGuides || [];
+  window.AniilogsGuides.push(Object.freeze({
+    id: "damage",
+    title: "How damage works",
+    summary: "What each kind of boost does, what stacks with what, and where your next point of ATK or potential does the most.",
+    intro: "How damage works in Aniimo, in plain words: what each kind of boost does, what stacks with what, and where your next point of ATK or potential does the most. Each section says how sure it is.",
+    sections: SECTIONS,
+  }));
 })();

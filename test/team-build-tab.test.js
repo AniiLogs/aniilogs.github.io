@@ -48,8 +48,9 @@ test("the card centres the team row, tags each Core skill (Core) in gold, and sa
   assert.doesNotMatch(team + card, /Star Up/u);
 });
 
-test("Team Builder's tabs: Team Builder, Type matchups and the Guide on top; PvE / PvP; then that group's modes", () => {
-  assert.match(team, /\[\["team", "Team Builder"\], \["types", "Type matchups"\], \["guide", window\.AniilogsGuide\?\.title \|\| "Guide"\]\]/u);
+test("Team Builder's tabs: Team Builder, Type matchups and a Guides link on top; PvE / PvP; then that group's modes", () => {
+  assert.match(team, /\[\["team", "Team Builder"\], \["types", "Type matchups"\]\]/u);
+  assert.match(team, /const guides = el\("a", "team-mode-button", "Guides"\);\s*guides\.href = "\/guides\/";/u);
   for (const [id, label, group] of [["standard", "Standard", "pve"], ["interlink", "Interlink", "pve"], ["holosim", "Holo-Sim", "pve"],
     ["eggheist", "Egg Heist", "pve"], ["pvpfair", "Fair \\(WIP\\)", "pvp"], ["pvpunfair", "Unfair \\(WIP\\)", "pvp"], ["eggheistpvp", "Egg Heist PvP", "pvp"]]) {
     assert.match(team, new RegExp(`\\{ id: "${id}", label: "${label}", share: "[a-z]", group: "${group}"`, "u"));
@@ -57,7 +58,7 @@ test("Team Builder's tabs: Team Builder, Type matchups and the Guide on top; PvE
   // 1v1 is PvP's first tab (its own page, duel.js)
   assert.match(team, /const DUEL_TAB = \["duel", "1v1"\];/u);
   assert.match(team, /if \(viewState\.page === DUEL_TAB\[0\]\) return "pvp";/u);
-  assert.match(team, /if \(!typesPage && !guidePage\) controls\.append\(renderGroupSwitch\(\), renderModeSwitch\(\)\);/u);
+  assert.match(team, /if \(!typesPage\) controls\.append\(renderGroupSwitch\(\), renderModeSwitch\(\)\);/u);
 });
 
 test("both Egg Heist modes work like Interlink with the main Aniimo in slot 2; every Aniimo's trait is on the card", () => {
