@@ -37,7 +37,11 @@ async function database() {
   });
   const DB = {
     prepare(sql) {
-      return { ...statement(sql), bind: (...values) => statement(sql, values) };
+      // like D1: at most 100 bound values a query (6 Nov: Show unlinked asked for more and failed)
+      return { ...statement(sql), bind: (...values) => {
+        if (values.length > 100) throw new Error(`D1_ERROR: too many SQL variables (${values.length})`);
+        return statement(sql, values);
+      } };
     },
     async batch(statements) {
       return Promise.all(statements.map((item) => item.run()));
@@ -780,7 +784,15 @@ test("two app users sending the same run vouch for each other: each teammate slo
   const mine = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0", { session: SESSIONS.dev })).json();
   const myRun = mine.entries.find((e) => e.submissionId && e.own && e.player === "MinMax" && e.score === 16064 && !e.teammate);
   assert.ok(myRun);
-  assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side
+  assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side  // more teammates' names than D1 takes in one query
+  for (let i = 0; i < 40; i += 1) {
+    await send(c, run(`many${i}`, { ...shared, score: 14000 - i, playedAt: 1792700100 + i, gameUid: "302000000003",
+      players: [{ name: "Rook", ai: false, self: true }, { name: `Mate${i}a`, ai: false }, { name: `Mate${i}b`, ai: false }, { name: `Mate${i}c`, ai: false }] }));
+  }
+  for (const q of ["ladder=score&limit=10", "ladder=avg_dps&limit=10", "boss=80000100&ladder=score&limit=50"]) {
+    const response = await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=1&${q}`);
+    assert.equal(response.status, 200, `unlinked with ${q}: ${await response.clone().text()}`);
+  }
 });
 
 test("a menu best that matches a run's score goes onto that run: the run keeps the row and opens with the menu picture", async () => {
