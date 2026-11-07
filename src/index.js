@@ -1328,6 +1328,25 @@ const LISTED_PROFILE = `(p.is_public = 1 AND p.public_id IS NOT NULL
   AND (COALESCE(json_extract(p.preferences_json, '$.visibility.mode'), 'public') <> 'custom'
     OR EXISTS (SELECT 1 FROM json_each(COALESCE(p.preferences_json, '{}'), '$.visibility.parts') WHERE value = 'directory')))`;
 
+// Shown by: each player picks the name the site shows for them (Edit profile > Show me by, or the app through
+// /api/account/preferences): their in-game name (the default; their display name instead while "Let players find me by
+// my display name" is on) or their Discord name (global name, else username), drawn with a Discord logo. Kept in
+// profiles.preferences_json as $.nameShown = "discord"; the in-game choice is the key's absence. The Discord name only
+// ever leaves the server for a player who picked it.
+const NAME_CHOICES = Object.freeze(["game", "discord"]);
+function nameShownOf(prefsJson) {
+  try { return JSON.parse(prefsJson || "{}")?.nameShown === "discord" ? "discord" : "game"; } catch { return "game"; }
+}
+// SQL: the Discord name of account <who> when, and only when, its owner picked it; else NULL
+const discordNameSql = (who) => `(SELECT COALESCE(dn.discord_global_name, dn.discord_username) FROM users dn
+  JOIN profiles dp ON dp.discord_id = dn.discord_id
+  WHERE dn.discord_id = ${who} AND json_extract(dp.preferences_json, '$.nameShown') = 'discord')`;
+async function saveNameShown(env, discordId, choice) {
+  await env.DB.prepare(`UPDATE profiles SET preferences_json = CASE WHEN ? = 'discord'
+      THEN json_set(COALESCE(preferences_json, '{}'), '$.nameShown', 'discord')
+      ELSE json_remove(COALESCE(preferences_json, '{}'), '$.nameShown') END WHERE discord_id = ?`).bind(choice, discordId).run();
+}
+
 async function ownProfile(request, env) {
   const account = await currentAccount(request, env);
   if (!account) return json({ error: "Authentication required." }, 401);
@@ -1339,7 +1358,7 @@ async function ownProfile(request, env) {
   const { mode, parts, runsPublic } = profileVisibility(row?.isPublic, prefs);
   // profileUid: the main character's game UID, the address of the profile link (?profile=<UID>)
   const main = await mainCharacter(env, account.discordId);
-  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, runsPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
+  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, runsPublic, nameShown: nameShownOf(prefs), findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1371,6 +1390,9 @@ async function updateOwnProfile(request, env) {
   }
   if (body.runsPublic !== undefined && typeof body.runsPublic !== "boolean") {
     return json({ error: "runsPublic must be true or false." }, 400);
+  }
+  if (body.nameShown !== undefined && !NAME_CHOICES.includes(body.nameShown)) {
+    return json({ error: "nameShown must be game or discord." }, 400);
   }
   if (body.visibility !== undefined && !["public", "private", "custom"].includes(body.visibility)) {
     return json({ error: "visibility must be public, private or custom." }, 400);
@@ -1408,9 +1430,10 @@ async function updateOwnProfile(request, env) {
     await env.DB.prepare("UPDATE profiles SET preferences_json = json_set(COALESCE(preferences_json, '{}'), '$.runsPublic', json(?)) WHERE discord_id = ?")
       .bind(body.runsPublic ? "true" : "false", account.discordId).run();
   }
+  if (body.nameShown !== undefined) await saveNameShown(env, account.discordId, body.nameShown);
   const saved = await env.DB.prepare("SELECT preferences_json AS prefs FROM profiles WHERE discord_id = ?").bind(account.discordId).first();
   const { mode, parts, runsPublic } = profileVisibility(isPublic ? 1 : 0, saved?.prefs);
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, runsPublic, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, runsPublic, nameShown: nameShownOf(saved?.prefs), findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1484,9 +1507,10 @@ export function collectionSummary(completedIds, checklist = null) {
 }
 
 // The owner's best entry on each board (as the board shows it) and its position among every player on that board.
-// Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone.
-async function boardStandings(env, discordId, kind) {
-  const sortKey = LEADERBOARD_DEFAULT_SORT[kind];
+// Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone. sort: another of the board's
+// sorts (Egg Heist matches by fastest escape or most defeats), ranked as the board ranks it with that sort.
+async function boardStandings(env, discordId, kind, sort = null) {
+  const sortKey = sort && Object.hasOwn(LEADERBOARD_SORTS, sort) ? sort : LEADERBOARD_DEFAULT_SORT[kind];
   const order = LEADERBOARD_SORTS[sortKey];
   const orderBy = (prefix) => (sortKey === "standing"
     ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
@@ -1530,6 +1554,9 @@ async function boardStandings(env, discordId, kind) {
     clearTimeS: row.clear_time_s,
     floors: row.floors,
     partySize: row.party_size,
+    ...(kind === "sim_run" ? { trial: row.trial || null, trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null } : {}),
+    ...(kind === "sim_run" || kind === "eggheist_match" ? { difficulty: row.difficulty || null } : {}),
+    ...(kind === "eggheist_match" ? { defeats: row.defeats ?? null, cleared: row.cleared == null ? null : Boolean(row.cleared) } : {}),
     playedAt: row.played_at,
   }));
 }
@@ -1609,17 +1636,16 @@ async function ownProfileOverview(request, env) {
     completed = [];
   }
   // Board positions follow the leaderboard gate: hidden while leaderboards are a preview the owner can't read.
+  // Trophies (each personal best with its place on the board) go with the standing.
   let leaderboards = null;
-  if (leaderboardAllowed(account, env)) {
-    const kinds = Object.keys(LEADERBOARD_KINDS);
-    const standings = await Promise.all(kinds.map((kind) => boardStandings(env, account.discordId, kind)));
-    leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
-    leaderboards.interlinkSeason = await interlinkSeasonStanding(env, account.discordId);
-    leaderboards.interlinkParts = await interlinkProfileParts(env, account.discordId);
-  }
+  let trophies = null;
+  if (leaderboardAllowed(account, env)) ({ leaderboards, trophies } = await profileBoards(env, account.discordId));
   return json({
     profile: {
-      displayName: profile?.displayName || account.globalName || account.username,
+      // the owner's own page: their display name, or their Discord name (with the logo) when they picked it
+      ...(nameShownOf(profile?.prefs) === "discord"
+        ? { displayName: account.globalName || account.username, nameSource: "discord" }
+        : { displayName: profile?.displayName || account.globalName || account.username }),
       bio: profile?.bio || null,
       avatarUrl: account.avatarUrl,
       isPublic: Number(profile?.isPublic || 0) === 1,
@@ -1634,6 +1660,7 @@ async function ownProfileOverview(request, env) {
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     presence: await profilePresence(env, account.discordId),
     leaderboards,
+    trophies,
     photos: await profilePhotos(env, account.discordId, true),
     gameStats: await characterStats(env, main),
     collection: collectionSummary(completed, await releaseChecklist(env)),
@@ -1651,29 +1678,33 @@ async function searchProfiles(request, env) {
   const byUid = /^\d{4,24}$/u.test(q);
   const like = `%${q.toLowerCase().replace(/[\\%_]/gu, (c) => `\\${c}`)}%`;
   const { results } = await env.DB.prepare(
-    `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid
+    `SELECT p.public_id AS publicId, gc.character_name AS name, gc.game_uid AS gameUid, ${discordNameSql("p.discord_id")} AS discordName
      FROM game_characters gc JOIN profiles p ON p.discord_id = gc.discord_id
      WHERE ${LISTED_PROFILE} AND gc.character_name IS NOT NULL
        AND ${byUid ? "gc.game_uid LIKE ?" : "LOWER(gc.character_name) LIKE ? ESCAPE '\\'"}
      ORDER BY gc.last_seen_at DESC LIMIT 30`,
   ).bind(byUid ? `${q}%` : like).all();
   const named = byUid ? { results: [] } : await env.DB.prepare(
-    `SELECT p.public_id AS publicId, p.display_name AS displayName,
+    `SELECT p.public_id AS publicId, CASE WHEN p.findable_by_name = 1 THEN p.display_name END AS displayName,
+       ${discordNameSql("p.discord_id")} AS discordName,
        (SELECT json_group_array(json_object('name', gc.character_name, 'gameUid', gc.game_uid)) FROM game_characters gc
         WHERE gc.discord_id = p.discord_id AND gc.character_name IS NOT NULL) AS charactersJson
      FROM profiles p
-     WHERE ${LISTED_PROFILE} AND p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ? ESCAPE '\\'
+     WHERE ${LISTED_PROFILE} AND ((p.findable_by_name = 1 AND LOWER(p.display_name) LIKE ?1 ESCAPE '\\')
+       OR LOWER(${discordNameSql("p.discord_id")}) LIKE ?1 ESCAPE '\\')
      ORDER BY p.updated_at DESC LIMIT 10`,
   ).bind(like).all();
   const seen = new Map();
   for (const row of named.results || []) {
     let characters = [];
     try { characters = JSON.parse(row.charactersJson || "[]"); } catch { characters = []; }
-    seen.set(row.publicId, { publicId: row.publicId, displayName: row.displayName, characters });
+    seen.set(row.publicId, { publicId: row.publicId, ...(row.discordName ? { displayName: row.discordName, nameSource: "discord" }
+      : { displayName: row.displayName }), characters });
   }
+  const byName = new Set(seen.keys());
   for (const row of results || []) {
-    const entry = seen.get(row.publicId) || { publicId: row.publicId, characters: [] };
-    if (!entry.displayName) entry.characters.push({ name: row.name, gameUid: row.gameUid });
+    const entry = seen.get(row.publicId) || { publicId: row.publicId, ...(row.discordName ? { displayName: row.discordName, nameSource: "discord" } : {}), characters: [] };
+    if (!byName.has(row.publicId)) entry.characters.push({ name: row.name, gameUid: row.gameUid });
     seen.set(row.publicId, entry);
   }
   return json({ results: [...seen.values()].slice(0, 10) });
@@ -1689,30 +1720,41 @@ const PUBLIC_NAME_SQL = `COALESCE(CASE WHEN p.findable_by_name = 1 THEN p.displa
 // GET /api/profiles/directory: the Profiles page's Recently joined (public profiles, newest first) and Online now
 // (public profiles showing their status). Players online with a private profile are only counted, never named.
 async function profilesDirectory(env) {
-  const fresh = Math.floor(Date.now() / 1000) - PRESENCE_FRESH_S;
-  const [recent, online, others] = await Promise.all([
+  const now = Math.floor(Date.now() / 1000);
+  const fresh = now - PRESENCE_FRESH_S;
+  const onlineListed = `${LISTED_PROFILE} AND COALESCE(p.show_presence, 1) = 1
+         AND EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
+           AND gc.presence_state IN ('online', 'afk'))`;
+  const [recent, online, others, counts] = await Promise.all([
     env.DB.prepare(
-      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, p.created_at AS joinedAt FROM profiles p
+      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, ${discordNameSql("p.discord_id")} AS discordName,
+         p.created_at AS joinedAt FROM profiles p
        WHERE ${LISTED_PROFILE} ORDER BY p.created_at DESC LIMIT 8`,
     ).all(),
     env.DB.prepare(
-      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name,
+      `SELECT p.public_id AS publicId, ${PUBLIC_NAME_SQL} AS name, ${discordNameSql("p.discord_id")} AS discordName,
          CASE WHEN EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
            AND gc.presence_state = 'online') THEN 'online' ELSE 'afk' END AS state
        FROM profiles p
-       WHERE ${LISTED_PROFILE} AND COALESCE(p.show_presence, 1) = 1
-         AND EXISTS (SELECT 1 FROM game_characters gc WHERE gc.discord_id = p.discord_id AND gc.presence_at > ?1
-           AND gc.presence_state IN ('online', 'afk'))
+       WHERE ${onlineListed}
        ORDER BY state = 'online' DESC, p.updated_at DESC LIMIT 24`,
     ).bind(fresh).all(),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT gc.discord_id) AS count FROM game_characters gc LEFT JOIN profiles p ON p.discord_id = gc.discord_id
        WHERE gc.presence_at > ? AND gc.presence_state IN ('online', 'afk') AND NOT COALESCE(${LISTED_PROFILE}, 0)`,
     ).bind(fresh).first(),
+    // the sidebar's one-line summary on phones: everyone online (listed or only counted) and accounts made this week
+    env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM profiles p WHERE ${onlineListed}) AS listedOnline,
+         (SELECT COUNT(*) FROM profiles WHERE created_at > ?2) AS joinedThisWeek`,
+    ).bind(fresh, now - 7 * 86400).first(),
   ]);
+  // a player's name as they chose it: the Discord name (marked) only for those who picked it
+  const named = ({ discordName, name, ...row }) => ({ ...row, name: discordName || name, ...(discordName ? { nameSource: "discord" } : {}) });
   return json({
-    recent: (recent.results || []).map((row) => ({ publicId: row.publicId, name: row.name, joinedAt: Number(row.joinedAt) || null })),
-    online: { players: online.results || [], others: Number(others?.count || 0) },
+    recent: (recent.results || []).map((row) => named({ ...row, joinedAt: Number(row.joinedAt) || null })),
+    online: { players: (online.results || []).map(named), others: Number(others?.count || 0) },
+    counts: { online: Number(counts?.listedOnline || 0) + Number(others?.count || 0), joinedThisWeek: Number(counts?.joinedThisWeek || 0) },
   });
 }
 
@@ -1810,6 +1852,23 @@ function mergedLineup(own, copies) {
     return JSON.parse(JSON.stringify({ ...entry, aniimo, aniimoLevel, cp, team }));
   });
 }
+// My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
+// rank's name), Result (score, then the fastest time) and Party (its size). Rows without the value go last either
+// way; ties stay newest first.
+const HISTORY_SORTS = Object.freeze({
+  played: { natural: "DESC", sql: () => [] },
+  mode: { natural: "ASC", sql: (dir) => [`mode ${dir}`, `kind ${dir}`] },
+  fight: { natural: "ASC", sql: (dir) => [`(COALESCE(boss_name, trial, rank_name) IS NULL)`, `LOWER(COALESCE(boss_name, trial, rank_name)) ${dir}`, `difficulty ${dir}`] },
+  result: { natural: "DESC", sql: (dir) => ["(score IS NULL)", `score ${dir}`, "(clear_time_s IS NULL)", `clear_time_s ${dir === "DESC" ? "ASC" : "DESC"}`] },
+  party: { natural: "DESC", sql: (dir) => ["(party_size IS NULL)", `party_size ${dir}`] },
+});
+export function historyOrder(params) {
+  const sort = Object.hasOwn(HISTORY_SORTS, params?.get("sort") || "") ? params.get("sort") : "played";
+  const asked = String(params?.get("order") || "").toUpperCase();
+  const dir = asked === "ASC" || asked === "DESC" ? asked : HISTORY_SORTS[sort].natural;
+  const newest = sort === "played" ? [`at ${dir}`, `submission_id ${dir}`] : ["at DESC", "submission_id DESC"];
+  return { sort, order: dir.toLowerCase(), sql: [...HISTORY_SORTS[sort].sql(dir), ...newest].join(", ") };
+}
 const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle, c.boss_id, c.boss_name, c.boss_level, c.score, c.stars,
   c.clear_time_s, c.cleared, c.floors, c.team_dps, c.party_size, c.difficulty, c.trial, c.rank_tier, c.rank_subtier, c.rank_name,
   c.players_json, c.buffs_json, c.extra_json, c.evidence_key, c.battle_evidence_key, c.proof_pruned_at, c.verify_state, c.status, c.played_at,
@@ -1877,8 +1936,10 @@ async function battleHistory(env, discordId, params, { owner }) {
   const limit = numbered ? (HISTORY_PAGE_SIZES.includes(Number(params.get("limit"))) ? Number(params.get("limit")) : HISTORY_PAGE)
     : Math.min(Math.max(Number.parseInt(params.get("limit") || String(HISTORY_PAGE), 10) || HISTORY_PAGE, 1), 50);
   const pageBinds = [...binds];
+  // My runs' column headers (numbered pages only; the profile card and "before" stay newest first)
+  const { sort, order, sql: orderSql } = historyOrder(numbered ? params : null);
   const [{ results }, counted] = await Promise.all([
-    env.DB.prepare(`${page} ORDER BY at DESC, submission_id DESC LIMIT ${limit + 1}${numbered ? ` OFFSET ${(pageNumber - 1) * limit}` : ""}`).bind(...binds).all(),
+    env.DB.prepare(`${page} ORDER BY ${orderSql} LIMIT ${limit + 1}${numbered ? ` OFFSET ${(pageNumber - 1) * limit}` : ""}`).bind(...binds).all(),
     numbered ? env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...pageBinds).first() : null,
   ]);
   const rows = (results || []).slice(0, limit);
@@ -1968,11 +2029,11 @@ async function battleHistory(env, discordId, params, { owner }) {
         ...(row.kind === "interlink_run" && menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`)
           ? { menuProofId: menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`) } : {}),
         ...(owner && row.status !== "visible" ? { hidden: true } : {}),
-        playedAt: row.played_at || row.created_at,
+        playedAt: row.played_at,
       };
     }),
     next: (results || []).length > limit && last ? `${last.at}.${last.submission_id}` : null,
-    ...(numbered ? { page: pageNumber, pageSize: limit, total: Number(counted?.total) || 0,
+    ...(numbered ? { sort, order, page: pageNumber, pageSize: limit, total: Number(counted?.total) || 0,
       pages: Math.max(1, Math.ceil((Number(counted?.total) || 0) / limit)) } : {}),
     ...(filters ? { filters } : {}),
   };
@@ -2081,7 +2142,22 @@ function cleanProfileLayout(raw) {
     ? [...new Set(value.map(String))] : null);
   const order = list(raw.order ?? []);
   const hidden = list(raw.hidden ?? []);
-  return order && hidden ? { order, hidden } : null;
+  if (!order || !hidden) return null;
+  // a card's width in columns (2 or 3; 1 is the default) and its tallest height before it scrolls
+  const sizes = (value, allowed) => {
+    if (value === undefined || value === null) return {};
+    if (typeof value !== "object" || Array.isArray(value)) return null;
+    const entries = Object.entries(value);
+    if (entries.length > 32 || !entries.every(([id, size]) => PROFILE_CARD_ID.test(id) && allowed.includes(size))) return null;
+    return Object.fromEntries(entries);
+  };
+  const widths = sizes(raw.widths, [2, 3]);
+  const heights = sizes(raw.heights, ["short", "medium", "tall", "none"]);
+  if (!widths || !heights) return null;
+  const layout = { order, hidden };
+  if (Object.keys(widths).length) layout.widths = widths;
+  if (Object.keys(heights).length) layout.heights = heights;
+  return layout;
 }
 function storedProfileLayout(prefsJson) {
   try {
@@ -2091,7 +2167,7 @@ function storedProfileLayout(prefsJson) {
   }
 }
 
-// PUT /api/profile/layout {order, hidden}: the owner's arrangement; empty lists put it back to the site's default.
+// PUT /api/profile/layout {order, hidden, widths?, heights?}: the owner's arrangement; empty lists put it back to the site's default.
 async function saveProfileLayout(request, env) {
   if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await currentAccount(request, env);
@@ -2103,9 +2179,9 @@ async function saveProfileLayout(request, env) {
     return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
   }
   const layout = cleanProfileLayout(body);
-  if (!layout) return json({ error: "layout must be { order, hidden }: lists of card ids." }, 400);
+  if (!layout) return json({ error: "layout must be { order, hidden }: lists of card ids, with optional widths (2 or 3) and heights (short, medium, tall, none)." }, 400);
   const now = Math.floor(Date.now() / 1000);
-  const empty = !layout.order.length && !layout.hidden.length;
+  const empty = !layout.order.length && !layout.hidden.length && !layout.widths && !layout.heights;
   await env.DB.prepare(
     `INSERT INTO profiles (discord_id, display_name, bio, is_public, public_id, created_at, updated_at, preferences_json)
      VALUES (?1, NULL, NULL, 1, lower(hex(randomblob(8))), ?2, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE json_object('profileLayout', json(?3)) END)
@@ -2151,7 +2227,8 @@ async function publicProfile(request, env, id) {
   if (resolved.private) return json({ error: "This profile is private.", private: true }, 404);
   const publicId = resolved.publicId;
   const profile = await env.DB.prepare(
-    "SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch, preferences_json AS prefs FROM profiles WHERE public_id = ? AND is_public = 1",
+    `SELECT discord_id AS discordId, bio, display_name AS displayName, findable_by_name AS findableByName, listed_in_search AS listedInSearch, preferences_json AS prefs,
+       ${discordNameSql("pr.discord_id")} AS discordName FROM profiles pr WHERE public_id = ? AND is_public = 1`,
   ).bind(publicId).first();
   if (!profile) return json({ error: "Profile not found." }, 404);
   // the owner opening their own link: the page shows them their own profile (with Edit) at this address
@@ -2173,17 +2250,18 @@ async function publicProfile(request, env, id) {
   } catch {
     completed = [];
   }
+  // board standing and trophies: only with the "standings" part (Custom), never a UID
   let leaderboards = null;
+  let trophies = null;
   if (leaderboardPublic(env) && shows("standings")) {
-    const kinds = Object.keys(LEADERBOARD_KINDS);
-    const standings = await Promise.all(kinds.map((kind) => boardStandings(env, profile.discordId, kind)));
-    leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index].map(({ gameUid, ...entry }) => entry)]));
-    leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
-    leaderboards.interlinkParts = await interlinkProfileParts(env, profile.discordId);
+    ({ leaderboards, trophies } = await profileBoards(env, profile.discordId));
+    for (const kind of Object.keys(LEADERBOARD_KINDS)) leaderboards[kind] = leaderboards[kind].map(({ gameUid, ...entry }) => entry);
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
-    profile: { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder", bio: shows("about") ? profile.bio || null : null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
+    // or their Discord name (marked) when they picked it
+    profile: { ...(profile.discordName ? { displayName: profile.discordName, nameSource: "discord" }
+      : { displayName: (Number(profile.findableByName) === 1 && profile.displayName) || main?.name || characters.results?.[0]?.name || "Pathfinder" }), bio: shows("about") ? profile.bio || null : null, avatarUrl: null, isPublic: true, listedInSearch: Number(profile.listedInSearch ?? 1) === 1 },
     main: main?.name ? { name: main.name } : null,
     ...(viewer?.discordId === profile.discordId ? { own: true } : {}),
     parts,                                 // the parts this profile shows (the page leaves out the rest)
@@ -2191,6 +2269,7 @@ async function publicProfile(request, env, id) {
     characters: shows("about") ? (characters.results || []).map((row) => ({ name: row.name, ...characterDetails(row) })) : [],
     presence: await profilePresence(env, profile.discordId),
     leaderboards,
+    trophies,
     photos: shows("photos") ? await profilePhotos(env, profile.discordId, false) : [],
     gameStats: shows("collection") ? await characterStats(env, main) : null,
     collection: shows("collection") ? collectionSummary(completed, await releaseChecklist(env)) : null,
@@ -2436,6 +2515,9 @@ const LEADERBOARD_SORTS = Object.freeze({
   defeats: "DESC",
   difficulty: "DESC",
   player: "ASC",
+  cycle: "DESC",
+  cleared: "DESC",
+  style: "ASC",
 });
 // Egg Heist difficulties, hardest first
 // Holo-Battle Sim stages, from the client's tables (rogue_difficulty_data, rogue_season_data), newest season first.
@@ -2492,8 +2574,9 @@ function simStageName(element, difficulty, cycle = null) {
 
 const DIFFICULTY_RANK_SQL = (prefix) => `CASE ${prefix}difficulty WHEN 'Chaos' THEN 4 WHEN 'Nightmare' THEN 3 WHEN 'Hard' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END`;
 // Sorts that only order the rows: each player's row is still their best by the board's main measure (best loot,
-// best score...), then the list is ordered by name, date or difficulty.
-const DISPLAY_SORTS = new Set(["player", "played_at", "difficulty"]);
+// best score...), then the list is ordered by name, date, difficulty, season, outcome, Training Style or party size.
+// Rows without the value stay on the board, last (difficulty keeps only rows that have one).
+const DISPLAY_SORTS = new Set(["player", "played_at", "difficulty", "cycle", "cleared", "style", "party_size"]);
 const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_run: "score",
   interlink_week: "score",
@@ -3587,6 +3670,7 @@ async function accountPreferences(request, env) {
       return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
     }
     if (body.showPresence !== undefined && typeof body.showPresence !== "boolean") return json({ error: "showPresence must be true or false." }, 400);
+    if (body.nameShown !== undefined && !NAME_CHOICES.includes(body.nameShown)) return json({ error: "nameShown must be game or discord." }, 400);
     const theme = body.theme === undefined ? undefined : cleanTheme(body.theme);
     if (theme === null) return json({ error: "theme must be { id, custom? } with #rrggbb colours." }, 400);
     const now = Math.floor(Date.now() / 1000);
@@ -3601,12 +3685,13 @@ async function accountPreferences(request, env) {
       await env.DB.prepare("UPDATE profiles SET preferences_json = json_set(COALESCE(preferences_json, '{}'), '$.theme', json(?)), updated_at = ? WHERE discord_id = ?")
         .bind(JSON.stringify(theme), now, account.discordId).run();
     }
+    if (body.nameShown !== undefined) await saveNameShown(env, account.discordId, body.nameShown);
   }
   const row = await env.DB.prepare("SELECT show_presence AS showPresence, preferences_json AS prefs FROM profiles WHERE discord_id = ?")
     .bind(account.discordId).first();
   let theme = null;
   try { theme = cleanTheme(JSON.parse(row?.prefs || "{}").theme); } catch { theme = null; }
-  return json({ showPresence: Number(row?.showPresence ?? 1) === 1, theme });
+  return json({ showPresence: Number(row?.showPresence ?? 1) === 1, theme, nameShown: nameShownOf(row?.prefs) });
 }
 
 // The profile's presence: "online" if any of its characters is, else "afk", else "offline" (the game or aLogs isn't
@@ -4302,7 +4387,8 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
          (SELECT game_uid FROM game_characters gc WHERE gc.discord_id = s.who AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS uid,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
-       s.created_at AS firstAt
+       ${discordNameSql("s.who")} AS discordName,
+       s.created_at AS firstAt, COALESCE(s.played_at, s.created_at) AS playedAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
                CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.created_at ASC) AS pick
@@ -4345,6 +4431,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
   for (const row of results || []) {
     row.unclaimed = String(row.discordId).startsWith("name:");
     row.lookalike = row.unclaimed && identities(row.player).lookalike;
+    if (!row.discordName) delete row.discordName;          // only for players who picked their Discord name
   }
   // A week the game data lists only counts its own three bosses: a misread boss name (the battle prep screen's name
   // sits over the boss art) can't add a fourth board or count a score twice.
@@ -4401,8 +4488,9 @@ async function interlinkSeasonStanding(env, discordId, season = null) {
 // weeks 3000-3005, 1.1 started at the 4000 reset): its total only counts its own weeks (the owner, 7 Nov: 1.0's scores
 // never count toward 1.1). The current part comes with its weeks, newest first, each with this player's best of each
 // boss (as the boards count them); earlier parts with their totals only. Ranks are among every player on the boards.
-async function interlinkProfileParts(env, discordId) {
-  const list = await interlinkCycles(env);
+// pre: { list, rows } already read (the weeks and interlinkBests over all of them), so the profile reads them once
+async function interlinkProfileParts(env, discordId, pre = null) {
+  const list = pre?.list || await interlinkCycles(env);
   if (!list.length) return null;
   const now = Math.floor(Date.now() / 1000);
   const currentWeek = currentInterlinkCycle(list, now);
@@ -4415,7 +4503,7 @@ async function interlinkProfileParts(env, discordId) {
     });
   }
   for (const cycle of list) parts.get(`${cycle.season}|${interlinkSplitOf(cycle.id)}`)?.cycles.push(cycle);
-  const rows = await interlinkBests(env, list.map((cycle) => cycle.id), list);
+  const rows = pre?.rows || await interlinkBests(env, list.map((cycle) => cycle.id), list);
   const partOf = (cycleId) => {
     const cycle = interlinkCycle(list, cycleId);
     return cycle ? parts.get(`${cycle.season}|${interlinkSplitOf(cycle.id)}`) : null;
@@ -4472,6 +4560,229 @@ function bossLabel(cycle, row) {
   return boss?.second?.name ? `${boss.name || row.bossName} + ${boss.second.name}` : row.bossName || boss?.name || null;
 }
 
+// ---------------------------------------------------------------- trophies
+// A profile's trophies: the player's personal best of each measure a board ranks, with its place on that board's
+// ladder ("#3 of 41", ranked as the board ranks it: each player's best) and the run behind it, whose pictures are its
+// proof. Only figures the public boards already show, so a profile shows them with its leaderboard standing (the
+// "standings" part). Interlink: every week and boss board, each ladder (INTERLINK_LADDERS, but stars: a cap many
+// share), and the best week total; Holo-Battle Sim: the fastest clear of each trial at the hardest difficulty cleared;
+// Egg Heist: the best season standing, best loot, fastest escape and most Total Defeats.
+// - shot: the picture the figure is read from first. Battle Data ("battle") shows the whole party: the meter sends it
+//   as one crop, with no rectangle per player, so the viewer opens the whole screen and says whose row it is (slice).
+const INTERLINK_TROPHIES = Object.freeze([
+  Object.freeze({ id: "interlink-score", ladder: "score", proof: "score", label: "Best Interlink score", unit: "score" }),
+  Object.freeze({ id: "interlink-clear", ladder: "clear", proof: "clear", label: "Fastest Interlink clear", unit: "time" }),
+  Object.freeze({ id: "interlink-dps", ladder: "dps", proof: "dps", label: "Best Avg DPS", unit: "number", shot: "battle" }),
+  Object.freeze({ id: "interlink-team-dps", ladder: "teamDps", proof: "score", label: "Best team DPS", unit: "number" }),
+  Object.freeze({ id: "interlink-break", ladder: "break", proof: "break", label: "Best BREAK damage", unit: "number", shot: "battle" }),
+  Object.freeze({ id: "interlink-heal", ladder: "heal", proof: "heal", label: "Best healing", unit: "number", shot: "battle" }),
+]);
+const LADDER_FIGURE_NAMES = Object.freeze({ dps: "Avg DPS", break: "BREAK", heal: "Healing" });
+
+// a better trophy candidate: the better figure, then the better place, then the earlier
+function betterTrophy(candidate, best, ascending) {
+  if (!best) return true;
+  if (candidate.value !== best.value) return ascending ? candidate.value < best.value : candidate.value > best.value;
+  return candidate.position < best.position || (candidate.position === best.position && candidate.firstAt < best.firstAt);
+}
+
+// rows: interlinkBests over every week (every player's best of each week and boss, as the boards count them)
+function interlinkTrophies(rows, list, discordId) {
+  const mine = rows.filter((row) => row.discordId === discordId);
+  if (!mine.length) return [];
+  const boards = new Map();
+  for (const row of rows) {
+    const key = `${row.cycle}|${row.bossId}`;
+    if (!boards.has(key)) boards.set(key, []);
+    boards.get(key).push(row);
+  }
+  const rankings = new Map();                       // "<week>|<boss>|<ladder>" -> that board ranked by that ladder
+  const rankedBoard = (row, ladder) => {
+    const key = `${row.cycle}|${row.bossId}|${ladder}`;
+    if (!rankings.has(key)) rankings.set(key, rankedLadder(boards.get(`${row.cycle}|${row.bossId}`).slice(), ladder));
+    return rankings.get(key);
+  };
+  const trophies = [];
+  for (const trophy of INTERLINK_TROPHIES) {
+    const ladder = INTERLINK_LADDERS[trophy.ladder];
+    let best = null;
+    for (const row of mine) {
+      const board = rankedBoard(row, trophy.ladder);
+      const placed = board.find((entry) => entry.discordId === discordId);
+      if (!placed) continue;
+      const candidate = { value: Number(placed[ladder.key]), position: placed.rank, players: board.length, firstAt: row.firstAt, row };
+      if (betterTrophy(candidate, best, ladder.ascending)) best = candidate;
+    }
+    if (!best) continue;
+    const { row } = best;
+    const week = interlinkCycle(list, row.cycle);
+    // the board's proof for this figure: the row's one run, or the run a menu best took the figure from
+    const proofId = row.figureRuns?.[trophy.proof] || (row.hasProof ? row.runId : null);
+    trophies.push({
+      id: trophy.id, mode: "interlink", label: trophy.label, unit: trophy.unit, value: best.value,
+      ...(trophy.unit === "score" ? { stars: row.stars ?? null } : {}),
+      context: { boss: { id: String(row.bossId), name: week ? bossLabel(week, row) : row.bossName || null },
+        week: week ? { cycle: week.id, start: week.start, end: week.end } : { cycle: row.cycle } },
+      character: row.player || null,
+      submissionId: row.figureRuns?.[trophy.proof] || row.runId,
+      placement: { position: best.position, players: best.players },
+      board: { mode: "interlink", kind: "interlink_boss", week: String(row.cycle), boss: String(row.bossId), ladder: trophy.ladder },
+      proof: proofId ? { id: proofId, shot: trophy.shot || "summary", ...(trophy.proof === "score" && row.menuProofId ? { menuId: row.menuProofId } : {}),
+        ...(trophy.shot === "battle" ? { slice: { figure: LADDER_FIGURE_NAMES[trophy.ladder], player: row.player || null } } : {}) } : null,
+    });
+  }
+  // the best week: its bosses' bests added up, ranked as the week's total board ranks it
+  const weeks = new Map();
+  for (const row of rows) {
+    if (!weeks.has(row.cycle)) weeks.set(row.cycle, new Map());
+    const players = weeks.get(row.cycle);
+    const player = players.get(row.discordId) || { discordId: row.discordId, total: 0, stars: 0, firstAt: row.firstAt };
+    player.total += Number(row.score) || 0;
+    player.stars += Number(row.stars) || 0;
+    player.firstAt = Math.min(player.firstAt, row.firstAt);
+    players.set(row.discordId, player);
+  }
+  let bestWeek = null;
+  for (const [cycle, players] of weeks) {
+    if (!players.has(discordId)) continue;
+    const board = ranked([...players.values()], "total");
+    const placed = board.find((entry) => entry.discordId === discordId);
+    const candidate = { value: placed.total, stars: placed.stars, position: placed.rank, players: board.length, firstAt: placed.firstAt, cycle };
+    if (betterTrophy(candidate, bestWeek, false)) bestWeek = candidate;
+  }
+  if (bestWeek?.value > 0) {
+    const week = interlinkCycle(list, bestWeek.cycle);
+    trophies.push({
+      id: "interlink-week", mode: "interlink", label: "Best Interlink week", unit: "score", value: bestWeek.value, stars: bestWeek.stars,
+      context: { week: week ? { cycle: week.id, start: week.start, end: week.end } : { cycle: bestWeek.cycle } },
+      submissionId: null,                     // three bosses' runs: each boss's proof is on the Interlink card and the board
+      placement: { position: bestWeek.position, players: bestWeek.players },
+      board: { mode: "interlink", kind: "interlink_boss", week: String(bestWeek.cycle) },
+      proof: null,
+    });
+  }
+  return trophies;
+}
+
+// Holo-Battle Sim: each trial's fastest clear at the hardest difficulty this player cleared it on (one tile a trial)
+function simTrophies(entries) {
+  const byTrial = new Map();
+  for (const entry of entries || []) {
+    if (!entry.trial || entry.clearTimeS == null) continue;
+    const season = simSeasonOf(entry.trial, null, entry.cycle);
+    const hardness = season ? season.difficulties.indexOf(entry.difficulty) : -1;
+    const key = `${entry.cycle}|${entry.trial}`;
+    const held = byTrial.get(key);
+    if (!held || hardness > held.hardness || (hardness === held.hardness && entry.clearTimeS < held.entry.clearTimeS)) byTrial.set(key, { entry, hardness });
+  }
+  return [...byTrial.values()].sort((a, b) => String(b.entry.cycle).localeCompare(String(a.entry.cycle)) || a.entry.trial.localeCompare(b.entry.trial))
+    .map(({ entry }) => ({
+      id: `sim-${entry.cycle}-${entry.trial}`.toLowerCase(), mode: "sim", label: `Fastest ${entry.trialName || entry.trial}`, unit: "time",
+      value: entry.clearTimeS,
+      context: { trial: entry.trial, trialName: entry.trialName || entry.trial, difficulty: entry.difficulty || null, season: entry.cycle },
+      character: entry.character || null,
+      submissionId: entry.submissionId,
+      placement: { position: entry.position, players: entry.players },
+      board: { mode: "sim", kind: "sim_run", cycle: String(entry.cycle), trial: entry.trial, ...(entry.difficulty ? { difficulty: entry.difficulty } : {}) },
+      proof: { id: entry.submissionId, shot: "summary" },
+    }));
+}
+
+// Egg Heist: the best season standing (highest rank, then Emperor stars, then rank points; the newer season on a tie),
+// the best loot, the fastest escape and the most Total Defeats in a match
+function eggHeistTrophies(seasons, loot, escape, defeats) {
+  const trophies = [];
+  const tierOf = (entry) => [entry.seasonRank?.tier || 0, entry.stars || 0, entry.score || 0];
+  const best = [...(seasons || [])].sort((a, b) => {
+    const [x, y] = [tierOf(a), tierOf(b)];
+    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2] || String(b.cycle).localeCompare(String(a.cycle));
+  })[0];
+  if (best) {
+    trophies.push({
+      id: "eggheist-season", mode: "eggheist", label: "Best Egg Heist season", unit: "rank",
+      value: best.seasonRank?.name || (best.seasonRank?.tier ? `Tier ${best.seasonRank.tier}` : "Unranked"),
+      rank: best.seasonRank ? { tier: best.seasonRank.tier, name: best.seasonRank.name || null } : null,
+      ...(best.seasonRank?.tier === 7 ? { stars: best.stars ?? null } : { points: best.score ?? null }),
+      context: { season: best.cycle },
+      character: best.character || null,
+      submissionId: best.submissionId,
+      placement: { position: best.position, players: best.players },
+      board: { mode: "eggheist", kind: "eggheist_season", cycle: String(best.cycle) },
+      proof: { id: best.submissionId, shot: "summary" },
+    });
+  }
+  const match = (entry, id, label, unit, value, sort) => entry && value != null && trophies.push({
+    id, mode: "eggheist", label, unit, value,
+    context: { difficulty: entry.difficulty || null, season: entry.cycle || null },
+    character: entry.character || null,
+    submissionId: entry.submissionId,
+    placement: { position: entry.position, players: entry.players },
+    board: { mode: "eggheist", kind: "eggheist_match", ...(sort ? { sort } : {}) },
+    proof: { id: entry.submissionId, shot: "summary" },
+  });
+  match(loot?.[0], "eggheist-loot", "Best Egg Heist loot", "score", loot?.[0]?.score, null);
+  match(escape?.[0], "eggheist-escape", "Fastest Egg Heist escape", "time", escape?.[0]?.clearTimeS, "clear_time_s");
+  match(defeats?.[0], "eggheist-defeats", "Most Egg Heist defeats", "number", defeats?.[0]?.defeats, "defeats");
+  return trophies;
+}
+
+// Every trophy of a player. pre: what the profile already read - the weeks (list), interlinkBests over all of them
+// (rows) and boardStandings by kind (leaderboards). One query more for each extra Egg Heist ladder, and one for the
+// proof pictures, the check badge and the date of the runs behind the trophies.
+async function profileTrophies(env, discordId, { list, rows, leaderboards }) {
+  const [escape, defeats] = await Promise.all([
+    boardStandings(env, discordId, "eggheist_match", "clear_time_s"),
+    boardStandings(env, discordId, "eggheist_match", "defeats"),
+  ]);
+  const trophies = [
+    ...interlinkTrophies(rows, list, discordId),
+    ...simTrophies(leaderboards.sim_run),
+    ...eggHeistTrophies(leaderboards.eggheist_season, leaderboards.eggheist_match, escape, defeats),
+  ];
+  const ids = [...new Set(trophies.flatMap((trophy) => [trophy.submissionId, trophy.proof?.id]).filter(Boolean))];
+  const runs = new Map();
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const { results } = await env.DB.prepare(
+      `SELECT submission_id AS id, COALESCE(played_at, created_at) AS at, verify_state AS state, proof_pruned_at AS prunedAt,
+         evidence_key IS NOT NULL AS summary, battle_evidence_key IS NOT NULL AS battle,
+         json_extract(extra_json, '$.proofParty') IS NOT NULL AS party, json_extract(extra_json, '$.proofGizmos') IS NOT NULL AS gizmos
+       FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
+    ).bind(...chunk).all();
+    for (const run of results || []) runs.set(run.id, run);
+  }
+  return trophies.map((trophy) => {
+    const run = runs.get(trophy.submissionId);
+    const shown = runs.get(trophy.proof?.id);
+    let proof = null;
+    if (trophy.proof && shown && !shown.prunedAt && [shown.summary, shown.battle, shown.party, shown.gizmos].some((has) => Number(has) === 1)) {
+      // no Battle Data picture: the run's first one, and nothing to say about rows
+      const battle = trophy.proof.shot === "battle" && Number(shown.battle) === 1;
+      const { slice, ...rest } = trophy.proof;
+      proof = { ...rest, shot: battle ? "battle" : "summary", check: runCheckBadge(shown.state), ...(battle && slice ? { slice } : {}) };
+    }
+    return { ...trophy, playedAt: run ? Number(run.at) || null : null, proof };
+  });
+}
+
+// The board standing a profile shows (leaderboards) and its trophies, read together: the Interlink weeks' bests once.
+async function profileBoards(env, discordId) {
+  const kinds = Object.keys(LEADERBOARD_KINDS);
+  const standings = await Promise.all(kinds.map((kind) => boardStandings(env, discordId, kind)));
+  const leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
+  const list = await interlinkCycles(env);
+  const rows = list.length ? await interlinkBests(env, list.map((cycle) => cycle.id), list) : [];
+  leaderboards.interlinkSeason = await interlinkSeasonStanding(env, discordId);
+  leaderboards.interlinkParts = await interlinkProfileParts(env, discordId, { list, rows });
+  let trophies = [];
+  try {
+    trophies = await profileTrophies(env, discordId, { list, rows, leaderboards });
+  } catch (error) {
+    console.error("Could not gather the profile's trophies", error);    // the rest of the profile still shows
+  }
+  return { leaderboards, trophies };
+}
+
 async function interlinkBoards(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!leaderboardAllowed(account, env)) return gatedResponse(account);
@@ -4495,6 +4806,7 @@ async function interlinkBoards(request, env) {
     const players = new Map();
     for (const row of await interlinkBests(env, cycles, list, server, unlinked)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
+        ...(row.discordName ? { discordName: row.discordName } : {}),
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
         total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt, updatedAt: row.firstAt };
       player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0;
@@ -4522,7 +4834,7 @@ async function interlinkBoards(request, env) {
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
   const rows = await interlinkBests(env, [cycle.id], list, server, unlinked);
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
-    const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind;
+    const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind; delete row.playedAt;
     row.proofIds = Object.fromEntries(Object.entries(ROW_FIGURES).filter(([, figure]) => row[figure] != null)
       .map(([metric]) => [metric, figureRuns[metric] || (hasProof ? runId : null)]).filter(([, id]) => id));
     row.proofId = row.proofIds.score || null;
@@ -4556,6 +4868,11 @@ async function interlinkBoards(request, env) {
   const limit = Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : null;
   const offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
   const onlyBoss = params.get("boss") ? String(params.get("boss")) : null;
+  // ?order=asc|desc against a ladder's own direction lists it the other way round (its column header clicked twice);
+  // each row keeps its rank on the ladder
+  const orderParam = params.get("order");
+  const reversed = Boolean(ladder) && (orderParam === "asc" || orderParam === "desc")
+    && orderParam !== (INTERLINK_LADDERS[ladder].ascending ? "asc" : "desc");
   const caps = interlinkStarCaps(cycle.id);
   const bosses = bossIds.filter((id) => !onlyBoss || id === onlyBoss).map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
@@ -4564,6 +4881,7 @@ async function interlinkBoards(request, env) {
     const all = (ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs))
       .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder",
         updatedAt: firstAt, own: own(discordId) }));         // updatedAt: when this best run reached the site
+    if (reversed) all.reverse();
     return {
       id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id,
       slot: slotIndex >= 0 ? INTERLINK_RULES.slots[slotIndex] || null : null,
@@ -4577,6 +4895,7 @@ async function interlinkBoards(request, env) {
   const totals = new Map();
   for (const row of rows) {
     const player = totals.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
+      ...(row.discordName ? { discordName: row.discordName } : {}),
       profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
       total: 0, stars: 0, scores: {}, bossStars: {}, firstAt: row.firstAt, updatedAt: row.firstAt };
     player.total += Number(row.score) || 0; player.stars += Number(row.stars) || 0; player.scores[row.bossId] = row.score;
@@ -4588,7 +4907,8 @@ async function interlinkBoards(request, env) {
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
   return json({
     cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers,
-    ladder: ladder || "stars", offset, limit, updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
+    ladder: ladder || "stars", order: ladder ? (Boolean(INTERLINK_LADDERS[ladder].ascending) !== reversed ? "asc" : "desc") : null,
+    offset, limit, updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
     seasons: interlinkSeasons(list),
     rules: { slots: INTERLINK_RULES.slots, slotsConfirmed: INTERLINK_RULES.slotsConfirmed, starCaps: caps,
       clearStars: interlinkStarRule(cycle.id).clear, ladders: Object.keys(INTERLINK_LADDERS) },
@@ -4622,6 +4942,14 @@ async function leaderboardEntries(request, env) {
     if (key === "difficulty") return `${DIFFICULTY_RANK_SQL(prefix)} ${direction}, ${prefix}score DESC`;
     if (key === "played_at") return `COALESCE(${prefix}played_at, ${prefix}created_at) ${direction}`;
     if (key === "player") return `LOWER(COALESCE(${prefix}teammate, ${prefix}characterName, ${prefix}anyCharacter, '')) ${direction}`;
+    if (key === "cycle") return `(${prefix}cycle IS NULL), CAST(${prefix}cycle AS INTEGER) ${direction}, ${prefix}cycle ${direction}`;
+    if (key === "style") {
+      // only the game's styles (the board shows nothing for any other), so rows sort as they read
+      const raw = `json_extract(CASE WHEN json_valid(${prefix}extra_json) THEN ${prefix}extra_json END, '$.setup.style')`;
+      const style = `(CASE WHEN ${raw} IN (${SIM_RULES.styles.map((name) => `'${name}'`).join(", ")}) THEN ${raw} END)`;
+      return `(${style} IS NULL), ${style} ${direction}`;
+    }
+    if (key === "cleared" || key === "party_size") return `(${prefix}${key} IS NULL), ${prefix}${key} ${direction}`;
     return `${prefix}${key} ${direction}`;
   };
   const mainKey = LEADERBOARD_DEFAULT_SORT[kind] || "score";
@@ -4630,7 +4958,7 @@ async function leaderboardEntries(request, env) {
   const pickBy = DISPLAY_SORTS.has(sortKey) ? sortBy(mainKey, LEADERBOARD_SORTS[mainKey]) : orderBy;
   if (sortKey === "standing" || (sortKey === "score" && kind === "eggheist_season")) where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
-  else if (sortKey !== "player" && sortKey !== "played_at") where.push(`s.${sortKey} IS NOT NULL`);
+  else if (!DISPLAY_SORTS.has(sortKey)) where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
@@ -4647,6 +4975,7 @@ async function leaderboardEntries(request, env) {
       (SELECT game_uid FROM game_characters WHERE discord_id = s.who AND character_name IS NOT NULL
        ORDER BY last_seen_at DESC LIMIT 1) AS anyUid,
       CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
+      ${discordNameSql("s.who")} AS discordName,
       ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${pickBy("s.")}, s.created_at ASC) AS playerRank
     FROM ${CREDITED_RUNS} s
     JOIN users u ON u.discord_id = s.discord_id
@@ -4675,6 +5004,8 @@ async function leaderboardEntries(request, env) {
       // the run's own linked character, else any the account linked; for a teammate's row, the name in the party.
       // Never a party slot for the sender: the sender isn't always 1P.
       player: row.teammate || row.characterName || row.anyCharacter || "Pathfinder",
+      // the account's Discord name, only when its owner picked it (Show me by); the site shows it with the logo
+      ...(row.discordName ? { discordName: row.discordName } : {}),
       character: row.teammate || row.characterName || null,
       uid: (row.teammate ? row.teammate_uid : (row.characterName ? row.game_uid : row.anyUid)) || null,
       teammate: Boolean(row.teammate),

@@ -12794,6 +12794,28 @@ html[data-embed="app"] #topbarLogoutButton {
   font-weight: 700;
 }
 
+/* a column header that sorts the attacks (/table-sort.js) */
+.duel-sort {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.duel-sort:hover,
+.duel-sort:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.duel-sort.is-active {
+  color: var(--accent);
+}
+
 .duel-row.is-off {
   opacity: 0.5;
 }

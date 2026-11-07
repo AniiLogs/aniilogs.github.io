@@ -23,6 +23,13 @@ const profileShowPresence = document.querySelector("[data-profile-presence]");
 const profilePresenceRow = document.querySelector("[data-profile-presence-row]");
 const profileSearchRow = document.querySelector("[data-profile-search-row]");
 const profileListedInSearch = document.querySelector("[data-profile-search]");
+// Show me by: the in-game name (default) or the Discord name, everywhere the site names this player
+const profileNameShown = document.querySelector("[data-profile-name-shown]");
+const profileNameShownRow = document.querySelector("[data-profile-name-shown-row]");
+// a player's name as they chose to be shown (site-sidebar.js draws the Discord logo for a Discord name)
+function shownName(text, nameSource) {
+  return window.AniiSite?.playerName(text, nameSource) || document.createTextNode(String(text || ""));
+}
 // /?view=profile is the profile page: your own profile (or a sign-in prompt), with a search for anyone else's.
 // /?profile=<id> shows someone's public profile (read-only) in the same view; <id> can be a character's game UID
 // (the profile of the account that linked it, or "This profile is private").
@@ -31,6 +38,9 @@ const PUBLIC_PROFILE_ID = /^(?:[A-Za-z0-9]{8,24}|\d{1,24})$/u.test(new URLSearch
   : "";
 // true once the server says the profile at ?profile=<id> is the viewer's own
 let ownAtLink = false;
+// ?profile=<id>&as=visitor: the owner's "View public profile": the page asks for it signed out, so it's exactly what
+// anyone else sees (the account stays signed in for everything else)
+const VISITOR_PREVIEW = Boolean(PUBLIC_PROFILE_ID) && new URLSearchParams(window.location.search).get("as") === "visitor";
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
@@ -55,7 +65,8 @@ async function apiFetch(path, options = {}) {
   if (!API_URL) throw new Error("AniiLogs account API is not configured.");
   const headers = new Headers(options.headers || {});
   const token = authSessionToken();
-  if (token) headers.set("authorization", `Bearer ${token}`);
+  const asVisitor = VISITOR_PREVIEW && path.startsWith("/profiles/");
+  if (token && !asVisitor) headers.set("authorization", `Bearer ${token}`);
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
@@ -139,6 +150,7 @@ function showSignedIn(account) {
   profileFindableRow.hidden = false;
   profilePresenceRow.hidden = false;
   profileSearchRow.hidden = false;
+  profileNameShownRow.hidden = false;
   void loadPrivateProfile(name);
   if (PROFILE_VIEW) {
     document.querySelector("[data-profile-signin]").hidden = true;
@@ -170,6 +182,7 @@ function showVisibility(profile) {
   profileFindable.checked = Boolean(profile.findableByName);
   profileListedInSearch.checked = profile.listedInSearch !== false;
   profileShowPresence.checked = profile.showPresence !== false;
+  profileNameShown.value = profile.nameShown === "discord" ? "discord" : "game";
   profileStatus.textContent = { public: "Public · anyone with the link can see it", custom: "Custom · anyone with the link sees the parts you picked",
     private: "Private · visible only to you" }[profilePublic.value];
   profilePublicLink.hidden = !(profile.isPublic && profile.publicId);
@@ -530,6 +543,70 @@ function renderEggHeist(boards) {
   else body.replaceChildren(standingList("Season standing", rows));
 }
 
+// The Trophies card: each personal best the boards rank (best score, fastest clear, best Avg DPS...), as a tile with its
+// figure, where it was set, its place on that ladder (linking to the board) and its proof. A figure read off Battle
+// Data opens the viewer on that screen, which shows the whole party: the note says whose row it is. Hidden with none.
+const TROPHY_MODES = [["interlink", "Holo-Battle Interlink"], ["sim", "Holo-Battle Sim"], ["eggheist", "Egg Heist"]];
+function trophyValue(trophy) {
+  if (trophy.unit === "time") return clockTime(trophy.value);
+  if (trophy.unit === "rank") return String(trophy.value || "Unranked");
+  return numberFormat.format(Number(trophy.value) || 0);
+}
+function trophyContext(trophy) {
+  const context = trophy.context || {};
+  const week = context.week?.start ? `Week of ${shortDate(context.week.start)}` : context.week?.cycle ? `Week ${context.week.cycle}` : "";
+  const season = context.season ? `Season ${context.season}` : "";
+  const points = trophy.points != null ? `${numberFormat.format(trophy.points)} rank points` : trophy.mode === "eggheist" && trophy.stars != null ? `${numberFormat.format(trophy.stars)} eggs` : "";
+  const played = trophy.playedAt && !week ? shortDate(trophy.playedAt) : "";
+  return [context.boss?.name, week, context.difficulty, season, points, played].filter(Boolean).join(" · ");
+}
+function trophyTile(trophy) {
+  const tile = element("li", `trophy-tile is-${trophy.mode}`);
+  const value = element("strong", "trophy-value", trophyValue(trophy));
+  if (trophy.unit === "rank") {
+    const icon = eggRankIcon(trophy.rank?.tier);
+    if (icon) value.prepend(icon);
+  }
+  tile.append(element("span", "trophy-title", trophy.label), value);
+  if (trophy.mode === "interlink" && trophy.stars != null) value.append(" ", interlinkStars(trophy.stars));
+  const context = trophyContext(trophy);
+  if (context) tile.append(element("small", "trophy-context", context));
+  const foot = element("span", "trophy-foot");
+  const place = trophy.placement;
+  if (place?.position) {
+    const link = element("a", "profile-position trophy-place", `#${place.position}`);
+    link.href = `/leaderboard/?${new URLSearchParams(trophy.board || {})}`;
+    link.title = `Position ${place.position} of ${place.players} players on this ladder · open the board`;
+    foot.append(link, element("small", "", `of ${numberFormat.format(place.players)}`));
+  }
+  const proof = trophy.proof;
+  if (proof?.id && window.AniilogsProof) {
+    const slice = proof.slice;
+    const note = slice ? `Battle Data shows the whole party: this trophy is ${slice.player ? `${slice.player}'s` : "this player's"} ${slice.figure}, ${trophyValue(trophy)}.` : "";
+    const button = window.AniilogsProof.button(proof.id, proof.check || null, proof.menuId || null, { shot: proof.shot, note });
+    button.classList.add("trophy-proof");
+    button.append(element("span", "", "Proof"));
+    foot.append(button);
+  }
+  tile.append(foot);
+  return tile;
+}
+function renderTrophies(trophies) {
+  const panel = profileOverview.querySelector('[data-overview-panel="trophies"]');
+  const body = overviewBody("trophies");
+  const list = Array.isArray(trophies) ? trophies : [];
+  panel.hidden = !list.length;
+  const nodes = [];
+  for (const [mode, label] of TROPHY_MODES) {
+    const own = list.filter((trophy) => trophy.mode === mode);
+    if (!own.length) continue;
+    const grid = element("ul", "trophy-grid");
+    grid.append(...own.map(trophyTile));
+    nodes.push(element("h4", "", label), grid);
+  }
+  body.replaceChildren(...nodes);
+}
+
 // Home page pictures from the reviewed content release (a missing one leaves its card's text).
 for (const picture of document.querySelectorAll("img[data-content-src]")) {
   const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
@@ -708,7 +785,7 @@ async function loadProfileOverview(publicId = "") {
     const avatar = profileOverview.querySelector("[data-overview-avatar]");
     avatar.hidden = !overview.profile?.avatarUrl;
     if (overview.profile?.avatarUrl) avatar.src = overview.profile.avatarUrl;
-    profileOverview.querySelector("[data-overview-name]").textContent = overview.profile?.displayName || "My profile";
+    profileOverview.querySelector("[data-overview-name]").replaceChildren(shownName(overview.profile?.displayName || "My profile", overview.profile?.nameSource));
     profileOverview.querySelector("[data-overview-visibility]").textContent = publicId ? "Public profile"
       : overview.profile?.visibility === "custom" ? "Custom · anyone with your link sees the parts you picked"
         : overview.profile?.isPublic ? "Public · anyone with your link can see this" : "Private · only you can see this";
@@ -768,6 +845,8 @@ async function loadProfileOverview(publicId = "") {
       renderSim(overview.leaderboards);
       renderEggHeist(overview.leaderboards);
     }
+    // with the standing: the server sends none while that part is private or the boards are closed
+    renderTrophies(overview.leaderboards ? overview.trophies : null);
     renderGameStats(overview.gameStats);
     renderCollection(overview.collection, Boolean(publicId));
     // someone else's profile shows only its public parts (Custom); the server sends nothing for the others
@@ -811,7 +890,7 @@ profileEditor.addEventListener("submit", async (event) => {
     const response = await apiFetch("/profile", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName, bio, ...visibility }),
+      body: JSON.stringify({ displayName, bio, ...visibility, ...(profileNameShownRow.hidden ? {} : { nameShown: profileNameShown.value }) }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.profile) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -905,7 +984,7 @@ if (authResult) {
 // Only the profile shows (no home page above it), with a player search at the top: names or UIDs of public profiles.
 function profileHref(params) {
   const next = new URLSearchParams(window.location.search);    // keeps ?embed=app, theme and uid in the app
-  for (const key of ["profile", "view", "auth", "history"]) next.delete(key);
+  for (const key of ["profile", "view", "auth", "history", "as"]) next.delete(key);
   for (const [key, value] of Object.entries(params)) next.set(key, value);
   return `/?${next}`;
 }
@@ -945,7 +1024,9 @@ if (PROFILE_VIEW) {
           // a display-name match (its owner opted in) shows that name over their characters
           const [first, ...others] = result.characters;
           if (result.displayName) {
-            link.append(element("strong", "", result.displayName));
+            const strong = element("strong");
+            strong.append(shownName(result.displayName, result.nameSource));
+            link.append(strong);
             if (result.characters.length) link.append(element("small", "", result.characters.map((c) => c.name).join(", ")));
           } else {
             link.append(element("strong", "", first.name), element("small", "", `UID ${first.gameUid}`));
@@ -981,6 +1062,13 @@ function showProfileLink(publicId, profile) {
   const note = share.querySelector("[data-profile-share-note]");
   share.hidden = !PROFILE_VIEW;
   share.querySelector("[data-profile-copy]").hidden = !id;
+  // your own public profile: open it as a visitor sees it
+  const preview = share.querySelector("[data-profile-preview-link]");
+  preview.hidden = !id || Boolean(publicId);
+  if (id) preview.href = `${profileHref({ profile: id })}&as=visitor`;
+  const bar = profileOverview.querySelector("[data-profile-preview-bar]");
+  bar.hidden = !VISITOR_PREVIEW;
+  if (VISITOR_PREVIEW) bar.querySelector("a").href = profileHref({ profile: publicId });
   note.textContent = "";
   url.textContent = id ? `${window.location.origin}/?profile=${id}` : "Your profile is private, so it has no link yet. Make it public under Edit profile to get one.";
   url.classList.toggle("is-note", !id);
@@ -1006,7 +1094,6 @@ function showAsOwner() {
   ownAtLink = true;
   document.querySelector("[data-profile-back]").hidden = true;
   document.querySelector("[data-profile-edit]").hidden = false;
-  void loadProfileDirectory();
 }
 
 // ---------------------------------------------------------------- the profile's cards (Arrange cards)
@@ -1024,8 +1111,29 @@ function placeCards(list) {
   for (const card of list) {
     const panel = cardPanel(card.id);
     panel.classList.toggle("is-arranged-off", card.hidden);
+    for (const width of window.AniiProfileCards.WIDTHS) panel.classList.toggle(`card-w${width}`, card.width === width && width > 1);
+    for (const height of window.AniiProfileCards.HEIGHTS) if (height) panel.classList.toggle(`card-h-${height}`, card.height === height);
     cardGrid.append(panel);
   }
+  fitCardHeights();
+}
+// By default no card is taller than the Collection card: its content's height (not the row's) caps the others.
+const HEIGHT_REFERENCE = "collection";
+function fitCardHeights() {
+  const reference = cardPanel(HEIGHT_REFERENCE);
+  const shown = reference && !reference.hidden && !reference.classList.contains("is-arranged-off") && reference.offsetParent;
+  if (!shown) { cardGrid.style.removeProperty("--profile-card-max"); return; }
+  const last = [...reference.children].filter((node) => node.offsetParent).at(-1);
+  if (!last) return;
+  const pad = parseFloat(getComputedStyle(reference).paddingBottom) || 0;
+  const height = Math.ceil(last.getBoundingClientRect().bottom - reference.getBoundingClientRect().top + reference.scrollTop + pad);
+  if (height > 120) cardGrid.style.setProperty("--profile-card-max", `${height}px`);
+}
+if (cardPanel(HEIGHT_REFERENCE)) {
+  const reference = cardPanel(HEIGHT_REFERENCE);
+  reference.classList.add("is-height-reference");
+  new ResizeObserver(() => fitCardHeights()).observe(reference.querySelector("[data-overview-body]"));
+  window.addEventListener("resize", () => fitCardHeights());
 }
 function applyCardLayout(layout) {
   savedLayout = layout || { order: [], hidden: [] };
@@ -1051,10 +1159,33 @@ function arrangeTools(card, index, count) {
     renderDraft(card.id);
   });
   toggle.setAttribute("aria-pressed", String(card.hidden));
+  const choice = (label, value, options, change) => {
+    const select = element("select", "profile-card-size");
+    select.setAttribute("aria-label", `${label}: ${card.title}`);
+    select.title = label;
+    for (const [optionValue, text] of options) {
+      const option = element("option", "", text);
+      option.value = String(optionValue);
+      option.selected = optionValue === value;
+      select.append(option);
+    }
+    select.addEventListener("change", () => {
+      draftCards = draftCards.map((item) => (item.id === card.id ? change(item, select.value) : item));
+      renderDraft();
+      cardPanel(card.id).querySelector(`[data-card-tools] select[title="${label}"]`)?.focus();
+    });
+    return select;
+  };
+  const isReference = card.id === HEIGHT_REFERENCE;
+  const width = choice("Width", card.width, [[1, "1 column"], [2, "2 columns"], [3, "3 columns"]],
+    (item, value) => ({ ...item, width: Number(value) }));
+  const height = choice("Max height", card.height, [["", isReference ? "Height: fits (sets the others)" : "Height: like Collection"],
+    ["short", "Height: short"], ["medium", "Height: medium"], ["tall", "Height: tall"], ["none", "Height: no limit"]],
+    (item, value) => ({ ...item, height: value }));
   tools.append(handle,
     button("Move up", "↑", () => { draftCards = window.AniiProfileCards.moveCard(draftCards, card.id, { step: -1 }); renderDraft(card.id, "up"); }, index === 0),
     button("Move down", "↓", () => { draftCards = window.AniiProfileCards.moveCard(draftCards, card.id, { step: 1 }); renderDraft(card.id, "down"); }, index === count - 1),
-    toggle);
+    toggle, width, height);
   if (card.hidden) tools.append(element("span", "profile-card-hidden-label", "Hidden"));
   return tools;
 }
@@ -1361,7 +1492,7 @@ async function loadHistoryCard() {
     if (!runs.length) { body.replaceChildren(element("p", "", "No runs captured yet. aLogs adds every run it sees here.")); return; }
     const list = element("ol", "profile-history-list is-compact");
     list.append(...runs.map((run) => historyRow(run)));
-    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all runs");
+    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all recent runs");
     more.href = historyLink(true);
     body.replaceChildren(list, more);
   } catch {
@@ -1395,8 +1526,27 @@ const MY_RUNS_PAGE_SIZE_KEY = "aniilogs:my-runs:page-size:v1";
 const MY_RUNS_PAGE_SIZES = [20, 30, 50];
 const MY_RUNS_SEARCH_WAIT_MS = 250;
 const HISTORY_MODE_NAMES = { interlink: "Holo-Battle Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist", menu: "Menu bests" };
-const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null, scope: null };
+// The table's column headers sort it on the server (it's paged): Played, newest first, unless another is clicked.
+// Each starts in its natural order (A–Z, or highest/newest first); clicked again it flips. The rows are shown in the
+// order the server sends them.
+const MY_RUNS_SORTS = Object.freeze({ played: "desc", mode: "asc", fight: "asc", result: "desc", party: "desc" });
+const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null, scope: null, sort: "played", order: "desc" };
 let runsArePublic = false;
+function renderMyRunsHead() {
+  for (const cell of historyFull.querySelectorAll("[data-myruns-sort]")) {
+    const key = cell.dataset.myrunsSort;
+    cell.dataset.label ||= cell.textContent.trim();
+    window.AniilogsTableSort?.fillHeader(cell, cell.dataset.label, {
+      active: myRuns.sort === key, order: myRuns.order,
+      onSort: () => {
+        ({ key: myRuns.sort, order: myRuns.order } = window.AniilogsTableSort.nextSort({ key: myRuns.sort, order: myRuns.order }, key, MY_RUNS_SORTS[key]));
+        myRuns.page = 1;
+        renderMyRunsHead();
+        void loadMyRuns();
+      },
+    });
+  }
+}
 // ?split=<id>[&best=1][&label=Season 1.0]: one part of an Interlink season (the profile's Interlink card links here)
 function runsScopeFromAddress() {
   const params = new URLSearchParams(window.location.search);
@@ -1536,7 +1686,8 @@ async function loadMyRuns() {
   const rows = historyFull.querySelector("[data-myruns-rows]");
   const status = historyFull.querySelector("[data-history-status]");
   const summary = historyFull.querySelector("[data-myruns-summary]");
-  const params = new URLSearchParams({ page: String(myRuns.page), limit: String(myRuns.pageSize), tz: String(-new Date().getTimezoneOffset()) });
+  const params = new URLSearchParams({ page: String(myRuns.page), limit: String(myRuns.pageSize), tz: String(-new Date().getTimezoneOffset()),
+    sort: myRuns.sort, order: myRuns.order });
   for (const select of historyFull.querySelectorAll("[data-history-filter]")) if (select.value) params.set(select.dataset.historyFilter, select.value);
   const search = historyFull.querySelector("[data-history-search]").value.trim();
   if (search) params.set("q", search);
@@ -1577,7 +1728,7 @@ function startMyRuns(publicId = null) {
   myRuns.pageSize = myRunsPageSize();
   myRuns.scope = runsScopeFromAddress();
   historyFull.classList.add("is-my-runs");
-  historyFull.querySelector("#history-title").textContent = publicId ? "Runs" : "My runs";
+  historyFull.querySelector("#history-title").textContent = publicId ? "Recent runs" : "My runs";
   historyFull.querySelector("[data-history-intro]").textContent = publicId
     ? "Every run aLogs captured for this player, newest first, including runs a teammate's app captured with them in the party, and their menu bests."
     : `${runsArePublic ? "Public: visitors to your profile see this list too" : "Only you can see this list"}: every run aLogs captured for you, newest first, `
@@ -1594,6 +1745,7 @@ function startMyRuns(publicId = null) {
     scope.hidden = false;
   }
   for (const node of historyFull.querySelectorAll("[data-myruns-only]")) node.hidden = false;
+  renderMyRunsHead();
   historyFull.querySelector("[data-history-list]").hidden = true;
   historyFull.querySelector("[data-history-more]").hidden = true;
   const size = historyFull.querySelector("[data-history-page-size]");
@@ -1646,13 +1798,13 @@ function showBattleHistory(publicId) {
       startMyRuns(publicId);
     }
   } else {
-    // your own profile's card leads to My runs (and says who else sees it); a visitor's to Runs
+    // your own profile's card leads to My runs (and says who else sees it); a visitor's to Recent runs
     const panel = profileOverview.querySelector('[data-overview-panel="history"]');
-    panel.querySelector("h3").textContent = publicId ? "Runs" : "My runs";
+    panel.querySelector("h3").textContent = publicId ? "Recent runs" : "My runs";
     let note = panel.querySelector("[data-history-visibility]");
     if (!publicId) {
       if (!note) { note = element("p", "history-visibility"); note.dataset.historyVisibility = ""; panel.querySelector("h3").after(note); }
-      note.textContent = runsArePublic ? "Public: visitors to your profile see this list." : "Private: only you see this list. Change it in Edit profile.";
+      note.textContent = runsArePublic ? "Public: visitors to your profile see this list as Recent runs." : "Private: only you see this list. Change it in Edit profile.";
     } else note?.remove();
     void loadHistoryCard();
   }
@@ -1666,48 +1818,6 @@ if (HISTORY_VIEW) {
   });
   historyFull.querySelector("[data-history-more]").addEventListener("click", () => void loadHistoryPage(false));
 }
-
-// ---------------------------------------------------------------- Online now and Recently joined
-// Public profiles only, by the name they show publicly; players online with a private profile are just a number.
-async function loadProfileDirectory() {
-  const box = profileOverview.querySelector("[data-profile-directory]");
-  const link = (row) => {
-    const anchor = element("a", "profile-directory-player");
-    anchor.href = profileHref({ profile: row.publicId });
-    anchor.append(element("strong", "", row.name));
-    return anchor;
-  };
-  try {
-    const response = await apiFetch("/profiles/directory");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const { recent = [], online = {} } = await response.json();
-    const players = (online.players || []).map((row) => {
-      const item = element("li");
-      const anchor = link(row);
-      const state = element("span", "profile-presence", row.state === "afk" ? "AFK" : "Online");
-      state.dataset.state = row.state;
-      anchor.append(state);
-      item.append(anchor);
-      return item;
-    });
-    box.querySelector("[data-directory-online]").replaceChildren(...(players.length ? players
-      : [element("li", "profile-directory-empty", "No public profiles online right now.")]));
-    const others = Number(online.others || 0);
-    box.querySelector("[data-directory-others]").textContent = others
-      ? `${players.length ? "And " : ""}${others} ${others === 1 ? "player" : "players"} online who keep their profile out of these lists.` : "";
-    box.querySelector("[data-directory-recent]").replaceChildren(...(recent.length ? recent.map((row) => {
-      const item = element("li");
-      const anchor = link(row);
-      if (row.joinedAt) anchor.append(element("small", "", `joined ${new Date(row.joinedAt * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`));
-      item.append(anchor);
-      return item;
-    }) : [element("li", "profile-directory-empty", "No public profiles yet.")]));
-    box.hidden = false;
-  } catch {
-    box.hidden = true;
-  }
-}
-if (PROFILE_VIEW && !PUBLIC_PROFILE_ID && !HISTORY_VIEW) void loadProfileDirectory();
 
 if (!API_URL) {
   for (const link of loginLinks) {

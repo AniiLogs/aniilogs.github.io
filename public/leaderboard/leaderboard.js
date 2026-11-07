@@ -17,22 +17,26 @@
     sim: [
       // one board per trial and difficulty, read from the Victory screen ("Battle time 00:08:22 Training of Water - Hard")
       // and, as the game's own leaderboard tabs them, one Training Style (from aLogs' setup read)
-      { kind: "sim_run", label: "Trials", sorts: ["clear_time_s"], fields: ["trial", "difficulty", "style", "party", "buff"] },
+      { kind: "sim_run", label: "Trials", sorts: ["clear_time_s", "player", "style", "party_size", "played_at"], fields: ["trial", "difficulty", "style", "party", "buff"] },
     ],
     // From the desktop meter: the Rank Info screen (season standing) and each match's end screen (Matches)
     eggheist: [
-      { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars"], fields: ["cycle"] },
+      { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars", "player", "cycle", "played_at"], fields: ["cycle"] },
       // each match, from the game's end screen; best loot per player unless "every run"
-      { kind: "eggheist_match", label: "Matches", sorts: ["score", "difficulty", "clear_time_s", "defeats", "player", "played_at"], fields: ["cycle", "difficulty", "cleared"] },
+      { kind: "eggheist_match", label: "Matches", sorts: ["score", "difficulty", "cleared", "clear_time_s", "defeats", "player", "cycle", "played_at"], fields: ["cycle", "difficulty", "cleared"] },
       { kind: "eggheist_pvp", label: "PvP (coming soon)", soon: true },
     ],
   });
+  // What the summary line calls each sort ("sorted by Season")
   const SORT_LABELS = Object.freeze({
     standing: "Rank", score: "Score", team_dps: "Team DPS", clear_time_s: "Fastest time", stars: "Stars", meter_dps: "Meter DPS", floors: "Floors",
     p_dps: "Avg DPS", p_break: "BREAK", p_taken: "Damage taken", p_heal: "Healing", defeats: "Total Defeats",
-    difficulty: "Difficulty (hardest first)", player: "Player (A–Z)", played_at: "Date (newest first)",
+    difficulty: "Difficulty", player: "Player", played_at: "Date", cycle: "Season", cleared: "Outcome", style: "Training Style", party_size: "Party size",
   });
-  // Table columns per board; `sort` makes the header clickable.
+  // Sorts that start A–Z / smallest first (the API's natural order); the rest start highest or newest first.
+  const ASCENDING_SORTS = new Set(["clear_time_s", "player", "style", "party_size"]);
+  // Table columns per board; `sort` makes the header clickable (sorted by the API: the boards are paged). The board's
+  // first sort is its ranking; the other columns re-order the same rows (each player's best).
   const COLUMNS = Object.freeze({
     eggheist_season: [
       { label: "Rank", sort: "standing", value: (e) => e.seasonRank?.name || (e.seasonRank?.tier ? `Tier ${e.seasonRank.tier}` : "—") },
@@ -40,27 +44,27 @@
       { label: "Rank points", sort: "score", value: (e) => (e.seasonRank?.tier === 7 ? "MAX" : number(e.score)) },
       // Stars only exist at the top rank (Egg Emperor)
       { label: "Emperor stars", sort: "stars", value: (e) => (e.seasonRank?.tier === 7 || e.stars ? number(e.stars) : "—") },
-      { label: "Season", value: (e) => e.cycle || "—" },
-      { label: "Updated", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Season", sort: "cycle", value: (e) => e.cycle || "—" },
+      { label: "Updated", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     eggheist_match: [
       { label: "Loot", sort: "score", value: (e) => number(e.score) },
       { label: "Difficulty", sort: "difficulty", value: (e) => e.difficulty || "—" },
-      { label: "Outcome", value: (e) => (e.cleared === true ? "Escaped" : e.cleared === false ? "Failed" : "—") },
+      { label: "Outcome", sort: "cleared", value: (e) => (e.cleared === true ? "Escaped" : e.cleared === false ? "Failed" : "—") },
       { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Total Defeats", sort: "defeats", info: "defeats", value: (e) => number(e.defeats) },
-      { label: "Season", value: (e) => e.cycle || "—" },
+      { label: "Season", sort: "cycle", value: (e) => e.cycle || "—" },
       { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
       { label: "Battle time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Trial", value: (e) => e.trialName || e.trial || "—" },
       { label: "Difficulty", value: (e) => e.difficulty || "—" },
-      { label: "Style", value: (e) => e.extra?.setup?.style || "—" },
+      { label: "Style", sort: "style", value: (e) => e.extra?.setup?.style || "—" },
       // each gizmo series with its count ("Energy 6 · Valor 2"); runs from before the setup was read: their buff count
       { label: "Gizmos", value: (e) => gizmoSeries(e.extra?.setup) || number(e.buffs?.length) },
-      { label: "Party", value: (e) => number(e.partySize) },
-      { label: "Date", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Party", sort: "party_size", value: (e) => number(e.partySize) },
+      { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
   });
 
@@ -68,7 +72,7 @@
   const els = {
     gate: $("[data-gate]"), gateTitle: $("[data-gate-title]"), gateDetail: $("[data-gate-detail]"),
     board: $("[data-board]"), badge: $("[data-preview-badge]"), filters: $("[data-filters]"),
-    boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
+    boardTabs: $("[data-board-tabs]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"),
     serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), unlinked: $("[data-unlinked]"),
@@ -78,7 +82,7 @@
     mode: "interlink", kind: "interlink_boss", sort: "", order: "", offset: 0, server: "",
     // Interlink: the week shown, the board opened with "View all" and its ladder, each board's ladder, the boss a phone
     // shows (0 left, 1 center, 2 right), and the Season Ladder's season, split ("all": the whole season) and order
-    week: "", viewBoss: "", viewLadder: "score", ladders: {}, slot: 1, season: "", split: "", rank: "score",
+    week: "", viewBoss: "", viewLadder: "score", ladders: {}, slot: 1, season: "", split: "", rank: "score", rankOrder: "",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0, push: false,
   };
 
@@ -109,10 +113,23 @@
   }
   // A name linked to its owner's public profile (only profiles their owners made public carry an id). A claimed
   // character shows its UID on hover: names can look alike (or use lookalike letters), UIDs can't.
-  function profileName(name, profileId, props = {}, uid = null) {
-    const title = [uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""].filter(Boolean).join(" · ") || null;
-    if (!profileId) return el("span", { ...props, title, text: name });
-    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}`, title, text: name });
+  // character: set when name is the player's Discord name (they picked it under Show me by): the Discord logo goes
+  // before it and the character that played stays on hover.
+  function profileName(name, profileId, props = {}, uid = null, character = null) {
+    const title = [character ? `Discord name · character ${character}` : "", uid ? `UID ${uid}` : "", profileId ? "Open their profile" : ""]
+      .filter(Boolean).join(" · ") || null;
+    const label = character ? shownName(name, "discord") : null;
+    if (!profileId) return el("span", { ...props, title, text: label ? null : name }, label);
+    return el("a", { ...props, href: `/?profile=${encodeURIComponent(profileId)}`, title, text: label ? null : name }, label);
+  }
+  // a player's name as they chose to be shown (site-sidebar.js draws the Discord logo)
+  function shownName(text, nameSource) {
+    return window.AniiSite?.playerName(text, nameSource) || document.createTextNode(String(text || ""));
+  }
+  // a board row's name: its Discord name when its player picked that, else the character's
+  function rowName(entry, props = {}) {
+    return entry.discordName ? profileName(entry.discordName, entry.profileId, props, entry.uid, entry.player)
+      : profileName(entry.player, entry.profileId, props, entry.uid);
   }
   // Marks after a name: a teammate's row nobody claimed yet, and a name that looks like a claimed one.
   function nameMarks(entry) {
@@ -152,7 +169,11 @@
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
-    state.season = params.get("season") || ""; state.split = params.get("split") || ""; state.rank = params.get("rank") === "stars" ? "stars" : "score";
+    state.viewOrder = state.viewBoss && ["asc", "desc"].includes(state.order) ? state.order : "";   // "View all": its ladder flipped
+    state.season = params.get("season") || ""; state.split = params.get("split") || "";
+    // the Season Ladder's sorted column (?rank=, so ?rank=stars from older links still works) and ?order=
+    state.rank = Object.hasOwn(SEASON_SORTS, params.get("rank") || "") ? params.get("rank") : "score";
+    state.rankOrder = board().custom === "season" && ["asc", "desc"].includes(state.order) ? state.order : "";
     state.server = params.get("server") || "";
     state.unlinked = params.get("unlinked") === "1"; els.unlinked.checked = state.unlinked;
     for (const name of ["cycle", "boss", "level", "difficulty", "trial", "style", "party", "buff", "player"]) {
@@ -173,6 +194,7 @@
       if (state.viewBoss) {
         params.set("boss", state.viewBoss);
         params.set("ladder", state.viewLadder);
+        if (state.viewOrder) params.set("order", state.viewOrder);
         if (state.offset) params.set("offset", String(state.offset));
       }
       return params;
@@ -180,7 +202,8 @@
     if (board().custom === "season") {
       if (state.season) params.set("season", state.season);
       if (state.split) params.set("split", state.split);
-      if (state.rank === "stars") params.set("rank", "stars");
+      if (state.rank !== "score") params.set("rank", state.rank);
+      if (state.rankOrder) params.set("order", state.rankOrder);
       return params;
     }
     if (state.sort) params.set("sort", state.sort);
@@ -276,10 +299,7 @@
     for (const node of [els.prev, els.next, els.page]) node.hidden = Boolean(custom);
     if (custom) return;
     const sorts = board().sorts;
-    if (!sorts.includes(state.sort)) state.sort = sorts[0];
-    // a board can name a measure its own way (Egg Heist matches call their score "Loot")
-    els.sort.replaceChildren(...sorts.map((key) => el("option", { value: key, text: (state.kind === "eggheist_match" && key === "score" ? "Loot" : SORT_LABELS[key]) })));
-    els.sort.value = state.sort;
+    if (!sorts.includes(state.sort)) { state.sort = sorts[0]; state.order = ""; }
     const clearedLabel = els.filters.querySelector("[data-cleared-label]");
     if (clearedLabel) clearedLabel.textContent = state.kind === "eggheist_match" ? "Escapes only" : "Kills only";
     for (const label of els.filters.querySelectorAll("[data-field]")) {
@@ -354,34 +374,39 @@
   }
 
   // ---------------------------------------------------------------- table
+  // A column header: a sort button (▲/▼ and aria-sort while the table is sorted by it) when the column sorts, plain
+  // text otherwise, with its (i) explanation if it has one.
+  function headCell(label, { sortable = false, active = false, order = "desc", onSort = null, info = null, className = null } = {}) {
+    if (!sortable) {
+      return info ? el("th", { scope: "col", class: className }, el("span", { class: "lb-th-info" }, el("span", { text: label }), info))
+        : el("th", { scope: "col", class: className, text: label });
+    }
+    return el("th", { scope: "col", class: className, "aria-sort": active ? (order === "asc" ? "ascending" : "descending") : null },
+      el("button", { type: "button", class: active ? "lb-sort is-active" : "lb-sort", title: `Sort by ${label}`,
+        text: label + (active ? (order === "asc" ? " ▲" : " ▼") : ""), onclick: onSort }), info);
+  }
   function renderHead() {
     const columns = COLUMNS[state.kind];
     const headers = [el("th", { scope: "col", text: "#" })];
-    for (const column of [{ label: "Player", sort: "player", playerColumn: true }, ...columns]) {
-      const info = column.info ? infoButton(column.info) : null;
-      if (!column.sort || !board().sorts.includes(column.sort)) {
-        headers.push(info ? el("th", { scope: "col" }, el("span", { class: "lb-th-info" }, el("span", { text: column.label }), info)) : el("th", { scope: "col", text: column.label }));
-        continue;
-      }
+    for (const column of [{ label: "Player", sort: "player" }, ...columns]) {
       const active = state.sort === column.sort;
-      const arrow = active ? (currentOrder() === "asc" ? " ▲" : " ▼") : "";
-      headers.push(el("th", { scope: "col", "aria-sort": active ? (currentOrder() === "asc" ? "ascending" : "descending") : null },
-        el("button", {
-          type: "button", class: active ? "lb-sort is-active" : "lb-sort", text: column.label + arrow,
-          onclick: () => {
-            if (state.sort === column.sort) state.order = currentOrder() === "asc" ? "desc" : "asc";
-            else { state.sort = column.sort; state.order = ""; }
-            state.offset = 0;
-            renderControls();
-            void loadEntries();
-          },
-        }), info));
+      headers.push(headCell(column.label, {
+        sortable: Boolean(column.sort) && board().sorts.includes(column.sort), active, order: currentOrder(),
+        info: column.info ? infoButton(column.info) : null,
+        onSort: () => {
+          if (active) state.order = currentOrder() === "asc" ? "desc" : "asc";
+          else { state.sort = column.sort; state.order = ""; }
+          state.offset = 0;
+          renderControls();
+          void loadEntries();
+        },
+      }));
     }
     els.head.replaceChildren(el("tr", {}, headers));
   }
   function currentOrder() {
     if (state.order) return state.order;
-    return state.sort === "clear_time_s" || state.sort === "player" ? "asc" : "desc";
+    return ASCENDING_SORTS.has(state.sort) ? "asc" : "desc";
   }
   function gizmoSeries(setup) {
     return (setup?.gizmos || []).map((row) => (row.count == null ? row.series : `${row.series} ${row.count}`)).join(" · ");
@@ -458,14 +483,14 @@
       const cells = [
         el("td", { class: "lb-rank", text: String(entry.rank) }),
         el("td", { class: "lb-player" }, el("button", {
-          type: "button", class: "lb-expand", "aria-expanded": String(open), text: entry.player || "—",
-          title: entry.uid ? `UID ${entry.uid}` : null,
+          type: "button", class: "lb-expand", "aria-expanded": String(open), text: entry.discordName ? null : entry.player || "—",
+          title: [entry.discordName ? `Discord name · character ${entry.player}` : "", entry.uid ? `UID ${entry.uid}` : ""].filter(Boolean).join(" · ") || null,
           onclick: () => {
             if (state.expanded.has(entry.submissionId)) state.expanded.delete(entry.submissionId);
             else state.expanded.add(entry.submissionId);
             renderRows(entries);
           },
-        }), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
+        }, entry.discordName ? shownName(entry.discordName, "discord") : null), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
         entry.hasEvidence ? proofButton(entry.submissionId) : null,
         entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
@@ -605,7 +630,7 @@
     return Object.keys(entry.proofIds || {}).length ? entry.checks?.[ladder.proof] || entry.checks?.score : "invalid";
   }
   function playerName(entry, proofId, check = null) {
-    return el("span", { class: "lb-who-name" }, profileName(entry.player, entry.profileId, {}, entry.uid),
+    return el("span", { class: "lb-who-name" }, rowName(entry),
       entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), checkBadge(check), proofButton(proofId, check));
   }
   function bossHead(boss, className, detail = "") {
@@ -643,7 +668,7 @@
       onclick: () => {
         state.push = true;
         state.returnWeek = state.week; state.week = cycleId;     // back from "View all" returns to this page
-        state.viewBoss = boss.id; state.viewLadder = ladder.id; state.offset = 0; void loadEntries();
+        state.viewBoss = boss.id; state.viewLadder = ladder.id; state.viewOrder = ""; state.offset = 0; void loadEntries();
       } }) : null);
   }
   // One board's ladder changed: reload just that board.
@@ -714,7 +739,8 @@
     els.summary.textContent = "";
   }
 
-  // "View all": one board, every player, paged, with every figure and a ladder chip row.
+  // "View all": one board, every player, paged, with every figure; a figure's column header ranks the board by it
+  // (the API's ?ladder=, clicked again ?order= the other way round). Who sent it and when only show.
   const FULL_COLUMNS = [
     { id: "score", label: "Score", value: (e) => number(e.score) },
     { id: "stars", label: "Stars", value: (e) => stars(e.stars) },
@@ -734,24 +760,33 @@
       state.viewBoss = ""; state.offset = 0; void loadEntries();
     };
     if (!boss) { back(); return; }
-    // the ladder's figure first; on phones the figures it isn't ranked by beyond score and stars fold away
-    const columns = [...FULL_COLUMNS.filter((column) => column.id === ladder.id), ...FULL_COLUMNS.filter((column) => column.id !== ladder.id)];
+    // the columns stay in place; the ranked one is highlighted, and on phones the figures it isn't ranked by beyond
+    // score, stars and time fold away
+    const columns = FULL_COLUMNS;
+    const natural = ladder.id === "clear" ? "asc" : "desc";
+    const order = state.viewOrder || natural;
+    const ranked = (column) => [column.id === ladder.id ? "is-ranked" : "", fold(column, ladder)].join(" ").trim() || null;
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" },
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
           el("span", { text: `${boss.slot ? `${boss.slot} boss` : boss.name} · ${weekRange(data.cycle)}` })),
         updatedLine(data.updatedAt)),
-      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`),
-      el("div", { class: "lb-chips", role: "group", "aria-label": "Ladder" }, LADDERS.map((item) => el("button", {
-        type: "button", "aria-pressed": String(item.id === ladder.id), text: item.short || item.label,
-        onclick: () => { state.viewLadder = item.id; state.offset = 0; void loadEntries(); },
-      }))));
+      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`));
     els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" }),
-      columns.map((column, index) => el("th", { scope: "col", class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null, text: column.label }))));
+      columns.map((column) => headCell(column.label, {
+        sortable: LADDERS.some((item) => item.id === column.id), active: column.id === ladder.id, order, className: ranked(column),
+        onSort: () => {
+          if (column.id === ladder.id) state.viewOrder = order === "asc" ? "desc" : "asc";
+          else { state.viewLadder = column.id; state.viewOrder = ""; }
+          if (state.viewOrder === (state.viewLadder === "clear" ? "asc" : "desc")) state.viewOrder = "";
+          state.offset = 0;
+          void loadEntries();
+        },
+      }))));
     els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
       el("td", { class: "lb-player" }, playerName(entry, null, rowCheck(entry, ladder))),
-      columns.map((column, index) => el("td", { class: [index ? "" : "is-ranked", fold(column, index)].join(" ").trim() || null },
+      columns.map((column) => el("td", { class: ranked(column) },
         column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder, boss)) : column.value(entry, boss)))))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
@@ -761,10 +796,10 @@
     for (const node of [els.prev, els.next, els.page]) node.hidden = boss.total <= FULL_ROWS;
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= boss.total;
-    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
+    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
   }
-  function fold(column, index) {
-    return index && !["score", "stars", "clear", "date"].includes(column.id) ? "lb-hide-sm" : "";
+  function fold(column, ladder) {
+    return column.id !== ladder.id && !["score", "stars", "clear", "date"].includes(column.id) ? "lb-hide-sm" : "";
   }
 
   // Season Ladder: each player's best on each boss of each week, added up over a split (stars reset each split) or a season.
@@ -772,7 +807,20 @@
     const season = seasons.find((item) => item.season === cycle.season);
     return season?.splits.find((split) => split.start <= cycle.start && cycle.start <= split.end)?.id ?? null;
   }
+  // The Season Ladder's columns and how a header click sorts them. The whole list comes in one answer, so it's sorted
+  // here; the API ranks it (the # column) by combined score, or by total stars when that's the sort (?sort=stars).
+  const SEASON_SORTS = Object.freeze({
+    player: { label: "Player", natural: "asc", value: (e) => e.discordName || e.player || "" },
+    score: { label: "Combined score", natural: "desc", value: (e) => Number(e.total) || 0 },
+    stars: { label: "Total stars", natural: "desc", value: (e) => Number(e.stars) || 0 },
+    weeks: { label: "Weeks", natural: "desc", value: (e) => Number(e.weeks) || 0, small: true },
+    bestWeek: { label: "Best week", natural: "desc", value: (e) => Number(e.bestWeek) || 0, small: true },
+  });
+  function seasonOrder() {
+    return state.rankOrder || SEASON_SORTS[state.rank].natural;
+  }
   function renderSeason(data) {
+    state.seasonData = data;
     const pick = el("select", { "aria-label": "Season or split", onchange: (event) => {
       [state.season, state.split] = event.target.value.split("|");
       void loadEntries();
@@ -787,24 +835,36 @@
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" }, el("label", { class: "lb-split" }, el("span", { text: "Split" }), pick), updatedLine(data.updatedAt)),
       el("p", { class: "lb-rules" }, el("span", { text: "Each week: your best run on the left, center and right boss, added together; then every week added up." }),
-        el("span", { text: "Stars reset when a split starts, so the current split shows first." })),
-      el("div", { class: "lb-chips", role: "group", "aria-label": "Rank by" }, [["score", "Combined score"], ["stars", "Total stars"]].map(([id, label]) => el("button", {
-        type: "button", "aria-pressed": String(state.rank === id), text: label,
-        onclick: () => { state.rank = id; void loadEntries(); },
-      }))));
+        el("span", { text: "Stars reset when a split starts, so the current split shows first." })));
     const most = Math.max(1, ...data.standings.map((entry) => Number(entry.stars) || 0));
-    els.head.replaceChildren(el("tr", {}, ["#", "Player", "Combined score", "Total stars", "Weeks", "Best week"].map((text, index) => el("th", {
-      scope: "col", text, class: [index === (state.rank === "stars" ? 3 : 2) ? "is-ranked" : "", index > 3 ? "lb-hide-sm" : ""].join(" ").trim() || null,
+    const order = seasonOrder();
+    const cellClass = (key) => [state.rank === key ? "is-ranked" : "", SEASON_SORTS[key].small && state.rank !== key ? "lb-hide-sm" : ""]
+      .join(" ").trim() || null;
+    els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), Object.entries(SEASON_SORTS).map(([key, column]) => headCell(column.label, {
+      sortable: true, active: state.rank === key, order, className: key === "player" ? null : cellClass(key),
+      onSort: () => {
+        const before = state.rank === "stars";
+        if (state.rank === key) state.rankOrder = order === "asc" ? "desc" : "asc";
+        else { state.rank = key; state.rankOrder = ""; }
+        if (state.rankOrder === SEASON_SORTS[state.rank].natural) state.rankOrder = "";
+        // the # column follows stars or score, which the API ranks; any other sort is only a new order of this list
+        if ((state.rank === "stars") !== before || !state.seasonData) void loadEntries();
+        else { writeUrl(); renderSeason(state.seasonData); }
+      },
     }))));
-    els.rows.replaceChildren(...(data.standings.length ? data.standings.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
-      el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry), playerUpdated(entry.updatedAt), el("span", { class: "lb-bar", "aria-hidden": "true" },
-        el("i", { style: `width: ${Math.round((Number(entry.stars) || 0) / most * 100)}%` }))),
-      el("td", { class: state.rank === "score" ? "is-ranked" : null, text: number(entry.total) }),
-      el("td", { class: state.rank === "stars" ? "is-ranked" : null }, stars(entry.stars)),
-      el("td", { class: "lb-hide-sm", text: `${number(entry.weeks)} / ${number(played)}` }),
-      el("td", { class: "lb-hide-sm", text: number(entry.bestWeek) })))
-      : [el("tr", {}, el("td", { colspan: "6", class: "lb-empty", text: "No scores in this split yet." }))]));
+    const shown = window.AniilogsTableSort.sortRows(data.standings, SEASON_SORTS[state.rank].value, order);
+    els.rows.replaceChildren(...(shown.length ? shown.map((entry) => {
+      const bar = el("i");
+      bar.style.width = `${Math.round((Number(entry.stars) || 0) / most * 100)}%`;
+      return el("tr", { class: entry.own ? "is-own" : null },
+        el("td", { class: "lb-rank", text: String(entry.rank) }),
+        el("td", { class: state.rank === "player" ? "lb-player is-ranked" : "lb-player" }, playerName(entry), playerUpdated(entry.updatedAt),
+          el("span", { class: "lb-bar", "aria-hidden": "true" }, bar)),
+        el("td", { class: cellClass("score"), text: number(entry.total) }),
+        el("td", { class: cellClass("stars") }, stars(entry.stars)),
+        el("td", { class: cellClass("weeks"), text: `${number(entry.weeks)} / ${number(played)}` }),
+        el("td", { class: cellClass("bestWeek"), text: number(entry.bestWeek) }));
+    }) : [el("tr", {}, el("td", { colspan: "6", class: "lb-empty", text: "No scores in this split yet." }))]));
     els.tableWrap.hidden = false;
     els.summary.textContent = `${pick.selectedOptions[0]?.textContent || `Season ${data.season}`} · ${number(data.standings.length)} player${data.standings.length === 1 ? "" : "s"}`;
   }
@@ -841,6 +901,7 @@
     if (state.viewBoss) {
       ask.set("boss", state.viewBoss);
       ask.set("ladder", state.viewLadder);
+      if (state.viewOrder) ask.set("order", state.viewOrder);
       ask.set("limit", String(FULL_ROWS));
       ask.set("offset", String(state.offset));
     } else {
@@ -896,9 +957,14 @@
     const first = result.total ? result.offset + 1 : 0;
     const last = result.offset + result.entries.length;
     const simBoard = state.kind === "sim_run" ? simBoardName() : "";
-    els.summary.textContent = simBoard
-      ? `${simBoard} · fastest Victory first · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`
-      : `${board().label} · ranked by ${(state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
+    // ranked by the board's own measure, or sorted by another column (a board can name a measure its own way: Egg
+    // Heist matches call their score "Loot"); "(reversed)" when a header was clicked twice
+    const sortName = (state.kind === "eggheist_match" && result.sort === "score" ? "Loot" : SORT_LABELS[result.sort]) || result.sort;
+    const reversed = result.order && result.order !== (ASCENDING_SORTS.has(result.sort) ? "asc" : "desc") ? " (reversed)" : "";
+    const sortedBy = result.sort === board().sorts[0] && !reversed
+      ? (simBoard ? "fastest Victory first" : `ranked by ${sortName}`)
+      : `${result.sort === board().sorts[0] ? "ranked" : "sorted"} by ${sortName}${reversed}`;
+    els.summary.textContent = `${simBoard || board().label} · ${sortedBy} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
     els.page.textContent = result.total ? `${first}–${last} of ${number(result.total)}` : "";
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= result.total;
@@ -953,15 +1019,8 @@
       void loadEntries();
     });
   });
-  els.sort.addEventListener("change", () => {
-    state.sort = els.sort.value;
-    state.order = "";
-    state.offset = 0;
-    void loadEntries();
-  });
   let searchTimer = 0;
   const onFilter = (target) => {
-    if (target === els.sort) return;
     if (target === els.filters.elements.trial) fillSimPickers();   // that trial's own difficulties
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => {
