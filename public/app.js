@@ -1164,12 +1164,14 @@ function historyProof(run) {
     box.append(element("p", "history-empty", "The pictures of this run are no longer kept (it isn't a best; pictures of other runs are kept 90 days). Its numbers stay."));
     return box;
   }
-  const shots = [["", "Result", run.hasEvidence, "full"], ["battle", "Battle Data", run.hasBattleEvidence, "battle_full"]].filter(([, , has]) => has);
+  const gizmos = Number(run.gizmoShots) || 0;          // Holo-Battle Sim's Gizmo screen, a view per part of its list
+  const shots = [["", "Result", run.hasEvidence, "full"], ["battle", "Battle Data", run.hasBattleEvidence, "battle_full"],
+    ...Array.from({ length: gizmos }, (_, i) => [`gizmo${i + 1}`, gizmos > 1 ? `Gizmos ${i + 1}` : "Gizmos", true, null])].filter(([, , has]) => has);
   if (!shots.length) { box.append(element("p", "history-empty", "No pictures with this run.")); return box; }
   for (const [shot, label, , full] of shots) {
     const base = `${API_URL}/leaderboard/submissions/${encodeURIComponent(run.submissionId)}/evidence`;
     const link = element("a", "history-shot");
-    const fullKey = full === "full" ? "evidence" : "battle";
+    const fullKey = full === "full" ? "evidence" : full ? "battle" : null;   // a Gizmo view is the whole screen already
     link.href = run.hasFullScreens?.includes(fullKey) ? `${base}?shot=${full}` : `${base}${shot ? `?shot=${shot}` : ""}`;
     link.target = "_blank";
     link.rel = "noopener";

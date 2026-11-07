@@ -28,7 +28,7 @@
     <script src="/site-chrome.js?v=0.1.0" defer></script>
     <script src="/aniimo-link.js?v=0.1.1" defer></script>
     <script src="/explorer/aniimo-picker.js?v=0.1.4-aniimo-links" defer></script>
-    <script src="/leaderboard/leaderboard.js?v=0.3.14-two-boss" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.3.15-menu-proof" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -121,6 +121,7 @@
           <label class="lb-server" data-server-pick hidden><span>Server</span>
             <select data-server-select></select>
           </label>
+          <label class="lb-unlinked" title="Also list players who aren't linked: teammates known only by the name read off the screen, and app users whose character name was never read. For spotting doubles and misread names."><input type="checkbox" data-unlinked> Show unlinked</label>
           <div class="lb-tabs lb-board-tabs" role="tablist" aria-label="Board" data-board-tabs></div>
         </div>
         <div class="lb-interlink" data-interlink hidden></div>

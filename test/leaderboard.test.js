@@ -377,6 +377,69 @@ test("aLogs B2 sends the cropped proof and the whole screens: all four stored, s
   assert.equal(EVIDENCE.objects.size, 1);                                             // only the older run's crop is left
 });
 
+test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, served, and deleted with it", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const sim = { kind: "sim_run", clientRunId: "sim-1", trial: "Training of Fire", difficulty: "Hard", clearTimeS: 400, cleared: true, partySize: 1,
+    extra: { proofGizmos: ["evidence/someone-else.jpg"] } };                         // the app can't name stored pictures
+  const form = new FormData();
+  form.set("submission", JSON.stringify(sim));
+  form.set("evidence", jpeg(1), "victory.jpg");
+  for (const [i, mark] of [[1, 11], [2, 12], [3, 13]]) form.set(`gizmo${i}`, jpeg(mark), `gizmo${i}.jpg`);
+  const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  const base = `/api/leaderboard/submissions/${submissionId}/evidence`;
+  assert.deepEqual((await (await call(env, `${base}?shot=list`)).json()).shots, ["summary", "gizmo1", "gizmo2", "gizmo3"]);
+  const mark = async (shot) => new Uint8Array(await (await call(env, `${base}?shot=${shot}`)).arrayBuffer())[3];
+  assert.deepEqual([await mark("gizmo1"), await mark("gizmo2"), await mark("gizmo3")], [11, 12, 13]);
+  assert.equal((await call(env, `${base}?shot=gizmo4`)).status, 404);
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=sim_run&trial=Fire&difficulty=Hard")).json()).entries[0];
+  assert.equal(entry.extra?.proofGizmos, undefined);                                  // storage keys stay private
+  // a re-send with fewer views replaces them (the extra one is deleted)
+  const again = new FormData();
+  again.set("submission", JSON.stringify({ ...sim, extra: {} }));
+  again.set("evidence", jpeg(1), "victory.jpg");
+  again.set("gizmo1", jpeg(21), "gizmo1.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: again })).status, 200);
+  assert.deepEqual((await (await call(env, `${base}?shot=list`)).json()).shots, ["summary", "gizmo1"]);
+  assert.equal(await mark("gizmo1"), 21);
+  assert.equal(EVIDENCE.objects.size, 2);
+  // an Interlink run lists its Battle Data after the result screen
+  const run = new FormData();
+  run.set("submission", JSON.stringify({ kind: "interlink_run", clientRunId: "il-1", cycle: "3005", boss: { id: "80000109", name: "Omega Sherro", level: 60 },
+    score: 20000, stars: 20, clearTimeS: 180, partySize: 2, buffs: [{ name: "Overtime", level: 2 }],
+    extra: { lineup: [{ slot: 0, name: "MinMax", self: true, aniimo: "Pawney", aniimoLevel: 60, cp: 41000,
+      team: [{ aniimo: "Pawney", aniimoLevel: 60, cp: 41000 }, { aniimo: "Emberpup" }] }, { slot: 1, name: "Bot", ai: true }] } }));
+  run.set("evidence", jpeg(2), "result.jpg");
+  run.set("battle", jpeg(3), "battle.jpg");
+  const runSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: run });
+  assert.ok([200, 201].includes(runSent.status), String(runSent.status));
+  const runId = (await runSent.json()).submissionId;
+  const details = await (await call(env, `/api/leaderboard/submissions/${runId}/evidence?shot=list`)).json();
+  assert.deepEqual(details.shots, ["summary", "battle"]);
+  assert.deepEqual(details.buffs, [{ name: "Overtime", level: 2 }]);                  // what the party went in with
+  assert.deepEqual(details.lineup.map((p) => [p.name, p.aniimo ?? null, (p.team || []).map((m) => m.aniimo)]),
+    [["MinMax", "Pawney", ["Pawney", "Emberpup"]], ["Bot", null, []]]);
+  // a better best sent from the game's menu is shown beside the run's pictures, never instead of them
+  const menu = new FormData();
+  menu.set("submission", JSON.stringify({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005",
+    boss: { id: "80000109", name: "Omega Sherro", level: 60 }, score: 21500, stars: 20 }));
+  menu.set("evidence", jpeg(4), "menu.jpg");
+  const menuSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: menu });
+  assert.ok([200, 201].includes(menuSent.status), String(menuSent.status));
+  const menuId = (await menuSent.json()).submissionId;
+  const menuDetails = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
+  assert.equal(menuDetails.menu, true);
+  assert.equal(menuDetails.runProof, runId);                                          // the run's pictures come with it
+  assert.equal(details.menu, undefined);                                              // a result-screen run isn't menu proof
+  // deleting the sim run removes every picture of it
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 200);
+  assert.equal(EVIDENCE.objects.size, 3);                                             // the Interlink run's two and the menu's are left
+});
+
 test("second reading (shadow mode): Workers AI re-reads the whole screens; a mismatch is listed for review, never held", async () => {
   const EVIDENCE = evidenceStore();
   // a stand-in for Workers AI: the result screen reads score 20000 / 20 stars / 3:00, the Battle Data card MinMax 25913
@@ -661,9 +724,14 @@ test("every real teammate gets a row; only a UID recorded with the run claims it
   assert.equal((await send(a, run("t1", { gameUid: "302000000001", boss: sherro, score: 14000, stars: 14, players: [
     { name: "MinMax", self: true, ai: false }, { name: "Kaela", ai: false, uid: "302000000002" },
     { name: "Rook", ai: false }, { name: "Tammy", ai: true }] }))).status, 201);
-  const board = async () => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries;
+  const board = async (unlinked = "1") => (await (await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=${unlinked}`)).json()).bosses.find((x) => x.id === "80000109").entries;
   assert.deepEqual((await board()).map((e) => [e.player, e.score, e.uid, e.unclaimed]),
     [["MinMax", 14000, "302000000001", false], ["Kaela", 14000, null, true], ["Rook", 14000, null, true]]);   // no AI row
+  // without "Show unlinked" the board lists linked players only
+  assert.deepEqual((await board("0")).map((e) => e.player), ["MinMax"]);
+  const linkedRuns = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries.map((e) => e.player);
+  const allRuns = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&unlinked=1")).json()).entries.map((e) => e.player);
+  assert.deepEqual([linkedRuns.sort(), allRuns.sort()], [["MinMax"], ["Kaela", "MinMax", "Rook"]]);
 
   // someone proves the name "Rook" later: a name alone claims nothing, so Rook's row stays where it is
   await link(c, "302000000099", "Rook");
@@ -699,7 +767,7 @@ test("two app users sending the same run vouch for each other: each teammate slo
   // a different run (another score) sent by someone else is not the same run
   await send(c, run("x1", { ...shared, score: 15000, gameUid: "302000000003", players: [{ name: "Rook", ai: false, self: true }, { name: "MinMax", ai: false }] }));
 
-  const entries = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000100").entries;
+  const entries = (await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json()).bosses.find((x) => x.id === "80000100").entries;
   // MinMax and Kaela once each (their teammate rows merged into their own), plus Rook's run with its unclaimed MinMax row
   assert.deepEqual(entries.map((e) => [e.player, e.score, e.unclaimed]).sort(),
     [["Kaela", 16064, false], ["MinMax", 15000, true], ["MinMax", 16064, false], ["Rook", 15000, false]].sort());
@@ -707,6 +775,39 @@ test("two app users sending the same run vouch for each other: each teammate slo
   const myRun = mine.entries.find((e) => e.submissionId && e.own && e.player === "MinMax" && e.score === 16064 && !e.teammate);
   assert.ok(myRun);
   assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side
+});
+
+test("a run that ties the menu's best doesn't take its row; its pictures are added to the menu proof and the other ladders", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.dev);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  // the menu's best arrives first, then the run that made it: same stars, same score
+  const menu = new FormData();
+  menu.set("submission", JSON.stringify({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 25000, stars: 20 }));
+  menu.set("evidence", jpeg(4), "menu.jpg");
+  const menuSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: menu });
+  assert.ok([200, 201].includes(menuSent.status), String(menuSent.status));
+  const menuId = (await menuSent.json()).submissionId;
+  const tie = new FormData();
+  tie.set("submission", JSON.stringify({ kind: "interlink_run", clientRunId: "il-tie", cycle: "3005", boss: sherro,
+    score: 25000, stars: 20, clearTimeS: 150, cleared: true, partySize: 1, gameUid: "302000000001",
+    players: [{ name: "MinMax", ai: false, self: true, avgDps: 9000 }] }));
+  tie.set("evidence", jpeg(2), "result.jpg");
+  tie.set("battle", jpeg(3), "battle.jpg");
+  const tieSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: tie });
+  assert.ok([200, 201].includes(tieSent.status), String(tieSent.status));
+  const tieId = (await tieSent.json()).submissionId;
+  const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
+    .find((e) => e.player === "MinMax");
+  assert.equal(row.score, 25000);
+  assert.equal(row.proofId, menuId);                        // the score ladder: the first in keeps its picture
+  assert.equal(row.avgDps, 9000);                           // the DPS ladder: the run's figure, and its pictures
+  assert.equal(row.proofIds.dps, tieId);
+  const details = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
+  assert.equal(details.menu, true);
+  assert.equal(details.runProof, tieId);                    // the tying run's result screen and Battle Data come with it
 });
 
 test("only runs played and sent within five minutes vouch; prep-screen scores and late runs never do", async () => {
@@ -863,7 +964,7 @@ test("boss boards show each player's one best run, its Battle Data and its pictu
   // run 1: best score; run 2: a clear, and my best DPS; Kaela's numbers come from the runs she was in
   const high = await send("r1", { stars: 16, score: 20000 }, [{ avgDps: 15000, breakValue: 280000, damageTaken: 4000, heal: 0 }, { avgDps: 16000, heal: 900 }]);
   const fast = await send("r2", { stars: 15, score: 16000, cleared: true, clearTimeS: 140 }, [{ avgDps: 19000, breakValue: 200000, damageTaken: 6000, heal: 50 }, { avgDps: 12000, heal: 1200 }]);
-  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json();
+  const week = await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json();
   const rows = week.bosses.find((b) => b.id === "80000109").entries;
   const me = rows.find((e) => e.player === "DevOne");
   // one run per row, the best (most stars, then score): all its figures and its pictures, never another run's
@@ -873,7 +974,7 @@ test("boss boards show each player's one best run, its Battle Data and its pictu
   assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 900, high, high]);
 
   // "All runs" ranks by those stats too: each player's own card, their best run for it
-  const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}`)).json()).entries;
+  const all = async (sort) => (await (await call(env, `/api/leaderboard/entries?kind=interlink_run&sort=${sort}&unlinked=1`)).json()).entries;
   assert.deepEqual((await all("p_dps")).map((e) => [e.player, e.avgDps]), [["DevOne", 19000], ["Kaela", 16000]]);
   assert.deepEqual((await all("p_heal")).map((e) => [e.player, e.heal]), [["Kaela", 1200], ["DevOne", 50]]);
   assert.deepEqual((await all("p_break")).map((e) => [e.player, e.breakValue, e.submissionId]), [["DevOne", 280000, high]]);

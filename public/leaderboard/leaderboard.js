@@ -71,7 +71,7 @@
     boardTabs: $("[data-board-tabs]"), sort: $("[data-filter-sort]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"),
-    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), unlinked: $("[data-unlinked]"),
     interlink: $("[data-interlink]"), tableWrap: $("[data-table-wrap]"),
   };
   const state = {
@@ -118,6 +118,8 @@
   function nameMarks(entry) {
     return [
       entry.unclaimed ? el("span", { class: "lb-mark", title: "From a teammate's run. Not claimed: no UID was recorded for this player with the run.", text: "unclaimed" }) : null,
+      // shown with "Show unlinked": an app user whose character name was never read (no UID to show either)
+      !entry.unclaimed && !entry.uid && state.unlinked && entry.player === "Pathfinder" ? el("span", { class: "lb-mark", title: "An aLogs user whose app hasn't read their character's name yet.", text: "no character" }) : null,
       entry.lookalike ? el("span", { class: "lb-mark lb-lookalike", title: "This name looks like a claimed player's name but isn't theirs. Only the UID tells players apart.", text: "≈" }) : null,
     ];
   }
@@ -152,6 +154,7 @@
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
     state.season = params.get("season") || ""; state.split = params.get("split") || ""; state.rank = params.get("rank") === "stars" ? "stars" : "score";
     state.server = params.get("server") || "";
+    state.unlinked = params.get("unlinked") === "1"; els.unlinked.checked = state.unlinked;
     for (const name of ["cycle", "boss", "level", "difficulty", "trial", "style", "party", "buff", "player"]) {
       const field = els.filters.elements[name];
       if (field && params.get(name)) field.dataset.pending = params.get(name);
@@ -164,6 +167,7 @@
   function query() {
     const params = new URLSearchParams({ mode: state.mode, kind: state.kind });
     if (state.server) params.set("server", state.server);              // every board: one game server, or all
+    if (state.unlinked) params.set("unlinked", "1");                   // every board: everyone's records, not only linked players
     if (board().custom === "boss") {
       if (state.week) params.set("week", state.week);
       if (state.viewBoss) {
@@ -421,6 +425,8 @@
     }
     const setup = simSetup(entry.extra?.setup);
     if (setup) parts.push(setup);
+    const teams = partyPanel({ lineup: entry.extra?.lineup });         // each player's team (the buffs are below)
+    if (teams) parts.push(teams);
     if (entry.buffs?.length) {
       parts.push(el("div", { class: "lb-buffs" }, el("strong", { text: "Rogue buffs" }),
         el("ol", {}, entry.buffs.map((buff) => el("li", { text: `${buff.floor ? `F${buff.floor} · ` : ""}${buff.name}${buff.level ? ` Lv ${buff.level}` : ""}` })))));
@@ -491,52 +497,77 @@
     const weeks = Math.max(1, Math.ceil((now - week.end) / (7 * 86400)));
     return weeks === 1 ? "last week" : `${weeks} weeks ago`;
   }
-  // A picture icon next to a name when the run has its result screenshot, for anyone: hover it to see the screenshot
-  // as large as the window allows, click (or tap) to keep it open.
-  const proofImages = new Map();                       // submission id -> object URL, loaded once per page
-  // shot: "summary" (the result screen) or "battle" (Battle Data)
+  // A picture icon next to a name when the run has proof pictures, for anyone: hover it to see them side by side (the
+  // result screen, Battle Data, Holo-Battle Sim's Gizmo screen), click (or tap) to keep them open, one per tab.
+  const proofImages = new Map();                       // submission id|shot -> object URL, loaded once per page
+  // shot: "summary" (the result screen), "battle" (Battle Data), "gizmo1"... (Holo-Battle Sim's Gizmo screen, a view
+  // per part of its list) or "party" (the Party screen the run started from)
   async function proofImage(submissionId, shot = "summary") {
     const key = `${submissionId}|${shot}`;
     if (!proofImages.has(key)) {
       proofImages.set(key, (async () => {
-        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence${shot === "battle" ? "?shot=battle" : ""}`);
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence${shot === "summary" ? "" : `?shot=${shot}`}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return URL.createObjectURL(await response.blob());
       })().catch((error) => { proofImages.delete(key); throw error; }));
     }
     return proofImages.get(key);
   }
+  // Which pictures a run has, in the order they were on screen, with each player's team and the run's buffs (the
+  // API's ?shot=list)
+  const proofLists = new Map();
+  function proofDetails(submissionId) {
+    if (!proofLists.has(submissionId)) {
+      proofLists.set(submissionId, (async () => {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence?shot=list`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const details = await response.json();
+        return { ...details, shots: Array.isArray(details.shots) && details.shots.length ? details.shots : ["summary"] };
+      })().catch(() => ({ shots: ["summary", "battle"] })));     // an older API: the two it always had
+    }
+    return proofLists.get(submissionId);
+  }
+
+  // What each player went in with (the Party screen when the battle started) and the run's buffs
+  function partyPanel(details) {
+    const aniimo = (m) => [m.aniimo, Number.isInteger(m.aniimoLevel) ? `Lv ${m.aniimoLevel}` : "", Number.isInteger(m.cp) ? `CP ${number(m.cp)}` : ""]
+      .filter(Boolean).join(" ");
+    const players = (details.lineup || []).filter((p) => p.name || p.aniimo);
+    const buffs = details.buffs || [];
+    if (!players.length && !buffs.length) return null;
+    return el("div", { class: "lb-proof-party" },
+      players.length ? el("ul", { class: "lb-party-players" }, players.map((p) => {
+        const team = (p.team || []).filter((m) => m.aniimo && m.aniimo !== p.aniimo).map(aniimo);
+        return el("li", {}, el("strong", { text: p.name || "—" }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null,
+          p.aniimo ? el("span", { class: "lb-party-lead", text: aniimo(p) }) : null,
+          team.length ? el("span", { class: "lb-party-team", text: `with ${team.join(", ")}` }) : null);
+      })) : null,
+      buffs.length ? el("p", { class: "lb-party-buffs" }, el("strong", { text: "Buffs " }),
+        buffs.map((b) => `${b.name}${b.level ? ` Lv ${b.level}` : ""}`).join(" · ")) : null);
+  }
+  function shotLabel(shot, shots) {
+    if (shot === "battle") return "Battle Data";
+    if (shot === "party") return "Party";
+    if (shot.startsWith("gizmo")) return shots.filter((s) => s.startsWith("gizmo")).length > 1 ? `Gizmos ${shot.slice(5)}` : "Gizmos";
+    return "Summary";
+  }
+  const HOVER_OPEN_MS = 350;                           // a hover this long opens the viewer; passing over the icon doesn't
   function proofButton(submissionId, check = null) {
     if (!submissionId) return null;
-    const button = el("button", { type: "button", class: "lb-proof", title: "Hover to see this run's screenshot, click to keep it open",
-      "aria-label": "View this run's screenshot", onclick: () => { hideProofPreview(); openProof(submissionId, check); } });
+    const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots (they stay open until you click outside)",
+      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check); } });
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
-    // hover (mouse or pen only: a tap goes straight to the click)
-    button.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") showProofPreview(submissionId); });
-    button.addEventListener("pointerleave", hideProofPreview);
-    button.addEventListener("focus", () => showProofPreview(submissionId));
-    button.addEventListener("blur", hideProofPreview);
+    // hover (mouse or pen only: a tap goes straight to the click) opens the same viewer as a click
+    button.addEventListener("pointerenter", (event) => {
+      if (event.pointerType === "touch") return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => openProof(submissionId, check), HOVER_OPEN_MS);
+    });
+    button.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
     return button;
   }
-  let previewFor = null;
-  async function showProofPreview(submissionId) {
-    previewFor = submissionId;
-    let preview = document.querySelector(".lb-proof-preview");
-    if (!preview) { preview = el("div", { class: "lb-proof-preview", "aria-hidden": "true" }); document.body.append(preview); }
-    preview.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
-    preview.hidden = false;
-    try {
-      const url = await proofImage(submissionId);
-      if (previewFor === submissionId) preview.replaceChildren(el("img", { src: url, alt: "" }));
-    } catch {
-      if (previewFor === submissionId) preview.replaceChildren(el("p", { class: "lb-empty", text: "This screenshot isn't available." }));
-    }
-  }
-  function hideProofPreview() {
-    previewFor = null;
-    const preview = document.querySelector(".lb-proof-preview");
-    if (preview) preview.hidden = true;
-  }
+  let hoverTimer = null;
+  let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
   async function openProof(submissionId, check = null) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
     if (!dialog) {
@@ -547,31 +578,46 @@
       document.body.append(dialog);
     }
     const body = dialog.querySelector(".lb-proof-body");
-    dialog.showModal();
-    // the result screen, and the run's Battle Data when it was sent with it
-    const show = async (shot) => {
+    let tabs = dialog.querySelector(".lb-proof-tabs");
+    if (!tabs) { tabs = el("div", { class: "lb-proof-tabs", role: "tablist" }); dialog.insertBefore(tabs, body); }
+    if (dialog.open && proofOpenFor === submissionId) return;
+    proofOpenFor = submissionId;
+    tabs.replaceChildren();
+    dialog.querySelector(".lb-proof-party")?.remove();
+    body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshots…" }));
+    if (!dialog.open) dialog.showModal();             // it stays until a click outside it, × or Esc
+    const details = await proofDetails(submissionId);
+    if (proofOpenFor !== submissionId) return;
+    // A best sent from the game's menu: its menu picture first, then the pictures of the player's best run of that boss
+    // and week (the menu proof is added to them, it doesn't replace them).
+    const run = details.menu && details.runProof ? await proofDetails(details.runProof) : null;
+    if (proofOpenFor !== submissionId) return;
+    const pictures = [
+      ...details.shots.map((shot) => ({ id: submissionId, shot, label: details.menu && shot === "summary" ? "Menu" : shotLabel(shot, details.shots) })),
+      ...(run ? run.shots.map((shot) => ({ id: details.runProof, shot, label: shotLabel(shot, run.shots) })) : []),
+    ];
+    dialog.querySelector(".lb-proof-party")?.remove();
+    const party = partyPanel(details.lineup?.length || details.buffs?.length || !run ? details : run);
+    if (party) dialog.append(party);
+    // a tab for each picture
+    const show = async (index) => {
+      const picture = pictures[index];
+      for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(Number(tab.dataset.proofShot) === index));
       body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
       try {
-        const url = await proofImage(submissionId, shot);
-        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: shot === "battle" ? "The run's Battle Data" : "The run's result screen" }));
+        const url = await proofImage(picture.id, picture.shot);
+        if (proofOpenFor !== submissionId) return;
+        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: `This run's ${picture.label} screen` }));
       } catch {
-        body.replaceChildren(el("p", { class: "lb-empty", text: shot === "battle" ? "This run has no Battle Data screenshot." : "This screenshot isn't available." }));
+        body.replaceChildren(el("p", { class: "lb-empty", text: `This run has no ${picture.label} screenshot.` }));
       }
-      for (const tab of dialog.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(tab.dataset.proofShot === shot));
     };
-    let tabs = dialog.querySelector(".lb-proof-tabs");
-    if (!tabs) {
-      tabs = el("div", { class: "lb-proof-tabs", role: "tablist" },
-        el("button", { type: "button", role: "tab", "data-proof-shot": "summary", text: "Summary" }),
-        el("button", { type: "button", role: "tab", "data-proof-shot": "battle", text: "Battle Data" }));
-      dialog.insertBefore(tabs, body);
-    }
-    for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.onclick = () => show(tab.dataset.proofShot);
+    tabs.append(...pictures.map((picture, index) => el("button", { type: "button", role: "tab", "data-proof-shot": String(index),
+      text: picture.label, onclick: () => show(index) })));
     // the run check's badge beside the tabs
-    tabs.querySelector(".lb-check")?.remove();
     const badge = checkBadge(check);
     if (badge) tabs.append(badge);
-    await show("summary");
+    await show(0);
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   // Explanations behind the (i) next to a column name, in a popover (one shared element per explanation)
@@ -733,6 +779,7 @@
     state.ladders[key] = ladderOf(ladderId).id;
     const ask = new URLSearchParams({ cycle: cycleId, boss: bossId, ladder: state.ladders[key], limit: String(BOARD_ROWS) });
     if (state.server) ask.set("server", state.server);
+    if (state.unlinked) ask.set("unlinked", "1");
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
     const boss = response.ok ? markPairs(await response.json()).bosses?.[0] : null;
     const old = els.interlink.querySelector(`[data-week="${CSS.escape(cycleId)}"][data-board-id="${CSS.escape(bossId)}"]`);
@@ -892,6 +939,7 @@
   async function loadInterlink(requestId) {
     const ask = new URLSearchParams();
     if (state.server) ask.set("server", state.server);
+    if (state.unlinked) ask.set("unlinked", "1");
     const get = async (params) => {
       const response = await apiFetch(`/leaderboard/interlink?${params}`);
       return response.ok ? markPairs(await response.json()) : null;
@@ -1054,6 +1102,7 @@
   els.filters.addEventListener("change", (event) => { if (pickers.has(event.target)) onFilter(event.target); });
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
+  els.unlinked.addEventListener("change", () => { state.unlinked = els.unlinked.checked; state.offset = 0; void loadEntries(); });
   // a board opened with "View all" pages by FULL_ROWS, the record boards by PAGE_SIZE
   const pageSize = () => (board().custom ? FULL_ROWS : PAGE_SIZE);
   els.prev.addEventListener("click", () => {

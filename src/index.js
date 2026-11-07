@@ -1879,6 +1879,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         hasBattleEvidence: Boolean(row.battle_evidence_key),
         hasFullScreens: Object.keys(extra.proofFull || {}),
         hasPartyScreen: Boolean(extra.proofParty),
+        gizmoShots: Array.isArray(extra.proofGizmos) ? extra.proofGizmos.length : 0,
         captures: Math.max(1, Number(row.captures) || 0),     // how many players' apps captured this run
         proofPrunedAt: row.proof_pruned_at || null,
         check: runCheckBadge(row.verify_state),
@@ -1908,8 +1909,9 @@ async function publicBattleHistory(request, env, id) {
 }
 
 // Picture retention. An Interlink run's pictures are replaced as soon as a better run of that boss and week comes in
-// (from a result screen or the game's menu), once that run has its own pictures and isn't under review (the owner,
-// 2 Nov: proof is overwritten by a higher score). Any other run that is nobody's current best keeps its full screens
+// from a result screen, once that run has its own pictures and isn't under review (the owner, 2 Nov: proof is
+// overwritten by a higher score). A best sent from the game's menu never replaces a run's pictures: it's shown beside
+// them (the owner, 7 Nov). Any other run that is nobody's current best keeps its full screens
 // 14 days and its crops 90 days; a current best (for its sender, or for a teammate it credits) and a run under review
 // keep everything, and every run keeps its numbers. Pages has no scheduled runs, so a few go after each submission (pruneProofs(env, max)).
 // "Best" errs on keeping: a teammate's best is judged against the runs that teammate sent.
@@ -1930,12 +1932,12 @@ const PROVEN_BETTER = `b.evidence_key IS NOT NULL AND COALESCE(b.verify_state, '
   AND COALESCE(json_extract(b.verify_json, '$.queued'), 0) = 0 AND b.created_at < CAST(strftime('%s', 'now') AS INTEGER) - 300`;
 const NOBODYS_BEST = `(
   (c.kind IN ('interlink_run', 'interlink_best')
-    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
+    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'interlink_run'
       AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id
       AND ${PROVEN_BETTER} AND ${BETTER_INTERLINK("b", "c")})
     AND NOT EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
       WHERE gc.discord_id <> c.discord_id AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)
-        AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
+        AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind = 'interlink_run'
           AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid'
           AND ${PROVEN_BETTER} AND ${BETTER_INTERLINK("b", "c")})))
   OR (c.kind = 'sim_run'
@@ -1966,14 +1968,15 @@ async function pruneProofs(env, max) {
     const crops = (await env.DB.prepare(
       `SELECT c.submission_id AS submissionId, c.evidence_key AS evidenceKey, c.battle_evidence_key AS battleKey, c.extra_json AS extraJson
        FROM leaderboard_submissions c
-       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL OR json_extract(c.extra_json, '$.proofParty') IS NOT NULL)
+       WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL OR json_extract(c.extra_json, '$.proofParty') IS NOT NULL
+              OR json_extract(c.extra_json, '$.proofGizmos') IS NOT NULL)
          AND c.proof_pruned_at IS NULL AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
     ).bind(now - RETENTION.cropsS, max).all()).results || [];
     for (const row of crops) {
       for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
       await env.DB.prepare(`UPDATE leaderboard_submissions SET evidence_key = NULL, battle_evidence_key = NULL, proof_pruned_at = ?,
-        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty') WHERE submission_id = ?`).bind(now, row.submissionId).run();
+        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty', '$.proofGizmos') WHERE submission_id = ?`).bind(now, row.submissionId).run();
       pruned += 1;
     }
   } catch (error) {
@@ -2311,9 +2314,11 @@ const MAX_SUBMISSION_BYTES = 64 * 1024;
 // at 4K), the whole screen ("evidence_full", at most 1920 wide, ~0.2-0.4 MB) and the same pair for Battle Data
 // ("battle", "battle_full"), and the Party screen as it was when the battle started ("party": the leader or anyone can
 // still change their Aniimo until then, so it's the last capture). Each image is capped here; anything larger isn't a
-// screenshot from the app.
+// screenshot from the app. Holo-Battle Sim's run also sends its Gizmo screen, a whole screen for each part of the list
+// ("gizmo1"...), at most MAX_GIZMO_SHOTS of them.
 const MAX_EVIDENCE_BYTES = 1536 * 1024;
-const EVIDENCE_PARTS = 5;
+const MAX_GIZMO_SHOTS = 12;
+const EVIDENCE_PARTS = 5 + MAX_GIZMO_SHOTS;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -2698,8 +2703,14 @@ async function readSubmissionRequest(request) {
   const evidence = picture("evidence");
   const battle = evidence ? picture("battle") : null;
   // the whole screens the crops came from (aLogs B2 on): kept for a second reading and for review
+  const gizmos = [];
+  for (let i = 1; evidence && i <= MAX_GIZMO_SHOTS; i += 1) {
+    const view = picture(`gizmo${i}`);
+    if (!view) break;
+    gizmos.push(view);
+  }
   return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null,
-    party: picture("party") };
+    party: picture("party"), gizmos };
 }
 
 // Two app users in one Interlink run both send it: same week and boss, played and sent within five minutes of each
@@ -2851,13 +2862,28 @@ async function submitLeaderboardRecord(request, env) {
     proofParty = `evidence/${account.discordId}/${submissionId}-party.${EVIDENCE_TYPES[parsed.party.type]}`;
     await env.EVIDENCE.put(proofParty, parsed.party.stream(), { httpMetadata: { contentType: parsed.party.type } });
   }
-  if (record.extraJson || Object.keys(proofFull).length || proofParty) {
+  // Holo-Battle Sim's Gizmo screen, a view per part of the list (server-only extra.proofGizmos): a re-send with views
+  // replaces them all
+  let proofGizmos = (parseJsonColumn(existing?.extraJson) || {}).proofGizmos || null;
+  if (parsed.gizmos?.length && env.EVIDENCE) {
+    const views = [];
+    for (const [i, part] of parsed.gizmos.entries()) {
+      const key = `evidence/${account.discordId}/${submissionId}-gizmo${i + 1}.${EVIDENCE_TYPES[part.type]}`;
+      await env.EVIDENCE.put(key, part.stream(), { httpMetadata: { contentType: part.type } });
+      views.push(key);
+    }
+    for (const key of proofGizmos || []) if (!views.includes(key)) await env.EVIDENCE.delete(key);
+    proofGizmos = views;
+  }
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos) {
     const extra = parseJsonColumn(record.extraJson) || {};
     delete extra.proofFull;
     delete extra.proofParty;
+    delete extra.proofGizmos;
     delete extra.sharedRun;
     if (Object.keys(proofFull).length) extra.proofFull = proofFull;
     if (proofParty) extra.proofParty = proofParty;
+    if (proofGizmos?.length) extra.proofGizmos = proofGizmos;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -3772,6 +3798,14 @@ const CREDITED_RUNS = `(
 // A record from an account with no character yet (its app couldn't read the name) stays saved and shows up under the
 // name once that player's app links one - nobody is listed as a generic "Pathfinder".
 const NAMED_ON_BOARDS = "(s.teammate IS NOT NULL OR EXISTS (SELECT 1 FROM game_characters named WHERE named.discord_id = s.who AND named.character_name IS NOT NULL))";
+// By default the boards list linked players only: an aLogs account with a character, and a teammate whose UID a run
+// recorded. "Show unlinked" (?unlinked=1) adds everyone else - a teammate known only by the name read off the screen,
+// and an account whose app never read its character's name - so doubles and misread names can be found (the owner,
+// 6 Nov).
+function onBoards(unlinked, alias = "s") {
+  const named = NAMED_ON_BOARDS.replaceAll("s.who", `${alias}.who`).replaceAll("s.teammate", `${alias}.teammate`);
+  return unlinked ? "1 = 1" : `(${named} AND ${alias}.who NOT LIKE 'name:%')`;
+}
 
 // Whether a name nobody claimed looks like a claimed character's name (same skeleton): the boards mark it, since only a
 // UID tells two such players apart. A name is never matched to a UID - only a UID recorded with the run is.
@@ -4160,14 +4194,14 @@ function clearedSql(kind, list = []) {
 // everything on their row (score, clear, DPS, BREAK, damage, healing, team DPS) is that run's, its pictures the proof
 // for all of it (the owner, 2 Nov: a row is one run, not each figure's best from a different run). With each
 // player's in-game name and public profile id (if public).
-async function interlinkBests(env, cycles, list, server = null) {
+async function interlinkBests(env, cycles, list, server = null, unlinked = false) {
   if (!cycles.length) return [];
-  const { results } = await env.DB.prepare(
+  const bests = (kinds, proofOnly) => env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, s.boss_name AS bossName, s.run_score AS score, s.stars,
        CASE WHEN ${clearedSql("interlink_run", list)} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END AS clearTimeS,
        s.p_dps AS avgDps, s.p_break AS breakValue, s.p_taken AS damageTaken, s.p_heal AS heal,
        s.team_dps AS teamDps, json_extract(s.extra_json, '$.starCap') AS sentCap,
-       s.submission_id AS runId, s.evidence_key IS NOT NULL AS hasProof,
+       s.submission_id AS runId, s.kind, s.evidence_key IS NOT NULL AS hasProof,
        s.outcome, s.clear_time_s AS runTimeS,               -- how it ended, and the battle's clock for every ending
        json_extract(s.extra_json, '$.timeLimitS') AS sentLimit,
        -- the character that played the run (an account can link several), else the account's latest-seen one
@@ -4185,11 +4219,30 @@ async function interlinkBests(env, cycles, list, server = null) {
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC, r.created_at ASC) AS pick
            FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_RUNS} c) r
-           WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
+           WHERE r.status = 'visible' AND r.kind IN (${kinds})${proofOnly ? " AND r.evidence_key IS NOT NULL AND COALESCE(r.outcome, '') <> 'invalid'" : ""} AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}
-             AND ${NAMED_ON_BOARDS.replaceAll("s.who", "r.who").replaceAll("s.teammate", "r.teammate")}) s
+             AND ${onBoards(unlinked, "r")}) s
      WHERE s.pick = 1`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
+  const { results } = await bests("'interlink_run', 'interlink_best'", false);
+  // A row is the first record of its best score - the score ladder shows its picture (the owner, 7 Nov). When that's a
+  // best sent from the game's menu (score and stars only), the other figures and their pictures come from the player's
+  // best run with pictures of that boss and week, so the DPS, clear, BREAK, damage and healing ladders show that run.
+  if ((results || []).some((row) => row.kind === "interlink_best")) {
+    const runs = new Map(((await bests("'interlink_run'", true)).results || [])
+      .map((run) => [`${run.discordId}|${run.cycle}|${run.bossId}`, run]));
+    for (const row of results || []) {
+      const run = row.kind === "interlink_best" && runs.get(`${row.discordId}|${row.cycle}|${row.bossId}`);
+      if (!run) continue;
+      row.figureRuns = {};
+      for (const [metric, figure] of Object.entries(ROW_FIGURES)) {
+        if (metric === "score" || row[figure] != null || run[figure] == null) continue;
+        row[figure] = run[figure];
+        row.figureRuns[metric] = run.runId;
+      }
+      for (const field of ["teamDps", "outcome", "runTimeS", "sentLimit"]) row[field] ??= run[field];
+    }
+  }
   // a teammate's name nobody claimed yet: marked when it looks like a claimed one
   const identities = await nameIdentities(env, (results || []).filter((row) => String(row.discordId).startsWith("name:")).map((row) => row.player));
   for (const row of results || []) {
@@ -4255,6 +4308,7 @@ async function interlinkBoards(request, env) {
   const list = await interlinkCycles(env);
   const server = String(params.get("server") || "").trim().slice(0, 40) || null;
   const servers = await gameServers(env, "interlink");
+  const unlinked = params.get("unlinked") === "1";            // "Show unlinked": everyone's records, not only linked players
   const weeks = list.map(publicCycle);
   const seasonParam = params.get("season");
   if (seasonParam !== null) {
@@ -4267,7 +4321,7 @@ async function interlinkBoards(request, env) {
     const cycles = inSeason.filter((cycle) => split === null || interlinkSplitOf(cycle.id) === split).map((cycle) => cycle.id);
     if (!inSeason.length) return json({ error: "Unknown season." }, 404);
     const players = new Map();
-    for (const row of await interlinkBests(env, cycles, list, server)) {
+    for (const row of await interlinkBests(env, cycles, list, server, unlinked)) {
       const player = players.get(row.discordId) || { discordId: row.discordId, player: row.player || "Pathfinder",
         profileId: row.profileId || null, uid: row.uid || null, unclaimed: row.unclaimed, lookalike: row.lookalike || false,
         total: 0, stars: 0, weeks: new Set(), weekTotals: new Map(), bosses: 0, firstAt: row.firstAt, updatedAt: row.firstAt };
@@ -4294,11 +4348,11 @@ async function interlinkBoards(request, env) {
   }
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
-  const rows = await interlinkBests(env, [cycle.id], list, server);
+  const rows = await interlinkBests(env, [cycle.id], list, server, unlinked);
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
-    const { runId, hasProof } = row; delete row.runId; delete row.hasProof;
-    row.proofIds = hasProof ? Object.fromEntries(Object.entries(ROW_FIGURES)
-      .filter(([, figure]) => row[figure] != null).map(([metric]) => [metric, runId])) : {};
+    const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind;
+    row.proofIds = Object.fromEntries(Object.entries(ROW_FIGURES).filter(([, figure]) => row[figure] != null)
+      .map(([metric]) => [metric, figureRuns[metric] || (hasProof ? runId : null)]).filter(([, id]) => id));
     row.proofId = row.proofIds.score || null;
   }
   // each best's check badge, from the run behind it: { score: "verified", dps: "pending", ... }
@@ -4378,7 +4432,7 @@ async function leaderboardEntries(request, env) {
   if (params.get("mine") === "1" && account) {
     where.push("s.who = ?");
     binds.push(account.discordId);
-  } else where.push(NAMED_ON_BOARDS);   // your own list shows everything; the boards only players with a name
+  } else where.push(onBoards(params.get("unlinked") === "1"));   // your own list shows everything; the boards linked players
   const sortKey = Object.hasOwn(LEADERBOARD_SORTS, params.get("sort") || "")
     ? params.get("sort")
     : LEADERBOARD_DEFAULT_SORT[kind] || "score";
@@ -4483,7 +4537,8 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, proofParty, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+        ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
         ...(proofFull ? { hasFullScreens: Object.keys(proofFull) } : {}) }))(parseJsonColumn(row.extra_json) || {}),
@@ -4574,7 +4629,7 @@ async function moderateSubmission(request, env, submissionId) {
 function proofKeys(row) {
   const extra = parseJsonColumn(row?.extraJson) || {};
   const full = extra.proofFull || {};
-  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty].filter(Boolean);
+  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || [])].filter(Boolean);
 }
 
 async function deleteSubmission(request, env, submissionId) {
@@ -4598,12 +4653,21 @@ async function deleteSubmission(request, env, submissionId) {
 // name); a hidden entry's only its submitter and developers.
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status FROM leaderboard_submissions WHERE submission_id = ?",
+    `SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status,
+       buffs_json AS buffsJson, kind, cycle, boss_id AS bossId FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
-  const full = (parseJsonColumn(row?.extraJson) || {}).proofFull || {};
-  const key = shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
-    : shot === "party" ? (parseJsonColumn(row?.extraJson) || {}).proofParty : row?.evidenceKey;
+  const extra = parseJsonColumn(row?.extraJson) || {};
+  const full = extra.proofFull || {};
+  const gizmos = Array.isArray(extra.proofGizmos) ? extra.proofGizmos : [];
+  const gizmo = /^gizmo([1-9]\d?)$/u.exec(shot || "");
+  // ?shot=list: the run's pictures, in the order they were on screen (the viewer's tabs), with what each player went in
+  // with (the Party screen's lineup: lead, level, CP, team) and the run's buffs - public on the boards already
+  const shots = row ? [row.evidenceKey && "summary", row.battleKey && "battle", ...gizmos.map((_, i) => `gizmo${i + 1}`),
+    extra.proofParty && "party"].filter(Boolean) : [];
+  const key = shot === "list" ? (shots.length ? "list" : null)
+    : shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
+    : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1] : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
@@ -4612,6 +4676,26 @@ async function submissionEvidence(request, env, submissionId) {
     if (row.discordId !== account.discordId && !account.developerModeAvailable) {
       return json({ error: "This entry is hidden: its proof is visible to its submitter and developers only." }, 403);
     }
+  }
+  if (shot === "list") {
+    const lineup = publicLineup(extra.lineup);
+    const buffs = (parseJsonColumn(row.buffsJson) || []).slice(0, 12).filter((buff) => buff?.name)
+      .map((buff) => ({ name: String(buff.name).slice(0, 60), ...(Number.isInteger(buff.level) ? { level: buff.level } : {}),
+        ...(Number.isInteger(buff.floor) ? { floor: buff.floor } : {}) }));
+    // A best sent from the game's menu is proof of the score only: its picture is the menu, and the viewer shows it beside
+    // the pictures of the player's best run of that boss and week (the owner, 7 Nov: the menu proof is added, it doesn't
+    // replace the run's pictures).
+    const menu = row.kind === "interlink_best";
+    const run = menu ? await env.DB.prepare(
+      `SELECT r.submission_id AS id FROM leaderboard_submissions r
+       WHERE r.discord_id = ? AND r.kind = 'interlink_run' AND r.cycle IS ? AND r.boss_id IS ? AND r.status = 'visible'
+         AND COALESCE(r.outcome, '') <> 'invalid' AND r.evidence_key IS NOT NULL
+       ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.created_at ASC LIMIT 1`,
+    ).bind(row.discordId, row.cycle, row.bossId).first() : null;
+    const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
+      ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
+    listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
+    return listed;
   }
   const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
