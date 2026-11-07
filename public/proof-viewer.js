@@ -1,6 +1,8 @@
 // The run's proof viewer, shared by the leaderboards and My runs: every picture of a run in its own tab (the result
 // screen, Battle Data, Holo-Battle Sim's Gizmo screen, the Party screen), a menu best's picture beside its run's, and
-// what each player went in with. window.AniilogsProof: open(submissionId, check, menuId), button(...), checkBadge, partyPanel.
+// what each player went in with. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
+// partyPanel. options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
+// pictures (Battle Data shows the whole party: the note says whose row the trophy is).
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
   const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
@@ -94,23 +96,23 @@
     return "Summary";
   }
   const HOVER_OPEN_MS = 350;                           // a hover this long opens the viewer; passing over the icon doesn't
-  function proofButton(submissionId, check = null, menuId = null) {
+  function proofButton(submissionId, check = null, menuId = null, options = {}) {
     if (!submissionId) return null;
     const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots (they stay open until you click outside)",
-      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check, menuId); } });
+      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check, menuId, options); } });
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
     // hover (mouse or pen only: a tap goes straight to the click) opens the same viewer as a click
     button.addEventListener("pointerenter", (event) => {
       if (event.pointerType === "touch") return;
       clearTimeout(hoverTimer);
-      hoverTimer = setTimeout(() => openProof(submissionId, check, menuId), HOVER_OPEN_MS);
+      hoverTimer = setTimeout(() => openProof(submissionId, check, menuId, options), HOVER_OPEN_MS);
     });
     button.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
     return button;
   }
   let hoverTimer = null;
   let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
-  async function openProof(submissionId, check = null, menuId = null) {
+  async function openProof(submissionId, check = null, menuId = null, options = {}) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
     if (!dialog) {
       dialog = el("dialog", { class: "lb-proof-dialog" },
@@ -126,6 +128,8 @@
     proofOpenFor = submissionId;
     tabs.replaceChildren();
     dialog.querySelector(".lb-proof-party")?.remove();
+    dialog.querySelector(".lb-proof-note")?.remove();
+    if (options?.note) dialog.insertBefore(el("p", { class: "lb-proof-note", text: String(options.note) }), body);
     body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshots…" }));
     if (!dialog.open) dialog.showModal();             // it stays until a click outside it, × or Esc
     const details = await proofDetails(submissionId);
@@ -162,7 +166,9 @@
     // the run check's badge beside the tabs
     const badge = checkBadge(check);
     if (badge) tabs.append(badge);
-    await show(0);
+    // the picture asked for (a trophy read off Battle Data opens on it), else the first
+    const start = options?.shot ? pictures.findIndex((picture) => picture.id === submissionId && picture.shot === options.shot) : -1;
+    await show(Math.max(0, start));
   }
   window.AniilogsProof = Object.freeze({ open: openProof, button: proofButton, checkBadge, partyPanel });
 })();

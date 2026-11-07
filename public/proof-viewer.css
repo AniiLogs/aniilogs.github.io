@@ -35,6 +35,8 @@
 .lb-check.is-pending, .lb-check.is-invalid { box-shadow: inset 0 0 0 1.5px currentColor; }   /* a drawn circle round the i and the x */
 .lb-check.is-invalid { background: color-mix(in srgb, #ef5350 22%, transparent); color: color-mix(in srgb, #ef5350 80%, var(--text)); }
 .lb-check-legend .lb-check { margin: 0 2px 0 0; }
+/* a line over the pictures: whose row a trophy is on a whole-party screen */
+.lb-proof-note { margin: 0; padding: 0 52px 8px 12px; color: var(--ink-soft); font-size: 0.86rem; }
 .lb-proof-tabs .lb-check { align-self: center; margin-left: auto; font-size: 0.8rem; }
 .lb-proof-dialog .lb-empty { padding: 1.2rem; text-align: center; opacity: 0.7; }
 .lb-proof-party .lb-ai { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); font-size: 0.75em; font-weight: 700; opacity: 0.8; }

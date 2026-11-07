@@ -530,6 +530,70 @@ function renderEggHeist(boards) {
   else body.replaceChildren(standingList("Season standing", rows));
 }
 
+// The Trophies card: each personal best the boards rank (best score, fastest clear, best Avg DPS...), as a tile with its
+// figure, where it was set, its place on that ladder (linking to the board) and its proof. A figure read off Battle
+// Data opens the viewer on that screen, which shows the whole party: the note says whose row it is. Hidden with none.
+const TROPHY_MODES = [["interlink", "Holo-Battle Interlink"], ["sim", "Holo-Battle Sim"], ["eggheist", "Egg Heist"]];
+function trophyValue(trophy) {
+  if (trophy.unit === "time") return clockTime(trophy.value);
+  if (trophy.unit === "rank") return String(trophy.value || "Unranked");
+  return numberFormat.format(Number(trophy.value) || 0);
+}
+function trophyContext(trophy) {
+  const context = trophy.context || {};
+  const week = context.week?.start ? `Week of ${shortDate(context.week.start)}` : context.week?.cycle ? `Week ${context.week.cycle}` : "";
+  const season = context.season ? `Season ${context.season}` : "";
+  const points = trophy.points != null ? `${numberFormat.format(trophy.points)} rank points` : trophy.mode === "eggheist" && trophy.stars != null ? `${numberFormat.format(trophy.stars)} eggs` : "";
+  const played = trophy.playedAt && !week ? shortDate(trophy.playedAt) : "";
+  return [context.boss?.name, week, context.difficulty, season, points, played].filter(Boolean).join(" · ");
+}
+function trophyTile(trophy) {
+  const tile = element("li", `trophy-tile is-${trophy.mode}`);
+  const value = element("strong", "trophy-value", trophyValue(trophy));
+  if (trophy.unit === "rank") {
+    const icon = eggRankIcon(trophy.rank?.tier);
+    if (icon) value.prepend(icon);
+  }
+  tile.append(element("span", "trophy-title", trophy.label), value);
+  if (trophy.mode === "interlink" && trophy.stars != null) value.append(" ", interlinkStars(trophy.stars));
+  const context = trophyContext(trophy);
+  if (context) tile.append(element("small", "trophy-context", context));
+  const foot = element("span", "trophy-foot");
+  const place = trophy.placement;
+  if (place?.position) {
+    const link = element("a", "profile-position trophy-place", `#${place.position}`);
+    link.href = `/leaderboard/?${new URLSearchParams(trophy.board || {})}`;
+    link.title = `Position ${place.position} of ${place.players} players on this ladder · open the board`;
+    foot.append(link, element("small", "", `of ${numberFormat.format(place.players)}`));
+  }
+  const proof = trophy.proof;
+  if (proof?.id && window.AniilogsProof) {
+    const slice = proof.slice;
+    const note = slice ? `Battle Data shows the whole party: this trophy is ${slice.player ? `${slice.player}'s` : "this player's"} ${slice.figure}, ${trophyValue(trophy)}.` : "";
+    const button = window.AniilogsProof.button(proof.id, proof.check || null, proof.menuId || null, { shot: proof.shot, note });
+    button.classList.add("trophy-proof");
+    button.append(element("span", "", "Proof"));
+    foot.append(button);
+  }
+  tile.append(foot);
+  return tile;
+}
+function renderTrophies(trophies) {
+  const panel = profileOverview.querySelector('[data-overview-panel="trophies"]');
+  const body = overviewBody("trophies");
+  const list = Array.isArray(trophies) ? trophies : [];
+  panel.hidden = !list.length;
+  const nodes = [];
+  for (const [mode, label] of TROPHY_MODES) {
+    const own = list.filter((trophy) => trophy.mode === mode);
+    if (!own.length) continue;
+    const grid = element("ul", "trophy-grid");
+    grid.append(...own.map(trophyTile));
+    nodes.push(element("h4", "", label), grid);
+  }
+  body.replaceChildren(...nodes);
+}
+
 // Home page pictures from the reviewed content release (a missing one leaves its card's text).
 for (const picture of document.querySelectorAll("img[data-content-src]")) {
   const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
@@ -768,6 +832,8 @@ async function loadProfileOverview(publicId = "") {
       renderSim(overview.leaderboards);
       renderEggHeist(overview.leaderboards);
     }
+    // with the standing: the server sends none while that part is private or the boards are closed
+    renderTrophies(overview.leaderboards ? overview.trophies : null);
     renderGameStats(overview.gameStats);
     renderCollection(overview.collection, Boolean(publicId));
     // someone else's profile shows only its public parts (Custom); the server sends nothing for the others
