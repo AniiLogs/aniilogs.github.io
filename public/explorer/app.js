@@ -9608,8 +9608,11 @@ function renderHoloBattleGizmoProgression(gizmo) {
 
 function renderItemLogCatalogRecord(entry) {
   const record = document.createElement("article");
-  record.className = "catalog-record catalog-itemlog-record";
+  record.className = `catalog-record catalog-itemlog-record catalog-itemlog-record--tier-${catalogItemTier(entry.quality)}`;
 
+  // The hero card: icon, name, quality and the game's own description, then quick links to each section below.
+  const hero = document.createElement("div");
+  hero.className = "catalog-itemlog-hero";
   const identity = document.createElement("header");
   identity.className = "catalog-identity";
   identity.dataset.catalogEntryId = entry.id;
@@ -9632,8 +9635,13 @@ function renderItemLogCatalogRecord(entry) {
   if (availabilityBadge) name.append(" ", availabilityBadge);
   const subtitle = document.createElement("p");
   subtitle.className = "catalog-subtitle";
-  subtitle.textContent = entry.inventory || "";
-  copy.append(stickyIndicator, eyebrow, name, subtitle);
+  // Inventory often repeats the category ("Home materials" / "Home Materials"); show it only when it adds something.
+  const category = String(entry.catalog_category || entry.type || "");
+  if (entry.inventory && entry.inventory.toLowerCase() !== category.toLowerCase()) {
+    subtitle.textContent = `Inventory: ${entry.inventory}`;
+  }
+  copy.append(stickyIndicator, eyebrow, name);
+  if (subtitle.textContent) copy.append(subtitle);
   identity.append(icon, copy);
   const actions = document.createElement("div");
   actions.className = "catalog-identity-actions";
@@ -9652,13 +9660,14 @@ function renderItemLogCatalogRecord(entry) {
     actions.append(locate);
   }
   if (actions.childElementCount) identity.append(actions);
-  record.append(identity);
+  hero.append(identity);
+  record.append(hero);
 
   if (entry.description) {
     const description = document.createElement("p");
     description.className = "catalog-description";
     appendGameRichText(description, entry.description);
-    record.append(description);
+    hero.append(description);
   }
   // The game's "use" text, shown under the description (it carries the same rich-text tags).
   if (entry.use_text) {
@@ -9668,7 +9677,7 @@ function renderItemLogCatalogRecord(entry) {
     label.textContent = "Use: ";
     use.append(label);
     appendGameRichText(use, entry.use_text);
-    record.append(use);
+    hero.append(use);
   }
 
   const details = createCatalogSection("Item details");
@@ -9690,7 +9699,13 @@ function renderItemLogCatalogRecord(entry) {
     detailFacts.push({ label: "Item ID", value: entry.item_id });
     detailFacts.push({ label: "Same-name definitions", value: String(entry.duplicate_name_count) });
   }
-  detailFacts.forEach((fact) => appendCatalogFact(facts, fact?.label, fact?.value));
+  // Category and quality already sit in the hero card.
+  const heroValues = new Set([category, entry.inventory, entry.quality, entry.quality_display]
+    .filter(Boolean).map((value) => String(value).toLowerCase()));
+  detailFacts
+    .filter((fact) => !(["Category", "Inventory", "Quality"].includes(fact?.label)
+      && heroValues.has(String(fact?.value || "").toLowerCase())))
+    .forEach((fact) => appendCatalogFact(facts, fact?.label, fact?.value));
   if (facts.childElementCount) {
     details.append(facts);
     record.append(details);
@@ -9738,7 +9753,84 @@ function renderItemLogCatalogRecord(entry) {
   const runeDetails = renderRuneDetails(entry.rune_details, state.itemlogData?.rune_reference);
   if (runeDetails) record.append(runeDetails);
 
+  const jumpLinks = renderItemlogJumpLinks(record);
+  if (jumpLinks) hero.append(jumpLinks);
   return record;
+}
+
+// "Jump to" chips in the hero card, one per section, so a long record (gizmos, runes) is one click away.
+function renderItemlogJumpLinks(record) {
+  const targets = [...record.children]
+    .filter((node) => node.matches(".catalog-section"))
+    .map((section) => ({ section, heading: section.querySelector(":scope > h3, :scope > .catalog-section-heading h3") }))
+    .filter(({ heading }) => heading?.textContent?.trim());
+  if (targets.length < 2) return null;
+  const nav = document.createElement("nav");
+  nav.className = "catalog-itemlog-jump";
+  nav.setAttribute("aria-label", "Sections on this item");
+  const label = document.createElement("span");
+  label.textContent = "Jump to";
+  nav.append(label);
+  targets.forEach(({ section, heading }, index) => {
+    section.id = `itemlog-section-${index + 1}`;
+    const link = document.createElement("a");
+    link.href = `#${section.id}`;
+    link.textContent = heading.textContent.trim();
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    nav.append(link);
+  });
+  return nav;
+}
+
+// Quick category chips above the record; they set the same category as the sidebar's Category menu.
+function renderItemlogCategoryChips(allEntries) {
+  const strip = document.createElement("nav");
+  strip.className = "catalog-itemlog-chips";
+  strip.setAttribute("aria-label", "Item categories");
+  const active = state.catalogCategory.itemlog || "all";
+  const counted = catalogCategoriesForView("itemlog")
+    .filter((category) => category !== "all")
+    .map((category) => ({ id: category, label: category, count: Number(itemlogCategoryCount(category, allEntries)) || 0 }))
+    .filter((category) => category.count > 0)
+    .sort((left, right) => right.count - left.count);
+  const chips = [
+    { id: "all", label: "All", count: Number(countedEntries(allEntries)) || 0 },
+    ...ITEMLOG_CATEGORY_COLLECTIONS.map((collection) => ({
+      id: collection.id, label: collection.label, count: Number(itemlogCategoryCount(collection.id, allEntries)) || 0,
+    })).filter((collection) => collection.count > 0),
+    ...counted.slice(0, 8),
+  ];
+  // Keep the chosen category visible even when it isn't one of the biggest.
+  if (!chips.some((chip) => chip.id === active)) {
+    const chosen = counted.find((category) => category.id === active);
+    if (chosen) chips.push(chosen);
+  }
+  chips.forEach((chip) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "catalog-itemlog-chip";
+    button.setAttribute("aria-pressed", String(chip.id === active));
+    const label = document.createElement("span");
+    label.textContent = chip.label;
+    const count = document.createElement("small");
+    count.textContent = formatNumber(chip.count);
+    button.append(label, count);
+    button.addEventListener("click", () => {
+      state.catalogCategory.itemlog = chip.id;
+      normalizeItemlogFilterForEntries(itemlogEntriesForCategory(chip.id, allEntries));
+      state.catalogIndexScroll.itemlog = 0;
+      const visibleEntries = catalogEntriesForView("itemlog");
+      if (!visibleEntries.some((entry) => entry.id === state.catalogSelection.itemlog)) {
+        state.catalogSelection.itemlog = visibleEntries[0]?.id || "";
+      }
+      renderCatalogPreview();
+    });
+    strip.append(button);
+  });
+  return strip;
 }
 
 function getAniilogExpandedGroups() {
@@ -10040,7 +10132,8 @@ function renderCatalogPreview(options = {}) {
   } else if (view === "aniilog") {
     subtitle.textContent = "Current-build Aniimo records";
   } else if (view === "itemlog" && allEntries.length) {
-    subtitle.textContent = `${formatNumber(countedEntries(entries))} of ${formatNumber(countedEntries(allEntries))} packaged item definitions`;
+    subtitle.textContent = `Showing ${formatNumber(countedEntries(entries))} of ${formatNumber(countedEntries(allEntries))} items`;
+    headingCopy.append(renderItemlogCategoryChips(allEntries));
   }
   if (!entries.length) {
     const entryLabel = view === "aniilog" ? "Aniimo" : "Item";
@@ -10477,7 +10570,9 @@ function removeMobileCatalogStickyIdentity() {
 function syncMobileCatalogStickyIdentity() {
   const view = state.sidebarView;
   const recordSelector = view === "aniilog" ? ".catalog-aniilog-record" : ".catalog-itemlog-record";
-  const identity = els.catalogPanel.querySelector(`${recordSelector} > .catalog-identity`);
+  const identity = els.catalogPanel.querySelector(
+    `${recordSelector} > .catalog-identity, ${recordSelector} > .catalog-itemlog-hero > .catalog-identity`,
+  );
   const stickyEnabled = (view === "aniilog" || view === "itemlog")
     && !els.catalogPanel.hidden;
   if (!identity || !stickyEnabled) {
