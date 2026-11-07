@@ -610,20 +610,46 @@
     return box;
   }
 
+  // The attack tables sort by a column header (both directions' tables by the same one); until one is clicked the
+  // attacks stay in the game's order. Not saved.
+  let attackSort = { key: "", order: "asc" };
   function renderAttackTable(options, result, rerender) {
     const table = el("div", "duel-table");
     table.setAttribute("role", "table");
     const head = el("div", "duel-row is-head");
     head.setAttribute("role", "row");
-    ["", "Attack", "Hit", "Cooldown", "Damage", "With crit", "Average", "Hits to KO", "BREAK dmg", "Hits to BREAK*"].forEach((label) => {
-      const cell = el("span", "", label);
+    const hpShare = (value) => result.maxHp ? value / result.maxHp * 100 : NaN;
+    const toKo = (value) => value > 0 ? Math.ceil(result.startHp / value) : Infinity;
+    const finite = (value) => (Number.isFinite(value) ? value : null);
+    // each column's sort value and the order it starts in (names A–Z, damage highest first, hits and cooldowns fewest first)
+    const columns = [
+      { label: "" },
+      { label: "Attack", natural: "asc", value: (row) => row.attack.name },
+      { label: "Hit", natural: "desc", value: (row) => chosenRate(row.attack) },
+      { label: "Cooldown", natural: "asc", value: (row) => row.attack.cooldown || null },
+      { label: "Damage", natural: "desc", value: (row) => finite(row.normal) },
+      { label: "With crit", natural: "desc", value: (row) => finite(row.crit) },
+      { label: "Average", natural: "desc", value: (row) => finite(row.average) },
+      { label: "Hits to KO", natural: "asc", value: (row) => finite(toKo(row.average)) },
+      { label: "BREAK dmg", natural: "desc", value: (row) => finite(row.breakAverage) },
+      { label: "Hits to BREAK*", natural: "asc", value: (row) => finite(row.hitsToBreak) },
+    ];
+    const sorter = window.AniilogsTableSort;
+    columns.forEach((column) => {
+      const cell = el("span", "", column.value && sorter ? "" : column.label);
       cell.setAttribute("role", "columnheader");
+      if (column.value && sorter) {
+        sorter.fillHeader(cell, column.label, {
+          active: attackSort.key === column.label, order: attackSort.order, className: "duel-sort",
+          onSort: () => { attackSort = sorter.nextSort(attackSort, column.label, column.natural); rerender(); },
+        });
+      }
       head.append(cell);
     });
     table.append(head);
-    const hpShare = (value) => result.maxHp ? value / result.maxHp * 100 : NaN;
-    const toKo = (value) => value > 0 ? Math.ceil(result.startHp / value) : Infinity;
-    for (const row of result.rows) {
+    const sortedBy = columns.find((column) => column.value && column.label === attackSort.key);
+    const rows = sortedBy && sorter ? sorter.sortRows(result.rows, sortedBy.value, attackSort.order) : result.rows;
+    for (const row of rows) {
       // Which direction this table is, so opening an attack's working opens it on this side only.
       const stepKey = `${result.attacker.side === settings.you ? "you" : "foe"}:${row.attack.id}`;
       const line = el("div", `duel-row${row.enabled ? "" : " is-off"}`);

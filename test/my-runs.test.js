@@ -28,7 +28,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
 test("My runs: search, mode filter, 20/30/50 per page (remembered), numbered pages, proof column, on your profile", () => {
   assert.match(home, /data-history-search/u);
   assert.match(home, /<select data-history-page-size><option value="20">20<\/option><option value="30">30<\/option><option value="50">50<\/option><\/select>/u);
-  assert.match(home, /<th scope="col">Mode<\/th><th scope="col">Fight<\/th><th scope="col">Played<\/th><th scope="col">Result<\/th><th scope="col">Party<\/th><th scope="col">Proof<\/th>/u);
+  assert.match(home, /<th scope="col" data-myruns-sort="mode">Mode<\/th><th scope="col" data-myruns-sort="fight">Fight<\/th><th scope="col" data-myruns-sort="played" aria-sort="descending">Played<\/th><th scope="col" data-myruns-sort="result">Result<\/th><th scope="col" data-myruns-sort="party">Party<\/th><th scope="col">Proof<\/th>/u);
   assert.match(app, /const MY_RUNS_PAGE_SIZES = \[20, 30, 50\];/u);
   assert.match(app, /window\.localStorage\.setItem\(MY_RUNS_PAGE_SIZE_KEY/u);
   assert.match(app, /const MY_RUNS_SEARCH_WAIT_MS = 250;/u);

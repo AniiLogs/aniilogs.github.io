@@ -621,6 +621,10 @@ body.profile-history-view .profile-arrange-bar, body.profile-history-view [data-
 .myruns-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
 .myruns-table th { position: sticky; top: 0; padding: 0.5rem 0.7rem; background: rgb(var(--panel-rgb)); color: var(--teal); font-size: 0.68rem;
   font-weight: 900; letter-spacing: 0.08em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+/* a sortable column's header (/table-sort.js): click to sort, again to flip */
+.table-sort { border: 0; background: none; color: inherit; cursor: pointer; font: inherit; letter-spacing: inherit; padding: 0; text-transform: inherit; }
+.table-sort:hover, .table-sort:focus-visible { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.table-sort.is-active { color: var(--ink); }
 .myruns-table td { padding: 0.55rem 0.7rem; border-top: 1px solid var(--line); color: var(--ink); vertical-align: top; }
 .myruns-table tbody tr:hover { background: color-mix(in srgb, var(--teal) 5%, transparent); }
 .myruns-table tr:target { background: color-mix(in srgb, var(--teal) 12%, transparent); }
