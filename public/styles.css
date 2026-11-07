@@ -372,6 +372,9 @@ footer a { font-weight: 800; text-decoration: none; }
 .profile-exp { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.45rem; vertical-align: middle; white-space: nowrap; font-size: 0.74rem; }
 .profile-exp-bar { position: relative; display: inline-block; width: 5.5rem; height: 0.35rem; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--teal) 16%, transparent); }
 .profile-exp-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--teal); }
+.profile-preview-bar { margin: 0 0 0.8rem; padding: 0.55rem 0.9rem; border: 1px dashed color-mix(in srgb, var(--teal) 55%, transparent); border-radius: 14px; color: var(--ink); font-size: 0.88rem; }
+.profile-preview-bar a { margin-left: 0.4rem; color: var(--teal); font-weight: 800; }
+a.profile-tool-button { text-decoration: none; }
 .profile-overview-status { min-height: 1.2em; margin: 0 0 0.8rem; color: var(--ink-soft); font-size: 0.82rem; }
 .profile-overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; container-type: inline-size; }
 /* the owner's sizes (Arrange cards): a wide card takes 2 or 3 columns where the page has them (300px columns, 1rem gaps) */

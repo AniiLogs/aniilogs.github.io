@@ -31,6 +31,9 @@ const PUBLIC_PROFILE_ID = /^(?:[A-Za-z0-9]{8,24}|\d{1,24})$/u.test(new URLSearch
   : "";
 // true once the server says the profile at ?profile=<id> is the viewer's own
 let ownAtLink = false;
+// ?profile=<id>&as=visitor: the owner's "View public profile": the page asks for it signed out, so it's exactly what
+// anyone else sees (the account stays signed in for everything else)
+const VISITOR_PREVIEW = Boolean(PUBLIC_PROFILE_ID) && new URLSearchParams(window.location.search).get("as") === "visitor";
 const siteConfig = window.ANIILOGS_CONFIG || {};
 const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
 const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
@@ -55,7 +58,8 @@ async function apiFetch(path, options = {}) {
   if (!API_URL) throw new Error("AniiLogs account API is not configured.");
   const headers = new Headers(options.headers || {});
   const token = authSessionToken();
-  if (token) headers.set("authorization", `Bearer ${token}`);
+  const asVisitor = VISITOR_PREVIEW && path.startsWith("/profiles/");
+  if (token && !asVisitor) headers.set("authorization", `Bearer ${token}`);
   return fetch(`${API_URL}${path}`, { ...options, credentials: "omit", headers });
 }
 
@@ -971,7 +975,7 @@ if (authResult) {
 // Only the profile shows (no home page above it), with a player search at the top: names or UIDs of public profiles.
 function profileHref(params) {
   const next = new URLSearchParams(window.location.search);    // keeps ?embed=app, theme and uid in the app
-  for (const key of ["profile", "view", "auth", "history"]) next.delete(key);
+  for (const key of ["profile", "view", "auth", "history", "as"]) next.delete(key);
   for (const [key, value] of Object.entries(params)) next.set(key, value);
   return `/?${next}`;
 }
@@ -1047,6 +1051,13 @@ function showProfileLink(publicId, profile) {
   const note = share.querySelector("[data-profile-share-note]");
   share.hidden = !PROFILE_VIEW;
   share.querySelector("[data-profile-copy]").hidden = !id;
+  // your own public profile: open it as a visitor sees it
+  const preview = share.querySelector("[data-profile-preview-link]");
+  preview.hidden = !id || Boolean(publicId);
+  if (id) preview.href = `${profileHref({ profile: id })}&as=visitor`;
+  const bar = profileOverview.querySelector("[data-profile-preview-bar]");
+  bar.hidden = !VISITOR_PREVIEW;
+  if (VISITOR_PREVIEW) bar.querySelector("a").href = profileHref({ profile: publicId });
   note.textContent = "";
   url.textContent = id ? `${window.location.origin}/?profile=${id}` : "Your profile is private, so it has no link yet. Make it public under Edit profile to get one.";
   url.classList.toggle("is-note", !id);
