@@ -106,6 +106,8 @@ test("Team Builder has a 1v1 tab that hands off to duel.js", () => {
 });
 
 const guidePage = await readFile(new URL("../public/explorer/guide-page.js", import.meta.url), "utf8");
+const guidesHtml = await readFile(new URL("../public/guides/index.html", import.meta.url), "utf8");
+const guidesJs = await readFile(new URL("../public/guides/guides.js", import.meta.url), "utf8");
 
 test("the 1v1 uses the damage model, the team's buffs and debuffs, and shows how a hit was worked out", () => {
   assert.match(source, /model\.hit\(side\(attacker, attackerMods\), side\(defender, scenario\.defenderMods \|\| \{\}\)/u);
@@ -119,11 +121,15 @@ test("the 1v1 uses the damage model, the team's buffs and debuffs, and shows how
   assert.match(source, /function renderSteps\(row, result\)/u);
 });
 
-test("the Try-Hard Guide has contents, a link per section and Back to contents", () => {
+test("the guides have their own page, with contents, a link per section and Back to contents", () => {
   assert.match(guidePage, /link\.href = `#\$\{SECTION_PREFIX\}\$\{section\.id\}`/u);
   assert.match(guidePage, /"Back to contents"/u);
   assert.match(guidePage, /const SECTION_PREFIX = "guide-";/u);
-  assert.match(teamBuilder, /\["guide", window\.AniilogsGuide\?\.title \|\| "Guide"\]/u);
-  assert.match(teamBuilder, /page: \/\^#guide-\/u\.test\(window\.location\.hash\) \? "guide"/u);
-  assert.match(explorerHtml, /<script defer src="\.\/guide-page\.js\?v=[^"]+"><\/script>/u);
+  // /guides/ lists the guides and shows one; Team Builder's old guide links (?tab=guide, #guide-…) go there.
+  assert.match(guidesHtml, /<script src="\/explorer\/guide-page\.js\?v=[^"]+" defer><\/script>/u);
+  assert.match(guidesHtml, /<a href="\/guides\/" data-chrome-link="guides" aria-current="page">Guides<\/a>/u);
+  assert.match(guidesJs, /window\.AniilogsGuidePage\.render\(\{ guide, aniilog \}\)/u);
+  assert.match(teamBuilder, /return `\/guides\/\?guide=damage\$\{window\.location\.hash \|\| ""\}`;/u);
+  assert.match(teamBuilder, /if \(guideAddress\(\)\) window\.location\.replace\(guideAddress\(\)\);/u);
+  assert.match(explorerHtml, /<a id="topNavGuides" href="\/guides\/">Guides<\/a>/u);
 });

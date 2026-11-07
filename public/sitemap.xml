@@ -2,6 +2,9 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://aniilogs.github.io/leaderboard/</loc></url>
   <url><loc>https://aniilogs.github.io/companion/</loc></url>
+  <url><loc>https://aniilogs.github.io/guides/</loc></url>
+  <url><loc>https://aniilogs.github.io/guides/?guide=damage</loc></url>
+  <url><loc>https://aniilogs.github.io/guides/?guide=interlink</loc></url>
   <url><loc>https://aniilogs.github.io/explorer/?view=aniilog</loc></url>
   <url><loc>https://aniilogs.github.io/</loc></url>
   <url><loc>https://aniilogs.github.io/explorer/</loc></url>

@@ -7,6 +7,7 @@ const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const linkSource = await read("../public/aniimo-link.js");
 const app = await read("../public/explorer/app.js");
 const teamBuilder = await read("../public/explorer/team-builder.js");
+const guidesJs = await readFile(new URL("../public/guides/guides.js", import.meta.url), "utf8");
 const duel = await read("../public/explorer/duel.js");
 const guidePage = await read("../public/explorer/guide-page.js");
 const picker = await read("../public/explorer/aniimo-picker.js");
@@ -127,7 +128,7 @@ test("the explorer reads the address on load, keeps it in step and answers Back/
 });
 
 test("the Team Builder tab lives in the address and Back returns to it", () => {
-  assert.match(teamBuilder, /pageFromAddress\(\) \|\| \(\["types", "duel", "guide"\]\.includes\(saved\?\.page\)/u);
+  assert.match(teamBuilder, /pageFromAddress\(\) \|\| \(\["types", "duel"\]\.includes\(saved\?\.page\)/u);
   assert.match(teamBuilder, /url\.searchParams\.set\("tab", page\);[\s\S]*?host\.pushAddress\(url/u);
   assert.match(teamBuilder, /function goToPage\(page\) \{\s*if \(viewState\.page !== page\) writePageAddress\(true, page\);/u);
   assert.match(teamBuilder, /const control = button\(label, "team-mode-button", \(\) => goToPage\(id\)\);/u);
@@ -152,7 +153,7 @@ test("the take-me-there icon is next to every Aniimo the site names", () => {
   assert.match(teamBuilder, /if \(!extra\) withLink\(name, aniimoLink\(partner\.formId, entry, form\)\);/u);
   assert.match(teamBuilder, /AniilogsAniimoLink\?\.inline\(pick, member\.formId/u);
   assert.match(teamBuilder, /withLink\(el\("strong", "", entry\?\.name \|\| form\.name\), aniimoLink\(formId, entry, form\)\)/u);
-  assert.match(teamBuilder, /AniilogsGuidePage\.render\(\{ aniilog \}\)/u);
+  assert.match(guidesJs, /AniilogsGuidePage\.render\(\{ guide, aniilog \}\)/u);
   // The picker shows an option's link without picking it.
   assert.match(picker, /entry\.option\.dataset\.aniimoLink && window\.AniilogsAniimoLink\?\.create\(entry\.option\.dataset\.aniimoLink/u);
   // 1v1: both sides' picks, their options, and the buff sources.

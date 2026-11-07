@@ -516,6 +516,22 @@ button[aria-pressed="true"] {
   font-weight: 800;
 }
 
+/* The Guides link in Team Builder's tab row looks like the tabs beside it. */
+a.team-mode-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0 12px;
+  text-decoration: none;
+}
+
+a.team-mode-button:hover,
+a.team-mode-button:focus-visible {
+  color: var(--text);
+}
+
 .team-mode-button[aria-selected="true"] {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.18);

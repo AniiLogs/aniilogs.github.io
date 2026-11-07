@@ -73,6 +73,16 @@
   let status = "";
   let store = loadStore();
   let model = activeLoadout().model;
+  // The Try-Hard Guide moved to its own page (/guides/): an old Team Builder guide link (?tab=guide or #guide-…)
+  // goes there, to the same section.
+  function guideAddress() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("view") !== "team") return "";
+    if (params.get("tab") !== "guide" && !/^#guide-/u.test(window.location.hash)) return "";
+    return `/guides/?guide=damage${window.location.hash || ""}`;
+  }
+  if (guideAddress()) window.location.replace(guideAddress());
+
   // Which Team Builder page is open and the elements picked in Type matchups (per viewer).
   let viewState = loadViewState();
 
@@ -80,8 +90,7 @@
     try {
       const saved = JSON.parse(window.localStorage.getItem(VIEW_STORAGE_KEY) || "null");
       return {
-        // A shared link to a Guide section (#guide-…) opens the Guide.
-        page: /^#guide-/u.test(window.location.hash) ? "guide" : pageFromAddress() || (["types", "duel", "guide"].includes(saved?.page) ? saved.page : "team"),
+        page: pageFromAddress() || (["types", "duel"].includes(saved?.page) ? saved.page : "team"),
         types: Array.isArray(saved?.types) ? saved.types.slice(0, MAX_TYPE_SELECTION).map(String) : [],
         memberTab: String(saved?.memberTab || "build"),
         lastPve: String(saved?.lastPve || ""),
@@ -105,7 +114,7 @@
   // (Called while viewState is first read, so the tab list is a literal here rather than a later constant.)
   function pageFromAddress() {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    return ["team", "types", "duel", "guide"].includes(tab) ? tab : "";
+    return ["team", "types", "duel"].includes(tab) ? tab : "";
   }
 
   // push: a new history entry, written before the render so the entry being left keeps its own scroll position.
@@ -2409,14 +2418,17 @@
   function renderPageSwitch() {
     const group = el("div", "team-mode-switch");
     group.setAttribute("role", "tablist");
-    [["team", "Team Builder"], ["types", "Type matchups"], ["guide", window.AniilogsGuide?.title || "Guide"]].forEach(([id, label]) => {
-      if (id === "guide" && !window.AniilogsGuidePage) return;
+    [["team", "Team Builder"], ["types", "Type matchups"]].forEach(([id, label]) => {
       const control = button(label, "team-mode-button", () => goToPage(id));
       control.setAttribute("role", "tab");
       // 1v1 is under Team Builder (PvP).
       control.setAttribute("aria-selected", String(viewState.page === id || (id === "team" && viewState.page === DUEL_TAB[0] && Boolean(window.AniilogsDuel))));
       group.append(control);
     });
+    // The guides moved to their own page; this keeps them a tap away on phones, whose bottom tabs don't list it.
+    const guides = el("a", "team-mode-button", "Guides");
+    guides.href = "/guides/";
+    group.append(guides);
     return group;
   }
 
@@ -2428,24 +2440,18 @@
     const typesPage = viewState.page === "types";
     // 1v1 lives in duel.js; without it the tab falls back to the team page.
     const duelPage = viewState.page === "duel" && Boolean(window.AniilogsDuel);
-    // The Try-Hard Guide lives in guide-page.js (text from damage-guide.js).
-    const guidePage = viewState.page === "guide" && Boolean(window.AniilogsGuidePage);
-    const guideTitle = window.AniilogsGuide?.title || "Guide";
-    copy.append(el("h1", "", typesPage ? "Type matchups" : duelPage ? "1v1" : guidePage ? guideTitle : "Team Builder"), el("p", "", typesPage
+    copy.append(el("h1", "", typesPage ? "Type matchups" : duelPage ? "1v1" : "Team Builder"), el("p", "", typesPage
       ? "See what an element or pair of elements is weak to and strong against, and which Aniimo have that typing."
       : duelPage
         ? "How much one Aniimo’s attacks take off another, and how fast each side gets the KO."
-        : guidePage
-          ? "How to get more damage out of your team, and why."
-          : MODE_NOTES[model.mode]));
+        : MODE_NOTES[model.mode]));
     const controls = el("div", "team-header-controls");
     controls.append(renderPageSwitch());
-    if (!typesPage && !guidePage) controls.append(renderGroupSwitch(), renderModeSwitch());
+    if (!typesPage) controls.append(renderGroupSwitch(), renderModeSwitch());
     header.append(copy, controls);
     panel.append(header);
     if (typesPage) panel.append(renderTypesPage());
     else if (duelPage) panel.append(renderDuelPage());
-    else if (guidePage) panel.append(window.AniilogsGuidePage.render({ aniilog }));
     else panel.append(renderOverview(), renderTeamPage());
   }
 
@@ -2502,17 +2508,9 @@
     requestDeveloperOverlay();
   }
 
-  // A #guide-… link followed on an open page also opens the Guide on that section.
+  // A #guide-… link followed on an open Team Builder goes to the Guides page too.
   window.addEventListener("hashchange", () => {
-    if (!/^#guide-/u.test(window.location.hash) || !host) return;
-    if (viewState.page !== "guide") {
-      viewState.page = "guide";
-      saveViewState();
-      writePageAddress(false);
-      render();
-      return;
-    }
-    document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (guideAddress()) window.location.assign(guideAddress());
   });
 
   window.AniilogsTeamBuilder = Object.freeze({ show, applyAddress, quickActions });

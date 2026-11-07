@@ -2,15 +2,17 @@
 (() => {
   "use strict";
 
-  // The Try-Hard Guide page (a Team Builder tab): the text from damage-guide.js (window.AniilogsGuide) laid out with
-  // a table of contents, a link for every section (#guide-<id>, also usable in a shared link), "Back to contents"
-  // after each section and, on desktop, contents that stay beside the text and mark the section being read.
-  // Team Builder mounts it with render({ aniilog }).
+  // One guide from the Guides page (/guides/, guides.js): a guide registered in window.AniilogsGuides (damage-guide.js,
+  // interlink-guide.js) laid out with a table of contents, a link for every section (#guide-<id>, also usable in a
+  // shared link), "Back to contents" after each section and, on desktop, contents that stay beside the text and mark
+  // the section being read. guides.js mounts it with render({ guide, aniilog }).
   const BASIS_LABELS = Object.freeze({
     exact: ["From the game files", "Read straight from the game's scripts or tables."],
     "by-name": ["Not verified: matched by name", "The formula input is matched to a game stat by its name; the code that passes it in runs on the game's server. Not yet checked in the game."],
     inferred: ["Not verified: inferred", "A reasoned reading of the game data, not something the files state outright. Not yet checked in the game."],
     text: ["From the game text", "Taken from the game's own skill text rather than its effect data."],
+    server: ["Worked out on the server", "The game's server computes this and only sends the result, so the formula isn't in the game files."],
+    measured: ["Measured from real results", "Read from real results by the aLogs meter, not from the game files."],
   });
   const SECTION_PREFIX = "guide-";
   // Aniimo named in the text, as { pattern, ids }: each name gets the "take me there" link (/aniimo-link.js) after it.
@@ -180,16 +182,15 @@
     root.querySelectorAll(".guide-section").forEach((section) => observer.observe(section));
   }
 
-  // render({ aniilog }): the Aniilog data, when given, links every Aniimo the guide names to its page.
-  function render({ aniilog = null } = {}) {
+  // render({ guide, aniilog }): the Aniilog data, when given, links every Aniimo the guide names to its page.
+  function render({ guide = null, aniilog = null } = {}) {
     aniimoNames = readAniimoNames(aniilog);
-    const guide = window.AniilogsGuide;
     const root = el("div", "guide-page");
     if (!guide?.sections?.length) {
       root.append(el("p", "duel-note", "The guide isn't available right now."));
       return root;
     }
-    const intro = el("p", "guide-intro", "How damage works in Aniimo, in plain words: what each kind of boost does, what stacks with what, and where your next point of ATK or potential does the most. Each section says how sure it is.");
+    const intro = el("p", "guide-intro", guide.intro || "");
     const layout = el("div", "guide-layout");
     const contents = renderContents(guide.sections, false);
     const article = el("article", "guide-article");
