@@ -25,7 +25,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   assert.match(leaderboard, /const proofViewer = window\.AniilogsProof;/u);
 });
 
-test("My runs: search, mode filter, 20/30/50 per page (remembered), numbered pages, proof column, on your own profile only", () => {
+test("My runs: search, mode filter, 20/30/50 per page (remembered), numbered pages, proof column, on your profile", () => {
   assert.match(home, /data-history-search/u);
   assert.match(home, /<select data-history-page-size><option value="20">20<\/option><option value="30">30<\/option><option value="50">50<\/option><\/select>/u);
   assert.match(home, /<th scope="col">Mode<\/th><th scope="col">Fight<\/th><th scope="col">Played<\/th><th scope="col">Result<\/th><th scope="col">Party<\/th><th scope="col">Proof<\/th>/u);
@@ -33,12 +33,30 @@ test("My runs: search, mode filter, 20/30/50 per page (remembered), numbered pag
   assert.match(app, /window\.localStorage\.setItem\(MY_RUNS_PAGE_SIZE_KEY/u);
   assert.match(app, /const MY_RUNS_SEARCH_WAIT_MS = 250;/u);
   assert.match(app, /new URLSearchParams\(\{ page: String\(myRuns\.page\), limit: String\(myRuns\.pageSize\)/u);
-  // a public profile keeps its own view; only your own profile gets My runs
-  assert.match(app, /if \(publicId\) void loadHistoryPage\(true\); else startMyRuns\(\);/u);
+  // your own profile, or a visitor on a profile whose runs are public (the server decides; the same list)
   assert.match(app, /historyPath = publicId \? `\/profiles\/\$\{encodeURIComponent\(publicId\)\}\/history` : "\/profile\/history";/u);
   // each teammate's Battle Data figures, and the proof viewer's button with the menu picture
   assert.match(app, /\["DPS", player\.avgDps\], \["BREAK", player\.breakValue\], \["Taken", player\.damageTaken\], \["Heal", player\.heal\]/u);
   assert.match(app, /window\.AniilogsProof\.button\(run\.submissionId, run\.check, run\.menuProofId \|\| null\)/u);
   // a stale answer never replaces a newer search's
   assert.match(app, /if \(request !== myRuns\.request\) return;/u);
+});
+
+test("My runs' switch: in Edit profile, private by default, off the Custom list, sent as runsPublic", () => {
+  assert.match(home, /<select name="runsPublic" data-profile-runs-public>\s*<option value="private">Private: only me<\/option>\s*<option value="public">Public: on my public profile<\/option>/u);
+  assert.doesNotMatch(home, /<input type="checkbox" value="history">/u);
+  assert.match(app, /runsPublic: profileRunsPublic\.value === "public",/u);
+  assert.match(app, /profileRunsPublic\.disabled = !shown;/u);
+  // visitors get the same list (when the profile shows it), a season part's best runs from the Interlink card
+  assert.match(app, /startMyRuns\(publicId\);/u);
+  assert.match(app, /params\.set\("split", myRuns\.scope\.split\);/u);
+});
+
+test("the Interlink card: the current season part, its weeks as a tree (week > boss > runs), earlier parts linking to their best runs", () => {
+  assert.match(app, /function renderInterlink\(boards, \{ publicId = null, runsOpen = false \} = \{\}\)/u);
+  assert.match(app, /const parts = boards\.interlinkParts;/u);
+  assert.match(app, /next\.set\("best", "1"\);/u);
+  // a visitor's boss lines open to runs only when the profile shows its runs
+  assert.match(app, /runsOpen: !publicId \|\| \(Array\.isArray\(overview\.parts\) && overview\.parts\.includes\("history"\)\)/u);
+  assert.match(app, /new URLSearchParams\(\{ page: "1", limit: "50", mode: "interlink", boss: boss\.id, cycle: week\.cycle \}\)/u);
 });

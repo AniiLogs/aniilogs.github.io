@@ -151,10 +151,13 @@ function showSignedIn(account) {
 
 // Who can see the profile: Public (everything), Custom (the parts ticked) or Private (only its owner)
 const profileParts = document.querySelector("[data-profile-parts]");
+// My runs has its own switch, private by default; it only reaches anyone while the profile itself is public
+const profileRunsPublic = document.querySelector("[data-profile-runs-public]");
 function syncVisibilityControls() {
   const shown = profilePublic.value !== "private";
   profileFindable.disabled = !shown;
   profileListedInSearch.disabled = !shown;
+  profileRunsPublic.disabled = !shown;
   profileParts.hidden = profilePublic.value !== "custom";
 }
 profilePublic.addEventListener("change", syncVisibilityControls);
@@ -162,6 +165,7 @@ profilePublic.addEventListener("change", syncVisibilityControls);
 function showVisibility(profile) {
   profilePublic.value = profile.visibility || (profile.isPublic ? "public" : "private");
   for (const box of profileParts.querySelectorAll("input[type=checkbox]")) box.checked = (profile.publicParts || []).includes(box.value);
+  profileRunsPublic.value = profile.runsPublic ? "public" : "private";
   syncVisibilityControls();
   profileFindable.checked = Boolean(profile.findableByName);
   profileListedInSearch.checked = profile.listedInSearch !== false;
@@ -263,51 +267,164 @@ function starIcon() {
   return svg;
 }
 
-function renderInterlink(boards) {
-  const body = overviewBody("interlink");
-  const bosses = new Map();
-  // Result-screen runs and battle-prep bests describe the same boss; show the higher of the two.
-  for (const kind of ["interlink_best", "interlink_run"]) {
-    for (const entry of boards[kind] || []) {
-      const key = entry.boss?.id || entry.boss?.name;
-      const prior = bosses.get(key);
-      if (!prior || (entry.score || 0) > (prior.entry.score || 0)) bosses.set(key, { entry, kind });
+// The Holo-Battle Interlink card: the current season part on top (Season 1.1: only its own weeks count, the owner,
+// 7 Nov), then its weeks as a tree, newest first - a week opens to its bosses (this player's best of each, as the
+// boards count it), a boss to every run of it that week (when the runs can be seen: always for the owner, for a visitor
+// when My runs is public) - and at the bottom the earlier parts' totals, each linking to their best runs in My runs.
+function interlinkRunsHref(split, label, publicId) {
+  const next = new URLSearchParams(window.location.search);
+  for (const key of ["history", "split", "best", "label"]) next.delete(key);
+  if (!publicId) next.set("view", "profile");
+  next.set("history", "1");
+  next.set("split", String(split));
+  next.set("best", "1");
+  next.set("label", label);
+  return `/?${next}`;
+}
+function interlinkStars(value) {
+  const stars = element("span", "profile-stars");
+  stars.append(starIcon(), element("span", "", numberFormat.format(value || 0)));
+  return stars;
+}
+// "Boss Killed 1:40", "Early Exit 2:31", "Timed Out" (as the boards say it)
+function interlinkEnding(boss) {
+  const time = boss.runTimeS ?? boss.clearTimeS;
+  if (boss.outcome === "unconfirmed") return time != null ? clockTime(time) : "";
+  const ending = boss.outcome === "ended-early" ? "Early Exit" : boss.outcome === "cleared" ? "Boss Killed"
+    : boss.outcome === "time-up" ? "Timed Out" : boss.clearTimeS != null ? "Boss Killed" : time != null ? "Timed Out" : "Menu best";
+  return time != null && ending !== "Timed Out" && ending !== "Menu best" ? `${ending} ${clockTime(time)}` : ending;
+}
+function interlinkPartLine(part, { current = false, publicId = null, runsOpen = false } = {}) {
+  const line = element(current ? "div" : "li", current ? "interlink-part is-current" : "interlink-part");
+  const name = element(current ? "strong" : "span", "interlink-part-name", part.label);
+  const figures = element("span", "interlink-part-figures");
+  figures.append(element("strong", "", `${numberFormat.format(part.total)} pts`), " ", interlinkStars(part.stars),
+    element("small", "", ` · ${part.weeksPlayed} week${part.weeksPlayed === 1 ? "" : "s"}`));
+  line.append(name, figures);
+  if (part.rank) {
+    const rank = element("a", "profile-position", `#${part.rank}`);
+    rank.href = `/leaderboard/?mode=interlink&kind=interlink_ladder&season=${part.season}&split=${part.split}`;
+    rank.title = `Position ${part.rank} of ${part.players} players in ${part.label} · open its ladder`;
+    const where = element("span", "interlink-part-rank");
+    where.append(rank, element("small", "", ` of ${numberFormat.format(part.players)}`));
+    line.append(where);
+  }
+  if (!current && runsOpen) {
+    const link = element("a", "interlink-part-runs", "Best runs");
+    link.href = interlinkRunsHref(part.split, part.label, publicId);
+    link.title = `${publicId ? "This player's" : "Your"} best run of each boss and week in ${part.label}`;
+    line.append(link);
+  }
+  return line;
+}
+// a boss's runs that week, fetched when its line is opened
+async function fillInterlinkBossRuns(holder, week, boss, publicId) {
+  holder.replaceChildren(element("p", "history-empty", "Loading…"));
+  try {
+    const path = publicId ? `/profiles/${encodeURIComponent(publicId)}/history` : "/profile/history";
+    const params = new URLSearchParams({ page: "1", limit: "50", mode: "interlink", boss: boss.id, cycle: week.cycle });
+    const response = await apiFetch(`${path}?${params}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { runs = [], total = runs.length } = await response.json();
+    if (!runs.length) { holder.replaceChildren(element("p", "history-empty", "No runs of this boss kept for this week.")); return; }
+    const list = element("ul", "interlink-runs");
+    for (const run of runs) {
+      const item = element("li", run.submissionId === boss.runId ? "is-best" : "");
+      const when = run.playedAt ? new Date(run.playedAt * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+      const text = element("span", "interlink-run-text");
+      text.append(element("small", "", when), element("span", "", runResult(run)));
+      const chips = element("span", "history-chips");
+      chips.append(...historyChips(run));
+      if (run.submissionId === boss.runId) chips.prepend(element("span", "history-chip is-best", "Counts"));
+      const proof = runProofCell(run);
+      if (proof.textContent === "None") proof.textContent = "No pictures";      // no column heading here to say what
+      item.append(text, chips, proof);
+      list.append(item);
     }
+    holder.replaceChildren(list);
+    if (total > runs.length) {
+      const more = element("a", "history-see-all", `All ${numberFormat.format(total)} runs`);
+      const next = new URLSearchParams(window.location.search);
+      if (!publicId) next.set("view", "profile");
+      next.set("history", "1");
+      more.href = `/?${next}`;
+      holder.append(more);
+    }
+  } catch {
+    holder.replaceChildren(element("p", "history-empty", "These runs couldn't be loaded right now."));
   }
-  const bossRows = [...bosses.values()].map(({ entry, kind }) => standingRow(
-    entry.boss?.level ? `${entry.boss.name || entry.boss.id} · Lv ${entry.boss.level}` : (entry.boss?.name || "Boss"),
-    entry,
-    kind,
-    [`${numberFormat.format(entry.score || 0)} pts`],
-    true,
-  ));
-  const weekRows = (boards.interlink_week || []).map((entry) => standingRow(
-    entry.cycle ? `Week ${entry.cycle}` : "Weekly total",
-    entry,
-    "interlink_week",
-    [`${numberFormat.format(entry.score || 0)} pts`],
-  ));
-  const season = boards.interlinkSeason;
-  const seasonRows = [];
-  if (season && season.total) {
-    // Season standing: every week's best scores added up, with the challenge-rating stars earned
-    const row = element("li");
-    const link = element("a", "profile-position", `#${season.rank}`);
-    link.href = `/leaderboard/?mode=interlink&kind=interlink_season_view&season=${season.season}`;
-    link.title = `Position ${season.rank} of ${season.players} players this season · open the season board`;
-    const stars = element("span", "profile-stars");
-    stars.append(starIcon(), element("span", "", numberFormat.format(season.stars)));
-    row.append(element("span", "", `Season ${season.season}`), link);
-    const detail = element("small", "", `of ${numberFormat.format(season.players)} · ${numberFormat.format(season.total)} pts · `);
-    detail.append(stars, ` · ${season.weeks} week${season.weeks === 1 ? "" : "s"}`);
-    row.append(detail);
-    seasonRows.push(row);
+}
+function interlinkWeek(week, { publicId, runsOpen }) {
+  const item = element("li", "interlink-week");
+  const details = element("details");
+  details.open = week.current;
+  const summary = element("summary");
+  const label = week.start ? `Week of ${shortDate(week.start)}${week.end ? ` – ${shortDate(week.end)}` : ""}` : `Week ${week.cycle}`;
+  const title = element("span", "interlink-week-name", label);
+  if (week.current) title.append(element("span", "history-chip is-current", "This week"));
+  const figures = element("span", "interlink-week-figures");
+  figures.append(element("strong", "", `${numberFormat.format(week.total)} pts`), " ", interlinkStars(week.stars));
+  summary.append(title, figures);
+  details.append(summary);
+  const bosses = element("ul", "interlink-bosses");
+  for (const boss of week.bosses) {
+    const row = element("li", "interlink-boss");
+    const line = element("span", "interlink-boss-line");
+    const name = element("span", "interlink-boss-name");
+    name.append(element("strong", "", boss.name || "Boss"), element("small", "", interlinkEnding(boss)));
+    const score = element("span", "interlink-boss-figures");
+    score.append(element("strong", "", `${numberFormat.format(boss.score || 0)} pts`), " ", interlinkStars(boss.stars));
+    line.append(name, score);
+    const proof = boss.proofId && window.AniilogsProof ? window.AniilogsProof.button(boss.proofId, null, boss.menuProofId || null) : null;
+    if (runsOpen) {
+      // the boss opens to its runs that week
+      const inner = element("details");
+      const head = element("summary");
+      head.append(line);
+      if (proof) { proof.addEventListener("click", (event) => event.preventDefault()); head.append(proof); }
+      const holder = element("div", "interlink-boss-runs");
+      inner.append(head, holder);
+      inner.addEventListener("toggle", () => {
+        if (!inner.open || inner.dataset.filled) return;
+        inner.dataset.filled = "1";
+        void fillInterlinkBossRuns(holder, week, boss, publicId);
+      });
+      row.append(inner);
+    } else {
+      const plain = element("div", "interlink-boss-plain");
+      plain.append(line);
+      if (proof) plain.append(proof);
+      row.append(plain);
+    }
+    bosses.append(row);
   }
-  if (!bossRows.length && !weekRows.length && !seasonRows.length) {
+  details.append(bosses);
+  item.append(details);
+  return item;
+}
+function renderInterlink(boards, { publicId = null, runsOpen = false } = {}) {
+  const body = overviewBody("interlink");
+  const parts = boards.interlinkParts;
+  if (!parts || (!parts.current?.weeksPlayed && !parts.previous?.length)) {
     body.replaceChildren(element("p", "", "No Interlink scores yet. The desktop app sends them after each boss fight."));
     return;
   }
-  body.replaceChildren(standingList("This season", seasonRows), standingList("Best per boss", bossRows), standingList("Weekly total", weekRows));
+  const nodes = [];
+  if (parts.current) {
+    nodes.push(interlinkPartLine(parts.current, { current: true, publicId, runsOpen }));
+    if (parts.current.weeks?.length) {
+      const tree = element("ol", "interlink-weeks");
+      tree.append(...parts.current.weeks.map((week) => interlinkWeek(week, { publicId, runsOpen })));
+      nodes.push(tree);
+    } else nodes.push(element("p", "history-empty", `No runs in ${parts.current.label} yet.`));
+  }
+  if (parts.previous?.length) {
+    nodes.push(element("h4", "", "Earlier seasons"));
+    const list = element("ul", "interlink-parts");
+    list.append(...parts.previous.map((part) => interlinkPartLine(part, { publicId, runsOpen })));
+    nodes.push(list);
+  }
+  body.replaceChildren(...nodes);
 }
 
 function renderSim(boards) {
@@ -639,7 +756,8 @@ async function loadProfileOverview(publicId = "") {
       profileOverview.querySelector(`[data-overview-panel="${panel}"]`).hidden = !overview.leaderboards;
     }
     if (overview.leaderboards) {
-      renderInterlink(overview.leaderboards);
+      renderInterlink(overview.leaderboards, { publicId,
+        runsOpen: !publicId || (Array.isArray(overview.parts) && overview.parts.includes("history")) });
       renderSim(overview.leaderboards);
       renderEggHeist(overview.leaderboards);
     }
@@ -653,6 +771,7 @@ async function loadProfileOverview(publicId = "") {
     renderPhotos(overview.photos, Boolean(publicId));
     applyCardLayout(overview.layout);
     showProfileLink(publicId, overview.profile);
+    runsArePublic = Boolean(overview.profile?.runsPublic);
     if (!parts || parts.includes("history")) showBattleHistory(publicId);
     profileOverview.querySelector("[data-profile-arrange]").hidden = Boolean(publicId);
     overviewStatus.textContent = overview.leaderboards ? "" : "Leaderboard standing appears here once leaderboards open.";
@@ -679,6 +798,7 @@ profileEditor.addEventListener("submit", async (event) => {
     visibility: profilePublic.value,
     ...(profilePublic.value === "custom" ? { publicParts: [...profileParts.querySelectorAll("input:checked")].map((box) => box.value) } : {}),
     findableByName: profileFindable.checked, showPresence: profileShowPresence.checked, listedInSearch: profileListedInSearch.checked,
+    runsPublic: profileRunsPublic.value === "public",
   };
   try {
     const response = await apiFetch("/profile", {
@@ -1234,7 +1354,7 @@ async function loadHistoryCard() {
     if (!runs.length) { body.replaceChildren(element("p", "", "No runs captured yet. aLogs adds every run it sees here.")); return; }
     const list = element("ol", "profile-history-list is-compact");
     list.append(...runs.map((run) => historyRow(run)));
-    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all");
+    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all runs");
     more.href = historyLink(true);
     body.replaceChildren(list, more);
   } catch {
@@ -1268,7 +1388,15 @@ const MY_RUNS_PAGE_SIZE_KEY = "aniilogs:my-runs:page-size:v1";
 const MY_RUNS_PAGE_SIZES = [20, 30, 50];
 const MY_RUNS_SEARCH_WAIT_MS = 250;
 const HISTORY_MODE_NAMES = { interlink: "Holo-Battle Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist", menu: "Menu bests" };
-const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null };
+const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null, scope: null };
+let runsArePublic = false;
+// ?split=<id>[&best=1][&label=Season 1.0]: one part of an Interlink season (the profile's Interlink card links here)
+function runsScopeFromAddress() {
+  const params = new URLSearchParams(window.location.search);
+  const split = params.get("split");
+  if (!/^\d{1,4}$/u.test(split || "")) return null;
+  return { split, best: params.get("best") === "1", label: String(params.get("label") || "").slice(0, 40) };
+}
 function myRunsPageSize() {
   try {
     const saved = Number(window.localStorage.getItem(MY_RUNS_PAGE_SIZE_KEY));
@@ -1405,6 +1533,10 @@ async function loadMyRuns() {
   for (const select of historyFull.querySelectorAll("[data-history-filter]")) if (select.value) params.set(select.dataset.historyFilter, select.value);
   const search = historyFull.querySelector("[data-history-search]").value.trim();
   if (search) params.set("q", search);
+  if (myRuns.scope) {
+    params.set("split", myRuns.scope.split);
+    if (myRuns.scope.best) params.set("best", "1");
+  }
   const request = ++myRuns.request;
   if (!rows.childElementCount) status.textContent = "Loading…";
   historyFull.classList.add("is-loading");
@@ -1423,7 +1555,7 @@ async function loadMyRuns() {
     summary.textContent = total
       ? `${numberFormat.format(first)}–${numberFormat.format(first + page.runs.length - 1)} of ${numberFormat.format(total)} run${total === 1 ? "" : "s"}` : "";
     historyFull.querySelector(".myruns-wrap").hidden = !page.runs.length;
-    const filtered = search || ["mode", "boss", "cycle"].some((name) => params.has(name));
+    const filtered = search || ["mode", "boss", "cycle", "split"].some((name) => params.has(name));
     status.textContent = page.runs.length ? "" : filtered ? "No runs match." : "No runs captured yet. aLogs adds every run it sees here.";
     renderMyRunsPager(current, pages);
     if (window.location.hash.startsWith("#run-")) document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "center" });
@@ -1433,13 +1565,27 @@ async function loadMyRuns() {
     if (request === myRuns.request) historyFull.classList.remove("is-loading");
   }
 }
-function startMyRuns() {
+function startMyRuns(publicId = null) {
   myRuns.on = true;
   myRuns.pageSize = myRunsPageSize();
+  myRuns.scope = runsScopeFromAddress();
   historyFull.classList.add("is-my-runs");
-  historyFull.querySelector("#history-title").textContent = "My runs";
-  historyFull.querySelector("[data-history-intro]").textContent = "Only you can see this list: every run aLogs captured for you, newest first, "
-    + "including runs a teammate's app captured with you in the party, and your menu bests.";
+  historyFull.querySelector("#history-title").textContent = publicId ? "Runs" : "My runs";
+  historyFull.querySelector("[data-history-intro]").textContent = publicId
+    ? "Every run aLogs captured for this player, newest first, including runs a teammate's app captured with them in the party, and their menu bests."
+    : `${runsArePublic ? "Public: visitors to your profile see this list too" : "Only you can see this list"}: every run aLogs captured for you, newest first, `
+      + "including runs a teammate's app captured with you in the party, and your menu bests.";
+  // a season part's runs, with a way back to all of them
+  const scope = historyFull.querySelector("[data-myruns-scope]");
+  if (myRuns.scope) {
+    const all = element("a", "", "Show all runs");
+    const next = new URLSearchParams(window.location.search);
+    for (const key of ["split", "best", "label"]) next.delete(key);
+    all.href = `/?${next}`;
+    scope.replaceChildren(element("strong", "", `${myRuns.scope.best ? "Best runs" : "Runs"} of ${myRuns.scope.label || "this season part"}`),
+      document.createTextNode(myRuns.scope.best ? " (each boss's best of each week, as the season total counts them) · " : " · "), all);
+    scope.hidden = false;
+  }
   for (const node of historyFull.querySelectorAll("[data-myruns-only]")) node.hidden = false;
   historyFull.querySelector("[data-history-list]").hidden = true;
   historyFull.querySelector("[data-history-more]").hidden = true;
@@ -1490,11 +1636,17 @@ function showBattleHistory(publicId) {
     historyFull.querySelector("[data-history-back]").href = historyLink(false);
     if (!historyFull.dataset.started) {
       historyFull.dataset.started = "1";
-      if (publicId) void loadHistoryPage(true); else startMyRuns();
+      startMyRuns(publicId);
     }
   } else {
-    // your own profile's card leads to My runs
-    if (!publicId) profileOverview.querySelector('[data-overview-panel="history"] h3').textContent = "My runs";
+    // your own profile's card leads to My runs (and says who else sees it); a visitor's to Runs
+    const panel = profileOverview.querySelector('[data-overview-panel="history"]');
+    panel.querySelector("h3").textContent = publicId ? "Runs" : "My runs";
+    let note = panel.querySelector("[data-history-visibility]");
+    if (!publicId) {
+      if (!note) { note = element("p", "history-visibility"); note.dataset.historyVisibility = ""; panel.querySelector("h3").after(note); }
+      note.textContent = runsArePublic ? "Public: visitors to your profile see this list." : "Private: only you see this list. Change it in Edit profile.";
+    } else note?.remove();
     void loadHistoryCard();
   }
 }
