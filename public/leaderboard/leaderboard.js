@@ -552,23 +552,23 @@
     return "Summary";
   }
   const HOVER_OPEN_MS = 350;                           // a hover this long opens the viewer; passing over the icon doesn't
-  function proofButton(submissionId, check = null) {
+  function proofButton(submissionId, check = null, menuId = null) {
     if (!submissionId) return null;
     const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots (they stay open until you click outside)",
-      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check); } });
+      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check, menuId); } });
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
     // hover (mouse or pen only: a tap goes straight to the click) opens the same viewer as a click
     button.addEventListener("pointerenter", (event) => {
       if (event.pointerType === "touch") return;
       clearTimeout(hoverTimer);
-      hoverTimer = setTimeout(() => openProof(submissionId, check), HOVER_OPEN_MS);
+      hoverTimer = setTimeout(() => openProof(submissionId, check, menuId), HOVER_OPEN_MS);
     });
     button.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
     return button;
   }
   let hoverTimer = null;
   let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
-  async function openProof(submissionId, check = null) {
+  async function openProof(submissionId, check = null, menuId = null) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
     if (!dialog) {
       dialog = el("dialog", { class: "lb-proof-dialog" },
@@ -591,8 +591,11 @@
     // A best sent from the game's menu: its menu picture first, then the pictures of the player's best run of that boss
     // and week (the menu proof is added to them, it doesn't replace them).
     const run = details.menu && details.runProof ? await proofDetails(details.runProof) : null;
+    // A run whose score a menu best matched: the menu picture goes with the run's (the board's menuProofId)
+    const menu = !details.menu && menuId ? await proofDetails(menuId).catch(() => null) : null;
     if (proofOpenFor !== submissionId) return;
     const pictures = [
+      ...(menu?.shots?.includes("summary") ? [{ id: menuId, shot: "summary", label: "Menu" }] : []),
       ...details.shots.map((shot) => ({ id: submissionId, shot, label: details.menu && shot === "summary" ? "Menu" : shotLabel(shot, details.shots) })),
       ...(run ? run.shots.map((shot) => ({ id: details.runProof, shot, label: shotLabel(shot, run.shots) })) : []),
     ];
@@ -721,7 +724,7 @@
   });
   // How a board row's run ended, with its proof pictures beside it
   function resultLine(entry, ladder, boss = null) {
-    return [clearText(entry, boss), proofButton(entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder))];
+    return [clearText(entry, boss), proofButton(entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder), entry.menuProofId)];
   }
   // A board row's badge: its run's check, or "invalid" when the row has no proof pictures at all
   function rowCheck(entry, ladder) {
