@@ -1656,6 +1656,8 @@ async function ownProfileOverview(request, env) {
       profileUid: main?.gameUid || null,
     },
     layout: storedProfileLayout(profile?.prefs),
+    // the owner gets every trophy, and which ones visitors don't see
+    hiddenTrophies: storedHiddenTrophies(profile?.prefs),
     characters: (characters.results || []).map(({ level, gender, server, exp, expNeeded, ...row }) => ({ ...row, ...characterDetails({ level, gender, server, exp, expNeeded }) })),
     main: main ? { gameUid: main.gameUid, name: main.name, picked: Boolean(main.picked) } : null,
     presence: await profilePresence(env, account.discordId),
@@ -2192,6 +2194,46 @@ async function saveProfileLayout(request, env) {
   return json({ layout });
 }
 
+// The trophies the owner hides from visitors: a list of trophy ids ("interlink-dps", "sim-2-earth", ...) kept in
+// profiles.preferences_json as $.hiddenTrophies. Ids are checked for shape only, so a trophy added later needs no
+// server change; every trophy shows until its owner hides it.
+const TROPHY_KEY = /^[a-z0-9][a-z0-9_.:-]{0,63}$/u;
+function cleanHiddenTrophies(raw) {
+  if (!Array.isArray(raw) || raw.length > 100 || !raw.every((key) => typeof key === "string" && TROPHY_KEY.test(key))) return null;
+  return [...new Set(raw)];
+}
+function storedHiddenTrophies(prefsJson) {
+  try {
+    return cleanHiddenTrophies(JSON.parse(prefsJson || "{}").hiddenTrophies) || [];
+  } catch {
+    return [];
+  }
+}
+
+// PUT /api/profile/trophies {hidden: [trophy id, ...]}: the trophies visitors don't see; [] shows them all again.
+async function saveHiddenTrophies(request, env) {
+  if (!browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await currentAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  let body;
+  try {
+    body = await readJsonBody(request, 8192);
+  } catch (error) {
+    return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
+  }
+  const hidden = cleanHiddenTrophies(body?.hidden);
+  if (!hidden) return json({ error: "hidden must be a list of at most 100 trophy ids (lower-case letters, digits, - _ . :)." }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT INTO profiles (discord_id, display_name, bio, is_public, public_id, created_at, updated_at, preferences_json)
+     VALUES (?1, NULL, NULL, 1, lower(hex(randomblob(8))), ?2, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE json_object('hiddenTrophies', json(?3)) END)
+     ON CONFLICT(discord_id) DO UPDATE SET updated_at = ?2, preferences_json = CASE WHEN ?3 IS NULL
+       THEN json_remove(COALESCE(preferences_json, '{}'), '$.hiddenTrophies')
+       ELSE json_set(COALESCE(preferences_json, '{}'), '$.hiddenTrophies', json(?3)) END`,
+  ).bind(account.discordId, now, hidden.length ? JSON.stringify(hidden) : null).run();
+  return json({ hidden });
+}
+
 // Search engines: the site's robots.txt names this sitemap, listing the public profiles whose owners leave
 // "List my profile in search engines" on. Only the random public id is in it, never a Discord id or UID.
 async function profilesSitemap(env) {
@@ -2256,6 +2298,9 @@ async function publicProfile(request, env, id) {
   if (leaderboardPublic(env) && shows("standings")) {
     ({ leaderboards, trophies } = await profileBoards(env, profile.discordId));
     for (const kind of Object.keys(LEADERBOARD_KINDS)) leaderboards[kind] = leaderboards[kind].map(({ gameUid, ...entry }) => entry);
+    // the trophies the owner hid never leave the server
+    const hidden = new Set(storedHiddenTrophies(profile.prefs));
+    trophies = trophies.filter((trophy) => !hidden.has(trophy.id));
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
@@ -5781,6 +5826,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profiles/search" && request.method === "GET") return searchProfiles(request, env);
   if (url.pathname === "/api/profiles/directory" && request.method === "GET") return profilesDirectory(env);
   if (url.pathname === "/api/profile/layout" && request.method === "PUT") return saveProfileLayout(request, env);
+  if (url.pathname === "/api/profile/trophies" && request.method === "PUT") return saveHiddenTrophies(request, env);
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
   if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
   // a profile id or a game UID (resolveProfileId)

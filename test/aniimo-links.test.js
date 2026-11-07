@@ -173,7 +173,11 @@ test("the take-me-there icon is next to every Aniimo the site names", () => {
   assert.match(app, /const trackedLink = mapItemAniimoLink\(state\.data\?\.itemsById\?\.get\(entry\.item_id\)/u);
   // Leaderboard teams and profile run lineups (names only: the Aniilog resolves them).
   assert.match(leaderboard, /member\.name \? window\.AniilogsAniimoLink\?\.create\(member\.name, member\.name\) : null/u);
-  assert.match(home, /const link = entry\.aniimo \? window\.AniilogsAniimoLink\?\.create\(entry\.aniimo, entry\.aniimo\) : null;/u);
+  // the profile: the Aniimo's name is itself the link (no separate icon)
+  assert.match(home, /const href = name \? window\.AniilogsAniimoLink\?\.url\(name\) : "";/u);
+  assert.match(home, /lead\.append\(aniimoNameLink\(player\.aniimo\)\);/u);
+  assert.match(home, /chip\.append\(aniimoNameLink\(member\.aniimo\)\);/u);
+  assert.doesNotMatch(home, /AniilogsAniimoLink\?\.(?:create|inline|wrapCorner)\(/u);
   assert.match(home, /chip\.href = window\.AniilogsAniimoLink\?\.url\(id\)/u);
 });
 

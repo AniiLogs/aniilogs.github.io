@@ -224,6 +224,35 @@ function element(tag, className = "", text = "") {
   return node;
 }
 
+// Every row on the profile that opens (an Interlink week or boss, a Battle History run): a chevron at the start of its
+// summary that turns down when it is open (styles.css), the open row marked with an accent bar, and aria-expanded kept
+// in step for screen readers.
+const CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function disclosure(details) {
+  const summary = details.querySelector(":scope > summary");
+  if (!summary) return details;
+  details.classList.add("disclosure");
+  const chevron = element("span", "disclosure-chevron");
+  chevron.innerHTML = CHEVRON;
+  summary.prepend(chevron);
+  const sync = () => summary.setAttribute("aria-expanded", String(details.open));
+  details.addEventListener("toggle", sync);
+  sync();
+  return details;
+}
+
+// An Aniimo's name on the profile is itself the link to its Aniilog page (no separate icon): subtle, it keeps the
+// text's colour and underlines on hover or focus. The run keeps the name read off the Party screen; the Aniilog finds
+// the Aniimo by it (/aniimo-link.js).
+function aniimoNameLink(name) {
+  const href = name ? window.AniilogsAniimoLink?.url(name) : "";
+  if (!href) return document.createTextNode(name || "");
+  const link = element("a", "aniimo-name", name);
+  link.href = href;
+  link.title = `Open ${name} in the Aniilog`;
+  return link;
+}
+
 function overviewBody(panel) {
   return profileOverview.querySelector(`[data-overview-panel="${panel}"] [data-overview-body]`);
 }
@@ -379,6 +408,7 @@ function interlinkWeek(week, { publicId, runsOpen }) {
   figures.append(element("strong", "", `${numberFormat.format(week.total)} pts`), " ", interlinkStars(week.stars));
   summary.append(title, figures);
   details.append(summary);
+  disclosure(details);
   const bosses = element("ul", "interlink-bosses");
   for (const boss of week.bosses) {
     const row = element("li", "interlink-boss");
@@ -397,6 +427,7 @@ function interlinkWeek(week, { publicId, runsOpen }) {
       if (proof) { proof.addEventListener("click", (event) => event.preventDefault()); head.append(proof); }
       const holder = element("div", "interlink-boss-runs");
       inner.append(head, holder);
+      disclosure(inner);
       inner.addEventListener("toggle", () => {
         if (!inner.open || inner.dataset.filled) return;
         inner.dataset.filled = "1";
@@ -560,24 +591,65 @@ function trophyContext(trophy) {
   const played = trophy.playedAt && !week ? shortDate(trophy.playedAt) : "";
   return [context.boss?.name, week, context.difficulty, season, points, played].filter(Boolean).join(" · ");
 }
+// The tile's mark: what kind of figure it is (a cup for a score, a clock for a time, a bolt for a number, a medal for
+// a rank), in its mode's colour (styles.css)
+const TROPHY_ICONS = {
+  score: '<path d="M7 4h10v3a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4v1.5A3.5 3.5 0 0 0 7.5 10M17 5h3v1.5A3.5 3.5 0 0 1 16.5 10M12 12v4M8.5 20h7M9.5 16h5l.5 4h-6l.5-4Z"/>',
+  time: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M10 3h4"/>',
+  number: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z"/>',
+  rank: '<circle cx="12" cy="14.5" r="5.5"/><path d="m8.5 9.5-3-6.5h4l2.5 5M15.5 9.5l3-6.5h-4l-1.4 3"/><path d="m12 12 .9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3L12 12Z"/>',
+};
+function trophyIcon(unit) {
+  const icon = element("span", "trophy-icon");
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">${TROPHY_ICONS[unit] || TROPHY_ICONS.number}</svg>`;
+  return icon;
+}
+// what the card shows and, for its owner, which trophies visitors don't see (saved to /api/profile/trophies)
+const trophyCard = { list: [], hidden: new Set(), owner: false, editing: false, draft: null, saving: false, message: "" };
 function trophyTile(trophy) {
-  const tile = element("li", `trophy-tile is-${trophy.mode}`);
+  const editing = trophyCard.editing;
+  const hidden = (editing ? trophyCard.draft : trophyCard.hidden).has(trophy.id);
+  const tile = element("li", `trophy-tile is-${trophy.mode}${hidden ? " is-hidden" : ""}`);
+  tile.dataset.trophy = trophy.id;
+  const top = element("div", "trophy-top");
+  top.append(trophyIcon(trophy.unit), element("span", "trophy-title", trophy.label));
+  if (editing) {
+    // the owner's switch: shown to visitors or not
+    const toggle = element("label", "trophy-toggle");
+    const box = element("input");
+    box.type = "checkbox";
+    box.checked = !hidden;
+    box.dataset.trophyKey = trophy.id;
+    box.addEventListener("change", () => {
+      if (box.checked) trophyCard.draft.delete(trophy.id); else trophyCard.draft.add(trophy.id);
+      tile.classList.toggle("is-hidden", !box.checked);
+      toggle.lastChild.textContent = box.checked ? "Shown" : "Hidden";
+      renderTrophyToolbar();
+    });
+    toggle.append(box, element("span", "", hidden ? "Hidden" : "Shown"));
+    toggle.title = `Show "${trophy.label}" to visitors`;
+    top.append(toggle);
+  }
+  tile.append(top);
   const value = element("strong", "trophy-value", trophyValue(trophy));
   if (trophy.unit === "rank") {
     const icon = eggRankIcon(trophy.rank?.tier);
     if (icon) value.prepend(icon);
   }
-  tile.append(element("span", "trophy-title", trophy.label), value);
-  if (trophy.mode === "interlink" && trophy.stars != null) value.append(" ", interlinkStars(trophy.stars));
+  if (trophy.mode === "interlink" && trophy.stars != null) value.append(interlinkStars(trophy.stars));
+  tile.append(value);
   const context = trophyContext(trophy);
   if (context) tile.append(element("small", "trophy-context", context));
-  const foot = element("span", "trophy-foot");
+  const foot = element("div", "trophy-foot");
   const place = trophy.placement;
   if (place?.position) {
-    const link = element("a", "profile-position trophy-place", `#${place.position}`);
+    const medal = place.position <= 3 ? ` is-top${place.position}` : "";
+    const link = element("a", `trophy-place${medal}`, `#${place.position}`);
+    link.append(element("small", "", ` of ${numberFormat.format(place.players)}`));
     link.href = `/leaderboard/?${new URLSearchParams(trophy.board || {})}`;
     link.title = `Position ${place.position} of ${place.players} players on this ladder · open the board`;
-    foot.append(link, element("small", "", `of ${numberFormat.format(place.players)}`));
+    foot.append(link);
   }
   const proof = trophy.proof;
   if (proof?.id && window.AniilogsProof) {
@@ -588,23 +660,98 @@ function trophyTile(trophy) {
     button.append(element("span", "", "Proof"));
     foot.append(button);
   }
-  tile.append(foot);
+  if (foot.childElementCount) tile.append(foot);
   return tile;
 }
-function renderTrophies(trophies) {
+// the owner's bar over the tiles: how many visitors see, and Choose trophies (Save / Cancel / Show all while choosing)
+function renderTrophyToolbar() {
   const panel = profileOverview.querySelector('[data-overview-panel="trophies"]');
+  let bar = panel.querySelector(".trophy-toolbar");
+  if (!trophyCard.owner) { bar?.remove(); return; }
+  if (!bar) {
+    bar = element("div", "trophy-toolbar");
+    panel.querySelector("h3").after(bar);
+  }
+  const set = trophyCard.editing ? trophyCard.draft : trophyCard.hidden;
+  const total = trophyCard.list.length;
+  const shown = trophyCard.list.filter((trophy) => !set.has(trophy.id)).length;
+  const summary = element("span", "trophy-summary", trophyCard.message
+    || (trophyCard.editing ? "Tick the trophies visitors see." : shown === total ? `All ${total} shown to visitors` : `${shown} of ${total} shown to visitors`));
+  summary.setAttribute("role", "status");
+  const button = (label, className, onClick, extra = {}) => {
+    const node = element("button", `profile-tool-button ${className}`, label);
+    node.type = "button";
+    node.disabled = trophyCard.saving;
+    node.addEventListener("click", onClick);
+    for (const [key, value] of Object.entries(extra)) node.setAttribute(key, value);
+    return node;
+  };
+  const actions = element("span", "trophy-actions");
+  if (trophyCard.editing) {
+    actions.append(
+      button("Show all", "is-quiet", () => { trophyCard.draft = new Set([...trophyCard.draft].filter((key) => !trophyCard.list.some((trophy) => trophy.id === key))); drawTrophies(); }),
+      button("Cancel", "is-quiet", () => { trophyCard.editing = false; trophyCard.draft = null; trophyCard.message = ""; drawTrophies(); }),
+      button(trophyCard.saving ? "Saving…" : "Save", "is-primary", () => void saveTrophyChoice()),
+    );
+  } else {
+    actions.append(button("Choose trophies", "", () => {
+      trophyCard.editing = true;
+      trophyCard.draft = new Set(trophyCard.hidden);
+      trophyCard.message = "";
+      drawTrophies();
+      panel.querySelector("[data-trophy-key]")?.focus();
+    }, { "data-trophy-edit": "", "aria-pressed": "false" }));
+  }
+  bar.replaceChildren(summary, actions);
+}
+async function saveTrophyChoice() {
+  trophyCard.saving = true;
+  renderTrophyToolbar();
+  try {
+    const response = await apiFetch("/profile/trophies", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hidden: [...trophyCard.draft] }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !Array.isArray(payload.hidden)) throw new Error(payload.error || `HTTP ${response.status}`);
+    trophyCard.hidden = new Set(payload.hidden);
+    trophyCard.editing = false;
+    trophyCard.draft = null;
+    trophyCard.message = "";
+  } catch {
+    trophyCard.message = "Couldn't save. Nothing changed.";
+  } finally {
+    trophyCard.saving = false;
+  }
+  drawTrophies();
+}
+function drawTrophies() {
   const body = overviewBody("trophies");
-  const list = Array.isArray(trophies) ? trophies : [];
-  panel.hidden = !list.length;
+  const { list, owner, editing } = trophyCard;
+  // visitors only get the shown ones from the server; the owner sees what visitors see, or everything while choosing
+  const visible = editing ? list : list.filter((trophy) => !trophyCard.hidden.has(trophy.id));
   const nodes = [];
   for (const [mode, label] of TROPHY_MODES) {
-    const own = list.filter((trophy) => trophy.mode === mode);
+    const own = visible.filter((trophy) => trophy.mode === mode);
     if (!own.length) continue;
+    const head = element("h4", `trophy-group is-${mode}`);
+    head.append(element("span", "", label), element("small", "", String(own.length)));
     const grid = element("ul", "trophy-grid");
     grid.append(...own.map(trophyTile));
-    nodes.push(element("h4", "", label), grid);
+    nodes.push(head, grid);
   }
+  if (!nodes.length && owner) nodes.push(element("p", "history-empty", "Every trophy is hidden from visitors. Choose trophies to show some again."));
   body.replaceChildren(...nodes);
+  body.classList.toggle("is-choosing", editing);
+  renderTrophyToolbar();
+}
+function renderTrophies(trophies, { owner = false, hidden = [] } = {}) {
+  const panel = profileOverview.querySelector('[data-overview-panel="trophies"]');
+  const list = Array.isArray(trophies) ? trophies : [];
+  panel.hidden = !list.length;
+  Object.assign(trophyCard, { list, owner: owner && list.length > 0, hidden: new Set(Array.isArray(hidden) ? hidden : []), editing: false, draft: null, message: "" });
+  drawTrophies();
 }
 
 // Home page pictures from the reviewed content release (a missing one leaves its card's text).
@@ -846,7 +993,7 @@ async function loadProfileOverview(publicId = "") {
       renderEggHeist(overview.leaderboards);
     }
     // with the standing: the server sends none while that part is private or the boards are closed
-    renderTrophies(overview.leaderboards ? overview.trophies : null);
+    renderTrophies(overview.leaderboards ? overview.trophies : null, { owner: !publicId, hidden: overview.hiddenTrophies });
     renderGameStats(overview.gameStats);
     renderCollection(overview.collection, Boolean(publicId));
     // someone else's profile shows only its public parts (Custom); the server sends nothing for the others
@@ -1352,37 +1499,53 @@ function historyLineup(run) {
     link.append(image, element("span", "", "Party screen at the start"));
     panel.append(link);
   }
-  const facts = element("dl", "history-lineup-facts");
-  // each line: text, or a list of text and nodes (an Aniimo's "take me there" link, /aniimo-link.js)
-  const fact = (label, ...lines) => {
-    lines = lines.filter((line) => (Array.isArray(line) ? line.length : line));
-    if (!lines.length) return;
-    const value = element("dd");
-    lines.forEach((line, index) => {
-      const nodes = (Array.isArray(line) ? line : [line]).filter(Boolean)
-        .map((part) => (typeof part === "string" ? document.createTextNode(part) : part));
-      if (!index) { value.append(...nodes); return; }
-      const team = element("span", "history-lineup-team");
-      team.append(...nodes);
-      value.append(team);
-    });
-    facts.append(element("dt", "", label), value);
-  };
-  // the run keeps the Aniimo's name (read from the Party screen): the Aniilog finds the Aniimo by it
-  const aniimo = (entry) => {
-    const text = [entry.aniimo, Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "",
-      Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : ""].filter(Boolean).join(" ");
-    const link = entry.aniimo ? window.AniilogsAniimoLink?.create(entry.aniimo, entry.aniimo) : null;
-    return text ? [text, link] : [];
-  };
-  for (const player of players) {
-    // the whole team only when aLogs read more than the lead (the rest are icons, there in the picture)
-    const team = Array.isArray(player.team) && player.team.length > 1 ? player.team : [];
-    fact(player.name || (player.slot ? `${player.slot}P` : "Player"), aniimo(player),
-      team.length ? ["Team: ", ...team.flatMap((member, index) => [index ? " · " : "", ...aniimo(member)])] : "");
+  // One block per player: their name, their lead Aniimo (level, CP) beside it, and the rest of their team as small
+  // chips underneath (the lead isn't repeated). Every Aniimo name links to its Aniilog page.
+  const facts = element("div", "history-lineup-facts");
+  const level = (entry) => (Number.isInteger(entry.aniimoLevel) ? `Lv ${entry.aniimoLevel}` : "");
+  const cp = (entry) => (Number.isInteger(entry.cp) ? `CP ${numberFormat.format(entry.cp)}` : "");
+  if (players.length) {
+    facts.append(element("p", "history-section-label", "Party at the start"));
+    const list = element("ul", "lineup-players");
+    for (const player of players) {
+      const item = element("li", "lineup-player");
+      const head = element("div", "lineup-head");
+      head.append(element("span", "lineup-name", player.name || (player.slot ? `${player.slot}P` : "Player")));
+      if (player.aniimo) {
+        const lead = element("span", "lineup-lead");
+        lead.append(aniimoNameLink(player.aniimo));
+        const meta = [level(player), cp(player)].filter(Boolean).join(" · ");
+        if (meta) lead.append(element("small", "lineup-meta", meta));
+        head.append(lead);
+      }
+      item.append(head);
+      // the whole team only when aLogs read more than the lead (the rest are icons, there in the picture)
+      const team = Array.isArray(player.team) && player.team.length > 1 ? [...player.team] : [];
+      const leadAt = team.findIndex((member) => member.aniimo === player.aniimo);
+      if (leadAt >= 0) team.splice(leadAt, 1);
+      if (team.length) {
+        const chips = element("ul", "lineup-team");
+        chips.setAttribute("aria-label", `${player.name || "This player"}'s team`);
+        for (const member of team) {
+          const chip = element("li", "lineup-chip");
+          chip.append(aniimoNameLink(member.aniimo));
+          if (level(member)) chip.append(element("small", "", level(member)));
+          if (cp(member)) chip.title = cp(member);
+          chips.append(chip);
+        }
+        item.append(chips);
+      }
+      list.append(item);
+    }
+    facts.append(list);
   }
-  fact("Team buffs", buffs.map((buff) => `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`).join(", "));
-  if (!picture) facts.append(element("dd", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));
+  if (buffs.length) {
+    const line = element("div", "lineup-buffs");
+    line.append(element("span", "lineup-label", "Team buffs"));
+    for (const buff of buffs) line.append(element("span", "lineup-chip is-buff", `${buff.name}${Number.isInteger(buff.level) ? ` ${buff.level}` : ""}`));
+    facts.append(line);
+  }
+  if (!picture) facts.append(element("p", "history-empty", run.proofPrunedAt ? "The Party screen's picture is no longer kept." : "No picture of the Party screen with this run."));
   panel.append(facts);
   return panel;
 }
@@ -1407,13 +1570,19 @@ function historyParty(run) {
     } else who.append(document.createTextNode(player.name || `Player ${index + 1}`));
     if (player.ai) who.append(element("span", "history-chip is-ai", "AI"));
     if (player.self && run.credited) who.append(element("span", "history-chip is-self", "captured it"));   // the teammate whose app sent it
-    const number = (value) => element("td", "history-number", value == null ? "–" : numberFormat.format(value));
-    row.append(element("td", "history-slot", `${index + 1}P`), who, number(player.avgDps), number(player.breakValue), number(player.damageTaken), number(player.heal));
+    // each figure carries its column's name: a narrow card shows each player as a block of labelled figures (styles.css)
+    const number = (value, label) => {
+      const cell = element("td", "history-number", value == null ? "–" : numberFormat.format(value));
+      cell.dataset.label = label;
+      return cell;
+    };
+    row.append(element("td", "history-slot", `${index + 1}P`), who, number(player.avgDps, "Avg DPS"), number(player.breakValue, "BREAK"),
+      number(player.damageTaken, "Taken"), number(player.heal, "Healing"));
     body.append(row);
   });
   table.append(thead, body);
   const wrap = element("div", "history-party-wrap");
-  wrap.append(table);
+  wrap.append(element("p", "history-section-label", "Battle Data"), table);
   return wrap;
 }
 function historyProof(run) {
@@ -1458,6 +1627,7 @@ function historyRow(run, { open = false } = {}) {
   chips.append(...historyChips(run));
   summary.append(title, numbers, chips);
   details.append(summary);
+  disclosure(details);
   details.addEventListener("toggle", () => {
     if (!details.open || details.dataset.filled) return;
     details.dataset.filled = "1";
