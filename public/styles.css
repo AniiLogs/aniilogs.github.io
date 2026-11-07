@@ -637,6 +637,60 @@ body.profile-history-view .profile-arrange-bar, body.profile-history-view [data-
   .profile-history-full.is-my-runs .profile-history-filters { gap: 0.5rem 0.6rem; }
   .profile-history-full.is-my-runs .profile-history-filters label:not(.myruns-search) { flex: 1 1 calc(50% - 0.6rem); min-width: 0; }
 }
+/* The Interlink card: the season part's total, its weeks as a thread-style tree (week > boss > runs), earlier parts */
+.interlink-part { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; }
+.interlink-part.is-current { margin-bottom: 0.7rem; padding: 0.6rem 0.75rem; border: 1px solid color-mix(in srgb, var(--teal) 45%, var(--line));
+  border-radius: 12px; background: color-mix(in srgb, var(--teal) 7%, transparent); }
+.interlink-part.is-current .interlink-part-name { flex: 1 1 100%; color: var(--teal); font-size: 0.72rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+.interlink-part.is-current .interlink-part-figures strong { font-size: 1.15rem; }
+.interlink-part-name { color: var(--ink); font-weight: 800; }
+.interlink-part-figures { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.interlink-part-figures small, .interlink-part-rank small { color: var(--ink-soft); }
+.interlink-part-rank { margin-left: auto; white-space: nowrap; }
+.interlink-part-runs { color: var(--teal); font-size: 0.82rem; font-weight: 800; white-space: nowrap; }
+.interlink-parts { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.interlink-parts .interlink-part { padding: 0.45rem 0; border-top: 1px solid var(--line); }
+.interlink-weeks, .interlink-bosses, .interlink-runs { margin: 0; padding: 0; list-style: none; }
+.interlink-weeks { display: grid; gap: 0.35rem; }
+.interlink-week summary, .interlink-boss summary { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; list-style: none; }
+.interlink-week summary::-webkit-details-marker, .interlink-boss summary::-webkit-details-marker { display: none; }
+/* the open/closed marker: a small triangle that turns, like a collapsed thread */
+.interlink-week summary::before, .interlink-boss summary::before { content: ""; flex: none; width: 0; height: 0; border-left: 0.36rem solid var(--ink-soft);
+  border-top: 0.26rem solid transparent; border-bottom: 0.26rem solid transparent; transition: transform 120ms ease; }
+.interlink-week details[open] > summary::before, .interlink-boss details[open] > summary::before { transform: rotate(90deg); }
+.interlink-week summary { min-height: 40px; padding: 0.3rem 0.4rem; border-radius: 10px; }
+.interlink-week summary:hover, .interlink-boss summary:hover { background: color-mix(in srgb, var(--teal) 7%, transparent); }
+.interlink-week-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-weight: 800; font-size: 0.9rem; }
+.interlink-week-name .history-chip { margin-left: 0.4rem; }
+.history-chip.is-current { background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--teal); }
+.interlink-week-figures, .interlink-boss-figures { display: inline-flex; flex: none; align-items: center; gap: 0.3rem; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+/* the thread line down the left of an open week and an open boss */
+.interlink-bosses, .interlink-boss-runs { margin-left: 0.55rem; padding-left: 0.75rem; border-left: 2px solid color-mix(in srgb, var(--teal) 28%, var(--line)); }
+.interlink-bosses { display: grid; gap: 0.15rem; padding-top: 0.2rem; padding-bottom: 0.3rem; }
+.interlink-boss summary, .interlink-boss-plain { display: flex; align-items: center; gap: 0.5rem; min-height: 40px; padding: 0.25rem 0.4rem; border-radius: 10px; }
+.interlink-boss-plain { padding-left: 1rem; }
+.interlink-boss-line { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.1rem 0.6rem; min-width: 0; }
+.interlink-boss-name { display: grid; min-width: 0; }
+.interlink-boss-name strong { color: var(--ink); font-size: 0.88rem; }
+.interlink-boss-name small { color: var(--ink-soft); font-size: 0.76rem; }
+.interlink-boss .lb-proof { flex: none; }
+.interlink-boss-runs { display: grid; gap: 0.3rem; padding-top: 0.25rem; padding-bottom: 0.4rem; }
+.interlink-runs { display: grid; gap: 0.3rem; }
+.interlink-runs li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem; padding: 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: 10px; font-size: 0.82rem; }
+.interlink-runs li.is-best { border-color: color-mix(in srgb, #f5b942 55%, var(--line)); }
+.interlink-run-text { display: grid; flex: 1 1 12rem; min-width: 0; }
+.interlink-run-text small { color: var(--ink-soft); font-size: 0.74rem; }
+.interlink-runs .history-chips { grid-column: auto; }
+.interlink-runs .lb-proof.myruns-proof { display: inline-flex; width: auto; height: auto; gap: 0.35rem; margin: 0; padding: 0.25rem 0.6rem;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink); font: inherit; font-size: 0.78rem; font-weight: 700; }
+.history-visibility { margin: -0.2rem 0 0.6rem; color: var(--ink-soft); font-size: 0.8rem; }
+.myruns-scope { margin: 0 0 0.6rem; padding: 0.45rem 0.7rem; border-radius: 10px; background: color-mix(in srgb, var(--teal) 9%, transparent); color: var(--ink); font-size: 0.85rem; }
+.myruns-scope a { color: var(--teal); font-weight: 800; }
+.profile-runs-visibility { display: grid; gap: 0.25rem; margin-top: 0.7rem; }
+@media (max-width: 560px) {
+  .interlink-part-rank { margin-left: 0; }
+  .interlink-bosses, .interlink-boss-runs { margin-left: 0.3rem; padding-left: 0.5rem; }
+}
 /* Online now and Recently joined, under the profile */
 .profile-directory { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; margin-top: 1rem; }
 .profile-directory-list { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }

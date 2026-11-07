@@ -1710,7 +1710,7 @@ test("Battle History follows the profile, credits teammates' copies by proven UI
   await sendRun(env, devToken, run("dev-same", { players: party.map((p) => ({ ...p, self: p.name === "DevOne" })), playedAt: 1792700100, extra: { instanceId: "inst-1" } }));
   assert.deepEqual((await devHistory()).map((r) => r.credited), [false, false]);
   // private profile: no public history; public: everyone sees it, hidden runs only in the owner's view
-  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01' WHERE discord_id = ?").run(IDS.dev);
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01', preferences_json = '{\"runsPublic\":true}' WHERE discord_id = ?").run(IDS.dev);
   sqlite.prepare("UPDATE leaderboard_submissions SET status = 'hidden' WHERE client_run_id = 'dev-own'").run();
   assert.equal((await historyOf(env, "/api/profiles/pubdev01/history")).runs.length, 1);
   assert.deepEqual((await devHistory()).map((r) => Boolean(r.hidden)), [false, true]);
@@ -1769,12 +1769,13 @@ test("My runs: numbered pages of 20, 30 or 50 with the total, and search as you 
   // filters still apply alongside
   assert.equal((await mine("page=1&mode=sim&q=sherro")).total, 0);
 
-  // the public history and other players: no numbered pages, no search, no total; logged out: nothing
-  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01' WHERE discord_id = ?").run(IDS.dev);
-  const shown = await historyOf(env, "/api/profiles/pubdev01/history?page=2&q=sherro&limit=50", SESSIONS.user);
-  assert.equal(shown.total, undefined);
-  assert.equal(shown.runs.length, 50);
-  assert.ok(shown.runs.some((r) => r.boss?.name !== "Omega Sherro"));
+  // made public (My runs' switch), visitors get the same list: pages, search, the total; another player's own list
+  // is theirs alone; logged out: nothing
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01', preferences_json = '{\"runsPublic\":true}' WHERE discord_id = ?").run(IDS.dev);
+  const shown = await historyOf(env, "/api/profiles/pubdev01/history?page=1&q=sherro", SESSIONS.user);
+  assert.equal(shown.total, (await mine("page=1&q=sherro")).total);
+  assert.ok(shown.runs.every((r) => r.boss?.name === "Omega Sherro"));
+  assert.equal((await historyOf(env, "/api/profiles/pubdev01/history?page=1")).total, first.total);   // logged out too, once public
   const theirs = await historyOf(env, "/api/profile/history?page=1", SESSIONS.user);
   assert.deepEqual(theirs.runs.map((r) => r.score), [20000]);            // UserOne sees only their own
   assert.equal(theirs.total, 1);
@@ -1807,6 +1808,60 @@ test("My runs: menu bests have their own filter, and a run a menu best matches o
   assert.ok(page.filters.modes.some((m) => m.value === "menu" && m.count === 1));
   assert.deepEqual((await historyOf(env, "/api/profile/history?page=1&mode=menu", SESSIONS.dev)).runs.map((r) => r.submissionId), [menuId]);
   assert.deepEqual((await historyOf(env, "/api/profile/history?page=1&q=menu", SESSIONS.dev)).runs.map((r) => r.submissionId), [menuId]);
+});
+
+test("the profile's Interlink card: the current season part's weeks and bosses, its total alone, earlier parts with a link's filter", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  // Season 1.1 begins: week 4000 started two days ago
+  const bosses = [{ id: "80000098", name: "Alpha Scorchhowl" }, { id: "80000112", name: "Alpha Glameep" }, { id: "80000096", name: "Alpha Minespine" }];
+  const start = Math.floor(Date.now() / 1000) - 2 * 86400;
+  assert.equal((await call(env, "/api/leaderboard/interlink/cycles", { token: dev, method: "POST",
+    body: { cycles: [{ id: "4000", season: 1, start, end: start + 6 * 86400, bosses }] } })).status, 200);
+  const glameep = { id: "80000112", name: "Alpha Glameep", level: 60 };
+  const scorch = { id: "80000098", name: "Alpha Scorchhowl", level: 60 };
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  // Season 1.0 (week 3005): two runs of Infergon (the better counts) and one of Sherro
+  await sendRun(env, dev, run("o1", { score: 20000, stars: 20 }));
+  await sendRun(env, dev, run("o2", { score: 18000, stars: 18, playedAt: 1792700100 }));
+  await sendRun(env, dev, run("o3", { boss: sherro, score: 15000, stars: 15, playedAt: 1792700200 }));
+  // Season 1.1 (week 4000): Glameep and Scorchhowl; UserOne beats DevOne on Glameep
+  await sendRun(env, dev, run("n1", { cycle: "4000", boss: glameep, score: 34000, stars: 40, clearTimeS: 100, cleared: true, playedAt: start + 100 }));
+  await sendRun(env, dev, run("n2", { cycle: "4000", boss: scorch, score: 21000, stars: 20, clearTimeS: 120, cleared: true, playedAt: start + 200 }));
+  await sendRun(env, user, run("u1", { cycle: "4000", boss: glameep, score: 90000, stars: 40, clearTimeS: 90, cleared: true, playedAt: start + 300 }));
+  // quit under the clock without every star: invalid, in the owner's list only
+  await sendRun(env, dev, run("n3", { cycle: "4000", boss: scorch, score: 9000, stars: 12, clearTimeS: 60, cleared: true, playedAt: start + 400 }));
+
+  const { leaderboards } = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
+  const parts = leaderboards.interlinkParts;
+  assert.equal(parts.current.label, "Season 1.1");
+  assert.deepEqual([parts.current.total, parts.current.stars, parts.current.weeksPlayed], [55000, 60, 1]);     // 1.0 doesn't count
+  assert.deepEqual([parts.current.rank, parts.current.players], [2, 2]);
+  assert.deepEqual(parts.current.weeks.map((w) => [w.cycle, w.total, w.current]), [["4000", 55000, true]]);
+  assert.deepEqual(parts.current.weeks[0].bosses.map((b) => [b.name, b.score, b.stars]), [["Alpha Scorchhowl", 21000, 20], ["Alpha Glameep", 34000, 40]]);
+  assert.ok(parts.current.weeks[0].bosses.every((b) => !b.proofId));                                     // no pictures sent
+  assert.deepEqual(parts.previous.map((p) => [p.label, p.season, p.split, p.total, p.weeksPlayed]), [["Season 1.0", 1, 3, 35000, 1]]);
+  assert.equal(JSON.stringify(parts).includes("30100000000"), false);                                    // never a UID
+
+  // the earlier part's link: My runs filtered to its best runs
+  const best = await historyOf(env, "/api/profile/history?page=1&split=3&best=1", SESSIONS.dev);
+  assert.deepEqual(best.runs.map((r) => r.score).sort(), [15000, 20000]);
+  assert.equal((await historyOf(env, "/api/profile/history?page=1&split=3", SESSIONS.dev)).total, 3);
+  assert.equal((await historyOf(env, "/api/profile/history?page=1&split=4", SESSIONS.dev)).total, 3);
+
+  // visitors (My runs made public) never see a hidden or an invalid run; the owner sees both
+  sqlite.prepare("UPDATE profiles SET is_public = 1, public_id = 'pubdev01', preferences_json = '{\"runsPublic\":true}' WHERE discord_id = ?").run(IDS.dev);
+  sqlite.prepare("UPDATE leaderboard_submissions SET status = 'hidden' WHERE client_run_id = 'o3'").run();
+  const owner = await historyOf(env, "/api/profile/history?page=1", SESSIONS.dev);
+  assert.equal(owner.total, 6);
+  assert.ok(owner.runs.some((r) => r.outcome === "invalid") && owner.runs.some((r) => r.hidden));
+  const visitor = await historyOf(env, "/api/profiles/pubdev01/history?page=1");
+  assert.equal(visitor.total, 4);
+  assert.ok(visitor.runs.every((r) => r.outcome !== "invalid" && !r.hidden));
+  // the public profile's card shows the same parts
+  const shown = await (await call(env, "/api/profiles/pubdev01")).json();
+  assert.equal(shown.leaderboards.interlinkParts.current.total, 55000);
 });
 
 test("at most DAILY_RUN_LIMIT new records an account a day; re-sends still go through", async () => {
@@ -2045,16 +2100,22 @@ test("profile visibility: Public shows every part, Custom only the ticked ones, 
   const view = async () => (await call(env, `/api/profiles/${publicId}`)).json();
   const listed = async () => (await (await call(env, "/api/profiles/directory")).json()).recent.map((row) => row.publicId);
   const found = async () => (await (await call(env, "/api/profiles/search?q=DevOne")).json()).results.map((row) => row.publicId);
-  // Public: everything
+  // Public: everything but My runs, which is private until its own switch says otherwise
   let shown = await view();
-  assert.deepEqual(shown.parts, ["standings", "history", "collection", "photos", "about", "directory"]);
+  assert.deepEqual(shown.parts, ["standings", "collection", "photos", "about", "directory"]);
   assert.equal(shown.profile.bio, "about me");
   assert.ok(shown.leaderboards);
-  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 200);
+  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 404);
   assert.deepEqual([await listed(), await found()], [[publicId], [publicId]]);
-  // Custom: everything private but Battle History and leaderboard standing
+  // My runs public: the list for anyone
+  const opened = await (await save({ visibility: "public", runsPublic: true })).json();
+  assert.equal(opened.profile.runsPublic, true);
+  assert.deepEqual((await view()).parts, ["standings", "history", "collection", "photos", "about", "directory"]);
+  assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 200);
+  // Custom: everything private but leaderboard standing; My runs keeps its own switch (Battle History isn't on the list)
   const custom = await (await save({ visibility: "custom", publicParts: ["history", "standings"] })).json();
-  assert.deepEqual([custom.profile.visibility, custom.profile.publicParts], ["custom", ["standings", "history"]]);
+  assert.deepEqual([custom.profile.visibility, custom.profile.publicParts, custom.profile.runsPublic], ["custom", ["standings", "history"], true]);
+  assert.deepEqual(JSON.parse(sqlite.prepare("SELECT preferences_json FROM profiles WHERE discord_id = ?").get(IDS.dev).preferences_json).visibility.parts, ["standings"]);
   shown = await view();
   assert.deepEqual(shown.parts, ["standings", "history"]);
   assert.equal(shown.profile.bio, null);                                   // about: private
@@ -2062,15 +2123,15 @@ test("profile visibility: Public shows every part, Custom only the ticked ones, 
   assert.ok(shown.leaderboards);                                           // standings: public
   assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 200);
   assert.deepEqual([await listed(), await found()], [[], []]);            // not in the directory or the search
-  // Custom without Battle History: its link is "not found"
-  await save({ visibility: "custom", publicParts: ["standings"] });
+  // My runs private again: its link is "not found"
+  await save({ visibility: "custom", publicParts: ["standings"], runsPublic: false });
   assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 404);
   // the owner still sees all of it
   assert.equal((await call(env, "/api/profile/history", { session: SESSIONS.dev })).status, 200);
   const own = await (await call(env, "/api/profile", { session: SESSIONS.dev })).json();
-  assert.deepEqual([own.profile.visibility, own.profile.publicParts], ["custom", ["standings"]]);
-  // Private: no page at all
-  await save({ visibility: "private" });
+  assert.deepEqual([own.profile.visibility, own.profile.publicParts, own.profile.runsPublic], ["custom", ["standings"], false]);
+  // Private: no page at all, My runs included, whatever its switch says
+  await save({ visibility: "private", runsPublic: true });
   assert.equal((await call(env, `/api/profiles/${publicId}`)).status, 404);
   assert.equal((await call(env, `/api/profiles/${publicId}/history`)).status, 404);
   // back to Public: the same link, everything again, and the Custom list is gone
@@ -2079,6 +2140,11 @@ test("profile visibility: Public shows every part, Custom only the ticked ones, 
   assert.equal(JSON.parse(sqlite.prepare("SELECT preferences_json FROM profiles WHERE discord_id = ?").get(IDS.dev).preferences_json || "{}").visibility, undefined);
   assert.equal((await save({ visibility: "secret" })).status, 400);
   assert.equal((await save({ visibility: "custom", publicParts: ["everything"] })).status, 400);
+  assert.equal((await save({ runsPublic: "yes" })).status, 400);
+  // a Custom list that ticked Battle History before the switch existed keeps it public
+  sqlite.prepare("UPDATE profiles SET preferences_json = ? WHERE discord_id = ?")
+    .run(JSON.stringify({ visibility: { mode: "custom", parts: ["standings", "history"] } }), IDS.dev);
+  assert.deepEqual((await view()).parts, ["standings", "history"]);
 });
 
 test("aLogs B2's Party screen as sent: the lead with level and CP, teammates by name, Season Buffs and an unsure offering", async () => {

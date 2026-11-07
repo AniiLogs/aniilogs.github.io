@@ -20,7 +20,7 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.15.0-my-runs">
+    <link rel="stylesheet" href="/styles.css?v=0.16.0-runs-public-interlink-tree">
     <link rel="stylesheet" href="/proof-viewer.css?v=0.1.0">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261104-build3857679-chests-r87" defer></script>
@@ -31,7 +31,7 @@
     <script src="/profile-cards.js?v=0.1.0" defer></script>
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
     <script src="/proof-viewer.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.12.0-my-runs" defer></script>
+    <script src="/app.js?v=0.13.0-runs-public-interlink-tree" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -278,6 +278,7 @@
             <label><span>Week</span><select data-history-filter="cycle"><option value="">All weeks</option></select></label>
             <label data-myruns-only hidden><span>Per page</span><select data-history-page-size><option value="20">20</option><option value="30">30</option><option value="50">50</option></select></label>
           </div>
+          <p class="myruns-scope" data-myruns-scope hidden></p>
           <p class="myruns-summary" data-myruns-summary data-myruns-only hidden></p>
           <div class="myruns-wrap" data-myruns-only hidden>
             <table class="myruns-table">
@@ -327,12 +328,19 @@
             <fieldset class="profile-parts" data-profile-parts hidden>
               <legend>Public parts</legend>
               <label><input type="checkbox" value="standings"> Leaderboard standing</label>
-              <label><input type="checkbox" value="history"> Battle History</label>
               <label><input type="checkbox" value="collection"> Collection</label>
               <label><input type="checkbox" value="photos"> Photos</label>
               <label><input type="checkbox" value="about"> About me and characters</label>
               <label><input type="checkbox" value="directory"> Show me in Online now, Recently joined and the player search</label>
             </fieldset>
+            <label class="profile-runs-visibility">
+              <span>Who can see My runs</span>
+              <select name="runsPublic" data-profile-runs-public>
+                <option value="private">Private: only me</option>
+                <option value="public">Public: on my public profile</option>
+              </select>
+            </label>
+            <small data-profile-runs-note>Every run aLogs captured for you, with your teammates and the pictures. Public shows the list and its link on your profile; hidden runs and invalid ones stay private.</small>
           </div>
           <label class="profile-public-toggle" data-profile-findable-row hidden>
             <input type="checkbox" name="findableByName" data-profile-findable>

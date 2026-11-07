@@ -1309,13 +1309,19 @@ async function getMapShare(id, env) {
 
 // What a profile shows to others. Public: every part. Private: nothing (the page is "not found"). Custom: the parts
 // its owner ticked. The owner always sees all of it. Online status keeps its own switch (Show my online status).
+// My runs ("history") has its own switch too, private unless its owner makes it public (the owner, 7 Nov): visitors
+// then see the list and its link, on a profile that is itself Public or Custom. A Custom list that ticked Battle
+// History before the switch existed counts as public until the switch is used.
 const PROFILE_PARTS = Object.freeze(["standings", "history", "collection", "photos", "about", "directory"]);
 function profileVisibility(isPublic, prefsJson) {
-  if (Number(isPublic) !== 1) return { mode: "private", parts: [] };
-  let visibility = null;
-  try { visibility = JSON.parse(prefsJson || "{}").visibility; } catch { visibility = null; }
-  if (visibility?.mode !== "custom") return { mode: "public", parts: [...PROFILE_PARTS] };
-  return { mode: "custom", parts: PROFILE_PARTS.filter((part) => (visibility.parts || []).includes(part)) };
+  let prefs = {};
+  try { prefs = JSON.parse(prefsJson || "{}") || {}; } catch { prefs = {}; }
+  const visibility = prefs.visibility;
+  const custom = visibility?.mode === "custom";
+  const runsPublic = typeof prefs.runsPublic === "boolean" ? prefs.runsPublic : custom && (visibility.parts || []).includes("history");
+  if (Number(isPublic) !== 1) return { mode: "private", parts: [], runsPublic };
+  const shown = (part) => (part === "history" ? runsPublic : !custom || (visibility.parts || []).includes(part));
+  return { mode: custom ? "custom" : "public", parts: PROFILE_PARTS.filter(shown), runsPublic };
 }
 // SQL: a profile that shows in Online now, Recently joined, the player search and the sitemap (alias p)
 const LISTED_PROFILE = `(p.is_public = 1 AND p.public_id IS NOT NULL
@@ -1330,10 +1336,10 @@ async function ownProfile(request, env) {
   ).bind(account.discordId).first();
   const isPublic = Number(row?.isPublic || 0) === 1;
   const { prefs, ...shown } = row || {};
-  const { mode, parts } = profileVisibility(row?.isPublic, prefs);
+  const { mode, parts, runsPublic } = profileVisibility(row?.isPublic, prefs);
   // profileUid: the main character's game UID, the address of the profile link (?profile=<UID>)
   const main = await mainCharacter(env, account.discordId);
-  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
+  return json({ profile: { ...shown, isPublic, visibility: mode, publicParts: parts, runsPublic, findableByName: Number(row?.findableByName || 0) === 1, showPresence: Number(row?.showPresence ?? 1) === 1, listedInSearch: Number(row?.listedInSearch ?? 1) === 1, publicId: isPublic ? row?.publicId || null : null, profileUid: main?.gameUid || null } });
 }
 
 async function updateOwnProfile(request, env) {
@@ -1363,6 +1369,9 @@ async function updateOwnProfile(request, env) {
   if (body.listedInSearch !== undefined && typeof body.listedInSearch !== "boolean") {
     return json({ error: "listedInSearch must be true or false." }, 400);
   }
+  if (body.runsPublic !== undefined && typeof body.runsPublic !== "boolean") {
+    return json({ error: "runsPublic must be true or false." }, 400);
+  }
   if (body.visibility !== undefined && !["public", "private", "custom"].includes(body.visibility)) {
     return json({ error: "visibility must be public, private or custom." }, 400);
   }
@@ -1390,13 +1399,18 @@ async function updateOwnProfile(request, env) {
   }
   // Custom: the parts it shows (kept in preferences_json); Public or Private drop the list
   if (body.visibility) {
-    const custom = body.visibility === "custom" ? JSON.stringify({ mode: "custom", parts: PROFILE_PARTS.filter((part) => (body.publicParts || []).includes(part)) }) : null;
+    // My runs ("history") isn't on the Custom list: it has its own switch (runsPublic)
+    const custom = body.visibility === "custom" ? JSON.stringify({ mode: "custom", parts: PROFILE_PARTS.filter((part) => part !== "history" && (body.publicParts || []).includes(part)) }) : null;
     await env.DB.prepare(`UPDATE profiles SET preferences_json = CASE WHEN ? IS NULL THEN json_remove(COALESCE(preferences_json, '{}'), '$.visibility')
       ELSE json_set(COALESCE(preferences_json, '{}'), '$.visibility', json(?)) END WHERE discord_id = ?`).bind(custom, custom, account.discordId).run();
   }
+  if (typeof body.runsPublic === "boolean") {
+    await env.DB.prepare("UPDATE profiles SET preferences_json = json_set(COALESCE(preferences_json, '{}'), '$.runsPublic', json(?)) WHERE discord_id = ?")
+      .bind(body.runsPublic ? "true" : "false", account.discordId).run();
+  }
   const saved = await env.DB.prepare("SELECT preferences_json AS prefs FROM profiles WHERE discord_id = ?").bind(account.discordId).first();
-  const { mode, parts } = profileVisibility(isPublic ? 1 : 0, saved?.prefs);
-  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
+  const { mode, parts, runsPublic } = profileVisibility(isPublic ? 1 : 0, saved?.prefs);
+  return json({ ok: true, profile: { displayName, bio: bio || null, isPublic, visibility: mode, publicParts: parts, runsPublic, findableByName, showPresence, listedInSearch, publicId: isPublic ? publicId : null, updatedAt: now } });
 }
 
 // ---------------------------------------------------------------- profile overview
@@ -1601,6 +1615,7 @@ async function ownProfileOverview(request, env) {
     const standings = await Promise.all(kinds.map((kind) => boardStandings(env, account.discordId, kind)));
     leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
     leaderboards.interlinkSeason = await interlinkSeasonStanding(env, account.discordId);
+    leaderboards.interlinkParts = await interlinkProfileParts(env, account.discordId);
   }
   return json({
     profile: {
@@ -1609,6 +1624,7 @@ async function ownProfileOverview(request, env) {
       avatarUrl: account.avatarUrl,
       isPublic: Number(profile?.isPublic || 0) === 1,
       visibility: profileVisibility(profile?.isPublic, profile?.prefs).mode,
+      runsPublic: profileVisibility(profile?.isPublic, profile?.prefs).runsPublic,
       ...(Number(profile?.isPublic || 0) === 1 && profile?.publicId ? { publicId: profile.publicId } : {}),
       // the main character's game UID: the profile link's address (?profile=<UID>)
       profileUid: main?.gameUid || null,
@@ -1804,12 +1820,13 @@ const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle,
 async function battleHistory(env, discordId, params, { owner }) {
   const uids = ((await env.DB.prepare("SELECT game_uid AS uid FROM game_characters WHERE discord_id = ?").bind(discordId).all()).results || [])
     .map((row) => String(row.uid)).filter((uid) => /^\d{4,24}$/u.test(uid)).slice(0, 10);
+  // a visitor sees what the public boards show: never a hidden run, nor an invalid one (quit: on no board)
   const own = `SELECT ${HISTORY_COLUMNS}, 0 AS credited FROM leaderboard_submissions c
-    WHERE c.discord_id = ?1 AND c.kind <> 'interlink_week'${owner ? "" : " AND c.status = 'visible'"}`;
+    WHERE c.discord_id = ?1 AND c.kind <> 'interlink_week'${owner ? "" : " AND c.status = 'visible' AND COALESCE(c.outcome, '') <> 'invalid'"}`;
   // a teammate's copy: only through a UID of this account's that's proven (or confirmed in that party), and not a
   // run this player also sent themselves (same game instance)
   const credited = uids.length ? `SELECT ${HISTORY_COLUMNS}, 1 AS credited FROM leaderboard_submissions c
-    WHERE c.kind = 'interlink_run' AND c.status = 'visible' AND c.discord_id <> ?1
+    WHERE c.kind = 'interlink_run' AND c.status = 'visible' AND c.discord_id <> ?1${owner ? "" : " AND COALESCE(c.outcome, '') <> 'invalid'"}
       AND (${uids.map((uid) => `instr(c.players_json, '"${uid}"') > 0`).join(" OR ")})
       AND EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
         WHERE gc.discord_id = ?1 AND json_extract(pl.value, '$.ai') = 0
@@ -1829,9 +1846,21 @@ async function battleHistory(env, discordId, params, { owner }) {
   const binds = [discordId];
   const mode = LEADERBOARD_MODES.includes(params.get("mode")) ? params.get("mode") : "";
   if (mode) { where.push(`mode = ?${binds.push(mode)}`); }
-  // My runs (the owner's own view only): menu bests on their own, and the search box
-  if (owner && params.get("mode") === "menu") where.push("kind = 'interlink_best'");
-  if (owner) where.push(...historySearch(params, binds));
+  // My runs: menu bests on their own, and the search box
+  if (params.get("mode") === "menu") where.push("kind = 'interlink_best'");
+  where.push(...historySearch(params, binds));
+  // a part of an Interlink season (?split=<week id block>, Season 1.0 is 3, 1.1 is 4), and with ?best=1 only the
+  // runs that are this player's best of each boss and week in it (as the boards and the season totals count them)
+  const split = /^\d{1,4}$/u.test(String(params.get("split") || "")) ? Number(params.get("split")) : null;
+  if (split !== null) {
+    where.push(`mode = 'interlink' AND CAST(cycle AS INTEGER) / ${INTERLINK_RULES.splitBlock} = ?${binds.push(split)}`);
+    if (params.get("best") === "1") {
+      const list = await interlinkCycles(env);
+      const cycles = list.filter((cycle) => interlinkSplitOf(cycle.id) === split).map((cycle) => cycle.id);
+      const ids = (await interlinkBests(env, cycles, list)).filter((row) => row.discordId === discordId).map((row) => row.runId);
+      where.push(ids.length ? `submission_id IN (${ids.map((id) => `?${binds.push(id)}`).join(", ")})` : "0");
+    }
+  }
   const boss = String(params.get("boss") || "");
   if (/^[A-Za-z0-9_-]{1,40}$/u.test(boss)) where.push(`boss_id = ?${binds.push(boss)}`);
   const cycle = String(params.get("cycle") || "");
@@ -1842,8 +1871,8 @@ async function battleHistory(env, discordId, params, { owner }) {
   const page = before
     ? `SELECT * FROM (${filtered}) WHERE at < ?${binds.push(Number(before[1]))} OR (at = ?${binds.length} AND submission_id < ?${binds.push(before[2])})`
     : filtered;
-  // My runs pages by number (?page=, 20, 30 or 50 a page) with the total; everyone else by "before"
-  const pageNumber = owner && !before ? Number.parseInt(params.get("page") || "", 10) : NaN;
+  // My runs pages by number (?page=, 20, 30 or 50 a page) with the total; the profile card by "before"
+  const pageNumber = !before ? Number.parseInt(params.get("page") || "", 10) : NaN;
   const numbered = Number.isInteger(pageNumber) && pageNumber >= 1 && pageNumber <= 10000;
   const limit = numbered ? (HISTORY_PAGE_SIZES.includes(Number(params.get("limit"))) ? Number(params.get("limit")) : HISTORY_PAGE)
     : Math.min(Math.max(Number.parseInt(params.get("limit") || String(HISTORY_PAGE), 10) || HISTORY_PAGE, 1), 50);
@@ -1856,7 +1885,7 @@ async function battleHistory(env, discordId, params, { owner }) {
   // My runs: a run whose stars and score a menu best of the same boss and week matches opens with the menu's picture
   // beside its own (as on the boards, menuProofId)
   const menuOf = new Map();
-  if (owner && rows.some((row) => row.kind === "interlink_run")) {
+  if (rows.some((row) => row.kind === "interlink_run")) {
     const { results: menus } = await env.DB.prepare(
       `SELECT submission_id AS id, cycle, boss_id AS bossId, stars, score FROM leaderboard_submissions
        WHERE discord_id = ? AND kind = 'interlink_best' AND status = 'visible' AND evidence_key IS NOT NULL ORDER BY created_at ASC`,
@@ -1880,7 +1909,7 @@ async function battleHistory(env, discordId, params, { owner }) {
       facet(`SELECT cycle AS value, COUNT(*) AS count FROM (${all}) WHERE cycle IS NOT NULL AND mode = 'interlink' GROUP BY cycle ORDER BY CAST(cycle AS INTEGER) DESC`),
     ]);
     filters = { modes, bosses, weeks: weeks.map((row) => ({ ...row, ...weekDates(row.value) })) };
-    if (owner) {
+    {
       const [menus] = await facet(`SELECT COUNT(*) AS count FROM (${all}) WHERE kind = 'interlink_best'`);
       if (menus?.count) filters.modes.push({ value: "menu", count: menus.count });
     }
@@ -1936,7 +1965,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         captures: Math.max(1, Number(row.captures) || 0),     // how many players' apps captured this run
         proofPrunedAt: row.proof_pruned_at || null,
         check: runCheckBadge(row.verify_state),
-        ...(owner && row.kind === "interlink_run" && menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`)
+        ...(row.kind === "interlink_run" && menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`)
           ? { menuProofId: menuOf.get(`${row.cycle}|${row.boss_id}|${row.stars}|${row.score}`) } : {}),
         ...(owner && row.status !== "visible" ? { hidden: true } : {}),
         playedAt: row.played_at || row.created_at,
@@ -2150,6 +2179,7 @@ async function publicProfile(request, env, id) {
     const standings = await Promise.all(kinds.map((kind) => boardStandings(env, profile.discordId, kind)));
     leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index].map(({ gameUid, ...entry }) => entry)]));
     leaderboards.interlinkSeason = await interlinkSeasonStanding(env, profile.discordId);
+    leaderboards.interlinkParts = await interlinkProfileParts(env, profile.discordId);
   }
   return json({
     // the display name only when its owner lets players find them by it; otherwise their main character's name
@@ -4365,6 +4395,81 @@ async function interlinkSeasonStanding(env, discordId, season = null) {
   if (!mine) return { season, total: 0, stars: 0, weeks: 0, rank: null, players: totals.size };
   const rank = 1 + [...totals.values()].filter((p) => p.total > mine.total || (p.total === mine.total && p.firstAt < mine.firstAt)).length;
   return { season, total: mine.total, stars: mine.stars, weeks: mine.weeks.size, rank, players: totals.size };
+}
+
+// A player's Interlink by season part, for the profile's Interlink card. A part is a split of a season (Season 1.0 is
+// weeks 3000-3005, 1.1 started at the 4000 reset): its total only counts its own weeks (the owner, 7 Nov: 1.0's scores
+// never count toward 1.1). The current part comes with its weeks, newest first, each with this player's best of each
+// boss (as the boards count them); earlier parts with their totals only. Ranks are among every player on the boards.
+async function interlinkProfileParts(env, discordId) {
+  const list = await interlinkCycles(env);
+  if (!list.length) return null;
+  const now = Math.floor(Date.now() / 1000);
+  const currentWeek = currentInterlinkCycle(list, now);
+  const parts = new Map();
+  for (const season of interlinkSeasons(list)) {
+    season.splits.forEach((split, index) => {
+      const label = season.season >= 1 ? `Season ${season.season}.${index}`
+        : season.splits.length > 1 ? `${season.label} · ${split.label}` : season.label;
+      parts.set(`${season.season}|${split.id}`, { season: season.season, split: split.id, label, start: split.start, end: split.end, cycles: [] });
+    });
+  }
+  for (const cycle of list) parts.get(`${cycle.season}|${interlinkSplitOf(cycle.id)}`)?.cycles.push(cycle);
+  const rows = await interlinkBests(env, list.map((cycle) => cycle.id), list);
+  const partOf = (cycleId) => {
+    const cycle = interlinkCycle(list, cycleId);
+    return cycle ? parts.get(`${cycle.season}|${interlinkSplitOf(cycle.id)}`) : null;
+  };
+  // every player's total in every part, for the ranks
+  const totals = new Map();             // part -> Map(player -> { total, firstAt })
+  for (const row of rows) {
+    const part = partOf(row.cycle);
+    if (!part) continue;
+    const players = totals.get(part) || new Map();
+    const player = players.get(row.discordId) || { total: 0, firstAt: row.firstAt };
+    player.total += Number(row.score) || 0;
+    player.firstAt = Math.min(player.firstAt, row.firstAt);
+    players.set(row.discordId, player);
+    totals.set(part, players);
+  }
+  const mine = rows.filter((row) => row.discordId === discordId);
+  const summary = (part) => {
+    const players = totals.get(part) || new Map();
+    const own = mine.filter((row) => partOf(row.cycle) === part);
+    const me = players.get(discordId);
+    const rank = me ? 1 + [...players.values()].filter((p) => p.total > me.total || (p.total === me.total && p.firstAt < me.firstAt)).length : null;
+    return {
+      season: part.season, split: part.split, label: part.label, start: part.start, end: part.end,
+      total: own.reduce((sum, row) => sum + (Number(row.score) || 0), 0),
+      stars: own.reduce((sum, row) => sum + (Number(row.stars) || 0), 0),
+      weeksPlayed: new Set(own.map((row) => row.cycle)).size, rank, players: players.size,
+    };
+  };
+  const current = partOf(currentWeek.id);
+  const weeks = current ? current.cycles.filter((cycle) => cycle.start <= now).sort((a, b) => b.start - a.start).map((cycle) => {
+    const bests = mine.filter((row) => row.cycle === cycle.id);
+    const slot = (bossId) => (cycle.bosses || []).findIndex((boss) => String(boss.id) === String(bossId));
+    return {
+      cycle: cycle.id, start: cycle.start, end: cycle.end, current: cycle.id === currentWeek.id,
+      total: bests.reduce((sum, row) => sum + (Number(row.score) || 0), 0),
+      stars: bests.reduce((sum, row) => sum + (Number(row.stars) || 0), 0),
+      bosses: bests.sort((a, b) => slot(a.bossId) - slot(b.bossId)).map((row) => ({
+        id: row.bossId, name: bossLabel(cycle, row), score: row.score, stars: row.stars, outcome: row.outcome || null,
+        clearTimeS: row.clearTimeS ?? null, runTimeS: row.runTimeS ?? null, runId: row.runId,
+        ...(row.hasProof ? { proofId: row.runId } : {}), ...(row.menuProofId ? { menuProofId: row.menuProofId } : {}),
+      })),
+    };
+  }).filter((week) => week.bosses.length) : [];
+  return {
+    current: current ? { ...summary(current), weeks } : null,
+    previous: [...parts.values()].filter((part) => part !== current && part.start < (current?.start ?? Infinity))
+      .sort((a, b) => b.start - a.start).map(summary).filter((part) => part.weeksPlayed),
+  };
+}
+// a boss as the boards name it: a two-boss fight by both bosses
+function bossLabel(cycle, row) {
+  const boss = (cycle.bosses || []).find((item) => String(item.id) === String(row.bossId));
+  return boss?.second?.name ? `${boss.name || row.bossName} + ${boss.second.name}` : row.bossName || boss?.name || null;
 }
 
 async function interlinkBoards(request, env) {
