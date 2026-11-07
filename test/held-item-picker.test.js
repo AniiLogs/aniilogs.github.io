@@ -56,3 +56,43 @@ test("the Legendary-only toggle is remembered", () => {
   H.setLegendaryOnly(false);
   assert.equal(H.legendaryOnly(), false);
 });
+
+test("until one is picked, an Aniimo holds its signature item, else the game's first recommended one, at Legendary", () => {
+  const fang = { name: "Ferocious Fang", tiers: [{ item_id: 551002, quality: 3 }, { item_id: 552002, quality: 4 }, { item_id: 553002, quality: 5 }] };
+  const needle = { name: "Lightning Needle", tiers: [{ item_id: 553020, quality: 5 }] };
+  const team = {
+    ...data,
+    forms: {
+      1: { recommended: { held_items: [fang, needle] } }, // Needle recommended only in this line: its signature item
+      2: { recommended: { held_items: [fang, needle] } }, // evolves from 1
+      3: { recommended: { held_items: [fang] } },
+      4: { recommended: { held_items: [] } },
+    },
+  };
+  const aniilog = { entries: [
+    { form_id: 1, evolution: { from: [], to: [{ id: "aniimo:2" }] } },
+    { form_id: 2, evolution: { from: [{ id: "aniimo:1" }], to: [] } },
+    { form_id: 3, evolution: { from: [], to: [] } },
+  ] };
+  const json = (value) => JSON.stringify(value);
+  assert.equal(json(H.defaultFor(team, aniilog, "1")), json({ itemId: "553020", level: 15 }));
+  assert.equal(json(H.defaultFor(team, aniilog, "2")), json({ itemId: "553020", level: 15 }));
+  // Fang is recommended for 1 and 2 too, so it isn't 3's signature item; it's still the first recommended.
+  assert.equal(json(H.defaultFor(team, aniilog, "3")), json({ itemId: "553002", level: 15 }));
+  assert.equal(H.defaultFor(team, aniilog, "4"), null);
+  // Without the evolution data, Needle is recommended outside form 1 alone, so it falls back to Fang.
+  assert.equal(json(H.defaultFor(team, null, "1")), json({ itemId: "553002", level: 15 }));
+  // A pick wins; "No held item" (null) stays none; nothing picked (undefined) gets the default.
+  assert.equal(json(H.chosen(team, aniilog, "1", { itemId: 551002 })), json({ itemId: "551002", level: 5 }));
+  assert.equal(H.chosen(team, aniilog, "1", null), null);
+  assert.equal(json(H.chosen(team, aniilog, "1", undefined)), json({ itemId: "553020", level: 15 }));
+});
+
+test("another form of the same species (a Prismana form with no evolution listed) is in the line", () => {
+  const needle = { name: "Lightning Needle", tiers: [{ item_id: 553020, quality: 5 }] };
+  const fang = { name: "Ferocious Fang", tiers: [{ item_id: 553002, quality: 5 }] };
+  const team = { ...data, forms: { 10: { recommended: { held_items: [fang, needle] } }, 11: { recommended: { held_items: [fang, needle] } }, 12: { recommended: { held_items: [fang] } } } };
+  const aniilog = { entries: [{ form_id: 10, base_id: 9, evolution: {} }, { form_id: 11, base_id: 9, evolution: {} }, { form_id: 12, base_id: 8, evolution: {} }] };
+  assert.equal(H.defaultFor(team, aniilog, "11")?.itemId, "553020");
+  assert.equal(H.defaultFor(team, aniilog, "12")?.itemId, "553002");
+});
