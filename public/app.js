@@ -1361,7 +1361,7 @@ async function loadHistoryCard() {
     if (!runs.length) { body.replaceChildren(element("p", "", "No runs captured yet. aLogs adds every run it sees here.")); return; }
     const list = element("ol", "profile-history-list is-compact");
     list.append(...runs.map((run) => historyRow(run)));
-    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all runs");
+    const more = element("a", "history-see-all", historyPath === "/profile/history" ? "See all my runs" : "See all recent runs");
     more.href = historyLink(true);
     body.replaceChildren(list, more);
   } catch {
@@ -1577,7 +1577,7 @@ function startMyRuns(publicId = null) {
   myRuns.pageSize = myRunsPageSize();
   myRuns.scope = runsScopeFromAddress();
   historyFull.classList.add("is-my-runs");
-  historyFull.querySelector("#history-title").textContent = publicId ? "Runs" : "My runs";
+  historyFull.querySelector("#history-title").textContent = publicId ? "Recent runs" : "My runs";
   historyFull.querySelector("[data-history-intro]").textContent = publicId
     ? "Every run aLogs captured for this player, newest first, including runs a teammate's app captured with them in the party, and their menu bests."
     : `${runsArePublic ? "Public: visitors to your profile see this list too" : "Only you can see this list"}: every run aLogs captured for you, newest first, `
@@ -1646,13 +1646,13 @@ function showBattleHistory(publicId) {
       startMyRuns(publicId);
     }
   } else {
-    // your own profile's card leads to My runs (and says who else sees it); a visitor's to Runs
+    // your own profile's card leads to My runs (and says who else sees it); a visitor's to Recent runs
     const panel = profileOverview.querySelector('[data-overview-panel="history"]');
-    panel.querySelector("h3").textContent = publicId ? "Runs" : "My runs";
+    panel.querySelector("h3").textContent = publicId ? "Recent runs" : "My runs";
     let note = panel.querySelector("[data-history-visibility]");
     if (!publicId) {
       if (!note) { note = element("p", "history-visibility"); note.dataset.historyVisibility = ""; panel.querySelector("h3").after(note); }
-      note.textContent = runsArePublic ? "Public: visitors to your profile see this list." : "Private: only you see this list. Change it in Edit profile.";
+      note.textContent = runsArePublic ? "Public: visitors to your profile see this list as Recent runs." : "Private: only you see this list. Change it in Edit profile.";
     } else note?.remove();
     void loadHistoryCard();
   }
