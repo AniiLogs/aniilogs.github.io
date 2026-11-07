@@ -4190,7 +4190,9 @@ function clearedSql(kind, list = []) {
   return `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE ${[...bySent, ...bySlot, ...byWeek].join(" ")} ELSE ${Math.min(...INTERLINK_RULES.starCaps[0].clear)} END)`;
 }
 
-// Each player's one best run per (week, boss) - most stars, then highest score, then the first to get there - and
+// Each player's one best run per (week, boss) - most stars, then highest score, then a run over a best sent from the
+// game's menu (the owner, 7 Nov: a run that ties the menu's best has the full proof, and the row kept the menu's), then
+// the first to get there - and
 // everything on their row (score, clear, DPS, BREAK, damage, healing, team DPS) is that run's, its pictures the proof
 // for all of it (the owner, 2 Nov: a row is one run, not each figure's best from a different run). With each
 // player's in-game name and public profile id (if public).
@@ -4217,7 +4219,8 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
        s.created_at AS firstAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
-             ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC, r.created_at ASC) AS pick
+             ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
+               CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.created_at ASC) AS pick
            FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_RUNS} c) r
            WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}

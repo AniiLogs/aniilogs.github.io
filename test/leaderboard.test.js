@@ -777,6 +777,22 @@ test("two app users sending the same run vouch for each other: each teammate slo
   assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side
 });
 
+test("a run that ties the menu's best takes its board row (it has the full proof)", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  await call(env, "/api/leaderboard/characters", { token: a, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
+  const send = (body) => call(env, "/api/leaderboard/submissions", { token: a, method: "POST", body });
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  // the menu's best arrives first, then the run that made it: same stars, same score
+  assert.equal((await send({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 25000, stars: 20 })).status, 201);
+  assert.ok([200, 201].includes((await send(run("tie", { boss: sherro, score: 25000, stars: 20, clearTimeS: 150, cleared: true,
+    gameUid: "302000000001", players: [{ name: "MinMax", ai: false, self: true }] }))).status));
+  const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
+    .find((e) => e.player === "MinMax");
+  assert.equal(row.score, 25000);
+  assert.equal(row.clearTimeS, 150);                        // the run's row, not the menu's (which has no clock)
+});
+
 test("only runs played and sent within five minutes vouch; prep-screen scores and late runs never do", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const a = await desktopToken(env, SESSIONS.dev);
