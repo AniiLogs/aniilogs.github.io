@@ -71,7 +71,7 @@
       paragraphs: [
         "Your week's score is your best score on each Alpha, added up. Your week's stars work the same way. Each route keeps its own best, so a bad run never lowers what you already have.",
         "Season stars are your best stars on every Alpha of every week of the season, added up. They unlock buffs (next section), so going back for stars on an earlier week still pays off while the season lasts.",
-        "The game's own leaderboards: one personal board, ranked by your best total score this period, and a team board per route, ranked by best result. Prizes go to ranks 1–2, 3–10, 11–30 and 31–100.",
+        "The game's own leaderboards: one personal board, ranked by your best total score this period, and a team board per route, ranked by best result. Trophies go to ranks 1–2, 3–10, 11–30 and 31–100.",
       ],
     },
     {
