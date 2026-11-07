@@ -38,3 +38,21 @@ test("every dropdown on the Team Builder, 1v1 and potential editor gets the type
     assert.equal(enhanced, selects, `${name}: ${selects} selects, ${enhanced} enhanced`);
   }
 });
+
+test("saved teams are renamed from a small Rename on each row of the list, not a Rename button or prompt", async () => {
+  const team = await readFile(new URL("../public/explorer/team-builder.js", import.meta.url), "utf8");
+  assert.doesNotMatch(team, /button\("Rename"/u);
+  assert.doesNotMatch(team, /window\.prompt\("Team name:"/u);
+  assert.match(team, /rename: \{ label: "Rename", applies: \(option\) => option\.value !== "__new__", onRename: renameLoadout \}/u);
+  assert.match(team, /function renameLoadout\(id, requested\)/u);
+  // Import, Export and Delete stay.
+  for (const label of ["Import", "Export", "Delete"]) assert.ok(team.includes(`button("${label}", "team-loadout-action"`), label);
+  // The picker: the row action keeps its clicks (the name still picks), the row edits in place,
+  // Enter or clicking away saves, Esc cancels, and the list stays open while editing.
+  assert.match(picker, /className = "aniimo-picker-row-action"/u);
+  assert.match(picker, /event\.stopPropagation\(\);\r?\n\s+if \(editing\) \{ endEdit\(\); return; \}\r?\n\s+editRow\(item, entry\);/u);
+  assert.match(picker, /if \(event\.key === "Enter"\) \{ event\.preventDefault\(\); finish\(true\); \}/u);
+  assert.match(picker, /else if \(event\.key === "Escape"\) \{ event\.preventDefault\(\); finish\(false\); \}/u);
+  assert.match(picker, /box\.addEventListener\("blur", \(\) => finish\(true\)\);/u);
+  assert.match(picker, /input\.addEventListener\("blur", \(\) => \{ if \(editing\) return; close\(\); showSelected\(\); \}\);/u);
+});

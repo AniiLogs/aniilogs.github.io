@@ -32,12 +32,17 @@
         || Number(a.item.quality) - Number(b.item.quality));
   }
 
-  // A saved { itemId, level } as the picker uses it: a listed item at its rarity's top level, or null.
+  // A saved { itemId, level } as the picker uses it, or null: a listed item at its level, kept between 0 (a new
+  // item: level 1 takes 100 exp, core_carry_level_data) and its rarity's top level; no level means the top level.
   function normalize(data, heldItem) {
     const id = heldItem?.itemId ? String(heldItem.itemId) : "";
     const item = data?.held_item_catalog?.[id];
     if (!id || !isListed(item)) return null;
-    return { itemId: id, level: maxLevel(data, item.quality) };
+    const top = maxLevel(data, item.quality);
+    const raw = heldItem.level;
+    const level = raw === undefined || raw === null || raw === "" || !Number.isFinite(Number(raw))
+      ? top : Math.min(top, Math.max(0, Math.round(Number(raw))));
+    return { itemId: id, level };
   }
 
   // The form ids in formId's evolution line: aniilog entries' evolution.from / .to ("aniimo:<form id>"), and
@@ -152,7 +157,7 @@
         option.value = id;
         const rarity = item.quality_label || `quality ${item.quality}`;
         const effect = describe(item, data);
-        option.textContent = `${item.name} (${rarity}, Lv ${maxLevel(data, item.quality)})${effect ? ` · ${effect}` : ""}`;
+        option.textContent = `${item.name} (${rarity}, up to Lv ${maxLevel(data, item.quality)})${effect ? ` · ${effect}` : ""}`;
         option.dataset.search = item.stats.map((stat) => stat.label).join(" ");
         group.append(option);
       }
@@ -164,16 +169,37 @@
     return picker?.wrap || select;
   }
 
-  // render({ data, formId, itemId, onChange(heldItem | null), label }) -> element.
-  function render({ data, formId, itemId, onChange, label = "Held item" }) {
-    let current = normalize(data, { itemId })?.itemId || "";
+  // The item level control: 0 up to the item's rarity's top level (Rare 5, Epic 10, Legendary 15).
+  function buildLevel(data, held, onChange, label) {
+    const select = document.createElement("select");
+    select.className = "potential-select held-item-level";
+    select.setAttribute("aria-label", `${label} level`);
+    const item = held ? data?.held_item_catalog?.[held.itemId] : null;
+    const top = item ? maxLevel(data, item.quality) : 0;
+    for (let level = 0; level <= top; level += 1) {
+      const option = document.createElement("option");
+      option.value = String(level);
+      option.textContent = `Lv ${level}`;
+      select.append(option);
+    }
+    select.value = String(held?.level ?? 0);
+    select.disabled = !held;
+    select.addEventListener("change", () => onChange(Number(select.value)));
+    return select;
+  }
+
+  // render({ data, formId, itemId, level, onChange(heldItem | null), label }) -> element. A new item starts at its
+  // top level; the level control changes it.
+  function render({ data, formId, itemId, level, onChange, label = "Held item" }) {
+    let held = normalize(data, { itemId, level });
+    let current = held?.itemId || "";
     const field = document.createElement("div");
     field.className = "potential-field held-item-field";
     const head = document.createElement("div");
     head.className = "held-item-head";
     const caption = document.createElement("span");
     caption.className = "potential-field-label";
-    caption.textContent = `${label} · top level`;
+    caption.textContent = label;
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.checked = legendaryOnly();
@@ -181,15 +207,35 @@
     toggleLabel.className = "held-item-toggle";
     toggleLabel.append(toggle, document.createTextNode("Legendary only"));
     head.append(caption, toggleLabel);
-    const pick = (heldItem) => { current = heldItem?.itemId || ""; onChange(heldItem); };
+    const row = document.createElement("div");
+    row.className = "held-item-row";
+    let levelControl = null;
+    const setLevel = (value) => {
+      held = normalize(data, { itemId: current, level: value });
+      onChange(held);
+    };
+    const showLevel = () => {
+      const next = buildLevel(data, held, setLevel, label);
+      if (levelControl) levelControl.replaceWith(next);
+      else row.append(next);
+      levelControl = next;
+    };
+    const pick = (heldItem) => {
+      held = heldItem;
+      current = heldItem?.itemId || "";
+      showLevel();
+      onChange(heldItem);
+    };
     let control = buildPicker(data, formId, current, toggle.checked, pick, label);
+    row.append(control);
+    showLevel();
     toggle.addEventListener("change", () => {
       setLegendaryOnly(toggle.checked);
       const next = buildPicker(data, formId, current, toggle.checked, pick, label);
       control.replaceWith(next);
       control = next;
     });
-    field.append(head, control);
+    field.append(head, row);
     return field;
   }
 

@@ -210,7 +210,12 @@
     // Build tab card calculator: personality letters (one per pair) and one held item with its level.
     if (Array.isArray(value?.personality)) member.personality = value.personality.map(String).filter((letter) => /^[EISNTFJP]$/u.test(letter)).slice(0, 4);
     if (value?.heldItem && Number.isFinite(Number(value.heldItem.itemId))) {
-      member.heldItem = { itemId: String(value.heldItem.itemId), level: Math.max(0, Math.round(Number(value.heldItem.level) || 0)) };
+      // No saved level means the item's top level (held-item-picker.js normalize).
+      member.heldItem = { itemId: String(value.heldItem.itemId) };
+      const level = value.heldItem.level;
+      if (level !== undefined && level !== null && level !== "" && Number.isFinite(Number(level))) {
+        member.heldItem.level = Math.max(0, Math.round(Number(level)));
+      }
     } else if (value?.heldItem === null) {
       // "No held item" picked on purpose; unset means the default (held-item-picker.js defaultFor).
       member.heldItem = null;
@@ -336,10 +341,10 @@
     render();
   }
 
-  function renameLoadout() {
-    const loadout = activeLoadout();
-    const requested = window.prompt("Team name:", loadout.name);
-    if (requested === null) return;
+  // From the saved-team list's "Rename" on that team's row (aniimo-picker.js rename).
+  function renameLoadout(id, requested) {
+    const loadout = store.loadouts.find((entry) => entry.id === id);
+    if (!loadout) return;
     const name = cleanName(requested, loadout.name);
     if (store.loadouts.some((entry) => entry.id !== loadout.id && entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       status = `A team named ${name} already exists.`;
@@ -1318,7 +1323,11 @@
     });
     selector.setAttribute("aria-label", "Saved team");
     field.append(selector);
-    window.AniilogsPicker?.enhance(selector, { placeholder: "Type a team name", emptyText: "No team matches" });
+    window.AniilogsPicker?.enhance(selector, {
+      placeholder: "Type a team name",
+      emptyText: "No team matches",
+      rename: { label: "Rename", applies: (option) => option.value !== "__new__", onRename: renameLoadout },
+    });
     const fileInput = el("input");
     fileInput.type = "file";
     fileInput.accept = ".aniiteam,application/json";
@@ -1330,7 +1339,6 @@
     });
     const actions = el("div", "team-loadout-actions");
     actions.append(
-      button("Rename", "team-loadout-action", renameLoadout),
       button("Import", "team-loadout-action", () => fileInput.click()),
       button("Export", "team-loadout-action", exportLoadout),
       button("Delete", "team-loadout-action", deleteLoadout),
@@ -1867,7 +1875,7 @@
 
   const PERSONALITY_ORDER = "EISNTFJP";
 
-  // A held item as the card shows it (at its rarity's top level, as the picker counts it), or null.
+  // A held item as the card shows it (at the level picked, else its rarity's top level), or null.
   function cardHeldItem(member) {
     const held = heldItemOf(member);
     const item = held ? data?.held_item_catalog?.[held.itemId] : null;
@@ -2139,7 +2147,7 @@
       cp.append(el("strong", "", "CP "), totals.cp.toLocaleString());
       box.append(cp);
     }
-    box.append(el("p", "team-data-note", "Card total = (base + Star-Up flat stats) × (1 + potential, personality, Star-Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at its rarity's top level (Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
+    box.append(el("p", "team-data-note", "Card total = (base + Star-Up flat stats) × (1 + potential, personality, Star-Up, held-item and Form Research percentages) + flat bonuses, as the game adds them up, rounded up. The held item counts at the level you pick (up to Rare 5, Epic 10, Legendary 15). Not included: held-item talents, which are rolled on each item."));
     if (Number.isFinite(totals.cp)) box.append(el("p", "team-data-note", "CP is the game's formula: species stats and level, your own potential, Star-Up, the held item, an enhanced Core skill, and the forms and Prismana forms you have caught."));
     return box;
   }

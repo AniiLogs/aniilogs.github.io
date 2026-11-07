@@ -15103,3 +15103,75 @@ html[data-theme] .catalog-itemlog-record {
   flex: 1 1 auto;
   min-width: 0;
 }
+
+.held-item-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.held-item-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.held-item-row .held-item-level {
+  flex: 0 0 auto;
+  width: 5.5em;
+}
+
+/* A row action in a picker list (aniimo-picker.js rename): small link-style text on the right of the name. */
+.aniimo-picker-option.has-row-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aniimo-picker-option.has-row-action > :not(.aniimo-picker-row-action) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aniimo-picker-row-action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.aniimo-picker-row-action:hover {
+  color: var(--accent);
+}
+
+.aniimo-picker-option.is-editing {
+  padding: 4px;
+  cursor: default;
+}
+
+.aniimo-picker-row-edit {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
+@media (pointer: coarse) {
+  .aniimo-picker-row-action {
+    padding: 6px 8px;
+  }
+
+  .aniimo-picker-row-edit {
+    font-size: 16px;
+  }
+}

@@ -99,7 +99,10 @@
   }
 
   // Returns { wrap, input, list, close }, or null when the select is missing or already enhanced.
-  function enhance(select, { placeholder = "Type to filter", emptyText = "No matches" } = {}) {
+  // rename: { label, applies(option), onRename(value, name) } adds a small link-style action on the right of each
+  // row it applies to (the Team Builder's saved teams). It edits that row's name in place: Enter or clicking away
+  // saves (onRename), Esc cancels. Clicking the name itself still picks it.
+  function enhance(select, { placeholder = "Type to filter", emptyText = "No matches", rename = null } = {}) {
     if (!select || select.dataset.pickerEnhanced) return null;
     select.dataset.pickerEnhanced = "true";
     const id = `aniimo-picker-${nextId += 1}`;
@@ -141,6 +144,11 @@
     let entries = entriesOf(select);
     let shown = [];
     let active = -1;
+    // While a row's name is being edited the list stays open though the box loses focus.
+    let editing = false;
+    let editor = null;
+    // A click elsewhere in the list while editing saves the edit (as clicking away does) instead of picking.
+    const endEdit = () => { if (editing && editor) editor.blur(); };
     const selectedText = () => select.selectedOptions[0]?.textContent || "";
     const showClear = () => { clear.hidden = !input.value || input.disabled; };
     const showSelected = () => { input.value = select.value ? selectedText() : ""; showClear(); };
@@ -172,6 +180,7 @@
     const viewport = window.visualViewport;
 
     function close() {
+      editing = false;
       window.removeEventListener("scroll", onMove, true);
       window.removeEventListener("resize", onMove);
       viewport?.removeEventListener("resize", onMove);
@@ -232,8 +241,29 @@
           item.classList.add("is-disabled");
           item.setAttribute("aria-disabled", "true");
         }
+        if (rename && rename.applies?.(entry.option) !== false) {
+          const action = document.createElement("button");
+          action.type = "button";
+          action.tabIndex = -1;
+          action.className = "aniimo-picker-row-action";
+          action.textContent = rename.label || "Rename";
+          action.setAttribute("aria-label", `${rename.label || "Rename"} ${entry.option.textContent}`);
+          action.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (editing) { endEdit(); return; }
+            editRow(item, entry);
+          });
+          item.classList.add("has-row-action");
+          item.append(action);
+        }
         // mousedown runs before the input's blur, so the pick isn't lost when the list closes.
-        item.addEventListener("mousedown", (event) => { event.preventDefault(); choose(index); });
+        item.addEventListener("mousedown", (event) => {
+          if (item.classList.contains("is-editing")) return;
+          event.preventDefault();
+          if (editing) { endEdit(); return; }
+          choose(index);
+        });
         list.append(item);
       });
       if (!shown.length) {
@@ -254,6 +284,39 @@
       place();
       input.setAttribute("aria-expanded", "true");
       setActive(shown.findIndex((entry) => !entry.option.disabled));
+    }
+
+    // The row becomes a text box with the name; Enter or clicking away saves, Esc cancels.
+    function editRow(item, entry) {
+      editing = true;
+      const box = document.createElement("input");
+      editor = box;
+      box.type = "text";
+      box.className = "aniimo-picker-row-edit";
+      box.value = entry.option.textContent;
+      box.maxLength = 80;
+      box.setAttribute("aria-label", `New name for ${entry.option.textContent}`);
+      item.classList.add("is-editing");
+      item.textContent = "";
+      item.append(editor);
+      let done = false;
+      const finish = (save) => {
+        if (done) return;
+        done = true;
+        const name = box.value;
+        editor = null;
+        close();
+        showSelected();
+        if (save && name.trim() && name.trim() !== entry.option.textContent) rename.onRename(entry.option.value, name);
+      };
+      box.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") { event.preventDefault(); finish(true); }
+        else if (event.key === "Escape") { event.preventDefault(); finish(false); }
+      });
+      box.addEventListener("blur", () => finish(true));
+      box.focus();
+      box.select();
     }
 
     function choose(index) {
@@ -280,7 +343,7 @@
       if (document.activeElement !== input) input.focus();
       render("");
     });
-    input.addEventListener("blur", () => { close(); showSelected(); });
+    input.addEventListener("blur", () => { if (editing) return; close(); showSelected(); });
     input.addEventListener("keydown", (event) => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();

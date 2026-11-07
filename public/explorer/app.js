@@ -7787,7 +7787,7 @@ function renderAfpStats(entry) {
   if (state.afpTeamData?.held_item_catalog && window.AniilogsHeldItems) {
     settings.heldItem = window.AniilogsHeldItems.normalize(state.afpTeamData, settings.heldItem);
     const heldItemField = window.AniilogsHeldItems.render({
-      data: state.afpTeamData, formId: String(entry.form_id), itemId: settings.heldItem?.itemId || "",
+      data: state.afpTeamData, formId: String(entry.form_id), itemId: settings.heldItem?.itemId || "", level: settings.heldItem?.level,
       onChange: (heldItem) => { settings.heldItem = heldItem; renderTable(); },
     });
     heldItemField.classList.add("afp-growth-held-item");

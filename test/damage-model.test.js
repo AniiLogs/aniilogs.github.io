@@ -89,6 +89,26 @@ test("CP matches a real Lv 70 Irisalis card: Core skill upgraded, Prismana caugh
   assert.equal(D.combatPower(data, data.forms[1021300], species, 70, own, { resonanceCp: 1050 }), 3646);
 });
 
+test("held-item CP at every item level: base CP + per-level CP x level (CoreCarryInfo:getCpValue), level 0 = a new item", () => {
+  const data = {
+    potential_cp: Array.from({ length: 21 }, (_, level) => ({ cp: 6 * level, recommended_rate: 2 })),
+    held_item_catalog: {
+      551025: { name: "Floral Rainbow Feather", quality: 3, cp: 50, cp_per_level: 5 },
+      553025: { name: "Floral Rainbow Feather", quality: 5, cp: 200, cp_per_level: 15 },
+    },
+    forms: { 1021300: { stat_template: { recommended_stats: ["ATK", "REGEN"] } } },
+  };
+  const species = { HP: 90, ATK: 130, "P.DEF": 78, "M.DEF": 78, REGEN: 108, BREAK: 56 };
+  const own = { HP: 20, ATK: 20, "P.DEF": 20, REGEN: 20, "M.DEF": 17, BREAK: 20 };
+  const card = { resonanceCp: 1050, coreUpgraded: true, formsCollected: 1, rainbowForms: 1 };
+  const cp = (itemId, level) => D.combatPower(data, data.forms[1021300], species, 70, own, { ...card, heldItems: [{ itemId, level }] });
+  const without = D.combatPower(data, data.forms[1021300], species, 70, own, card);
+  for (let level = 0; level <= 15; level += 1) assert.equal(cp("553025", level), without + 200 + 15 * level, `Legendary Lv ${level}`);
+  for (let level = 0; level <= 5; level += 1) assert.equal(cp("551025", level), without + 50 + 5 * level, `Rare Lv ${level}`);
+  assert.equal(cp("553025", 15), 4212);
+  assert.equal(cp("553025", 0), 3987);
+});
+
 test("toughness drain is hit share x the skill's BREAK power x the target's modifiers", () => {
   assert.equal(D.toughnessDrain(24), 24);
   assert.equal(D.toughnessDrain(24, { hitShare: 0.5, tpReduceAdd: 0.25, sizeResistRate: 2 }), 7.5);
