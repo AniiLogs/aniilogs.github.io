@@ -40,7 +40,7 @@ test("the phone strip is a real button that says what it opens", () => {
   assert.match(sidebar, /setAttribute\("aria-controls", "site-sidebar-panels"\)/u);
   assert.match(sidebar, /panels\.id = "site-sidebar-panels"/u);
   assert.match(sidebar, /joined this week/u);
-  assert.match(sidebarCss, /@media \(max-width: 1199px\)[\s\S]*\.site-sidebar:not\(\.is-open\) \.site-sidebar-panels \{ display: none; \}/u);
+  assert.match(sidebarCss, /\.site-sidebar:not\(\.is-docked\):not\(\.is-open\) \.site-sidebar-panels \{ display: none; \}/u);
   assert.match(sidebarCss, /@media \(min-width: 1200px\)[\s\S]*\.site-sidebar-toggle \{ display: none; \}|\.site-sidebar-toggle \{ display: none; \}/u);
 });
 

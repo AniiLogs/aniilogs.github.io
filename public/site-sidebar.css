@@ -1,8 +1,6 @@
-/* The site's left column (public/site-sidebar.js): beside the page on wide screens, a one-line strip that opens in
-   place on narrow ones. The page's own <main> keeps its width rules; inside .site-layout it fills its column. */
-.site-layout { position: relative; z-index: 1; width: min(1180px, 92vw); margin: 0 auto; }
-.site-layout > main { width: auto; min-width: 0; margin: 0; }
-
+/* The site's left column (public/site-sidebar.js). The page's <main> is never moved or narrowed: on wide screens the
+   column sits in the empty margin left of it (the script measures that margin), otherwise it's a one-line strip at the
+   top of the page that opens in place. */
 .site-sidebar { min-width: 0; color: var(--ink); }
 .site-sidebar-panels { display: grid; gap: 0.9rem; }
 .site-panel { min-width: 0; padding: 0.95rem 1rem; border: 1px solid var(--line); border-radius: 20px;
@@ -24,32 +22,24 @@
 .player-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .discord-name-mark { width: 1.05em; height: 1.05em; flex: none; color: #5865f2; }
 
-.site-sidebar-toggle { display: none; }
+/* Docked in the empty margin left of the page (<main> is min(1180px, 92vw), centred), staying in view while the
+   page scrolls: up to 288px wide, 16px from the page and from the window's edge. site-sidebar.js docks it from 1644px. */
+.site-sidebar.is-docked { --site-margin: calc((100vw - 1180px) / 2); --site-sidebar-width: min(288px, calc(var(--site-margin) - 32px));
+  position: fixed; z-index: 2; top: calc(58px + 1.5rem); left: calc(var(--site-margin) - 16px - var(--site-sidebar-width));
+  width: var(--site-sidebar-width); max-height: calc(100vh - 58px - 3rem); overflow-y: auto; scrollbar-width: thin; }
+.site-sidebar.is-docked .site-sidebar-toggle { display: none; }
 
-/* Wide screens: a column on the left that stays in view while the page scrolls */
-@media (min-width: 1200px) {
-  .site-layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1.5rem; align-items: start;
-    width: min(1180px + 16.5rem, 96vw); }
-  .site-sidebar { position: sticky; top: 1rem; max-height: calc(100vh - 58px - 2rem); margin-top: 1.5rem; overflow-y: auto;
-    scrollbar-width: thin; }
-}
-@media (min-width: 1200px) and (max-width: 1365px) {
-  .site-layout { grid-template-columns: 12.5rem minmax(0, 1fr); gap: 1.1rem; }
-}
-
-/* Narrow screens: one line under the bar ("2 online · 5 joined this week") that opens the panels in place */
-@media (max-width: 1199px) {
-  .site-sidebar { margin-top: 0.75rem; }
-  .site-sidebar-toggle { display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 2.5rem; padding: 0.45rem 0.95rem;
-    border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 88%, transparent);
-    color: var(--ink); font: inherit; font-size: 0.86rem; font-weight: 750; text-align: left; cursor: pointer; }
-  .site-sidebar-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-  .site-sidebar-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .site-sidebar-chevron { flex: none; transition: transform 0.15s ease; }
-  .site-sidebar.is-open .site-sidebar-chevron { transform: rotate(180deg); }
-  .site-sidebar:not(.is-open) .site-sidebar-panels { display: none; }
-  .site-sidebar.is-open .site-sidebar-panels { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); margin-top: 0.6rem; }
-}
+/* Otherwise one line ("2 online · 5 joined this week") that opens the panels in place */
+.site-sidebar:not(.is-docked) { margin: 0.75rem 0 0; }
+.site-sidebar:not(.is-docked) .site-sidebar-toggle { display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 2.5rem; padding: 0.45rem 0.95rem;
+  border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--cream) 88%, transparent);
+  color: var(--ink); font: inherit; font-size: 0.86rem; font-weight: 750; text-align: left; cursor: pointer; }
+.site-sidebar-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.site-sidebar-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-sidebar-chevron { flex: none; transition: transform 0.15s ease; }
+.site-sidebar.is-open .site-sidebar-chevron { transform: rotate(180deg); }
+.site-sidebar:not(.is-docked):not(.is-open) .site-sidebar-panels { display: none; }
+.site-sidebar:not(.is-docked).is-open .site-sidebar-panels { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); margin-top: 0.6rem; }
 @media (prefers-reduced-motion: reduce) {
   .site-sidebar-chevron { transition: none; }
 }
