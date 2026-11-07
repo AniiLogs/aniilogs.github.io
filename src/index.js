@@ -4684,11 +4684,12 @@ async function submissionEvidence(request, env, submissionId) {
         ...(Number.isInteger(buff.floor) ? { floor: buff.floor } : {}) }));
     // A best sent from the game's menu is proof of the score only: its picture is the menu, and the viewer shows it beside
     // the pictures of the player's best run of that boss and week (the owner, 7 Nov: the menu proof is added, it doesn't
-    // replace the run's pictures).
+    // replace the run's pictures). Runs a teammate's app sent count too, as on the boards, so the viewer shows the run the
+    // board's other ladders show.
     const menu = row.kind === "interlink_best";
     const run = menu ? await env.DB.prepare(
-      `SELECT r.submission_id AS id FROM leaderboard_submissions r
-       WHERE r.discord_id = ? AND r.kind = 'interlink_run' AND r.cycle IS ? AND r.boss_id IS ? AND r.status = 'visible'
+      `SELECT r.submission_id AS id FROM ${CREDITED_RUNS} r
+       WHERE r.who = ? AND r.kind = 'interlink_run' AND r.cycle IS ? AND r.boss_id IS ? AND r.status = 'visible'
          AND COALESCE(r.outcome, '') <> 'invalid' AND r.evidence_key IS NOT NULL
        ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.created_at ASC LIMIT 1`,
     ).bind(row.discordId, row.cycle, row.bossId).first() : null;

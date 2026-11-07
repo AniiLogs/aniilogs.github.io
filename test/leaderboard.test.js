@@ -810,6 +810,35 @@ test("a run that ties the menu's best doesn't take its row; its pictures are add
   assert.equal(details.runProof, tieId);                    // the tying run's result screen and Battle Data come with it
 });
 
+test("a menu best's viewer shows the run a teammate's app sent for that player, as the boards do", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.dev2);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  await call(env, "/api/leaderboard/characters", { token: a, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
+  await call(env, "/api/leaderboard/characters", { token: b, method: "POST", form: proofForm({ gameUid: "302000000002", name: "Kaela" }) });
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const sendForm = async (token, body, marks) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(body));
+    for (const [field, mark] of marks) form.set(field, jpeg(mark), `${field}.jpg`);
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    return (await sent.json()).submissionId;
+  };
+  const menuId = await sendForm(a, { kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 25000, stars: 20 }, [["evidence", 4]]);
+  // MinMax's own app missed the run; Kaela's sent it with MinMax in the party
+  const runId = await sendForm(b, { kind: "interlink_run", clientRunId: "il-k", cycle: "3005", boss: sherro, score: 25000, stars: 20,
+    clearTimeS: 150, cleared: true, partySize: 2, gameUid: "302000000002",
+    players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false, uid: "302000000001", avgDps: 9000 }] }, [["evidence", 2], ["battle", 3]]);
+  const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
+    .find((e) => e.player === "MinMax");
+  assert.equal(row.proofId, menuId);
+  assert.equal(row.proofIds.clear, runId);
+  const details = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
+  assert.equal(details.runProof, runId);                    // the same run the clear ladder shows
+});
+
 test("only runs played and sent within five minutes vouch; prep-screen scores and late runs never do", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const a = await desktopToken(env, SESSIONS.dev);
