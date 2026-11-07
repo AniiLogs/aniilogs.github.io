@@ -9436,6 +9436,11 @@ body.aniilog-artwork-mode .catalog-heading {
   backdrop-filter: blur(8px);
 }
 
+/* the bar is the artwork's, not the page's: the Aniimo list on the left stays above it, whole */
+@media (min-width: 821px) and (pointer: fine) {
+  body.aniilog-artwork-mode .app-shell:not(.is-sidebar-collapsed) .catalog-heading { left: calc(var(--ui-scale, 1) * clamp(280px, 21vw, 360px)); }
+}
+
 body.aniilog-artwork-mode .catalog-heading h1,
 body.aniilog-artwork-mode .catalog-heading p,
 body.aniilog-artwork-mode .catalog-mobile-sticky-identity {
