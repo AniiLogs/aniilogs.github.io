@@ -9473,6 +9473,17 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .catalog-identity 
   text-shadow: 0 2px 14px rgba(0, 0, 0, 0.78);
 }
 
+.catalog-artwork-exit { position: fixed; z-index: 230; top: 0.9rem; left: calc(360px + 1rem); }
+.catalog-artwork-exit[hidden] { display: none; }
+.catalog-artwork-exit-button { min-height: 38px; padding: 0.4rem 0.95rem; border: 1px solid var(--line, rgba(255, 255, 255, 0.2));
+  border-radius: 999px; background: rgba(10, 14, 24, 0.72); color: var(--text, #fff); font: inherit; font-weight: 800;
+  cursor: pointer; backdrop-filter: blur(6px); }
+.catalog-artwork-exit-button:hover, .catalog-artwork-exit-button:focus-visible { background: rgba(10, 14, 24, 0.9); outline: 2px solid var(--accent, #7fd1c7); outline-offset: 2px; }
+body.aniilog-artwork-mode .catalog-panel .catalog-aniilog-record.is-showcase > .catalog-identity { padding-left: 6.5rem; }
+@media (max-width: 760px) { .catalog-artwork-exit { left: 0.75rem; top: 0.75rem; } }
+/* the forms row stays usable in artwork mode (the title around it ignores clicks): a pill switches the artwork */
+body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase .afp-forms { pointer-events: auto; }
+
 body.aniilog-artwork-mode .catalog-aniimo-video-backdrop {
   display: block;
   z-index: 0;

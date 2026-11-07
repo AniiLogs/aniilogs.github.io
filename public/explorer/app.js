@@ -10418,6 +10418,29 @@ function setAniilogShowcaseMode(enabled) {
   els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.toggle("is-visible", state.aniilogShowcaseMode);
   document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
+  artworkExitBar().hidden = !state.aniilogShowcaseMode;
+}
+
+// Artwork mode hides the page's own header (and the button that opened it), so it carries its own way out: a Back
+// button in the corner, and Esc.
+let artworkExit = null;
+function artworkExitBar() {
+  if (artworkExit) return artworkExit;
+  artworkExit = document.createElement("div");
+  artworkExit.className = "catalog-artwork-exit";
+  artworkExit.hidden = true;
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "catalog-artwork-exit-button";
+  back.textContent = "← Back";
+  back.title = "Back to the Aniilog entry (Esc)";
+  back.addEventListener("click", () => setAniilogShowcaseMode(false));
+  artworkExit.append(back);
+  document.body.append(artworkExit);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.aniilogShowcaseMode && !event.defaultPrevented) setAniilogShowcaseMode(false);
+  });
+  return artworkExit;
 }
 
 // ---- View Model: the released Aniimo's live 3D model in place of the page UI.
