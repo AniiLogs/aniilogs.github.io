@@ -40,8 +40,15 @@ test("each rarity counts at its own top level (Rare 5, Epic 10, Legendary 15)", 
   assert.equal(H.maxLevel(data, 3), 5);
   assert.equal(H.maxLevel(data, 4), 10);
   assert.equal(H.maxLevel(data, 5), 15);
-  assert.equal(JSON.stringify(H.normalize(data, { itemId: 551002, level: 1 })), JSON.stringify({ itemId: "551002", level: 5 }));
-  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002, level: 3 })), JSON.stringify({ itemId: "553002", level: 15 }));
+  // The level picked is kept (0 = a new item), held to the rarity's top level; no level means the top level.
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 551002, level: 1 })), JSON.stringify({ itemId: "551002", level: 1 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 551002, level: 9 })), JSON.stringify({ itemId: "551002", level: 5 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002, level: 3 })), JSON.stringify({ itemId: "553002", level: 3 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002, level: 0 })), JSON.stringify({ itemId: "553002", level: 0 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002, level: -2 })), JSON.stringify({ itemId: "553002", level: 0 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002, level: 20 })), JSON.stringify({ itemId: "553002", level: 15 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002 })), JSON.stringify({ itemId: "553002", level: 15 }));
+  assert.equal(JSON.stringify(H.normalize(data, { itemId: 553002, level: null })), JSON.stringify({ itemId: "553002", level: 15 }));
   assert.equal(H.normalize(data, { itemId: 528000 }), null);
   assert.equal(H.normalize(data, null), null);
   assert.equal(H.describe(data.held_item_catalog[551002], data), "Damage Amp +3.8%");

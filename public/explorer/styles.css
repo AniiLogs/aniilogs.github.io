@@ -15103,3 +15103,19 @@ html[data-theme] .catalog-itemlog-record {
   flex: 1 1 auto;
   min-width: 0;
 }
+
+.held-item-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.held-item-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.held-item-row .held-item-level {
+  flex: 0 0 auto;
+  width: 5.5em;
+}

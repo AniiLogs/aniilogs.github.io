@@ -114,9 +114,9 @@
       sources.append(field("Star-Up level", selectInput(stageLevels.map((value) => ({ value, label: `Level ${value}` })),
         Number(build.starUp.level) || 0, (value) => update({ starUp: { stage, level: Number(value) } }), "Star-Up level")));
     }
-    // Held item: the shared picker (every item, each rarity at its top level, optional "Legendary only").
+    // Held item: the shared picker (every item, its level up to its rarity's top level, optional "Legendary only").
     if (window.AniilogsHeldItems) {
-      sources.append(window.AniilogsHeldItems.render({ data, formId, itemId: build?.heldItem?.itemId || "",
+      sources.append(window.AniilogsHeldItems.render({ data, formId, itemId: build?.heldItem?.itemId || "", level: build?.heldItem?.level,
         onChange: (heldItem) => update({ heldItem }) }));
     }
     const perfect = el("input");
