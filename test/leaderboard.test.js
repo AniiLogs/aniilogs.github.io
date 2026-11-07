@@ -777,20 +777,37 @@ test("two app users sending the same run vouch for each other: each teammate slo
   assert.equal(JSON.stringify(mine).includes("302000000002\",\"confirmed"), false);              // recorded UIDs stay server-side
 });
 
-test("a run that ties the menu's best takes its board row (it has the full proof)", async () => {
-  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
-  const a = await desktopToken(env, SESSIONS.dev);
-  await call(env, "/api/leaderboard/characters", { token: a, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
-  const send = (body) => call(env, "/api/leaderboard/submissions", { token: a, method: "POST", body });
+test("a run that ties the menu's best doesn't take its row; its pictures are added to the menu proof and the other ladders", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.dev);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
   const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
   // the menu's best arrives first, then the run that made it: same stars, same score
-  assert.equal((await send({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 25000, stars: 20 })).status, 201);
-  assert.ok([200, 201].includes((await send(run("tie", { boss: sherro, score: 25000, stars: 20, clearTimeS: 150, cleared: true,
-    gameUid: "302000000001", players: [{ name: "MinMax", ai: false, self: true }] }))).status));
+  const menu = new FormData();
+  menu.set("submission", JSON.stringify({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005", boss: sherro, score: 25000, stars: 20 }));
+  menu.set("evidence", jpeg(4), "menu.jpg");
+  const menuSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: menu });
+  assert.ok([200, 201].includes(menuSent.status), String(menuSent.status));
+  const menuId = (await menuSent.json()).submissionId;
+  const tie = new FormData();
+  tie.set("submission", JSON.stringify({ kind: "interlink_run", clientRunId: "il-tie", cycle: "3005", boss: sherro,
+    score: 25000, stars: 20, clearTimeS: 150, cleared: true, partySize: 1, gameUid: "302000000001",
+    players: [{ name: "MinMax", ai: false, self: true, avgDps: 9000 }] }));
+  tie.set("evidence", jpeg(2), "result.jpg");
+  tie.set("battle", jpeg(3), "battle.jpg");
+  const tieSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: tie });
+  assert.ok([200, 201].includes(tieSent.status), String(tieSent.status));
+  const tieId = (await tieSent.json()).submissionId;
   const row = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses.find((x) => x.id === "80000109").entries
     .find((e) => e.player === "MinMax");
   assert.equal(row.score, 25000);
-  assert.equal(row.clearTimeS, 150);                        // the run's row, not the menu's (which has no clock)
+  assert.equal(row.proofId, menuId);                        // the score ladder: the first in keeps its picture
+  assert.equal(row.avgDps, 9000);                           // the DPS ladder: the run's figure, and its pictures
+  assert.equal(row.proofIds.dps, tieId);
+  const details = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
+  assert.equal(details.menu, true);
+  assert.equal(details.runProof, tieId);                    // the tying run's result screen and Battle Data come with it
 });
 
 test("only runs played and sent within five minutes vouch; prep-screen scores and late runs never do", async () => {

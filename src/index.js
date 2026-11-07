@@ -4190,20 +4190,18 @@ function clearedSql(kind, list = []) {
   return `(COALESCE(s.cleared, 1) = 1 AND COALESCE(s.stars, 0) >= CASE ${[...bySent, ...bySlot, ...byWeek].join(" ")} ELSE ${Math.min(...INTERLINK_RULES.starCaps[0].clear)} END)`;
 }
 
-// Each player's one best run per (week, boss) - most stars, then highest score, then a run over a best sent from the
-// game's menu (the owner, 7 Nov: a run that ties the menu's best has the full proof, and the row kept the menu's), then
-// the first to get there - and
+// Each player's one best run per (week, boss) - most stars, then highest score, then the first to get there - and
 // everything on their row (score, clear, DPS, BREAK, damage, healing, team DPS) is that run's, its pictures the proof
 // for all of it (the owner, 2 Nov: a row is one run, not each figure's best from a different run). With each
 // player's in-game name and public profile id (if public).
 async function interlinkBests(env, cycles, list, server = null, unlinked = false) {
   if (!cycles.length) return [];
-  const { results } = await env.DB.prepare(
+  const bests = (kinds, proofOnly) => env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, s.boss_name AS bossName, s.run_score AS score, s.stars,
        CASE WHEN ${clearedSql("interlink_run", list)} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END AS clearTimeS,
        s.p_dps AS avgDps, s.p_break AS breakValue, s.p_taken AS damageTaken, s.p_heal AS heal,
        s.team_dps AS teamDps, json_extract(s.extra_json, '$.starCap') AS sentCap,
-       s.submission_id AS runId, s.evidence_key IS NOT NULL AS hasProof,
+       s.submission_id AS runId, s.kind, s.evidence_key IS NOT NULL AS hasProof,
        s.outcome, s.clear_time_s AS runTimeS,               -- how it ended, and the battle's clock for every ending
        json_extract(s.extra_json, '$.timeLimitS') AS sentLimit,
        -- the character that played the run (an account can link several), else the account's latest-seen one
@@ -4219,14 +4217,32 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
        s.created_at AS firstAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
-             ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
-               CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.created_at ASC) AS pick
+             ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC, r.created_at ASC) AS pick
            FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_RUNS} c) r
-           WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
+           WHERE r.status = 'visible' AND r.kind IN (${kinds})${proofOnly ? " AND r.evidence_key IS NOT NULL AND COALESCE(r.outcome, '') <> 'invalid'" : ""} AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}
              AND ${onBoards(unlinked, "r")}) s
      WHERE s.pick = 1`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
+  const { results } = await bests("'interlink_run', 'interlink_best'", false);
+  // A row is the first record of its best score - the score ladder shows its picture (the owner, 7 Nov). When that's a
+  // best sent from the game's menu (score and stars only), the other figures and their pictures come from the player's
+  // best run with pictures of that boss and week, so the DPS, clear, BREAK, damage and healing ladders show that run.
+  if ((results || []).some((row) => row.kind === "interlink_best")) {
+    const runs = new Map(((await bests("'interlink_run'", true)).results || [])
+      .map((run) => [`${run.discordId}|${run.cycle}|${run.bossId}`, run]));
+    for (const row of results || []) {
+      const run = row.kind === "interlink_best" && runs.get(`${row.discordId}|${row.cycle}|${row.bossId}`);
+      if (!run) continue;
+      row.figureRuns = {};
+      for (const [metric, figure] of Object.entries(ROW_FIGURES)) {
+        if (metric === "score" || row[figure] != null || run[figure] == null) continue;
+        row[figure] = run[figure];
+        row.figureRuns[metric] = run.runId;
+      }
+      for (const field of ["teamDps", "outcome", "runTimeS", "sentLimit"]) row[field] ??= run[field];
+    }
+  }
   // a teammate's name nobody claimed yet: marked when it looks like a claimed one
   const identities = await nameIdentities(env, (results || []).filter((row) => String(row.discordId).startsWith("name:")).map((row) => row.player));
   for (const row of results || []) {
@@ -4334,9 +4350,9 @@ async function interlinkBoards(request, env) {
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
   const rows = await interlinkBests(env, [cycle.id], list, server, unlinked);
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
-    const { runId, hasProof } = row; delete row.runId; delete row.hasProof;
-    row.proofIds = hasProof ? Object.fromEntries(Object.entries(ROW_FIGURES)
-      .filter(([, figure]) => row[figure] != null).map(([metric]) => [metric, runId])) : {};
+    const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind;
+    row.proofIds = Object.fromEntries(Object.entries(ROW_FIGURES).filter(([, figure]) => row[figure] != null)
+      .map(([metric]) => [metric, figureRuns[metric] || (hasProof ? runId : null)]).filter(([, id]) => id));
     row.proofId = row.proofIds.score || null;
   }
   // each best's check badge, from the run behind it: { score: "verified", dps: "pending", ... }
