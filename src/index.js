@@ -1909,8 +1909,9 @@ async function publicBattleHistory(request, env, id) {
 }
 
 // Picture retention. An Interlink run's pictures are replaced as soon as a better run of that boss and week comes in
-// (from a result screen or the game's menu), once that run has its own pictures and isn't under review (the owner,
-// 2 Nov: proof is overwritten by a higher score). Any other run that is nobody's current best keeps its full screens
+// from a result screen, once that run has its own pictures and isn't under review (the owner, 2 Nov: proof is
+// overwritten by a higher score). A best sent from the game's menu never replaces a run's pictures: it's shown beside
+// them (the owner, 7 Nov). Any other run that is nobody's current best keeps its full screens
 // 14 days and its crops 90 days; a current best (for its sender, or for a teammate it credits) and a run under review
 // keep everything, and every run keeps its numbers. Pages has no scheduled runs, so a few go after each submission (pruneProofs(env, max)).
 // "Best" errs on keeping: a teammate's best is judged against the runs that teammate sent.
@@ -1931,12 +1932,12 @@ const PROVEN_BETTER = `b.evidence_key IS NOT NULL AND COALESCE(b.verify_state, '
   AND COALESCE(json_extract(b.verify_json, '$.queued'), 0) = 0 AND b.created_at < CAST(strftime('%s', 'now') AS INTEGER) - 300`;
 const NOBODYS_BEST = `(
   (c.kind IN ('interlink_run', 'interlink_best')
-    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
+    AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'interlink_run'
       AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id
       AND ${PROVEN_BETTER} AND ${BETTER_INTERLINK("b", "c")})
     AND NOT EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
       WHERE gc.discord_id <> c.discord_id AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1)
-        AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind IN ('interlink_run', 'interlink_best')
+        AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = gc.discord_id AND b.kind = 'interlink_run'
           AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid'
           AND ${PROVEN_BETTER} AND ${BETTER_INTERLINK("b", "c")})))
   OR (c.kind = 'sim_run'
@@ -4634,7 +4635,7 @@ async function deleteSubmission(request, env, submissionId) {
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
     `SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status,
-       buffs_json AS buffsJson FROM leaderboard_submissions WHERE submission_id = ?`,
+       buffs_json AS buffsJson, kind, cycle, boss_id AS bossId FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
   const extra = parseJsonColumn(row?.extraJson) || {};
@@ -4662,7 +4663,18 @@ async function submissionEvidence(request, env, submissionId) {
     const buffs = (parseJsonColumn(row.buffsJson) || []).slice(0, 12).filter((buff) => buff?.name)
       .map((buff) => ({ name: String(buff.name).slice(0, 60), ...(Number.isInteger(buff.level) ? { level: buff.level } : {}),
         ...(Number.isInteger(buff.floor) ? { floor: buff.floor } : {}) }));
-    const listed = json({ shots, ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
+    // A best sent from the game's menu is proof of the score only: its picture is the menu, and the viewer shows it beside
+    // the pictures of the player's best run of that boss and week (the owner, 7 Nov: the menu proof is added, it doesn't
+    // replace the run's pictures).
+    const menu = row.kind === "interlink_best";
+    const run = menu ? await env.DB.prepare(
+      `SELECT r.submission_id AS id FROM leaderboard_submissions r
+       WHERE r.discord_id = ? AND r.kind = 'interlink_run' AND r.cycle IS ? AND r.boss_id IS ? AND r.status = 'visible'
+         AND COALESCE(r.outcome, '') <> 'invalid' AND r.evidence_key IS NOT NULL
+       ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.created_at ASC LIMIT 1`,
+    ).bind(row.discordId, row.cycle, row.bossId).first() : null;
+    const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
+      ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
     listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
     return listed;
   }

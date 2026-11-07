@@ -423,9 +423,21 @@ test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, se
   assert.deepEqual(details.buffs, [{ name: "Overtime", level: 2 }]);                  // what the party went in with
   assert.deepEqual(details.lineup.map((p) => [p.name, p.aniimo ?? null, (p.team || []).map((m) => m.aniimo)]),
     [["MinMax", "Pawney", ["Pawney", "Emberpup"]], ["Bot", null, []]]);
+  // a better best sent from the game's menu is shown beside the run's pictures, never instead of them
+  const menu = new FormData();
+  menu.set("submission", JSON.stringify({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005",
+    boss: { id: "80000109", name: "Omega Sherro", level: 60 }, score: 21500, stars: 20 }));
+  menu.set("evidence", jpeg(4), "menu.jpg");
+  const menuSent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: menu });
+  assert.ok([200, 201].includes(menuSent.status), String(menuSent.status));
+  const menuId = (await menuSent.json()).submissionId;
+  const menuDetails = await (await call(env, `/api/leaderboard/submissions/${menuId}/evidence?shot=list`)).json();
+  assert.equal(menuDetails.menu, true);
+  assert.equal(menuDetails.runProof, runId);                                          // the run's pictures come with it
+  assert.equal(details.menu, undefined);                                              // a result-screen run isn't menu proof
   // deleting the sim run removes every picture of it
   assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 200);
-  assert.equal(EVIDENCE.objects.size, 2);                                             // the Interlink run's two are left
+  assert.equal(EVIDENCE.objects.size, 3);                                             // the Interlink run's two and the menu's are left
 });
 
 test("second reading (shadow mode): Workers AI re-reads the whole screens; a mismatch is listed for review, never held", async () => {

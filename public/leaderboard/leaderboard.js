@@ -588,28 +588,36 @@
     if (!dialog.open) dialog.showModal();             // it stays until a click outside it, × or Esc
     const details = await proofDetails(submissionId);
     if (proofOpenFor !== submissionId) return;
-    const shots = details.shots;
+    // A best sent from the game's menu: its menu picture first, then the pictures of the player's best run of that boss
+    // and week (the menu proof is added to them, it doesn't replace them).
+    const run = details.menu && details.runProof ? await proofDetails(details.runProof) : null;
+    if (proofOpenFor !== submissionId) return;
+    const pictures = [
+      ...details.shots.map((shot) => ({ id: submissionId, shot, label: details.menu && shot === "summary" ? "Menu" : shotLabel(shot, details.shots) })),
+      ...(run ? run.shots.map((shot) => ({ id: details.runProof, shot, label: shotLabel(shot, run.shots) })) : []),
+    ];
     dialog.querySelector(".lb-proof-party")?.remove();
-    const party = partyPanel(details);
+    const party = partyPanel(details.lineup?.length || details.buffs?.length || !run ? details : run);
     if (party) dialog.append(party);
-    // a tab for each picture the run has
-    const show = async (shot) => {
-      for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(tab.dataset.proofShot === shot));
+    // a tab for each picture
+    const show = async (index) => {
+      const picture = pictures[index];
+      for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(Number(tab.dataset.proofShot) === index));
       body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
       try {
-        const url = await proofImage(submissionId, shot);
+        const url = await proofImage(picture.id, picture.shot);
         if (proofOpenFor !== submissionId) return;
-        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: `This run's ${shotLabel(shot, shots)} screen` }));
+        body.replaceChildren(el("img", { class: "lb-proof-image", src: url, alt: `This run's ${picture.label} screen` }));
       } catch {
-        body.replaceChildren(el("p", { class: "lb-empty", text: `This run has no ${shotLabel(shot, shots)} screenshot.` }));
+        body.replaceChildren(el("p", { class: "lb-empty", text: `This run has no ${picture.label} screenshot.` }));
       }
     };
-    tabs.append(...shots.map((shot) => el("button", { type: "button", role: "tab", "data-proof-shot": shot, text: shotLabel(shot, shots),
-      onclick: () => show(shot) })));
+    tabs.append(...pictures.map((picture, index) => el("button", { type: "button", role: "tab", "data-proof-shot": String(index),
+      text: picture.label, onclick: () => show(index) })));
     // the run check's badge beside the tabs
     const badge = checkBadge(check);
     if (badge) tabs.append(badge);
-    await show(shots[0]);
+    await show(0);
   }
   // How the game's Challenge Score adds up (bossrush_grade_data in the game files, checked against recorded runs).
   // Explanations behind the (i) next to a column name, in a popover (one shared element per explanation)
