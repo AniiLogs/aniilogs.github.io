@@ -341,10 +341,10 @@
     render();
   }
 
-  function renameLoadout() {
-    const loadout = activeLoadout();
-    const requested = window.prompt("Team name:", loadout.name);
-    if (requested === null) return;
+  // From the saved-team list's "Rename" on that team's row (aniimo-picker.js rename).
+  function renameLoadout(id, requested) {
+    const loadout = store.loadouts.find((entry) => entry.id === id);
+    if (!loadout) return;
     const name = cleanName(requested, loadout.name);
     if (store.loadouts.some((entry) => entry.id !== loadout.id && entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       status = `A team named ${name} already exists.`;
@@ -1323,7 +1323,11 @@
     });
     selector.setAttribute("aria-label", "Saved team");
     field.append(selector);
-    window.AniilogsPicker?.enhance(selector, { placeholder: "Type a team name", emptyText: "No team matches" });
+    window.AniilogsPicker?.enhance(selector, {
+      placeholder: "Type a team name",
+      emptyText: "No team matches",
+      rename: { label: "Rename", applies: (option) => option.value !== "__new__", onRename: renameLoadout },
+    });
     const fileInput = el("input");
     fileInput.type = "file";
     fileInput.accept = ".aniiteam,application/json";
@@ -1335,7 +1339,6 @@
     });
     const actions = el("div", "team-loadout-actions");
     actions.append(
-      button("Rename", "team-loadout-action", renameLoadout),
       button("Import", "team-loadout-action", () => fileInput.click()),
       button("Export", "team-loadout-action", exportLoadout),
       button("Delete", "team-loadout-action", deleteLoadout),
