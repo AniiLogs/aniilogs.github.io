@@ -22,7 +22,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="stylesheet" href="/styles.css?v=0.14.3-type-to-filter">
     <link rel="stylesheet" href="/proof-viewer.css?v=0.1.0">
-    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.9-shared-proof">
+    <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.10-header-sort">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=0.6.3" defer></script>
     <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
@@ -30,7 +30,8 @@
     <script src="/aniimo-link.js?v=0.1.1" defer></script>
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
     <script src="/proof-viewer.js?v=0.1.0" defer></script>
-    <script src="/leaderboard/leaderboard.js?v=0.3.17-shared-proof" defer></script>
+    <script src="/table-sort.js?v=0.1.0" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.3.18-header-sort" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -129,9 +130,6 @@
         <div class="lb-interlink" data-interlink hidden></div>
 
         <form class="lb-filters" data-filters>
-          <label>Rank by
-            <select name="sort" data-filter-sort></select>
-          </label>
           <label data-field="cycle"><span data-cycle-label>Week</span>
             <select name="cycle"><option value="">All weeks</option></select>
           </label>

@@ -1810,6 +1810,23 @@ function mergedLineup(own, copies) {
     return JSON.parse(JSON.stringify({ ...entry, aniimo, aniimoLevel, cp, team }));
   });
 }
+// My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
+// rank's name), Result (score, then the fastest time) and Party (its size). Rows without the value go last either
+// way; ties stay newest first.
+const HISTORY_SORTS = Object.freeze({
+  played: { natural: "DESC", sql: () => [] },
+  mode: { natural: "ASC", sql: (dir) => [`mode ${dir}`, `kind ${dir}`] },
+  fight: { natural: "ASC", sql: (dir) => [`(COALESCE(boss_name, trial, rank_name) IS NULL)`, `LOWER(COALESCE(boss_name, trial, rank_name)) ${dir}`, `difficulty ${dir}`] },
+  result: { natural: "DESC", sql: (dir) => ["(score IS NULL)", `score ${dir}`, "(clear_time_s IS NULL)", `clear_time_s ${dir === "DESC" ? "ASC" : "DESC"}`] },
+  party: { natural: "DESC", sql: (dir) => ["(party_size IS NULL)", `party_size ${dir}`] },
+});
+export function historyOrder(params) {
+  const sort = Object.hasOwn(HISTORY_SORTS, params?.get("sort") || "") ? params.get("sort") : "played";
+  const asked = String(params?.get("order") || "").toUpperCase();
+  const dir = asked === "ASC" || asked === "DESC" ? asked : HISTORY_SORTS[sort].natural;
+  const newest = sort === "played" ? [`at ${dir}`, `submission_id ${dir}`] : ["at DESC", "submission_id DESC"];
+  return { sort, order: dir.toLowerCase(), sql: [...HISTORY_SORTS[sort].sql(dir), ...newest].join(", ") };
+}
 const HISTORY_COLUMNS = `c.submission_id, c.discord_id, c.kind, c.mode, c.cycle, c.boss_id, c.boss_name, c.boss_level, c.score, c.stars,
   c.clear_time_s, c.cleared, c.floors, c.team_dps, c.party_size, c.difficulty, c.trial, c.rank_tier, c.rank_subtier, c.rank_name,
   c.players_json, c.buffs_json, c.extra_json, c.evidence_key, c.battle_evidence_key, c.proof_pruned_at, c.verify_state, c.status, c.played_at,
@@ -1877,8 +1894,10 @@ async function battleHistory(env, discordId, params, { owner }) {
   const limit = numbered ? (HISTORY_PAGE_SIZES.includes(Number(params.get("limit"))) ? Number(params.get("limit")) : HISTORY_PAGE)
     : Math.min(Math.max(Number.parseInt(params.get("limit") || String(HISTORY_PAGE), 10) || HISTORY_PAGE, 1), 50);
   const pageBinds = [...binds];
+  // My runs' column headers (numbered pages only; the profile card and "before" stay newest first)
+  const { sort, order, sql: orderSql } = historyOrder(numbered ? params : null);
   const [{ results }, counted] = await Promise.all([
-    env.DB.prepare(`${page} ORDER BY at DESC, submission_id DESC LIMIT ${limit + 1}${numbered ? ` OFFSET ${(pageNumber - 1) * limit}` : ""}`).bind(...binds).all(),
+    env.DB.prepare(`${page} ORDER BY ${orderSql} LIMIT ${limit + 1}${numbered ? ` OFFSET ${(pageNumber - 1) * limit}` : ""}`).bind(...binds).all(),
     numbered ? env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...pageBinds).first() : null,
   ]);
   const rows = (results || []).slice(0, limit);
@@ -1972,7 +1991,7 @@ async function battleHistory(env, discordId, params, { owner }) {
       };
     }),
     next: (results || []).length > limit && last ? `${last.at}.${last.submission_id}` : null,
-    ...(numbered ? { page: pageNumber, pageSize: limit, total: Number(counted?.total) || 0,
+    ...(numbered ? { sort, order, page: pageNumber, pageSize: limit, total: Number(counted?.total) || 0,
       pages: Math.max(1, Math.ceil((Number(counted?.total) || 0) / limit)) } : {}),
     ...(filters ? { filters } : {}),
   };
@@ -2436,6 +2455,9 @@ const LEADERBOARD_SORTS = Object.freeze({
   defeats: "DESC",
   difficulty: "DESC",
   player: "ASC",
+  cycle: "DESC",
+  cleared: "DESC",
+  style: "ASC",
 });
 // Egg Heist difficulties, hardest first
 // Holo-Battle Sim stages, from the client's tables (rogue_difficulty_data, rogue_season_data), newest season first.
@@ -2492,8 +2514,9 @@ function simStageName(element, difficulty, cycle = null) {
 
 const DIFFICULTY_RANK_SQL = (prefix) => `CASE ${prefix}difficulty WHEN 'Chaos' THEN 4 WHEN 'Nightmare' THEN 3 WHEN 'Hard' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END`;
 // Sorts that only order the rows: each player's row is still their best by the board's main measure (best loot,
-// best score...), then the list is ordered by name, date or difficulty.
-const DISPLAY_SORTS = new Set(["player", "played_at", "difficulty"]);
+// best score...), then the list is ordered by name, date, difficulty, season, outcome, Training Style or party size.
+// Rows without the value stay on the board, last (difficulty keeps only rows that have one).
+const DISPLAY_SORTS = new Set(["player", "played_at", "difficulty", "cycle", "cleared", "style", "party_size"]);
 const LEADERBOARD_DEFAULT_SORT = Object.freeze({
   interlink_run: "score",
   interlink_week: "score",
@@ -4556,6 +4579,11 @@ async function interlinkBoards(request, env) {
   const limit = Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : null;
   const offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
   const onlyBoss = params.get("boss") ? String(params.get("boss")) : null;
+  // ?order=asc|desc against a ladder's own direction lists it the other way round (its column header clicked twice);
+  // each row keeps its rank on the ladder
+  const orderParam = params.get("order");
+  const reversed = Boolean(ladder) && (orderParam === "asc" || orderParam === "desc")
+    && orderParam !== (INTERLINK_LADDERS[ladder].ascending ? "asc" : "desc");
   const caps = interlinkStarCaps(cycle.id);
   const bosses = bossIds.filter((id) => !onlyBoss || id === onlyBoss).map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
@@ -4564,6 +4592,7 @@ async function interlinkBoards(request, env) {
     const all = (ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs))
       .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder",
         updatedAt: firstAt, own: own(discordId) }));         // updatedAt: when this best run reached the site
+    if (reversed) all.reverse();
     return {
       id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id,
       slot: slotIndex >= 0 ? INTERLINK_RULES.slots[slotIndex] || null : null,
@@ -4588,7 +4617,8 @@ async function interlinkBoards(request, env) {
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
   return json({
     cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers,
-    ladder: ladder || "stars", offset, limit, updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
+    ladder: ladder || "stars", order: ladder ? (Boolean(INTERLINK_LADDERS[ladder].ascending) !== reversed ? "asc" : "desc") : null,
+    offset, limit, updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
     seasons: interlinkSeasons(list),
     rules: { slots: INTERLINK_RULES.slots, slotsConfirmed: INTERLINK_RULES.slotsConfirmed, starCaps: caps,
       clearStars: interlinkStarRule(cycle.id).clear, ladders: Object.keys(INTERLINK_LADDERS) },
@@ -4622,6 +4652,14 @@ async function leaderboardEntries(request, env) {
     if (key === "difficulty") return `${DIFFICULTY_RANK_SQL(prefix)} ${direction}, ${prefix}score DESC`;
     if (key === "played_at") return `COALESCE(${prefix}played_at, ${prefix}created_at) ${direction}`;
     if (key === "player") return `LOWER(COALESCE(${prefix}teammate, ${prefix}characterName, ${prefix}anyCharacter, '')) ${direction}`;
+    if (key === "cycle") return `(${prefix}cycle IS NULL), CAST(${prefix}cycle AS INTEGER) ${direction}, ${prefix}cycle ${direction}`;
+    if (key === "style") {
+      // only the game's styles (the board shows nothing for any other), so rows sort as they read
+      const raw = `json_extract(CASE WHEN json_valid(${prefix}extra_json) THEN ${prefix}extra_json END, '$.setup.style')`;
+      const style = `(CASE WHEN ${raw} IN (${SIM_RULES.styles.map((name) => `'${name}'`).join(", ")}) THEN ${raw} END)`;
+      return `(${style} IS NULL), ${style} ${direction}`;
+    }
+    if (key === "cleared" || key === "party_size") return `(${prefix}${key} IS NULL), ${prefix}${key} ${direction}`;
     return `${prefix}${key} ${direction}`;
   };
   const mainKey = LEADERBOARD_DEFAULT_SORT[kind] || "score";
@@ -4630,7 +4668,7 @@ async function leaderboardEntries(request, env) {
   const pickBy = DISPLAY_SORTS.has(sortKey) ? sortBy(mainKey, LEADERBOARD_SORTS[mainKey]) : orderBy;
   if (sortKey === "standing" || (sortKey === "score" && kind === "eggheist_season")) where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
-  else if (sortKey !== "player" && sortKey !== "played_at") where.push(`s.${sortKey} IS NOT NULL`);
+  else if (!DISPLAY_SORTS.has(sortKey)) where.push(`s.${sortKey} IS NOT NULL`);
   if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
   const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
   const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);

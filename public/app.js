@@ -1395,8 +1395,27 @@ const MY_RUNS_PAGE_SIZE_KEY = "aniilogs:my-runs:page-size:v1";
 const MY_RUNS_PAGE_SIZES = [20, 30, 50];
 const MY_RUNS_SEARCH_WAIT_MS = 250;
 const HISTORY_MODE_NAMES = { interlink: "Holo-Battle Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist", menu: "Menu bests" };
-const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null, scope: null };
+// The table's column headers sort it on the server (it's paged): Played, newest first, unless another is clicked.
+// Each starts in its natural order (A–Z, or highest/newest first); clicked again it flips. The rows are shown in the
+// order the server sends them.
+const MY_RUNS_SORTS = Object.freeze({ played: "desc", mode: "asc", fight: "asc", result: "desc", party: "desc" });
+const myRuns = { on: false, page: 1, pageSize: 20, request: 0, timer: null, scope: null, sort: "played", order: "desc" };
 let runsArePublic = false;
+function renderMyRunsHead() {
+  for (const cell of historyFull.querySelectorAll("[data-myruns-sort]")) {
+    const key = cell.dataset.myrunsSort;
+    cell.dataset.label ||= cell.textContent.trim();
+    window.AniilogsTableSort?.fillHeader(cell, cell.dataset.label, {
+      active: myRuns.sort === key, order: myRuns.order,
+      onSort: () => {
+        ({ key: myRuns.sort, order: myRuns.order } = window.AniilogsTableSort.nextSort({ key: myRuns.sort, order: myRuns.order }, key, MY_RUNS_SORTS[key]));
+        myRuns.page = 1;
+        renderMyRunsHead();
+        void loadMyRuns();
+      },
+    });
+  }
+}
 // ?split=<id>[&best=1][&label=Season 1.0]: one part of an Interlink season (the profile's Interlink card links here)
 function runsScopeFromAddress() {
   const params = new URLSearchParams(window.location.search);
@@ -1536,7 +1555,8 @@ async function loadMyRuns() {
   const rows = historyFull.querySelector("[data-myruns-rows]");
   const status = historyFull.querySelector("[data-history-status]");
   const summary = historyFull.querySelector("[data-myruns-summary]");
-  const params = new URLSearchParams({ page: String(myRuns.page), limit: String(myRuns.pageSize), tz: String(-new Date().getTimezoneOffset()) });
+  const params = new URLSearchParams({ page: String(myRuns.page), limit: String(myRuns.pageSize), tz: String(-new Date().getTimezoneOffset()),
+    sort: myRuns.sort, order: myRuns.order });
   for (const select of historyFull.querySelectorAll("[data-history-filter]")) if (select.value) params.set(select.dataset.historyFilter, select.value);
   const search = historyFull.querySelector("[data-history-search]").value.trim();
   if (search) params.set("q", search);
@@ -1594,6 +1614,7 @@ function startMyRuns(publicId = null) {
     scope.hidden = false;
   }
   for (const node of historyFull.querySelectorAll("[data-myruns-only]")) node.hidden = false;
+  renderMyRunsHead();
   historyFull.querySelector("[data-history-list]").hidden = true;
   historyFull.querySelector("[data-history-more]").hidden = true;
   const size = historyFull.querySelector("[data-history-page-size]");

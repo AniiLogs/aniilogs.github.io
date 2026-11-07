@@ -20,7 +20,7 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"AniiLogs","url":"https://aniilogs.github.io/","description":"AniiLogs: competitive Aniimo leaderboards backed by proof for Holo-Battle and Egg Heist, aLogs, an ad-free boss DPS meter and Egg Heist overlay, a 3D Aniilog of every Aniimo, and player profiles built from your records."}</script>
-    <link rel="stylesheet" href="/styles.css?v=0.16.0-runs-public-interlink-tree">
+    <link rel="stylesheet" href="/styles.css?v=0.16.1-header-sort">
     <link rel="stylesheet" href="/proof-viewer.css?v=0.1.0">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <script src="/explorer/app-config.js?v=20261104-build3857679-chests-r87" defer></script>
@@ -31,7 +31,8 @@
     <script src="/profile-cards.js?v=0.1.0" defer></script>
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
     <script src="/proof-viewer.js?v=0.1.0" defer></script>
-    <script src="/app.js?v=0.13.0-runs-public-interlink-tree" defer></script>
+    <script src="/table-sort.js?v=0.1.0" defer></script>
+    <script src="/app.js?v=0.13.1-header-sort" defer></script>
   </head>
   <body class="site-chrome-page">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -282,7 +283,7 @@
           <p class="myruns-summary" data-myruns-summary data-myruns-only hidden></p>
           <div class="myruns-wrap" data-myruns-only hidden>
             <table class="myruns-table">
-              <thead><tr><th scope="col">Mode</th><th scope="col">Fight</th><th scope="col">Played</th><th scope="col">Result</th><th scope="col">Party</th><th scope="col">Proof</th></tr></thead>
+              <thead><tr><th scope="col" data-myruns-sort="mode">Mode</th><th scope="col" data-myruns-sort="fight">Fight</th><th scope="col" data-myruns-sort="played" aria-sort="descending">Played</th><th scope="col" data-myruns-sort="result">Result</th><th scope="col" data-myruns-sort="party">Party</th><th scope="col">Proof</th></tr></thead>
               <tbody data-myruns-rows></tbody>
             </table>
           </div>

@@ -106,6 +106,7 @@
 .lb-rank { width: 3rem; color: var(--accent-2); font-weight: 900; }
 .lb-sort, .lb-expand { border: 0; background: none; color: inherit; cursor: pointer; font: inherit; padding: 0; text-transform: inherit; letter-spacing: inherit; }
 .lb-sort.is-active { color: var(--accent); }
+.lb-sort:hover, .lb-sort:focus-visible { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .lb-expand { color: var(--text); font-weight: 750; text-decoration: underline dotted; text-underline-offset: 3px; }
 .lb-you { margin-left: 0.45rem; border-radius: 999px; background: var(--accent-2); color: var(--on-highlight); font-size: 0.66rem; font-weight: 900; padding: 0.05rem 0.45rem; text-transform: uppercase; }
 .lb-empty { color: var(--muted); text-align: center; }
@@ -277,10 +278,6 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-full-head { border: 1px solid var(--line); border-top: 4px solid var(--slot, var(--accent)); border-radius: 14px;
   background: color-mix(in srgb, var(--panel-2) 55%, transparent); padding: 0.8rem 1rem; }
 .lb-full-head h3 { font-size: 1.3rem; }
-.lb-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.lb-chips button { border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit;
-  font-size: 0.82rem; font-weight: 800; padding: 0.35rem 0.8rem; cursor: pointer; }
-.lb-chips button[aria-pressed="true"] { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .lb-table .is-ranked { color: var(--accent); font-weight: 900; }
 .lb-who-name .lb-proof { margin-left: 2px; }
 

@@ -320,6 +320,12 @@ test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, trans
   assert.deepEqual(all[0].extra.setup, { picked: [{ name: "Spark", series: "Surge", rarity: "Common" }] });
   assert.deepEqual((await board("&style=Valor")).map((e) => e.player), ["DevOne"]);
   assert.deepEqual((await board("&style=Sneaky")).map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);   // not a style: no filter
+  // the Style, Player and Party headers re-order the board; a run without a style stays on it, last
+  const styled = async (query) => (await (await call(env, `/api/leaderboard/entries?kind=sim_run&cycle=2&trial=Earth&difficulty=Trial&${query}`)).json()).entries;
+  assert.deepEqual((await styled("sort=style")).map((e) => e.player), ["UserOne", "DevOne", "DevTwo"]);              // Energy, Valor, none
+  assert.deepEqual((await styled("sort=style&order=desc")).map((e) => e.player), ["DevOne", "UserOne", "DevTwo"]);
+  assert.deepEqual((await styled("sort=player")).map((e) => e.player), ["DevOne", "DevTwo", "UserOne"]);
+  assert.equal((await styled("sort=party_size")).length, 3);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=sim")).json();
   assert.deepEqual(facets.simRules.styles, ["Energy", "Surge", "Defense", "Vitality", "Ironclad", "Valor", "Wealth"]);
   assert.deepEqual(facets.styles.map((row) => [row.value, row.count]).sort(), [["Energy", 1], ["Valor", 1]]);
@@ -1483,6 +1489,10 @@ test("Egg Heist matches: loot, time, escaped or not, difficulty and Total Defeat
   assert.deepEqual((await get("difficulty=Normal")).map((e) => [e.player, e.score]), [["DevOne", 23733], ["UserOne", 9000]]);
   assert.deepEqual((await get("sort=defeats&best=0")).map((e) => e.defeats), [4, 1, 0]);
   assert.deepEqual((await get("cleared=1&best=0")).map((e) => e.score), [31000, 23733]);   // escapes only
+  // the Outcome and Season headers: escapes first (or failures, flipped), each player's row still their best loot
+  assert.deepEqual((await get("sort=cleared")).map((e) => [e.player, e.cleared]), [["DevOne", true], ["UserOne", false]]);
+  assert.deepEqual((await get("sort=cleared&order=asc")).map((e) => [e.player, e.cleared]), [["UserOne", false], ["DevOne", true]]);
+  assert.deepEqual((await get("sort=cycle")).map((e) => [e.player, e.score]), [["DevOne", 31000], ["UserOne", 9000]]);
   const facets = await (await call(env, "/api/leaderboard/facets?mode=eggheist")).json();
   assert.deepEqual(facets.difficulties.map((d) => d.value), ["Hard", "Normal"]);
 });
@@ -1596,6 +1606,14 @@ test("Interlink Per Boss boards: slots, star caps, ladders, paging, one boss, an
   assert.deepEqual(fastest.bosses[1].entries.map((e) => e.clearTimeS), [100]);
   const dps = await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=teamDps")).json();
   assert.deepEqual(dps.bosses[1].entries.map((e) => e.teamDps), [61000, 50000]);
+  assert.equal(dps.order, "desc");
+  // "View all" with its column header clicked twice: the other way round, each row keeping its rank on the ladder
+  const lowDps = await (await call(env, "/api/leaderboard/interlink?cycle=4000&boss=80000112&ladder=teamDps&order=asc")).json();
+  assert.deepEqual(lowDps.bosses[0].entries.map((e) => [e.rank, e.teamDps]), [[2, 50000], [1, 61000]]);
+  assert.equal(lowDps.order, "asc");
+  assert.equal((await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=clear&order=asc")).json()).order, "asc");   // its own direction
+  assert.deepEqual((await (await call(env, "/api/leaderboard/interlink?cycle=4000&ladder=teamDps&order=sideways")).json()).bosses[1].entries
+    .map((e) => e.teamDps), [61000, 50000]);
   // one boss, paged
   const page = await (await call(env, "/api/leaderboard/interlink?cycle=4000&boss=80000112&ladder=score&limit=1&offset=1")).json();
   assert.deepEqual(page.bosses.map((x) => x.id), ["80000112"]);
@@ -1768,6 +1786,26 @@ test("My runs: numbered pages of 20, 30 or 50 with the total, and search as you 
   assert.equal((await mine("page=1&q=_")).total, 0);
   // filters still apply alongside
   assert.equal((await mine("page=1&mode=sim&q=sherro")).total, 0);
+
+  // the column headers: Played newest first unless asked, then Mode, Fight, Result (score, empty last) and Party
+  assert.deepEqual([first.sort, first.order], ["played", "desc"]);
+  assert.ok(first.runs.every((r, i) => !i || first.runs[i - 1].playedAt >= r.playedAt));
+  const oldest = await mine("page=1&sort=played&order=asc");
+  assert.deepEqual([oldest.sort, oldest.order, oldest.runs[0].score], ["played", "asc", 10000]);
+  assert.ok(oldest.runs.every((r, i) => !i || oldest.runs[i - 1].playedAt <= r.playedAt));
+  assert.deepEqual((await mine("page=1&sort=result")).runs.slice(0, 3).map((r) => r.score), [10054, 10053, 10052]);
+  assert.equal((await mine("page=3&sort=result")).runs.at(-1).kind, "sim_run");                     // no score: last
+  assert.deepEqual((await mine("page=1&sort=result&order=asc")).runs.slice(0, 2).map((r) => r.score), [10000, 10001]);
+  assert.equal((await mine("page=3&sort=result&order=asc")).runs.at(-1).kind, "sim_run");           // last either way
+  assert.equal((await mine("page=1&sort=mode")).runs[0].mode, "interlink");
+  assert.equal((await mine("page=1&sort=mode&order=desc")).runs[0].mode, "sim");
+  assert.equal((await mine("page=1&sort=fight")).runs[0].boss.name, "Omega Infergon");
+  const byFight = await mine("page=1&sort=fight");
+  assert.ok(byFight.runs.filter((r) => r.boss?.name === "Omega Infergon").every((r, i, list) => !i || list[i - 1].playedAt >= r.playedAt));   // ties newest first
+  assert.equal((await mine("page=1&sort=party")).total, 56);
+  assert.deepEqual([(await mine("page=1&sort=nope;DROP")).sort, (await mine("page=1&order=sideways")).order], ["played", "desc"]);
+  // the profile card (no page number) is always newest first
+  assert.equal((await mine("limit=5&sort=result&order=asc")).runs[0].kind, "sim_run");
 
   // made public (My runs' switch), visitors get the same list: pages, search, the total; another player's own list
   // is theirs alone; logged out: nothing
