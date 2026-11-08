@@ -536,7 +536,7 @@ test("the map organizes Lumin sources and counts the Blessed Aniimo spots from t
   assert.match(explorer, /\.filter\(\(\[amberKind\]\) => amberKind === "blessing"\)\.length;/u);
   assert.match(explorer, /const LUMIN_AMBER_KINDS = Object\.freeze\(\{/u);
   assert.match(explorer, /LUMIN_AMBER_KINDS\[String\(spawn\.source_record_id \|\| ""\)\]/u);
-  assert.match(explorer, /"91399363": \["blend_in", "Link up as Prawnch/u);
+  assert.match(explorer, /"91399363": \["blend_in", "Twine as Prawnch/u);
   assert.match(explorer, /"91130755": \["collection", "Start the timed run at its marker and collect 12 Lumin energy within 100 s/u);
   assert.doesNotMatch(explorer, /does not identify whether this Amber is ordinary, guarded, or ecosystem-based/u);
   assert.match(explorerStyles, /\.map-lumin-source\s*\{/u);
