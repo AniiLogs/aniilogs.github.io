@@ -8876,6 +8876,7 @@ select option:hover {
 
 .catalog-showcase-button,
 .catalog-model-button,
+.catalog-hide-artwork-button,
 .catalog-showcase-variant-select {
   border: 1px solid var(--accent-2);
   border-radius: 999px;
@@ -15214,4 +15215,16 @@ html[data-theme] .catalog-itemlog-record {
   .aniimo-picker-row-edit {
     font-size: 16px;
   }
+}
+
+/* Hide Artwork: the moving Aniimo behind a normal entry is off; Show Artwork and View Model still show theirs. */
+body.aniilog-artwork-hidden:not(.aniilog-artwork-mode) .catalog-aniilog-record .catalog-aniimo-video-backdrop,
+body.aniilog-artwork-hidden:not(.aniilog-artwork-mode) .catalog-aniilog-record .catalog-aniimo-turntable,
+body.aniilog-artwork-hidden:not(.aniilog-artwork-mode) .catalog-aniilog-record .catalog-aniimo-live-viewer,
+body.aniilog-artwork-hidden:not(.aniilog-artwork-mode) .catalog-aniilog-record .catalog-aniimo-model-canvas {
+  display: none;
+}
+
+body.aniilog-artwork-mode .catalog-hide-artwork-button {
+  display: none;
 }

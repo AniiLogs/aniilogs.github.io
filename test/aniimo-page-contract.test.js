@@ -37,7 +37,7 @@ test("every feature of the old page is still reachable from the new one", () => 
   ]) assert.ok(pageCode.includes(feature), `missing: ${feature}`);
   // View Model and Show Artwork move into the form header; the mobile sticky header's copies press the real ones.
   assert.match(explorer, /identityActions\.prepend\(\.\.\.headingActions\.childNodes\)/u);
-  assert.match(explorer, /\.catalog-showcase-button, \.catalog-model-button"\)\.forEach/u);
+  assert.match(explorer, /\.catalog-showcase-button, \.catalog-model-button, \.catalog-hide-artwork-button"\)\.forEach/u);
 });
 
 test("growth uses the game's formulas: +0.8% per potential level and +4% every 4 levels", () => {
