@@ -14299,14 +14299,14 @@ const LUMIN_AMBER_KIND_LABELS = Object.freeze({
 // Breezy Plains' Ambers, by coordinate_key (lumin-routes.js): not every pin there carries a record id.
 const LUMIN_AMBER_KINDS_BY_KEY = window.ANIILOGS_LUMIN_KINDS || {};
 const LUMIN_AMBER_KINDS = Object.freeze({
-  "91049896": ["blend_in", "Link up as Bubbeep near the group, then talk to them; the Amber appears after."],
+  "91049896": ["blend_in", "Twine as Bubbeep near the group, then talk to them; the Amber appears after."],
   "91052948": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
   "91053558": ["guarded", "Defeat the Aniimo guarding it (Shelly); the Amber is released after."],
   "91062381": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
   "91102468": ["puzzle", "Finish this spot's puzzle (involves Dewlop); the Amber appears after."],
   "91103745": ["blessing", "Find Blessed Bubbeep here and finish its event; the Amber is its reward."],
   "91117294": ["collection", "Start the timed run at its marker and collect 19 Lumin energy within 90 s; the Amber appears when you finish."],
-  "91123960": ["blend_in", "Link up as Salabask near the group, then talk to them; the Amber appears after."],
+  "91123960": ["blend_in", "Twine as Salabask near the group, then talk to them; the Amber appears after."],
   "91125434": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
   "91126628": ["totem", "Solve the totem ruin puzzle here; the Amber appears when it's done."],
   "91126975": ["guarded", "Defeat the Aniimo guarding it (Dewlop); the Amber is released after."],
@@ -14327,7 +14327,7 @@ const LUMIN_AMBER_KINDS = Object.freeze({
   "91364872": ["collection", "Start the timed run at its marker and collect 8 Lumin energy within 99 s; this Amber waits up high near the end."],
   "91371046": ["collection", "Start the timed run at its marker and collect 14 Lumin energy within 90 s; the Amber appears when you finish."],
   "91381593": ["guarded", "Defeat the Aniimo guarding it (Eko); the Amber is released after."],
-  "91399363": ["blend_in", "Link up as Prawnch near the group, then talk to them; the Amber appears after."],
+  "91399363": ["blend_in", "Twine as Prawnch near the group, then talk to them; the Amber appears after."],
   "91418260": ["puzzle", "Finish this spot's puzzle (involves Octopus at Work); the Amber appears after."],
   "91418724": ["blessing", "Find Blessed Jeglid here and finish its event; the Amber is its reward."],
   "91469641": ["collection", "Start the timed run at its marker and collect 9 Lumin energy within 45 s; the Amber appears when you finish."],
