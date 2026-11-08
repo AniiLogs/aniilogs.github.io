@@ -14324,7 +14324,7 @@ const LUMIN_AMBER_KINDS = Object.freeze({
   "91363818": ["collection", "Start the timed run at its marker and collect 8 Lumin energy within 35 s; this Amber waits up high near the end."],
   "91363980": ["collection", "Start the timed run at its marker and collect 8 Lumin energy within 99 s; the Amber appears when you finish."],
   "91364317": ["collection", "Start the timed run at its marker and collect 26 Lumin energy within 60 s; the Amber appears when you finish."],
-  "91364872": ["collection", "Start the timed run at its marker and collect 8 Lumin energy within 99 s; this Amber waits up high near the end."],
+  "91364872": ["collection", "Placed up high, but no Lumin collection or other event in the game starts it yet."],
   "91371046": ["collection", "Start the timed run at its marker and collect 14 Lumin energy within 90 s; the Amber appears when you finish."],
   "91381593": ["guarded", "Defeat the Aniimo guarding it (Eko); the Amber is released after."],
   "91399363": ["blend_in", "Twine as Prawnch near the group, then talk to them; the Amber appears after."],
@@ -15597,12 +15597,27 @@ function useMapDataset(mapId, dataset) {
   useMapDatasetNow(mapId, dataset);
 }
 
+// Pins in the public map data that aren't in the game yet, by source_record_id: hidden from the public map and shown
+// to Developer Mode as Unreleased (not counted).
+const UNRELEASED_MAP_RECORDS = Object.freeze({
+  // Rosy Mirelands' up-high Lumin Amber: placed in the scene, but no collection or other event starts it yet.
+  "91364872": "No event in the game starts this Amber yet",
+});
+function withUnreleasedMapRecords(spawns) {
+  const developer = developerContentAllowed();
+  return spawns.flatMap((spawn) => {
+    const note = UNRELEASED_MAP_RECORDS[String(spawn?.source_record_id ?? "")];
+    if (!note) return [spawn];
+    return developer ? [{ ...spawn, availability: "unreleased", availability_note: note }] : [];
+  });
+}
+
 function useMapDatasetNow(mapId, dataset) {
   if (!state.bootstrap || state.activeMapId !== mapId) return;
   state.data = prepareData({
     ...state.bootstrap,
     items: dataset?.items || [],
-    spawns: dataset?.spawns || [],
+    spawns: withUnreleasedMapRecords(dataset?.spawns || []),
   });
   state.mapAreas = Array.isArray(dataset?.areas) ? dataset.areas : [];
   renderAreaBorders();
