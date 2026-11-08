@@ -2058,6 +2058,46 @@ test("a shared run's lineup: each player's details from whichever copy read them
   assert.deepEqual(await lineupOf(SESSIONS.dev), expected);               // UserOne's CP from UserOne's own copy, not the misread
 });
 
+test("one party run sent by two players: Battle Data cards say who is who when a name was misread or on the wrong slot", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
+  const userToken = await namedToken(env, SESSIONS.user);     // UserOne 301000000003
+  const card = (n) => ({ avgDps: 1000 + n, breakValue: 2000 + n, damageTaken: 3000 + n, heal: n });
+  const at = Math.floor(Date.now() / 1000) - 60;
+  // UserOne's copy: DevOne misread (and taken for AI), and "DevOne" wrongly on a third player's card
+  await sendRun(env, userToken, run("u-card", { gameUid: "301000000003", score: 100, stars: 10, playedAt: at, players: [
+    { name: "UserOne", ai: false, self: true, ...card(1) },
+    { name: "Xq7", ai: true, ...card(2) },
+    { name: "DevOne", ai: false, ...card(3) },
+  ] }));
+  // DevOne's copy, with a different score read: only the cards tie the two together
+  await sendRun(env, devToken, run("d-card", { gameUid: "301000000001", score: 900, stars: 4, playedAt: at + 20, players: [
+    { name: "UserOne", ai: false, ...card(1) },
+    { name: "DevOne", ai: false, self: true, ...card(2) },
+    { name: "Third", ai: false, ...card(3) },
+  ] }));
+  const players = (id) => JSON.parse(sqlite.prepare("SELECT players_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).players_json);
+  const shared = (id) => JSON.parse(sqlite.prepare("SELECT extra_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).extra_json).sharedRun;
+  assert.ok(shared("u-card"));
+  assert.equal(shared("u-card"), shared("d-card"));
+  const mine = players("u-card");
+  assert.deepEqual([mine[1].name, mine[1].uid, mine[1].ai], ["DevOne", "301000000001", false]);   // the card, not the name
+  assert.equal(mine[2].uid ?? null, null);                                                          // the wrong slot gets no UID
+  assert.equal(players("d-card")[0].uid, "301000000003");
+});
+
+test("Battle Data cards alone do not tie two runs together with fewer than two cards in common", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);
+  const userToken = await namedToken(env, SESSIONS.user);
+  const card = (n) => ({ avgDps: 1000 + n, breakValue: 2000 + n, damageTaken: 3000 + n, heal: n });
+  const at = Math.floor(Date.now() / 1000) - 60;
+  await sendRun(env, userToken, run("u-one", { gameUid: "301000000003", score: 100, stars: 10, playedAt: at, players: [{ name: "UserOne", ai: false, self: true, ...card(1) }, { name: "Other", ai: false, ...card(5) }] }));
+  await sendRun(env, devToken, run("d-one", { gameUid: "301000000001", score: 900, stars: 4, playedAt: at + 20, players: [{ name: "DevOne", ai: false, self: true, ...card(2) }, { name: "Other", ai: false, ...card(5) }] }));
+  const extra = JSON.parse(sqlite.prepare("SELECT extra_json FROM leaderboard_submissions WHERE client_run_id = ?").get("d-one").extra_json) || {};
+  assert.equal(extra.sharedRun, undefined);
+});
+
 test("one party run sent by two players: matched by the Party screen's slots when a number was misread, shown once", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
