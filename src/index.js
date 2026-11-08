@@ -2958,25 +2958,37 @@ async function corroborateRun(env, submissionId) {
     me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
   const myExtra = parseJsonColumn(me.extraJson) || {};
   const results = (nearby || []).filter((other) => (other.score === me.score && other.stars === me.stars && other.clearTimeS === me.clearTimeS)
-    || sameParty(myExtra.lineup, (parseJsonColumn(other.extraJson) || {}).lineup));
+    || sameParty(myExtra.lineup, (parseJsonColumn(other.extraJson) || {}).lineup)
+    || sharedBattleData(parseJsonColumn(me.playersJson) || [], parseJsonColumn(other.playersJson) || []) >= 2);
   // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
   const ownName = async (row, players) => players.find((player) => player?.self)?.name
     || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
   // put the other sender's UID on their slot (matched by lookalike-folded name, never an AI or the sender's own slot)
-  const vouch = (players, name, gameUid) => {
-    if (!name) return false;
-    const skeleton = nameSkeleton(name);
-    const slot = players.find((player) => player?.name && player.ai !== true && !player.self && (player.skel || nameSkeleton(player.name)) === skeleton);
-    if (!slot || (slot.uid === gameUid && slot.confirmed)) return false;
+  // The sender's own Battle Data card, when it's in this copy too, says which slot they are however that slot's name
+  // was read: OCR misreads names and at times puts one on the wrong slot, and four numbers don't match by chance.
+  // (Until 8 Nov a misread name split one player into several rows on the boards.)
+  const vouch = (players, name, gameUid, theirPlayers) => {
+    const skeleton = name ? nameSkeleton(name) : null;
+    const own = theirPlayers.find((player) => player?.self)
+      || (skeleton && theirPlayers.find((player) => player?.name && (player.skel || nameSkeleton(player.name)) === skeleton));
+    const byCard = hasBattleData(own) ? players.find((player) => player && !player.self && sameBattleData(player, own)) : null;
+    const slot = byCard || (skeleton && players.find((player) => player?.name && player.ai !== true && !player.self && (player.skel || nameSkeleton(player.name)) === skeleton));
+    if (!slot) return false;
+    const renamed = Boolean(byCard && name && slot.name !== name);
+    const stale = players.filter((player) => player && player !== slot && player.uid === gameUid);
+    if (slot.uid === gameUid && slot.confirmed && !renamed && !(byCard && slot.ai === true) && !stale.length) return false;
+    for (const player of stale) { delete player.uid; delete player.confirmed; }  // the wrong slot had this player's name
     Object.assign(slot, { uid: gameUid, confirmed: true });
+    if (byCard) slot.ai = false;
+    if (renamed) Object.assign(slot, { name, skel: skeleton });
     return true;
   };
   const mine = parseJsonColumn(me.playersJson) || [];
   let mineChanged = false;
   for (const other of results || []) {
     const theirs = parseJsonColumn(other.playersJson) || [];
-    if (vouch(mine, await ownName(other, theirs), other.gameUid)) mineChanged = true;
-    if (vouch(theirs, await ownName(me, mine), me.gameUid)) {
+    if (vouch(mine, await ownName(other, theirs), other.gameUid, theirs)) mineChanged = true;
+    if (vouch(theirs, await ownName(me, mine), me.gameUid, mine)) {
       await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").bind(JSON.stringify(theirs), other.id).run();
     }
   }
@@ -2992,6 +3004,19 @@ async function corroborateRun(env, submissionId) {
         .bind(group, id).run();
     }
   }
+}
+
+// A player's Battle Data card in a run: the same four numbers in two copies of a run are the same player.
+const BATTLE_DATA_FIELDS = Object.freeze(["avgDps", "breakValue", "damageTaken", "heal"]);
+function hasBattleData(player) {
+  return Boolean(player) && BATTLE_DATA_FIELDS.every((field) => Number.isFinite(player[field])) && player.avgDps > 0;
+}
+function sameBattleData(a, b) {
+  return hasBattleData(a) && hasBattleData(b) && BATTLE_DATA_FIELDS.every((field) => a[field] === b[field]);
+}
+// How many cards two copies share: two or more is the same fight, whatever else was misread.
+function sharedBattleData(a, b) {
+  return a.filter((player) => b.some((other) => sameBattleData(player, other))).length;
 }
 
 // Whether two Party screens (extra.lineup) show the same party: every slot both read has the same player (names
