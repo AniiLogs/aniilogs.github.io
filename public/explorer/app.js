@@ -1199,6 +1199,41 @@ function areaBordersEnabled() {
   }
 }
 
+// Hide Artwork: the moving Aniimo behind a normal Aniilog entry is turned off (Show Artwork still shows it). Per device.
+const ARTWORK_HIDDEN_STORAGE_KEY = "aniilogs:explorer:artwork-hidden:v1";
+
+function artworkHidden() {
+  try {
+    return window.localStorage.getItem(ARTWORK_HIDDEN_STORAGE_KEY) === "1";
+  } catch {
+    return document.body.classList.contains("aniilog-artwork-hidden");
+  }
+}
+
+function setArtworkHidden(hidden) {
+  try {
+    if (hidden) window.localStorage.setItem(ARTWORK_HIDDEN_STORAGE_KEY, "1");
+    else window.localStorage.removeItem(ARTWORK_HIDDEN_STORAGE_KEY);
+  } catch {
+    // not remembered; still applied below
+  }
+  applyArtworkHidden(hidden);
+}
+
+function applyArtworkHidden(hidden = artworkHidden()) {
+  document.body.classList.toggle("aniilog-artwork-hidden", hidden);
+  document.querySelectorAll(".catalog-hide-artwork-button").forEach((button) => {
+    button.textContent = hidden ? "Unhide Artwork" : "Hide Artwork";
+    button.setAttribute("aria-pressed", String(hidden));
+  });
+  // Nothing plays while it's hidden (Show Artwork and View Model still play theirs).
+  const paused = hidden && !state.aniilogShowcaseMode && !state.aniilogModelMode;
+  els.catalogPanel?.querySelectorAll(".catalog-aniimo-video-source").forEach((video) => {
+    if (paused) video.pause();
+    else video.play?.().catch(() => {});
+  });
+}
+
 function renderAreaBorders() {
   const layer = els.mapAreaBorderLayer;
   if (!layer) return;
@@ -10199,7 +10234,11 @@ function renderCatalogPreview(options = {}) {
     showcaseButton.addEventListener("click", () => setAniilogShowcaseMode(!state.aniilogShowcaseMode));
     const headingActions = document.createElement("div");
     headingActions.className = "catalog-heading-actions";
-    headingActions.append(showcaseButton);
+    const hideArtworkButton = document.createElement("button");
+    hideArtworkButton.type = "button";
+    hideArtworkButton.className = "catalog-hide-artwork-button";
+    hideArtworkButton.addEventListener("click", () => setArtworkHidden(!artworkHidden()));
+    headingActions.append(showcaseButton, hideArtworkButton);
     const modelAppearances = viewModelAppearances(selected);
     if (modelAppearances.length) {
       const modelButton = document.createElement("button");
@@ -10390,6 +10429,7 @@ function renderCatalogPreview(options = {}) {
     }
     setAniilogShowcaseMode(state.aniilogShowcaseMode);
     setAniilogModelMode(state.aniilogModelMode);
+    applyArtworkHidden();
   }
   scheduleMobileCatalogStickyIdentity();
 }
@@ -10418,6 +10458,7 @@ function setAniilogShowcaseMode(enabled) {
   els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.toggle("is-visible", state.aniilogShowcaseMode);
   document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", state.aniilogShowcaseMode);
   if (record) record.setAttribute("aria-label", state.aniilogShowcaseMode ? "Aniimo artwork showcase" : "Aniilog entry");
+  applyArtworkHidden();
   artworkExitBar().hidden = !state.aniilogShowcaseMode;
 }
 
@@ -10592,6 +10633,7 @@ function setAniilogModelMode(enabled) {
   if (on) els.catalogPanel.querySelector(".catalog-artwork-controls:not(.catalog-model-controls)")?.classList.remove("is-visible");
   document.querySelector(".catalog-mobile-sticky-identity")?.classList.toggle("is-showcase", on || showcase);
   if (record && on) record.setAttribute("aria-label", "Aniimo 3D model");
+  applyArtworkHidden();
 }
 
 function removeMobileCatalogStickyIdentity() {
@@ -10645,7 +10687,7 @@ function syncMobileCatalogStickyIdentity() {
       stickyLocate.addEventListener("click", () => sourceLocate.click());
     }
     // The cloned View Model / Show Artwork buttons press the real ones.
-    stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button").forEach((button) => {
+    stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button, .catalog-hide-artwork-button").forEach((button) => {
       button.addEventListener("click", () => identity.querySelector(`.${button.classList[0]}`)?.click());
     });
     // So do its form chips (same order as the header's).
