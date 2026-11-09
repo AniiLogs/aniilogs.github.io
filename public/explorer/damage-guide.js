@@ -42,6 +42,7 @@
         "So spreading your team's boosts over different kinds beats piling up one kind. Each kind is strongest while it is still empty.",
         "Damage Amp, Damage Boost and \"DMG +x%\" are all the same stat in the game, so they share one pot. The target's Damage Reduction comes out of that same pot. The Damage Amp and Final Damage pots each have a floor of ×0.2, so reductions can never cut those below a fifth. The elemental pot has no floor: at 0 or less the hit does nothing.",
         "Final Damage (for example Helion's Solar Grace) is a separate pot from Damage Amp, so it multiplies on top.",
+        "In PvP every hit is scaled to 15%. PvP-only boosts and reductions are one more pot with a floor of ×0.2 (matched to the game's PvP stats by name). BREAK damage isn't touched by either.",
       ],
       table: {
         columns: ["Kind of boost", "Adds with", "Example"],
@@ -97,8 +98,9 @@
       basis: "exact",
       paragraphs: [
         "Every Aniimo starts with 10% Crit Rate and +50% Crit Damage.",
-        "Crit Rate adds up from all sources, including bonuses for basic attacks, skills or Ultimates, minus the target's crit resistance. At 100% or more every hit crits.",
-        "A crit multiplies the hit by 1 + Crit Damage, capped at ×3 in total.",
+        "Crit Rate adds up from all sources, including bonuses for basic attacks, skills or Ultimates, minus the target's crit resistance, including its resistance to that type of attack. At 100% or more every hit crits.",
+        "A crit multiplies the hit by 1 + Crit Damage, capped at ×3 in total. Crit Damage adds up and subtracts the same way as Crit Rate.",
+        "A few Crit Rate and Crit Damage bonuses only count while the target is in BREAK (matched by name).",
       ],
     },
     {
@@ -120,7 +122,7 @@
       basis: "by-name",
       paragraphs: [
         "The game picks a row of its level-gap table by your level minus the target's (exact). The world scales to your level, so most fights sit near 0, where nothing changes.",
-        "Toughness drain from that row is exact: fighting 10 levels above you, your hits drain ×0.5 toughness; 20 above, ×0.1.",
+        "Toughness drain from that row is exact. With the target 5 to 15 levels above you, your hits drain ×0.5 toughness; 16 to 19 above, ×0.2; 20 or more above, ×0.1. Being above the target doesn't raise it.",
         "The damage part has four columns, picked on the game's server by who is fighting whom, and all of them favour the higher level: at 10 levels in your favour ×1.10–1.35, at 10 against ×0.5–0.9. Which applies to you isn't in the client files, so the 1v1 tab leaves it out.",
         "BREAK damage changes by the square root of that same factor, so a level gap moves it less than a hit's damage, but it isn't immune.",
       ],

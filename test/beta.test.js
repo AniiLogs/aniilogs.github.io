@@ -30,7 +30,21 @@ async function setup({ devMode = ["owner", "tester", "admin", "player"], keepSee
     async all() { return { results: sqlite.prepare(sql).all(...values) }; },
     async run() { return { meta: { changes: Number(sqlite.prepare(sql).run(...values).changes) } }; },
   });
-  const DB = { prepare: (sql) => ({ ...statement(sql), bind: (...values) => statement(sql, values) }) };
+  const DB = {
+    prepare: (sql) => ({ ...statement(sql), bind: (...values) => statement(sql, values) }),
+    async batch(statements) {
+      sqlite.exec("BEGIN");
+      try {
+        const results = [];
+        for (const row of statements) results.push(await row.run());
+        sqlite.exec("COMMIT");
+        return results;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
   const now = Math.floor(Date.now() / 1000);
   for (const [key, discordId] of Object.entries(IDS)) {
     sqlite.prepare("INSERT INTO users VALUES (?, ?, ?, NULL, ?, ?)").run(discordId, key, `${key} name`, now, now);
@@ -246,4 +260,119 @@ test("migrations 0028 and 0029 seed the 0.1.28-RC43 tests and then the Try-Hard 
   const list = await (await app(env, tokens.tester, "/api/beta/tests")).json();
   assert.equal(list.build, "0.1.28-RC43");
   assert.deepEqual(list.items, [...seed.items, ...guide.items]);
+});
+
+const DAY = 86400;
+const nowS = () => Math.floor(Date.now() / 1000);
+const publish = async (env, tokens, body) => (await app(env, tokens.owner, "/api/beta/tests", { method: "POST", body })).json();
+const ownerList = async (env, tokens) => (await app(env, tokens.owner, "/api/beta/tests")).json();
+const retire = (env, tokens, id, retired = true) => app(env, tokens.owner, `/api/beta/tests/${id}/retire`, { method: "POST", body: { retired } });
+const backdate = (sqlite, id, days, edited = days) => sqlite.prepare("UPDATE beta_tests SET retired_at = ?, updated_at = ? WHERE test_id = ?")
+  .run(nowS() - days * DAY, nowS() - edited * DAY, id);
+const mark = (sqlite, who, id) => sqlite.prepare("INSERT INTO beta_test_marks (discord_id, test_id, working, marked_at) VALUES (?, ?, 1, 1)").run(who, id);
+const marksOf = (sqlite, id) => sqlite.prepare("SELECT COUNT(*) AS n FROM beta_test_marks WHERE test_id = ?").get(id).n;
+
+test("a retired test is deleted with its marks 30 days on, when the owner reads the list; others are left alone", async () => {
+  const { env, sqlite, tokens } = await setup();
+  await publish(env, tokens, SEED);
+  await retire(env, tokens, "send-logs");
+  mark(sqlite, IDS.tester, "send-logs");
+  mark(sqlite, IDS.tester, "meter-hp");
+  // at 29 days it's still listed, and says when it goes
+  backdate(sqlite, "send-logs", 29);
+  const before = await ownerList(env, tokens);
+  const retired = before.items.find((item) => item.id === "send-logs");
+  assert.equal(retired.deletesAt, retired.retiredAt + 30 * DAY);
+  assert.equal("deletesAt" in before.items.find((item) => item.id === "meter-hp"), false);
+  assert.deepEqual(before.deleted, []);
+  // a tester's read doesn't delete anything and shows none of this
+  backdate(sqlite, "send-logs", 30);
+  const tester = await (await app(env, tokens.tester, "/api/beta/tests")).json();
+  assert.deepEqual(tester.items.map((item) => item.id), ["meter-hp"]);
+  assert.equal("deleted" in tester, false);
+  assert.equal(marksOf(sqlite, "send-logs"), 1);
+  // the owner's does
+  const after = await ownerList(env, tokens);
+  assert.deepEqual(after.items.map((item) => item.id), ["meter-hp"]);
+  assert.deepEqual(after.deleted, ["send-logs"]);
+  assert.equal(marksOf(sqlite, "send-logs"), 0);
+  assert.equal(marksOf(sqlite, "meter-hp"), 1);
+});
+
+test("bringing a test back keeps it; an edit restarts its 30 days; publishing the same wording doesn't", async () => {
+  const { env, sqlite, tokens } = await setup();
+  await publish(env, tokens, SEED);
+  // brought back: retired_at cleared
+  await retire(env, tokens, "meter-hp");
+  backdate(sqlite, "meter-hp", 40);
+  assert.equal((await retire(env, tokens, "meter-hp", false)).status, 200);
+  // edited 10 days ago, retired 40 days ago: 20 days left
+  await retire(env, tokens, "send-logs");
+  backdate(sqlite, "send-logs", 40, 10);
+  const list = await ownerList(env, tokens);
+  assert.deepEqual(list.items.map((item) => item.id), ["meter-hp", "send-logs"]);
+  const edited = list.items.find((item) => item.id === "send-logs");
+  assert.equal(edited.deletesAt, nowS() - 10 * DAY + 30 * DAY);
+  // the same list published again doesn't count as an edit of the retired test...
+  const updatedAt = () => sqlite.prepare("SELECT updated_at AS at FROM beta_tests WHERE test_id = 'send-logs'").get().at;
+  const stamp = updatedAt();
+  assert.deepEqual(await publish(env, tokens, SEED), { added: 0, updated: 2 });
+  assert.equal(updatedAt(), stamp);
+  // ...a new wording does, and it stays retired
+  await publish(env, tokens, { build: "RC44", items: [{ ...SEED.items[1], how: "Settings → Send logs, twice." }] });
+  assert.ok(updatedAt() > stamp);
+  const reworded = (await ownerList(env, tokens)).items.find((item) => item.id === "send-logs");
+  assert.equal(reworded.retired, true);
+  assert.ok(reworded.deletesAt > nowS() + 29 * DAY);
+});
+
+test("publishing a deleted test's wording doesn't bring it back; a new wording is a new test", async () => {
+  const { env, sqlite, tokens } = await setup();
+  await publish(env, tokens, SEED);
+  await retire(env, tokens, "send-logs");
+  backdate(sqlite, "send-logs", 31);
+  await ownerList(env, tokens);
+  assert.deepEqual(await publish(env, tokens, SEED), { added: 0, updated: 1, skipped: ["send-logs"] });
+  assert.deepEqual((await ownerList(env, tokens)).items.map((item) => item.id), ["meter-hp"]);
+  const fresh = { build: "RC50", items: [{ id: "send-logs", title: "Send logs, new flow", how: "Settings → Report." }] };
+  assert.deepEqual(await publish(env, tokens, fresh), { added: 1, updated: 0 });
+  const list = await ownerList(env, tokens);
+  assert.deepEqual(list.deleted, []);
+  assert.equal(list.items.find((item) => item.id === "send-logs").retired, false);
+});
+
+test("a tester's results from an old list don't leave marks for a deleted test", async () => {
+  const { env, sqlite, tokens } = await setup();
+  await publish(env, tokens, SEED);
+  await retire(env, tokens, "send-logs");
+  backdate(sqlite, "send-logs", 31);
+  await ownerList(env, tokens);
+  const form = betaForm({ tests: [
+    { id: "send-logs", title: "Send logs works", tested: true, working: true },
+    { id: "meter-hp", title: "HP bar follows the game", tested: true, working: true },
+  ] });
+  assert.equal((await app(env, tokens.tester, "/api/logs/beta", { method: "POST", form })).status, 201);
+  assert.equal(marksOf(sqlite, "send-logs"), 0);
+  assert.equal(marksOf(sqlite, "meter-hp"), 1);
+});
+
+test("each read of the list deletes a bounded number of old retired tests; a failure doesn't break the list", async () => {
+  const { env, sqlite, tokens } = await setup();
+  const items = Array.from({ length: 30 }, (_, index) => ({ id: `old-${index}`, title: `Old ${index}`, how: "Old." }));
+  await publish(env, tokens, { build: "RC1", items });
+  for (const { id } of items) {
+    await retire(env, tokens, id);
+    backdate(sqlite, id, 60);
+  }
+  assert.equal((await ownerList(env, tokens)).items.length, 5);
+  assert.equal((await ownerList(env, tokens)).items.length, 0);
+  const missing = await setup();
+  await publish(missing.env, missing.tokens, SEED);
+  await retire(missing.env, missing.tokens, "send-logs");
+  backdate(missing.sqlite, "send-logs", 31);
+  // deployed before migration 0034: nothing is deleted, the list and Publish still work
+  missing.sqlite.exec("DROP TABLE beta_tests_deleted");
+  const list = await ownerList(missing.env, missing.tokens);
+  assert.deepEqual(list.items.map((item) => item.id), ["meter-hp", "send-logs"]);
+  assert.deepEqual(await publish(missing.env, missing.tokens, SEED), { added: 0, updated: 2 });
 });

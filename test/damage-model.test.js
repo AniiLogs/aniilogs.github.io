@@ -231,3 +231,61 @@ test("Guide audit for 1.1: ATK table and BREAK example use the rounded-up stat c
   assert.match(G.explanationFor("skill", 10900480).text, /^Once the skill is upgraded/u);
   assert.doesNotMatch(G.explanationFor("skill", 10300090, 1019100).text, /for 10s, not Damage Amp for 20s/u);
 });
+
+const near = (value) => Math.round(value * 1e6) / 1e6;
+
+test("PvP: formula 3001's max(0.2, pvpDmg) x 0.15 uses pvp_taken_*, only in PvP, and leaves BREAK alone", () => {
+  const pvp = { ...context, pvp: true };
+  const hit = (modifiers, target = {}, ctx = pvp) => D.hit({ ...attacker, modifiers }, { ...defender, modifiers: target }, fireSkill, ctx);
+  const base = hit({}).hit;
+  assert.equal(near(base / hit({}, {}, context).hit), 0.15);
+  assert.equal(near(hit({ pvp_taken_dmg_inc_rate_v: 0.2 }).hit / base), 1.2);
+  assert.equal(near(hit({ pvp_taken_dmg_inc_rate_v: 0.2 }, { pvp_taken_dmg_dec_rate_v: 0.5 }).hit / base), 0.7);
+  assert.equal(near(hit({}, { pvp_taken_dmg_dec_rate_v: 5 }).hit / base), 0.2);
+  assert.equal(near(hit({ pvp_taken_dmg_inc_rate_v: 0.5 }, { pvp_taken_dmg_dec_rate_v: 0.5 }, context).hit / hit({}, {}, context).hit), 1);
+  assert.equal(hit({}, { pvp_taken_dmg_dec_rate_v: 0.5 }).break, hit({}, {}, context).break);
+});
+
+test("crit: the target's resistance by attack type, from getCriticalDamageRatio", () => {
+  const rate = (type, target) => D.hit({ ...attacker, critRate: 0.5 }, { ...defender, modifiers: target }, { ...fireSkill, type }, context).critChance;
+  const multiplier = (type, target) => D.hit({ ...attacker, critDamage: 1 }, { ...defender, modifiers: target }, { ...fireSkill, type }, context).critMultiplier;
+  assert.equal(near(rate("basic", { normal_attack_crit_dec_rate_v: 0.2 })), 0.3);
+  assert.equal(near(rate("skill", { normal_attack_crit_dec_rate_v: 0.2 })), 0.5);
+  assert.equal(near(rate("skill", { skill_crit_dec_rate_v: 0.2 })), 0.3);
+  assert.equal(near(rate("ultimate", { ultimate_crit_dec_rate_v: 0.2 })), 0.3);
+  assert.equal(near(multiplier("basic", { normal_attack_crit_dmg_dec_rate_v: 0.5 })), 1.5);
+  assert.equal(near(multiplier("skill", { skill_crit_dmg_dec_rate_v: 0.5 })), 1.5);
+  assert.equal(near(multiplier("ultimate", { ultimate_crit_dec_dmg_v: 0.5 })), 1.5);
+  assert.equal(near(multiplier("ultimate", { skill_crit_dmg_dec_rate_v: 0.5 })), 2);
+});
+
+test("crit bonuses for a target in BREAK count only then", () => {
+  const mods = { break_crit_inc_rate_v: 0.2, break_crit_dmg_v: 0.5 };
+  const up = { ...attacker, critRate: 0.1, critDamage: 0.5, modifiers: mods };
+  const normal = D.hit(up, defender, fireSkill, context);
+  assert.equal(near(normal.critChance), 0.1);
+  assert.equal(near(normal.critMultiplier), 1.5);
+  const broken = D.hit(up, defender, fireSkill, { ...context, broken: true });
+  assert.equal(near(broken.critChance), 0.3);
+  assert.equal(near(broken.critMultiplier), 2);
+});
+
+test("damage to a target in BREAK: dmg_break_add_ratio less dmg_break_dec_ratio, which isn't an element", () => {
+  const hit = (ctx, target) => D.hit({ ...attacker, modifiers: { dmg_break_add_ratio: 0.3 } }, { ...defender, modifiers: target }, fireSkill, ctx).hit;
+  const plain = hit(context, {});
+  assert.equal(D.bracketOf("dmg_break_dec_ratio").bracket, "vs_break");
+  assert.equal(near(hit({ ...context, broken: true }, {}) / plain), 1.3);
+  assert.equal(near(hit({ ...context, broken: true }, { dmg_break_dec_ratio: 0.1 }) / plain), 1.2);
+  assert.equal(hit(context, { dmg_break_dec_ratio: 0.1 }), plain);
+});
+
+test("Ultimate BREAK Efficiency counts on Ultimates only", () => {
+  const value = (type) => D.hit({ ...attacker, modifiers: { ultimate_bp_add_ratio: 0.5 } }, defender, { ...fireSkill, type }, context).break;
+  assert.equal(near(value("ultimate") / value("skill")), 1.5);
+});
+
+test("the Guide's toughness drain matches calc_lv_modify_data: x0.5 from 5 above, x0.2 from 16, x0.1 from 20", () => {
+  const level = G.sections.find((row) => row.id === "level").paragraphs.join(" ");
+  assert.match(level, /5 to 15 levels above you, your hits drain ×0\.5 toughness; 16 to 19 above, ×0\.2; 20 or more above, ×0\.1/u);
+  assert.match(level, /BREAK damage changes by the square root/u);
+});

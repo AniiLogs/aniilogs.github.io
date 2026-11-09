@@ -43,13 +43,22 @@
     crit_rate_v: { bracket: "crit_rate", side: "attacker", basis: "exact" },
     crit_rate_dec_v: { bracket: "crit_rate", side: "defender", basis: "exact" },
     normal_attack_crit_inc_rate_v: { bracket: "crit_rate", side: "attacker", basis: "exact", only: "basic" },
+    normal_attack_crit_dec_rate_v: { bracket: "crit_rate", side: "defender", basis: "exact", only: "basic" },
     skill_crit_inc_rate_v: { bracket: "crit_rate", side: "attacker", basis: "exact", only: "skill" },
+    skill_crit_dec_rate_v: { bracket: "crit_rate", side: "defender", basis: "exact", only: "skill" },
     ultimate_crit_inc_rate_v: { bracket: "crit_rate", side: "attacker", basis: "exact", only: "ultimate" },
+    ultimate_crit_dec_rate_v: { bracket: "crit_rate", side: "defender", basis: "exact", only: "ultimate" },
+    // getCriticalDamageRatio adds these two when its isInBreak input is set; that it means the target is by-name.
+    break_crit_inc_rate_v: { bracket: "crit_rate", side: "attacker", basis: "by-name", whenBroken: true },
     crit_dmg_v: { bracket: "crit_damage", side: "attacker", basis: "exact" },
     crit_dmg_rate_dec_v: { bracket: "crit_damage", side: "defender", basis: "exact" },
     normal_attack_crit_dmg_inc_rate_v: { bracket: "crit_damage", side: "attacker", basis: "exact", only: "basic" },
+    normal_attack_crit_dmg_dec_rate_v: { bracket: "crit_damage", side: "defender", basis: "exact", only: "basic" },
     skill_crit_dmg_v: { bracket: "crit_damage", side: "attacker", basis: "exact", only: "skill" },
+    skill_crit_dmg_dec_rate_v: { bracket: "crit_damage", side: "defender", basis: "exact", only: "skill" },
     ultimate_crit_dmg_v: { bracket: "crit_damage", side: "attacker", basis: "exact", only: "ultimate" },
+    ultimate_crit_dec_dmg_v: { bracket: "crit_damage", side: "defender", basis: "exact", only: "ultimate" },
+    break_crit_dmg_v: { bracket: "crit_damage", side: "attacker", basis: "by-name", whenBroken: true },
     taken_normal_attack_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "basic" },
     taken_skill_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "skill" },
     taken_ultimate_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "ultimate" },
@@ -61,10 +70,13 @@
     taken_phy_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "Physical" },
     taken_mag_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "Magical" },
     dmg_break_add_ratio: { bracket: "vs_break", side: "attacker", basis: "inferred" },
+    dmg_break_dec_ratio: { bracket: "vs_break", side: "defender", basis: "inferred" },
     bp_add_ratio: { bracket: "break", side: "attacker", basis: "by-name" },
     skill_bp_add_ratio: { bracket: "break", side: "attacker", basis: "by-name", only: "skill" },
+    ultimate_bp_add_ratio: { bracket: "break", side: "attacker", basis: "by-name", only: "ultimate" },
     bp_reduce_rate_v: { bracket: "break", side: "defender", basis: "by-name" },
     pvp_taken_dmg_inc_rate_v: { bracket: "pvp", side: "attacker", basis: "by-name" },
+    pvp_taken_dmg_dec_rate_v: { bracket: "pvp", side: "defender", basis: "by-name" },
   });
   const ELEMENT_KEY = /^dmg_([a-z]+)_(add|dec)_ratio$/u;
   const STAT_KEY_BY_ATTR = Object.freeze(Object.fromEntries(Object.entries(STAT_KEYS)
@@ -311,6 +323,7 @@
       const value = Number(raw);
       if (!info || !Number.isFinite(value) || info.side !== side) continue;
       if (info.only && info.only !== skill.type && info.only !== skill.category) continue;
+      if (info.whenBroken && !skill.broken) continue;
       if (info.bracket === "element" && info.element !== skill.elementKey) continue;
       totals[info.bracket] = (totals[info.bracket] || 0) + value;
     }
@@ -325,9 +338,11 @@
   // ability_param_data.bpRate (1 when unset, 0 = no BREAK). tpPower is only for toughness, see
   // toughnessDrain.
   // context: { elements (team_builder_data.elements), sameElementBonus, elementKeys, broken, pvp }.
+  // Left out: the level gap (hit takes no levels; see the Guide's level section) and pet_/puppet_element_*: they only
+  // count where the server's space sets usePetElementResistProp / usePuppetElementResistProp, which the client doesn't show.
   function hit(attacker, defender, skill, context = {}) {
     const elementKey = context.elementKeys?.[skill.element]?.add?.replace(ELEMENT_KEY, "$1") || null;
-    const s = { ...skill, elementKey };
+    const s = { ...skill, elementKey, broken: Boolean(context.broken) };
     const atk = bracketTotals(attacker.modifiers, "attacker", s);
     const def = bracketTotals(defender.modifiers, "defender", s);
     const steps = [];
@@ -347,9 +362,13 @@
     damage *= step("Elemental Boost - target's Elemental Resistance", elementalDamage, "exact");
     damage *= step("Basic / skill / Ultimate damage", 1 + (atk.type || 0) - (def.type || 0), "inferred");
     damage *= step("Damage Amp - target's Damage Reduction (min 0.2)", Math.max(0.2, 1 + (atk.amp || 0) - (def.amp || 0)), "by-name");
-    if (context.broken) damage *= step("Damage to a BREAKed target", 1 + (atk.vs_break || 0), "inferred");
+    if (context.broken) damage *= step("Damage to a BREAKed target", Math.max(0, 1 + (atk.vs_break || 0) - (def.vs_break || 0)), "inferred");
     damage *= step("Final damage (min 0.2)", Math.max(0.2, 1 + (atk.final || 0) - (def.final || 0)), "by-name");
-    if (context.pvp) damage *= step("PvP", 0.15, "exact");
+    if (context.pvp) {
+      // Formula 3001: max(0.2, pvpDmg) x 0.15 when isPvp. pvpDmg comes from the server: matched to pvp_taken_* by name.
+      damage *= step("PvP-only boosts - target's PvP reduction (min 0.2)", Math.max(0.2, 1 + (atk.pvp || 0) - (def.pvp || 0)), "by-name");
+      damage *= step("PvP", 0.15, "exact");
+    }
     damage = Math.max(damage, 0);
 
     // Crit (exact, CombatActionTool 1098-1137): rate from both sides; x(1 + crit damage), capped at 3x.

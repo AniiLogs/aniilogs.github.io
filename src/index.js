@@ -5595,11 +5595,46 @@ async function betaAccount(request, env) {
 
 const betaText = (value, max) => String(value ?? "").trim().slice(0, max);
 
+// A retired test is deleted, with its marks, 30 days after it was retired or last edited, whichever is later (bringing
+// it back clears retired_at, so it survives). Pages has no scheduled runs, so a few go whenever the owner reads the list.
+const BETA_RETIRED_KEEP_S = 30 * 86400;
+const BETA_PURGE_MAX = 25;
+
+async function purgeRetiredBetaTests(env, now) {
+  const due = `SELECT test_id FROM beta_tests WHERE retired_at IS NOT NULL AND MAX(retired_at, updated_at) <= ? ORDER BY test_id LIMIT ${BETA_PURGE_MAX}`;
+  const cutoff = now - BETA_RETIRED_KEEP_S;
+  if (!await env.DB.prepare(due).bind(cutoff).first()) return;
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR REPLACE INTO beta_tests_deleted (test_id, title, how, details, deleted_at)
+      SELECT test_id, title, how, details, ? FROM beta_tests WHERE test_id IN (${due})`).bind(now, cutoff),
+    env.DB.prepare(`DELETE FROM beta_test_marks WHERE test_id IN (${due})`).bind(cutoff),
+    env.DB.prepare(`DELETE FROM beta_tests WHERE test_id IN (${due})`).bind(cutoff),
+  ]);
+}
+
+// What was deleted that way. Publishing the same wording again doesn't bring it back, and marks sent from an old list don't count.
+async function deletedBetaTests(env) {
+  try {
+    const { results } = await env.DB.prepare("SELECT test_id AS id, title, how, details FROM beta_tests_deleted").all();
+    return results || [];
+  } catch (error) {
+    if (/beta_tests_deleted/u.test(String(error?.message))) { console.error("The beta archive needs migration 0034", error); return []; }
+    throw error;
+  }
+}
+
 async function listBetaTests(request, env) {
   if (!env.DB) return json({ error: "The beta list is unavailable." }, 503);
   const account = await betaAccount(request, env);
   if (!account) return json({ error: "Beta access required." }, 403);
   const manager = can(account, "beta.manage");
+  if (manager) {
+    try {
+      await purgeRetiredBetaTests(env, Math.floor(Date.now() / 1000));
+    } catch (error) {
+      console.error("Could not delete old retired beta tests", error);
+    }
+  }
   const { results } = await env.DB.prepare(
     `SELECT test_id AS id, build, title, how, details, retired_at AS retiredAt, updated_at AS updatedAt
      FROM beta_tests ${manager ? "" : "WHERE retired_at IS NULL"} ORDER BY sort, created_at, test_id`,
@@ -5618,12 +5653,14 @@ async function listBetaTests(request, env) {
   const latest = tests.reduce((best, row) => (!best || row.updatedAt > best.updatedAt ? row : best), null);
   return json({
     build: latest?.build ?? null,
+    ...(manager ? { deleted: (await deletedBetaTests(env)).map((row) => row.id) } : {}),
     items: tests.map((row) => ({
       id: row.id,
       title: row.title,
       how: row.how,
       ...(row.details ? { details: storedBetaDetails(row.details) } : {}),
       ...(manager ? { retired: row.retiredAt != null, results: counts.get(row.id) || { working: 0, broken: 0 } } : {}),
+      ...(manager && row.retiredAt != null ? { retiredAt: row.retiredAt, deletesAt: Math.max(row.retiredAt, row.updatedAt) + BETA_RETIRED_KEEP_S } : {}),
     })),
     mine: Object.fromEntries((mine || []).map((row) => [row.id, { working: row.working === 1, at: row.at }])),
   });
@@ -5651,7 +5688,9 @@ function storedBetaDetails(stored) {
 }
 
 // Add new tests and reword existing ones, in the order sent. Publishing is upsert-only: a test missing from the list
-// is left as it is (never retired or deleted), and a retired test stays retired.
+// is left as it is (never retired or deleted), and a retired test stays retired: publishing the wording it already has
+// doesn't count as an edit, so it doesn't restart its 30 days. A test deleted after those 30 days stays deleted when the
+// same wording is published again (listed in `skipped`); a new wording is a new test.
 async function upsertBetaTests(request, env) {
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const account = await betaAccount(request, env);
@@ -5677,22 +5716,29 @@ async function upsertBetaTests(request, env) {
   }
   if (new Set(tests.map((test) => test.id)).size !== tests.length) return json({ error: "Test ids must be unique." }, 400);
   const now = Math.floor(Date.now() / 1000);
+  const deleted = new Map((await deletedBetaTests(env)).map((row) => [row.id, row]));
+  const sameWording = (row, test) => row.title === test.title && row.how === test.how && (row.details ?? null) === test.details;
   let added = 0;
   let updated = 0;
+  const skipped = [];
   for (const test of tests) {
-    const existing = await env.DB.prepare("SELECT 1 FROM beta_tests WHERE test_id = ?").bind(test.id).first();
+    const existing = await env.DB.prepare("SELECT title, how, details, retired_at AS retiredAt, updated_at AS updatedAt FROM beta_tests WHERE test_id = ?")
+      .bind(test.id).first();
     if (existing) {
       await env.DB.prepare("UPDATE beta_tests SET build = ?, title = ?, how = ?, details = ?, sort = ?, updated_at = ? WHERE test_id = ?")
-        .bind(build, test.title, test.how, test.details, test.sort, now, test.id).run();
+        .bind(build, test.title, test.how, test.details, test.sort, existing.retiredAt != null && sameWording(existing, test) ? existing.updatedAt : now, test.id).run();
       updated += 1;
+    } else if (deleted.has(test.id) && sameWording(deleted.get(test.id), test)) {
+      skipped.push(test.id);
     } else {
+      if (deleted.has(test.id)) await env.DB.prepare("DELETE FROM beta_tests_deleted WHERE test_id = ?").bind(test.id).run();
       await env.DB.prepare(
         "INSERT INTO beta_tests (test_id, build, title, how, details, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       ).bind(test.id, build, test.title, test.how, test.details, test.sort, now, now).run();
       added += 1;
     }
   }
-  return json({ added, updated });
+  return json({ added, updated, ...(skipped.length ? { skipped } : {}) });
 }
 
 async function retireBetaTest(request, env, testId) {
@@ -5819,7 +5865,8 @@ async function submitBetaReport(request, env) {
   ).bind(reportId, gameUid, summary, appVersion, logs.size, logKey, ipHash, now, stored.length ? JSON.stringify(stored) : null,
     kind, JSON.stringify({ build, [kind === "beta-tests" ? "tests" : "bugs"]: entries }), summary, account.discordId).run();
   if (kind === "beta-tests") {
-    for (const test of entries.filter((entry) => entry.tested && entry.working !== null)) {
+    const deleted = new Set((await deletedBetaTests(env)).map((row) => row.id));
+    for (const test of entries.filter((entry) => entry.tested && entry.working !== null && !deleted.has(entry.id))) {
       await env.DB.prepare(
         `INSERT INTO beta_test_marks (discord_id, test_id, working, report_id, marked_at) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(discord_id, test_id) DO UPDATE SET working = excluded.working, report_id = excluded.report_id, marked_at = excluded.marked_at`,
