@@ -23,7 +23,7 @@
     eggheist: [
       { kind: "eggheist_season", label: "Season standings", sorts: ["standing", "score", "stars", "player", "cycle", "played_at"], fields: ["cycle"] },
       // each match, from the game's end screen; best loot per player unless "every run"
-      { kind: "eggheist_match", label: "Matches", sorts: ["score", "difficulty", "cleared", "clear_time_s", "defeats", "player", "cycle", "played_at"], fields: ["cycle", "difficulty", "cleared"] },
+      { kind: "eggheist_match", label: "Matches", sorts: ["score", "difficulty", "cleared", "clear_time_s", "player", "cycle", "played_at"], fields: ["cycle", "difficulty", "cleared"] },
       { kind: "eggheist_pvp", label: "PvP (coming soon)", soon: true },
     ],
   });
@@ -52,7 +52,7 @@
       { label: "Difficulty", sort: "difficulty", value: (e) => e.difficulty || "—" },
       { label: "Outcome", sort: "cleared", value: (e) => (e.cleared === true ? "Escaped" : e.cleared === false ? "Failed" : "—") },
       { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
-      { label: "Total Defeats", sort: "defeats", info: "defeats", value: (e) => number(e.defeats) },
+      { label: "Total Defeats", info: "defeats", value: (e) => number(e.defeats) },
       { label: "Season", sort: "cycle", value: (e) => e.cycle || "—" },
       { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],

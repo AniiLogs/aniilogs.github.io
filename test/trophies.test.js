@@ -137,7 +137,7 @@ test("trophies: each personal best a board ranks, with its place on that ladder 
   assert.deepEqual(place(got.get("eggheist-loot")), [900, 2, 2]);
   assert.deepEqual(place(got.get("eggheist-escape")), [300, 1, 2]);
   assert.deepEqual(got.get("eggheist-escape").board, { mode: "eggheist", kind: "eggheist_match", sort: "clear_time_s" });
-  assert.deepEqual(place(got.get("eggheist-defeats")), [7, 1, 2]);
+  assert.equal(got.has("eggheist-defeats"), false);
   // nothing for a mode the player has no records in
   const bravo = byId((await (await call(env, "/api/profile/overview", SESSIONS.bravo)).json()).trophies);
   assert.deepEqual(place(bravo.get("interlink-score")), [25000, 1, 2]);

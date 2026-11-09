@@ -56,7 +56,7 @@ test("leaderboards: no Rank by menu or ladder chips; column headers sort every b
   // every column the API can sort by has a sort key, so its header is a button
   assert.match(leaderboard, /sorts: \["clear_time_s", "player", "style", "party_size", "played_at"\]/u);
   assert.match(leaderboard, /sorts: \["standing", "score", "stars", "player", "cycle", "played_at"\]/u);
-  assert.match(leaderboard, /sorts: \["score", "difficulty", "cleared", "clear_time_s", "defeats", "player", "cycle", "played_at"\]/u);
+  assert.match(leaderboard, /sorts: \["score", "difficulty", "cleared", "clear_time_s", "player", "cycle", "played_at"\]/u);
   // Season Ladder: sorted here by its headers; ?rank=stars from older links still reads
   assert.match(leaderboard, /state\.rank = Object\.hasOwn\(SEASON_SORTS, params\.get\("rank"\) \|\| ""\) \? params\.get\("rank"\) : "score";/u);
   assert.match(leaderboard, /window\.AniilogsTableSort\.sortRows\(data\.standings, SEASON_SORTS\[state\.rank\]\.value, order\)/u);
