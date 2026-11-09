@@ -1260,6 +1260,10 @@ test("the profile overview gathers the owner's characters, board positions and c
     [["S1", "Egg Emperor", 475, 2900, 2, 2]]);
   // the profile's season progress: just these fields, nothing else from the app's extra
   assert.deepEqual(heists[0].seasonProgress, { nextRankAt: 2370, lastGain: 18, bar: [1337, 1350], barAt: 1793167625 });
+  // ...and a match that lost points stays a loss
+  await submit(devToken, { kind: "eggheist_season", clientRunId: "eh", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475, extra: { lastGain: -12 } });
+  const afterLoss = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
+  assert.equal(afterLoss.leaderboards.eggheist_season[0].seasonProgress.lastGain, -12);
 
   assert.deepEqual(overview.collection, {
     aniilog: { standard: 2, sparkling: 1, forms: 2, special: 0, specialTotal: 1 },
