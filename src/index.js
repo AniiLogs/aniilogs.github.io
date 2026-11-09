@@ -2079,8 +2079,13 @@ const BETTER_INTERLINK = (b, c) => `(COALESCE(${b}.stars, -1) > COALESCE(${c}.st
 // the older proof is never gone before the run that replaces it has held up
 const PROVEN_BETTER = `b.evidence_key IS NOT NULL AND COALESCE(b.verify_state, '') NOT IN ('pending', 'mismatch', 'unreadable')
   AND COALESCE(json_extract(b.verify_json, '$.queued'), 0) = 0 AND b.created_at < CAST(strftime('%s', 'now') AS INTEGER) - 300`;
+// a run holding its sender's best Avg DPS, BREAK or healing of that boss and week: its ladder's proof
+const SELF_FIGURE = (s, figure) => `(SELECT json_extract(me.value, '$.${figure}') FROM json_each(${s}.players_json) me WHERE json_extract(me.value, '$.self') = 1)`;
+const FIGURE_BEST = ["avgDps", "breakValue", "heal"].map((figure) => `(${SELF_FIGURE("c", figure)} > 0 AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions b
+    WHERE b.discord_id = c.discord_id AND b.kind = 'interlink_run' AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible'
+      AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id AND (${SELF_FIGURE("b", figure)} > ${SELF_FIGURE("c", figure)} OR (${SELF_FIGURE("b", figure)} = ${SELF_FIGURE("c", figure)} AND ${BETTER_INTERLINK("b", "c")}))))`).join(" OR ");
 const NOBODYS_BEST = `(
-  (c.kind IN ('interlink_run', 'interlink_best')
+  (c.kind IN ('interlink_run', 'interlink_best') AND NOT (c.kind = 'interlink_run' AND COALESCE(c.outcome, '') <> 'invalid' AND COALESCE((${FIGURE_BEST}), 0))
     AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'interlink_run'
       AND b.cycle IS c.cycle AND b.boss_id IS c.boss_id AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id
       AND ${PROVEN_BETTER} AND ${BETTER_INTERLINK("b", "c")})
@@ -4325,6 +4330,19 @@ const INTERLINK_LADDERS = Object.freeze({
   heal: { key: "heal" },
 });
 
+// The one-player ladders rank each player's own best of that figure that week on that boss, whichever run it came from, with
+// that run's pictures as its proof (the owner, 8 Nov: a best run's Avg DPS of 78k stood for a 108k run). The score board's rows
+// stay one run, its figures from it.
+const OWN_BEST_LADDERS = Object.freeze({ dps: "p_dps", break: "p_break", heal: "p_heal" });
+function withOwnBest(row, ladderId) {
+  const best = OWN_BEST_LADDERS[ladderId] && row.ownBests?.[ladderId];
+  const key = INTERLINK_LADDERS[ladderId]?.key;
+  if (!best || !(best.value > (Number(row[key]) || 0))) return row;
+  const copy = { ...row, [key]: best.value, figureRuns: { ...row.figureRuns, [ladderId]: best.hasProof ? best.runId : null } };
+  Object.defineProperty(copy, "ownBests", { value: row.ownBests, enumerable: false });
+  return copy;
+}
+
 function rankedLadder(rows, ladderId) {
   const ladder = INTERLINK_LADDERS[ladderId] || INTERLINK_LADDERS.score;
   const value = (row) => Number(row[ladder.key]);
@@ -4480,6 +4498,29 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
      WHERE s.pick = 1`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
   const { results } = await bests("'interlink_run', 'interlink_best'", false);
+  // each player's own best of each one-player figure, for its ladder (withOwnBest)
+  const ownBests = new Map();
+  const figures = await env.DB.prepare(
+    `SELECT r.who, r.cycle, r.boss_id AS bossId, r.submission_id AS runId, r.p_dps AS dps, r.p_break AS "break", r.p_heal AS heal,
+       (r.evidence_key IS NOT NULL OR r.battle_evidence_key IS NOT NULL) AS hasProof
+     FROM ${CREDITED_RUNS} r
+     WHERE r.status = 'visible' AND r.kind = 'interlink_run' AND COALESCE(r.outcome, '') <> 'invalid' AND r.boss_id IS NOT NULL
+       AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}`,
+  ).bind(...cycles, ...(server ? [server] : [])).all();
+  for (const run of figures.results || []) {
+    const key = `${run.who}|${run.cycle}|${run.bossId}`;
+    const own = ownBests.get(key) || {};
+    for (const ladderId of Object.keys(OWN_BEST_LADDERS)) {
+      const value = Number(run[ladderId]);
+      if (run[ladderId] != null && Number.isFinite(value) && !(own[ladderId]?.value >= value)) {
+        own[ladderId] = { value, runId: run.runId, hasProof: Boolean(run.hasProof) };
+      }
+    }
+    ownBests.set(key, own);
+  }
+  for (const row of results || []) {
+    Object.defineProperty(row, "ownBests", { value: ownBests.get(`${row.discordId}|${row.cycle}|${row.bossId}`) || {}, enumerable: false });
+  }
   // A best sent from the game's menu that matches a run's score goes onto that run: the run keeps the row, and its
   // pictures open with the menu's (menuProofId). Only a menu best higher than every run (or with no run at all) has
   // a row of its own (the owner, 7 Nov). Such a row's other figures and their pictures come from the player's best
@@ -4680,7 +4721,7 @@ function interlinkTrophies(rows, list, discordId) {
   const rankings = new Map();                       // "<week>|<boss>|<ladder>" -> that board ranked by that ladder
   const rankedBoard = (row, ladder) => {
     const key = `${row.cycle}|${row.bossId}|${ladder}`;
-    if (!rankings.has(key)) rankings.set(key, rankedLadder(boards.get(`${row.cycle}|${row.bossId}`).slice(), ladder));
+    if (!rankings.has(key)) rankings.set(key, rankedLadder(boards.get(`${row.cycle}|${row.bossId}`).map((entry) => withOwnBest(entry, ladder)), ladder));
     return rankings.get(key);
   };
   const trophies = [];
@@ -4691,14 +4732,15 @@ function interlinkTrophies(rows, list, discordId) {
       const board = rankedBoard(row, trophy.ladder);
       const placed = board.find((entry) => entry.discordId === discordId);
       if (!placed) continue;
-      const candidate = { value: Number(placed[ladder.key]), position: placed.rank, players: board.length, firstAt: row.firstAt, row };
+      const candidate = { value: Number(placed[ladder.key]), position: placed.rank, players: board.length, firstAt: row.firstAt, row: placed };
       if (betterTrophy(candidate, best, ladder.ascending)) best = candidate;
     }
     if (!best) continue;
     const { row } = best;
     const week = interlinkCycle(list, row.cycle);
     // the board's proof for this figure: the row's one run, or the run a menu best took the figure from
-    const proofId = row.figureRuns?.[trophy.proof] || (row.hasProof ? row.runId : null);
+    const ownProof = row.figureRuns && trophy.proof in row.figureRuns;
+    const proofId = ownProof ? row.figureRuns[trophy.proof] : (row.hasProof ? row.runId : null);
     trophies.push({
       id: trophy.id, mode: "interlink", label: trophy.label, unit: trophy.unit, value: best.value,
       ...(trophy.unit === "score" ? { stars: row.stars ?? null } : {}),
@@ -4913,11 +4955,12 @@ async function interlinkBoards(request, env) {
   }
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
-  const rows = await interlinkBests(env, [cycle.id], list, server, unlinked);
+  const asked = String(params.get("ladder") || "");
+  const rows = (await interlinkBests(env, [cycle.id], list, server, unlinked)).map((row) => withOwnBest(row, asked));
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
     const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind; delete row.playedAt;
     row.proofIds = Object.fromEntries(Object.entries(ROW_FIGURES).filter(([, figure]) => row[figure] != null)
-      .map(([metric]) => [metric, figureRuns[metric] || (hasProof ? runId : null)]).filter(([, id]) => id));
+      .map(([metric]) => [metric, metric in figureRuns ? figureRuns[metric] : (hasProof ? runId : null)]).filter(([, id]) => id));
     row.proofId = row.proofIds.score || null;
   }
   // each best's check badge, from the run behind it: { score: "verified", dps: "pending", ... }
