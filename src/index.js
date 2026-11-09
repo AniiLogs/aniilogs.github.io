@@ -1508,7 +1508,7 @@ export function collectionSummary(completedIds, checklist = null) {
 
 // The owner's best entry on each board (as the board shows it) and its position among every player on that board.
 // Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone. sort: another of the board's
-// sorts (Egg Heist matches by fastest escape or most defeats), ranked as the board ranks it with that sort.
+// sorts (Egg Heist matches by fastest escape), ranked as the board ranks it with that sort.
 async function boardStandings(env, discordId, kind, sort = null) {
   const sortKey = sort && Object.hasOwn(LEADERBOARD_SORTS, sort) ? sort : LEADERBOARD_DEFAULT_SORT[kind];
   const order = LEADERBOARD_SORTS[sortKey];
@@ -2566,7 +2566,6 @@ const LEADERBOARD_SORTS = Object.freeze({
   p_break: "DESC",
   p_taken: "DESC",
   p_heal: "DESC",
-  defeats: "DESC",
   difficulty: "DESC",
   player: "ASC",
   cycle: "DESC",
@@ -4706,7 +4705,7 @@ function bossLabel(cycle, row) {
 // proof. Only figures the public boards already show, so a profile shows them with its leaderboard standing (the
 // "standings" part). Interlink: every week and boss board, each ladder (INTERLINK_LADDERS, but stars: a cap many
 // share), and the best week total; Holo-Battle Sim: the fastest clear of each trial at the hardest difficulty cleared;
-// Egg Heist: the best season standing, best loot, fastest escape and most Total Defeats.
+// Egg Heist: the best season standing, best loot and fastest escape.
 // - shot: the picture the figure is read from first. Battle Data ("battle") shows the whole party: the meter sends it
 //   as one crop, with no rectangle per player, so the viewer opens the whole screen and says whose row it is (slice).
 const INTERLINK_TROPHIES = Object.freeze([
@@ -4830,8 +4829,8 @@ function simTrophies(entries) {
 }
 
 // Egg Heist: the best season standing (highest rank, then Emperor stars, then rank points; the newer season on a tie),
-// the best loot, the fastest escape and the most Total Defeats in a match
-function eggHeistTrophies(seasons, loot, escape, defeats) {
+// the best loot and the fastest escape in a match
+function eggHeistTrophies(seasons, loot, escape) {
   const trophies = [];
   const tierOf = (entry) => [entry.seasonRank?.tier || 0, entry.stars || 0, entry.score || 0];
   const best = [...(seasons || [])].sort((a, b) => {
@@ -4863,7 +4862,6 @@ function eggHeistTrophies(seasons, loot, escape, defeats) {
   });
   match(loot?.[0], "eggheist-loot", "Best Egg Heist loot", "score", loot?.[0]?.score, null);
   match(escape?.[0], "eggheist-escape", "Fastest Egg Heist escape", "time", escape?.[0]?.clearTimeS, "clear_time_s");
-  match(defeats?.[0], "eggheist-defeats", "Most Egg Heist defeats", "number", defeats?.[0]?.defeats, "defeats");
   return trophies;
 }
 
@@ -4871,14 +4869,11 @@ function eggHeistTrophies(seasons, loot, escape, defeats) {
 // (rows) and boardStandings by kind (leaderboards). One query more for each extra Egg Heist ladder, and one for the
 // proof pictures, the check badge and the date of the runs behind the trophies.
 async function profileTrophies(env, discordId, { list, rows, leaderboards }) {
-  const [escape, defeats] = await Promise.all([
-    boardStandings(env, discordId, "eggheist_match", "clear_time_s"),
-    boardStandings(env, discordId, "eggheist_match", "defeats"),
-  ]);
+  const escape = await boardStandings(env, discordId, "eggheist_match", "clear_time_s");
   const trophies = [
     ...interlinkTrophies(rows, list, discordId),
     ...simTrophies(leaderboards.sim_run),
-    ...eggHeistTrophies(leaderboards.eggheist_season, leaderboards.eggheist_match, escape, defeats),
+    ...eggHeistTrophies(leaderboards.eggheist_season, leaderboards.eggheist_match, escape),
   ];
   const ids = [...new Set(trophies.flatMap((trophy) => [trophy.submissionId, trophy.proof?.id]).filter(Boolean))];
   const runs = new Map();

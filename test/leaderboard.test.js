@@ -1543,7 +1543,6 @@ test("Egg Heist matches: loot, time, escaped or not, difficulty and Total Defeat
   assert.deepEqual((await get("")).map((e) => [e.player, e.score, e.difficulty, e.defeats, e.cleared]),
     [["DevOne", 31000, "Hard", 4, true], ["UserOne", 9000, "Normal", 0, false]]);   // best loot per player
   assert.deepEqual((await get("difficulty=Normal")).map((e) => [e.player, e.score]), [["DevOne", 23733], ["UserOne", 9000]]);
-  assert.deepEqual((await get("sort=defeats&best=0")).map((e) => e.defeats), [4, 1, 0]);
   assert.deepEqual((await get("cleared=1&best=0")).map((e) => e.score), [31000, 23733]);   // escapes only
   // the Outcome and Season headers: escapes first (or failures, flipped), each player's row still their best loot
   assert.deepEqual((await get("sort=cleared")).map((e) => [e.player, e.cleared]), [["DevOne", true], ["UserOne", false]]);
