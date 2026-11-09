@@ -1592,7 +1592,7 @@ function historyProof(run) {
     return box;
   }
   const gizmos = Number(run.gizmoShots) || 0;          // Holo-Battle Sim's Gizmo screen, a view per part of its list
-  const shots = [["", "Result", run.hasEvidence, "full"], ["battle", "Battle Data", run.hasBattleEvidence, "battle_full"],
+  const shots = [["", "Result", run.hasEvidence, "full"], ["battle", run.kind === "eggheist_match" ? "Rank summary" : "Battle Data", run.hasBattleEvidence, "battle_full"],
     ...Array.from({ length: gizmos }, (_, i) => [`gizmo${i + 1}`, gizmos > 1 ? `Gizmos ${i + 1}` : "Gizmos", true, null])].filter(([, , has]) => has);
   if (!shots.length) { box.append(element("p", "history-empty", "No pictures with this run.")); return box; }
   for (const [shot, label, , full] of shots) {
