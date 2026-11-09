@@ -54,7 +54,12 @@
     taken_skill_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "skill" },
     taken_ultimate_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "ultimate" },
     taken_normal_attack_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "basic" },
+    taken_skill_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "skill" },
+    taken_ultimate_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "ultimate" },
     taken_phy_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "Physical" },
+    taken_mag_dmg_inc_rate_v: { bracket: "type", side: "attacker", basis: "inferred", only: "Magical" },
+    taken_phy_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "Physical" },
+    taken_mag_dmg_dec_rate_v: { bracket: "type", side: "defender", basis: "inferred", only: "Magical" },
     dmg_break_add_ratio: { bracket: "vs_break", side: "attacker", basis: "inferred" },
     bp_add_ratio: { bracket: "break", side: "attacker", basis: "by-name" },
     skill_bp_add_ratio: { bracket: "break", side: "attacker", basis: "by-name", only: "skill" },
@@ -187,7 +192,7 @@
       const potentialPercent = step ? Math.floor(totalPotential / step.every) * step.percent : 0;
       const b = bonus[stat];
       result.base[stat] = base;
-      // Shown rounded up: the client scripts don't say, but rounding up reproduced all five stats it could
+      // Shown rounded up (PetAttributeUIProxy: ceil with usePetManagementDisplayValue, else floor): it reproduced all five stats it could
       // check on a real Lv 65 Fulmintis card (rounding down or to nearest did not).
       result.total[stat] = base === null ? null
         : Math.ceil((base + b.v) * (1 + potentialPercent + b.p) + b.fix + b.conv - 1e-9);
