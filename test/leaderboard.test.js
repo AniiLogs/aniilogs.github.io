@@ -841,6 +841,38 @@ test("a menu best that matches a run's score goes onto that run: the run keeps t
   assert.equal(details.runProof, tieId);
 });
 
+test("a one-player ladder ranks a player's own best of that figure, from whichever run; the score board's row stays one run", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const token = await desktopToken(env, SESSIONS.dev);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  await call(env, "/api/leaderboard/characters", { token, method: "POST", form: proofForm({ gameUid: "302000000001", name: "MinMax" }) });
+  const sherro = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const send = async (id, score, avgDps, breakValue, proof, extra = {}) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify({ kind: "interlink_run", clientRunId: id, cycle: "3005", boss: sherro, score, stars: 20, clearTimeS: 150, cleared: true, partySize: 1,
+      gameUid: "302000000001", players: [{ name: "MinMax", ai: false, self: true, avgDps, breakValue, damageTaken: 5, heal: 1 }], ...extra }));
+    if (proof) form.set("evidence", jpeg(2), "e.jpg");
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    return (await sent.json()).submissionId;
+  };
+  const best = await send("own-a", 30000, 78448, 500, true);
+  const dpsRun = await send("own-b", 20000, 108785, 400, true);
+  const breakRun = await send("own-c", 21000, 90000, 900, false);
+  const entry = async (query) => (await (await call(env, `/api/leaderboard/interlink?cycle=3005${query}`)).json()).bosses.find((x) => x.id === "80000109").entries.find((e) => e.player === "MinMax");
+  const plain = await entry("&ladder=score");
+  assert.equal(plain.score, 30000);
+  assert.equal(plain.avgDps, 78448);                         // the score board's row: one run's figures
+  const dps = await entry("&ladder=dps");
+  assert.equal(dps.avgDps, 108785);                          // not the best score run's
+  assert.equal(dps.proofIds.dps, dpsRun);
+  assert.equal(dps.proofIds.score, best);
+  const brk = await entry("&ladder=break");
+  assert.equal(brk.breakValue, 900);
+  assert.equal(brk.proofIds.break, undefined);               // that run has no picture: never another run's
+  assert.equal("ownBests" in dps, false);
+});
+
 test("a menu best's viewer shows the run a teammate's app sent for that player, as the boards do", async () => {
   const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
   const a = await desktopToken(env, SESSIONS.dev);
