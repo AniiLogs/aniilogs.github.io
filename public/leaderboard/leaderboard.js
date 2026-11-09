@@ -555,7 +555,7 @@
     { id: "score", label: "Score", proof: "score", value: (e) => number(e.score) },
     { id: "stars", label: "Stars", proof: "score", value: (e) => number(e.score) },
     { id: "clear", label: "Fastest clear", short: "Time", proof: "clear", value: (e, boss) => clearText(e, boss) },
-    { id: "teamDps", label: "Team DPS", proof: "score", value: (e) => number(e.teamDps) },
+    { id: "teamDps", label: "Team DPS", proof: "teamDps", value: (e) => number(e.teamDps) },
     { id: "dps", label: "Avg DPS (one player)", short: "Avg DPS", proof: "dps", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK damage (one player)", short: "BREAK", proof: "break", value: (e) => number(e.breakValue) },
     { id: "heal", label: "Healing (one player)", short: "Healing", proof: "heal", value: (e) => number(e.heal) },

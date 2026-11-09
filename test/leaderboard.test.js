@@ -484,7 +484,7 @@ test("second reading (shadow mode): Workers AI re-reads the whole screens; a mis
   // public badges: the agreeing run is Verified, the disagreeing one only Pending (never "mismatch" in public)
   const boardCheck = async (cycle) => (await (await call(env, `/api/leaderboard/interlink?cycle=${cycle}`)).json())
     .bosses.flatMap((b) => b.entries).find((e) => e.proofId)?.checks;
-  assert.deepEqual(await boardCheck("3005"), { score: "verified" });
+  assert.deepEqual(await boardCheck("3005"), { score: "verified", teamDps: "verified" });
   assert.equal((await boardCheck("3003")).score, "pending");
   const publicList = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
   assert.deepEqual(publicList.map((e) => e.check).sort(), ["pending", "verified"]);
@@ -871,6 +871,18 @@ test("a one-player ladder ranks a player's own best of that figure, from whichev
   assert.equal(brk.breakValue, 900);
   assert.equal(brk.proofIds.break, undefined);               // that run has no picture: never another run's
   assert.equal("ownBests" in dps, false);
+  // the rest, each from its own run
+  const fast = await send("own-d", 19000, 100, 100, true, { clearTimeS: 90, cleared: true, teamDps: 777777, stars: 20 });
+  const low = await send("own-e", 35000, 100, 100, true, { stars: 15, cleared: false, clearTimeS: 40 });
+  assert.equal((await entry("&ladder=clear")).clearTimeS, 90);
+  assert.equal((await entry("&ladder=clear")).proofIds.clear, fast);
+  const team = await entry("&ladder=teamDps");
+  assert.equal(team.teamDps, 777777);
+  assert.equal(team.proofIds.teamDps, fast);
+  const score = await entry("&ladder=score");
+  assert.equal(score.score, 35000);                          // the highest score, though with fewer stars
+  assert.equal(score.proofIds.score, low);
+  assert.equal((await entry("")).score, 30000);              // no ladder asked: most stars, then score
 });
 
 test("a menu best's viewer shows the run a teammate's app sent for that player, as the boards do", async () => {
@@ -1061,7 +1073,7 @@ test("boss boards show each player's one best run, its Battle Data and its pictu
   const me = rows.find((e) => e.player === "DevOne");
   // one run per row, the best (most stars, then score): all its figures and its pictures, never another run's
   assert.deepEqual([me.score, me.clearTimeS, me.avgDps, me.breakValue, me.damageTaken, me.heal], [20000, null, 15000, 280000, 4000, 0]);
-  assert.deepEqual(me.proofIds, { score: high, dps: high, break: high, taken: high, heal: high });
+  assert.deepEqual(me.proofIds, { score: high, teamDps: high, dps: high, break: high, taken: high, heal: high });
   const kaela = rows.find((e) => e.player === "Kaela");
   assert.deepEqual([kaela.avgDps, kaela.heal, kaela.proofIds.dps, kaela.proofIds.heal], [16000, 900, high, high]);
 
