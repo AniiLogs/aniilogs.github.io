@@ -1568,7 +1568,7 @@ function seasonProgress(extraJson) {
   const extra = parseJsonColumn(extraJson) || {};
   const whole = (value) => (Number.isInteger(value) && value >= 0 && value < 1e9 ? value : null);
   const bar = Array.isArray(extra.bar) && extra.bar.length === 2 && extra.bar.every((v) => whole(v) != null) ? extra.bar : null;
-  const progress = { nextRankAt: whole(extra.nextRankAt), lastGain: whole(extra.lastGain), bar, barAt: bar && Number.isInteger(extra.barAt) && extra.barAt > 0 && extra.barAt < 1e10 ? extra.barAt : null };
+  const progress = { nextRankAt: whole(extra.nextRankAt), lastGain: Number.isInteger(extra.lastGain) && Math.abs(extra.lastGain) < 1e9 ? extra.lastGain : null, bar, barAt: bar && Number.isInteger(extra.barAt) && extra.barAt > 0 && extra.barAt < 1e10 ? extra.barAt : null };
   return Object.values(progress).some((v) => v != null) ? progress : null;
 }
 

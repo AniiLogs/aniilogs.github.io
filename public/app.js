@@ -551,7 +551,7 @@ function renderEggHeist(boards) {
           ? `${numberFormat.format(entry.score)}${progress.nextRankAt ? ` / ${numberFormat.format(progress.nextRankAt)}` : ""} rank points`
           : "",
         emperor && entry.stars != null ? `${numberFormat.format(entry.stars)} eggs` : "",
-        !emperor && progress.lastGain != null ? `+${numberFormat.format(progress.lastGain)} last match` : "",
+        !emperor && progress.lastGain != null ? `${progress.lastGain < 0 ? "" : "+"}${numberFormat.format(progress.lastGain)} last match` : "",
       ],
     );
     const icon = eggRankIcon(entry.seasonRank?.tier);
