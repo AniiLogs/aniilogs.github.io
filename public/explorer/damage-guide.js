@@ -121,7 +121,8 @@
       paragraphs: [
         "The game picks a row of its level-gap table by your level minus the target's (exact). The world scales to your level, so most fights sit near 0, where nothing changes.",
         "Toughness drain from that row is exact: fighting 10 levels above you, your hits drain ×0.5 toughness; 20 above, ×0.1.",
-        "The damage part has four columns, picked on the game's server by who is fighting whom. For example, at 10 levels in your favour one column gives +35% damage and another −30%. Which applies to you isn't in the client files, so the 1v1 tab leaves it out.",
+        "The damage part has four columns, picked on the game's server by who is fighting whom, and all of them favour the higher level: at 10 levels in your favour ×1.10–1.35, at 10 against ×0.5–0.9. Which applies to you isn't in the client files, so the 1v1 tab leaves it out.",
+        "BREAK damage changes by the square root of that same factor, so a level gap moves it less than a hit's damage, but it isn't immune.",
       ],
     },
     {
@@ -146,18 +147,15 @@
       basis: "inferred",
       paragraphs: [
         "These come from reading the game files but haven't been checked in the game. Treat them as unconfirmed until someone tests them.",
+        "Settled by the game's own formulas and data, no test needed: BREAK Efficiency and BREAK damage taken share one pot. Damage Amp and Damage Reduction share one pot. Bonus damage against a target in BREAK is its own multiplier. Sparkelf's Inspiration is 15–18% Fire Elemental Boost, growing with its ATK up to 800 (upgraded, 12–21%). Hummin's Energized is +2.5% BREAK Efficiency per 1,000 max HP, which its text shows rounded down to 2%.",
       ],
       tests: [
-        { id: "break-hits", text: "Hits to BREAK a pet. The BREAK bar is BREAK points (read from the game's UI code), and BREAK damage uses your BREAK stat and the skill's Might. Test: count the Fire Kicks a Lv 50 Flameruff with 20 BREAK potential needs to BREAK a Lv 50 pet (about 19 expected, with no BREAK Efficiency). Note both levels and what you fought." },
-        { id: "break-pots", text: "BREAK Efficiency (on you) and BREAK damage taken (on the target) add in one pot." },
-        { id: "magic-defence", text: "Magical skills hit against M.DEF and Physical skills against P.DEF. Test: hit the same target with a Physical and a Magical skill of similar Might, and compare against its P.DEF and M.DEF." },
-        { id: "amp-sides", text: "Damage Amp counts from the attacker and Damage Reduction from the target, in one pot." },
+        { id: "break-hits", text: "Hits to BREAK a pet. The BREAK bar is BREAK points (read from the game's UI code), and BREAK damage uses your BREAK stat and the skill's Might. Test: count the Fire Kicks a Lv 50 Flameruff with 20 BREAK potential needs to BREAK a Lv 50 pet (about 19 expected, roughly 17–19 with crits, with no BREAK Efficiency, on a target Fire doesn't counter, with no dodge procs). Note both levels and what you fought." },
+        { id: "magic-defence", text: "Magical skills hit against M.DEF and Physical skills against P.DEF. The game's stat text says so; the server picks the defence used. Test: hit the same target with a Physical and a Magical skill of similar Might, and compare against its P.DEF and M.DEF." },
         { id: "attack-type-bonus", text: "Basic attack, skill and Ultimate damage bonuses are their own multiplier." },
-        { id: "vs-break", text: "Bonus damage against a target in BREAK (e.g. Ironclad Armament) is its own multiplier." },
-        { id: "inspiration", text: "Sparkelf's Inspiration: the text says +15–18% team Fire damage, but the game data gives +30% Fire Elemental Boost. Test which one shows up in a hit." },
-        { id: "whole-team", text: "Whole-team buffs such as Zephyr's Breath and Inspiration reach every Aniimo on the team, including ones not currently out. Read from the skill texts; the game code for it isn't in the client." },
+        { id: "whole-team", text: "Whole-team buffs such as Zephyr's Breath and Inspiration: the game holds these on the player and shows them on whichever Aniimo is out. Whether a switched-in Aniimo's hits get stronger is still to confirm. Test: cast one, switch, compare one hit." },
         { id: "role-atk", text: "ATK by role. Test: a Lv 70 Heal, Support or REGEN Aniimo with ATK well under 600 should hit a target for about (420 + 0.3 × ATK − DEF) × Might ÷ 10, not (ATK − DEF) × Might ÷ 10; one with ATK above 600 should hit with its own ATK. A BREAK Aniimo should hit for (ATK + 0.42 × (BREAK − ATK ÷ 2) − DEF) × Might ÷ 10." },
-        { id: "level-gap", text: "Which side of the level-gap table applies to whom. The world scales with your level, so this matters in most fights." },
+        { id: "level-gap", text: "Which column of the level-gap table applies. Test: hit a target at your level and one 10 levels above with the same skill; the ratio (0.7, 0.5 or 0.9) names the column." },
       ],
     },
     {
