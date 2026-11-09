@@ -1556,7 +1556,9 @@ function historyParty(run) {
   if (!players.length) return element("p", "history-empty", "No party read for this run.");
   const table = element("table", "history-party");
   const head = element("tr");
-  for (const label of ["", "Player", "Avg DPS", "BREAK", "Damage Taken", "Healing"]) head.append(element("th", "", label));
+  // Egg Heist has no Battle Data: its end screen shows no player's figures, so its run lists only who played
+  const figures = run.kind !== "eggheist_match";
+  for (const label of ["", "Player", ...(figures ? ["Avg DPS", "BREAK", "Damage Taken", "Healing"] : [])]) head.append(element("th", "", label));
   const thead = element("thead");
   thead.append(head);
   const body = element("tbody");
@@ -1576,13 +1578,13 @@ function historyParty(run) {
       cell.dataset.label = label;
       return cell;
     };
-    row.append(element("td", "history-slot", `${index + 1}P`), who, number(player.avgDps, "Avg DPS"), number(player.breakValue, "BREAK"),
-      number(player.damageTaken, "Taken"), number(player.heal, "Healing"));
+    row.append(element("td", "history-slot", `${index + 1}P`), who);
+    if (figures) row.append(number(player.avgDps, "Avg DPS"), number(player.breakValue, "BREAK"), number(player.damageTaken, "Taken"), number(player.heal, "Healing"));
     body.append(row);
   });
   table.append(thead, body);
   const wrap = element("div", "history-party-wrap");
-  wrap.append(element("p", "history-section-label", "Battle Data"), table);
+  wrap.append(element("p", "history-section-label", figures ? "Battle Data" : "Party"), table);
   return wrap;
 }
 function historyProof(run) {
