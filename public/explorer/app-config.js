@@ -5,7 +5,7 @@
   const contentBaseUrl = isLocalPreview
     ? "http://127.0.0.1:8788/releases/3535596"
     : "https://aniilogs-api.pages.dev/api/content/releases/3535596";
-  const contentRevision = "20261104-build3857679-chests-r87";
+  const contentRevision = "20261111-build3857679-team-builder-conditions-r88";
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
