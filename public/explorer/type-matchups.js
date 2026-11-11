@@ -133,6 +133,88 @@
     return svg("polygon", { points, class: className });
   }
 
+  // Several defenders (a team) against one attacking element: the geometric mean of their multipliers, so x1.6 on
+  // one member and x0.625 on another average to x1.
+  function average(elements, defendingList, attacker, mode = "pve") {
+    const list = (defendingList || []).filter((defending) => defending?.length);
+    if (!list.length) return 1;
+    return Math.exp(list.reduce((sum, defending) => sum + Math.log(net(elements, defending, attacker, mode)), 0) / list.length);
+  }
+
+  // One entry per attacking element for a whole team: { id, name, color, value, tone }.
+  function teamRow(elements, defendingList, mode = "pve") {
+    return order(elements).map((id) => {
+      const value = average(elements, defendingList, id, mode);
+      return { id, name: elements[id].name || id, color: elements[id].color || "", value, tone: tone(value) };
+    });
+  }
+
+  // Background, rings and spokes shared by both radars.
+  function radarFrame(count, mode, label) {
+    const chart = svg("svg", { viewBox: `0 0 ${RADAR.width} ${RADAR.height}`, role: "img", "aria-label": label });
+    const even = radarRadius(1);
+    chart.append(
+      polygon(count, () => RADAR.outer, "matchup-radar-more"),
+      polygon(count, () => even, "matchup-radar-cover"),
+      polygon(count, () => even, "matchup-radar-less"),
+    );
+    steps(mode).forEach((value) => chart.append(polygon(count, () => radarRadius(value), "matchup-radar-ring")));
+    chart.append(polygon(count, () => even, "matchup-radar-ring matchup-radar-ring--even"));
+    for (let index = 0; index < count; index += 1) {
+      const [fromX, fromY] = radarPoint(index, count, RADAR.inner);
+      const [toX, toY] = radarPoint(index, count, RADAR.outer);
+      chart.append(svg("line", { x1: fromX.toFixed(1), y1: fromY.toFixed(1), x2: toX.toFixed(1), y2: toY.toFixed(1), class: "matchup-radar-spoke" }));
+    }
+    return chart;
+  }
+
+  function radarName(chart, entry, index, count) {
+    const [labelX, labelY] = radarPoint(index, count, RADAR.label);
+    const swatch = svg("circle", { cx: (labelX - (entry.name.length * 3.3 + 9)).toFixed(1), cy: (labelY - 8).toFixed(1), r: 4 });
+    if (entry.color) swatch.setAttribute("fill", entry.color);
+    chart.append(swatch, svg("text", { x: (labelX + 4).toFixed(1), y: (labelY - 4).toFixed(1), class: "matchup-radar-name" }, entry.name));
+    return [labelX, labelY];
+  }
+
+  function radarEven(chart, count) {
+    const [evenX, evenY] = radarPoint(0, count, radarRadius(1));
+    chart.append(svg("text", { x: (evenX + 5).toFixed(1), y: (evenY - 4).toFixed(1), class: "matchup-radar-even" }, "×1"));
+  }
+
+  // Two shapes on one radar: `sides` is [{ entries, name }, { entries, name }] with the same elements in the same
+  // order. The first is drawn solid, the second dashed, and both values stand under each element's name.
+  function renderCompareRadar(sides, { mode = "pve" } = {}) {
+    const count = sides[0].entries.length;
+    const box = html("div", "matchup-radar matchup-radar--compare");
+    const label = sides.map((side) => `${side.name}: ${sentence(side.entries)}`).join(" ");
+    const chart = radarFrame(count, mode, label);
+    sides.forEach((side, sideIndex) => {
+      const key = sideIndex ? "b" : "a";
+      chart.append(polygon(count, (index) => radarRadius(side.entries[index].value), `matchup-compare-shape matchup-side-${key}`));
+      side.entries.forEach((entry, index) => {
+        const [x, y] = radarPoint(index, count, radarRadius(entry.value));
+        chart.append(svg("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: 3.6, class: `matchup-compare-dot matchup-side-${key}` }));
+      });
+    });
+    sides[0].entries.forEach((entry, index) => {
+      const [labelX, labelY] = radarName(chart, entry, index, count);
+      sides.forEach((side, sideIndex) => chart.append(svg("text", {
+        x: (labelX + (sideIndex ? 17 : -15)).toFixed(1), y: (labelY + 11).toFixed(1),
+        class: `matchup-compare-value matchup-side-${sideIndex ? "b" : "a"}`,
+      }, format(side.entries[index].value))));
+    });
+    radarEven(chart, count);
+    box.append(chart);
+    const key = html("div", "matchup-compare-key");
+    sides.forEach((side, sideIndex) => {
+      const item = html("span", `matchup-side-${sideIndex ? "b" : "a"}`, side.name);
+      item.prepend(html("i"));
+      key.append(item);
+    });
+    box.append(key);
+    return box;
+  }
+
   // The radar: further out = takes more. `image` (a ready <img>, the Aniimo's head) sits in the middle.
   function renderRadar(entries, { mode = "pve", color = "", image = null } = {}) {
     const count = entries.length;
@@ -194,7 +276,7 @@
     return "even";
   }
 
-  // The grid: one line per row ({ head: Node, defending: [ids], current?: bool, count?: false }), one column per
+  // The grid: one line per row ({ head: Node, defending: [ids], current?: bool, count?: false, className? }), one column per
   // attacking element. `foot` adds a last line counting the rows that take more from each element (not the
   // rows with count: false).
   function renderGrid(elements, rows, { mode = "pve", foot = "" } = {}) {
@@ -214,7 +296,7 @@
     table.append(head);
     const counts = Object.fromEntries(ids.map((id) => [id, 0]));
     rows.forEach((line) => {
-      const tr = html("tr", line.current ? "is-current" : "");
+      const tr = html("tr", [line.current ? "is-current" : "", line.className || ""].filter(Boolean).join(" "));
       const name = html("th", "matchup-grid-head");
       name.scope = "row";
       name.append(line.head);
@@ -240,7 +322,7 @@
 
   window.AniilogsMatchups = Object.freeze({
     MODES, PVE_NOTE, PVP_NOTE, net, steps, format, tone, order, row, groups, sentence, radarRadius, radarPoint,
-    renderRadar, renderLegend, renderGrid,
+    average, teamRow, renderRadar, renderCompareRadar, renderLegend, renderGrid,
     note: (mode) => (mode === "pvp" ? PVP_NOTE : PVE_NOTE),
   });
 })();

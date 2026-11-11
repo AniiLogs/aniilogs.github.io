@@ -96,10 +96,18 @@
         lastPve: String(saved?.lastPve || ""),
         lastPvp: String(saved?.lastPvp || ""),
         matchupMode: saved?.matchupMode === "pvp" ? "pvp" : "pve",
+        typesTab: saved?.typesTab === "compare" ? "compare" : "matchups",
+        compare: normalizeCompare(saved?.compare),
       };
     } catch {
-      return { page: "team", types: [], memberTab: "build", lastPve: "", lastPvp: "", matchupMode: "pve" };
+      return { page: "team", types: [], memberTab: "build", lastPve: "", lastPvp: "", matchupMode: "pve", typesTab: "matchups", compare: normalizeCompare(null) };
     }
+  }
+
+  // Type matchups › Compare: two Aniimo (form ids) or two saved teams (loadout ids). Empty means "pick for me".
+  function normalizeCompare(value) {
+    const text = (key) => String(value?.[key] || "").slice(0, 80);
+    return { kind: value?.kind === "teams" ? "teams" : "aniimo", a: text("a"), b: text("b"), teamA: text("teamA"), teamB: text("teamB") };
   }
 
   function saveViewState() {
@@ -145,7 +153,7 @@
 
   function openTypes(types) {
     if (viewState.page !== "types") writePageAddress(true, "types");
-    viewState = { ...viewState, page: "types", types: types.map(String).slice(0, MAX_TYPE_SELECTION) };
+    viewState = { ...viewState, page: "types", typesTab: "matchups", types: types.map(String).slice(0, MAX_TYPE_SELECTION) };
     saveViewState();
     render();
     host.panel.scrollTo?.({ top: 0 });
@@ -2374,11 +2382,16 @@
       });
       if (mixed.length) taken.push(["Takes ×1 (countered and resisted)", mixed, "mixed"]);
     }
-    section.append(matchupBlock(types.length > 1 ? "Defending with both elements" : `${element(types[0]).name} defending`, taken));
-    types.forEach((type) => section.append(matchupBlock(`${element(type).name} attacking one element`, [
+    // The radar (as on an Aniimo's page) beside the lists.
+    const layout = el("div", "team-matchup-radar-row");
+    const lists = el("div", "team-matchup-lists");
+    lists.append(matchupBlock(types.length > 1 ? "Defending with both elements" : `${element(types[0]).name} defending`, taken));
+    types.forEach((type) => lists.append(matchupBlock(`${element(type).name} attacking one element`, [
       [`Deals ${matchups.format(countered)}`, defendersAt(type, STRONG), "strong"],
       [`Deals ${matchups.format(resisted)}`, defendersAt(type, WEAK), "resist"],
     ])));
+    layout.append(matchups.renderRadar(matchups.row(data.elements, types, mode), { mode, color: element(types[0])?.color || "" }), lists);
+    section.append(layout);
     section.append(el("p", "team-data-note", `${matchups.note(mode)} An elemental shield on the target may change it too; that isn't confirmed.`));
     return section;
   }
@@ -2476,8 +2489,203 @@
     return section;
   }
 
+  // --- Type matchups › Compare ---------------------------------------------------------------
+
+  function setCompare(changes) {
+    viewState.compare = { ...viewState.compare, ...changes };
+    saveViewState();
+    render();
+  }
+
+  function renderTypesTabs() {
+    const row = el("div", "team-matchup-tabs");
+    row.setAttribute("role", "tablist");
+    [["matchups", "Matchups"], ["compare", "Compare"]].forEach(([id, label]) => {
+      const control = button(label, "team-matchup-tab", () => {
+        viewState.typesTab = id;
+        saveViewState();
+        render();
+      });
+      control.setAttribute("role", "tab");
+      control.setAttribute("aria-selected", String((viewState.typesTab === "compare" ? "compare" : "matchups") === id));
+      row.append(control);
+    });
+    return row;
+  }
+
+  // Every published form, by name, for the two pickers.
+  function compareFormOptions() {
+    return Object.entries(data?.forms || {})
+      .filter(([, form]) => form?.elements?.length)
+      .map(([formId, form]) => ({ value: formId, label: formLabel(entryForForm(formId), form) }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }
+
+  // A form id that is still published: the saved pick, else a team member, else the first form.
+  function comparePick(saved, fallbacks, options) {
+    const ids = new Set(options.map((option) => option.value));
+    return [saved, ...fallbacks].find((id) => id && ids.has(String(id))) || options[0]?.value || "";
+  }
+
+  function compareHead(side, formId) {
+    const form = data.forms[formId];
+    const entry = entryForForm(formId);
+    const head = el("span", `matchup-compare-head matchup-side-${side}`);
+    if (entry?.icon) head.append(icon(entry.icon, "team-type-member-icon"));
+    else head.append(el("i", "matchup-compare-mark"));
+    head.append(el("span", "", entry?.name || form?.name || "Aniimo"));
+    return head;
+  }
+
+  function comparePicker(side, control, sub) {
+    const box = el("div", `matchup-compare-pick matchup-side-${side}`);
+    box.append(control);
+    if (sub) box.append(sub);
+    return box;
+  }
+
+  function summaryLine(label, text, side = "") {
+    const line = el("div", "matchup-compare-line");
+    if (side) line.classList.add(`matchup-side-${side}`);
+    line.append(el("strong", "", label), " ", el("span", "", text || "nobody"));
+    return line;
+  }
+
+  function names(list) {
+    return list.length ? list.join(", ") : "";
+  }
+
+  function renderCompareAniimo() {
+    const matchups = window.AniilogsMatchups;
+    const mode = matchupMode();
+    const options = compareFormOptions();
+    const team = battleMembers().map(({ member }) => member.formId);
+    const a = comparePick(viewState.compare.a, team, options);
+    const other = options.find((option) => String(data.forms[option.value].elements) !== String(data.forms[a]?.elements))?.value;
+    const b = comparePick(viewState.compare.b, [...team.filter((id) => id !== a), other], options);
+    const formA = data.forms[a];
+    const formB = data.forms[b];
+    const section = el("section", "team-config-section");
+    if (!formA || !formB) {
+      section.append(el("p", "team-empty-copy", "No Aniimo to compare yet."));
+      return section;
+    }
+    const nameA = entryForForm(a)?.name || formA.name;
+    const nameB = entryForForm(b)?.name || formB.name;
+    const pickers = el("div", "matchup-compare-pickers");
+    pickers.append(
+      comparePicker("a", selectControl("First Aniimo", options, a, (value) => setCompare({ a: value })), chipRow(formA.elements)),
+      el("span", "matchup-compare-vs", "vs"),
+      comparePicker("b", selectControl("Second Aniimo", options, b, (value) => setCompare({ b: value })), chipRow(formB.elements)),
+    );
+    section.append(pickers);
+    const rowA = matchups.row(data.elements, formA.elements, mode);
+    const rowB = matchups.row(data.elements, formB.elements, mode);
+    const layout = el("div", "team-matchup-radar-row");
+    const summary = el("div", "matchup-compare-summary");
+    const hits = (attacker, defender) => attacker.elements.map((id) => `${element(id).name} ${matchups.format(matchups.net(data.elements, defender.elements, id, mode))}`).join(", ");
+    const where = (test) => names(rowA.filter((entry, index) => test(entry.value, rowB[index].value)).map((entry) => entry.name));
+    summary.append(
+      summaryLine(`${nameA} hits ${nameB} for`, hits(formA, formB), "a"),
+      summaryLine(`${nameB} hits ${nameA} for`, hits(formB, formA), "b"),
+      summaryLine("Both take more from", where((left, right) => left > 1 && right > 1) || "none"),
+      summaryLine(`${nameB} covers ${nameA} against`, where((left, right) => left > 1 && right < 1) || "none"),
+      summaryLine(`${nameA} covers ${nameB} against`, where((left, right) => left < 1 && right > 1) || "none"),
+    );
+    layout.append(matchups.renderCompareRadar([{ entries: rowA, name: nameA }, { entries: rowB, name: nameB }], { mode }), summary);
+    section.append(layout, matchups.renderGrid(data.elements, [
+      { head: compareHead("a", a), defending: formA.elements },
+      { head: compareHead("b", b), defending: formB.elements },
+    ], { mode }));
+    return section;
+  }
+
+  // A saved team's Aniimo in battle (the first three slots), with their forms.
+  function teamForms(loadout) {
+    return (loadout?.model?.members || []).slice(0, TEAM_SIZE)
+      .map((member) => ({ formId: member.formId, form: formFor(member) })).filter((row) => row.form);
+  }
+
+  function renderCompareTeams() {
+    const matchups = window.AniilogsMatchups;
+    const mode = matchupMode();
+    const section = el("section", "team-config-section");
+    const options = store.loadouts.map((loadout) => ({ value: loadout.id, label: loadout.name }));
+    const ids = new Set(options.map((option) => option.value));
+    const teamA = ids.has(viewState.compare.teamA) ? viewState.compare.teamA : store.activeId;
+    const teamB = ids.has(viewState.compare.teamB) ? viewState.compare.teamB
+      : options.find((option) => option.value !== teamA)?.value || teamA;
+    const loadoutA = store.loadouts.find((loadout) => loadout.id === teamA);
+    const loadoutB = store.loadouts.find((loadout) => loadout.id === teamB);
+    const membersA = teamForms(loadoutA);
+    const membersB = teamForms(loadoutB);
+    const sub = (members) => el("small", "matchup-compare-members", members.map(({ formId, form }) => entryForForm(formId)?.name || form.name).join(", ") || "No Aniimo yet");
+    const pickers = el("div", "matchup-compare-pickers");
+    pickers.append(
+      comparePicker("a", selectControl("First team", options, teamA, (value) => setCompare({ teamA: value })), sub(membersA)),
+      el("span", "matchup-compare-vs", "vs"),
+      comparePicker("b", selectControl("Second team", options, teamB, (value) => setCompare({ teamB: value })), sub(membersB)),
+    );
+    section.append(pickers);
+    if (store.loadouts.length < 2) section.append(el("p", "team-data-note", "Make a second team in Team Builder (+ New team… in the team list) to compare two teams."));
+    if (!membersA.length || !membersB.length) {
+      section.append(el("p", "team-empty-copy", "Both teams need Aniimo in battle to compare them."));
+      return section;
+    }
+    const nameA = loadoutA.name;
+    const nameB = teamB === teamA ? `${loadoutB.name} (again)` : loadoutB.name;
+    const rowA = matchups.teamRow(data.elements, membersA.map(({ form }) => form.elements), mode);
+    const rowB = matchups.teamRow(data.elements, membersB.map(({ form }) => form.elements), mode);
+    // A member "can counter" another when one of its own elements hits it for more than x1.
+    const label = ({ formId, form }) => entryForForm(formId)?.name || form.name;
+    const countered = (attackers, defenders) => defenders.filter(({ form }) => attackers.some((attacker) => attacker.form.elements
+      .some((id) => matchups.net(data.elements, form.elements, id, mode) > 1))).map(label);
+    const safe = (attackers, defenders) => defenders.filter(({ form }) => attackers.every((attacker) => attacker.form.elements
+      .every((id) => matchups.net(data.elements, form.elements, id, mode) <= 1))).map(label);
+    const layout = el("div", "team-matchup-radar-row");
+    const summary = el("div", "matchup-compare-summary");
+    summary.append(
+      summaryLine(`${nameA} can counter`, names(countered(membersA, membersB)), "a"),
+      summaryLine(`${nameB} can counter`, names(countered(membersB, membersA)), "b"),
+      summaryLine(`Safe from ${nameA}:`, names(safe(membersA, membersB))),
+      summaryLine(`Safe from ${nameB}:`, names(safe(membersB, membersA))),
+    );
+    layout.append(matchups.renderCompareRadar([{ entries: rowA, name: nameA }, { entries: rowB, name: nameB }], { mode }), summary);
+    const rows = [
+      ...membersA.map(({ formId, form }) => ({ head: compareHead("a", formId), defending: form.elements })),
+      ...membersB.map(({ formId, form }, index) => ({ head: compareHead("b", formId), defending: form.elements, className: index ? "" : "matchup-grid-split" })),
+    ];
+    section.append(layout, matchups.renderGrid(data.elements, rows, { mode }), matchups.renderLegend(),
+      el("p", "team-data-note", "Radar: each team's average damage taken from each element (the members in battle). Counters use each member's own elements: skills of another element, stats and gear aren't counted."));
+    return section;
+  }
+
+  function renderComparePage() {
+    const section = el("section", "team-config-section");
+    const heading = el("div", "team-section-heading");
+    const kinds = el("div", "team-matchup-mode");
+    kinds.setAttribute("role", "group");
+    kinds.setAttribute("aria-label", "Compare");
+    [["aniimo", "Two Aniimo"], ["teams", "Two teams"]].forEach(([id, label]) => {
+      const control = button(label, "team-matchup-mode-button", () => setCompare({ kind: id }));
+      control.setAttribute("aria-pressed", String(viewState.compare.kind === id));
+      kinds.append(control);
+    });
+    heading.append(el("div", "", "Compare"), kinds, renderMatchupModeSwitch());
+    section.append(heading);
+    const page = el("div", "team-builder-main-column");
+    page.append(section, viewState.compare.kind === "teams" ? renderCompareTeams() : renderCompareAniimo(),
+      el("p", "team-data-note", matchupMode() === "pvp" ? window.AniilogsMatchups.PVP_NOTE : window.AniilogsMatchups.PVE_NOTE));
+    return page;
+  }
+
   function renderTypesPage() {
     const wrapper = el("div", "team-member-configuration");
+    wrapper.append(renderTypesTabs());
+    if (viewState.typesTab === "compare") {
+      wrapper.append(renderComparePage());
+      return wrapper;
+    }
     const types = viewState.types.filter((type) => element(type));
     const columns = el("div", "team-builder-columns");
     const main = el("div", "team-builder-main-column");
