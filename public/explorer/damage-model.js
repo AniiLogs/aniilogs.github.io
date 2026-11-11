@@ -1,4 +1,4 @@
-// game-audit: 1.1.3857679 2026-11-03 formula_data 3001 3003 3004 3007 3008 3018 3023 3100 3110 3512 3513 and 3025-3030/13025-13030/23025-23030, crit and element code, property_data crit/BREAK bar, Star-Up and held-item level tables, role ATK
+// game-audit: 1.1.3857679 2026-11-03 formula_data 3001 3003 3004 3007 3008 3018 3023 3100 3110 3512 3513 and 3025-3030/13025-13030/23025-23030, crit and element code, duel buff 11158 (PvP matchup values: expected, not seen in play; 1.1.3887621 2026-11-10), property_data crit/BREAK bar, Star-Up and held-item level tables, role ATK
 // Damage and stat model from the game's own scripts (build 3846247; re-checked against 1.1 build 3857679).
 // Pure functions for the 1v1 tab, the Guide and the Team Builder Build tab; no DOM. Every rule says where it
 // comes from:
@@ -338,8 +338,15 @@
   // ability_param_data.bpRate (1 when unset, 0 = no BREAK). tpPower is only for toughness, see
   // toughnessDrain.
   // context: { elements (team_builder_data.elements), sameElementBonus, elementKeys, broken, pvp }.
+  // pvp also applies the duel buff to the matchup (duelBoost): expected, no scene turns it on yet.
   // Left out: the level gap (hit takes no levels; see the Guide's level section) and pet_/puppet_element_*: they only
   // count where the server's space sets usePetElementResistProp / usePuppetElementResistProp, which the client doesn't show.
+  // The duel buff (11158, sys_config DUEL_ELEMENT_RESIST_V) on a Counter Boost or Resistance Boost: 0.5 off,
+  // not below 0, then 0.1 more off. With no boost from gear a countered hit is x0.9, a resisted one / 0.9.
+  function duelBoost(boost) {
+    return Math.max(0, (Number(boost) || 0) - 0.5) - 0.1;
+  }
+
   function hit(attacker, defender, skill, context = {}) {
     const elementKey = context.elementKeys?.[skill.element]?.add?.replace(ELEMENT_KEY, "$1") || null;
     const s = { ...skill, elementKey, broken: Boolean(context.broken) };
@@ -353,8 +360,10 @@
     const share = Number(skill.hitShare ?? 1);
     let damage = step("Base: max(ATK - DEF, 10% of ATK) x Might / 10",
       Math.max(attacker.atk - defence, 0.1 * attacker.atk) * (share * Number(skill.might || 0) / 10), "exact");
-    const matchup = elementMatchup(context.elements, skill.element, defender.elements, atk.counter || 0, def.resist || 0);
-    damage *= step(`Element matchup (${matchup.kind})`, matchup.factor, "exact");
+    const boost = (value) => (context.pvp ? duelBoost(value) : value || 0);
+    const matchup = elementMatchup(context.elements, skill.element, defender.elements, boost(atk.counter), boost(def.resist));
+    const duelMatchup = Boolean(context.pvp) && matchup.kind !== "neutral";
+    damage *= step(`Element matchup (${matchup.kind}${duelMatchup ? ", expected PvP value" : ""})`, matchup.factor, duelMatchup ? "inferred" : "exact");
     const same = (attacker.elements || []).map(String).includes(String(skill.element)) ? 1 + (context.sameElementBonus ?? 0.1) : 1;
     damage *= step("Same element as the Aniimo", same, "exact");
     const elementalDamage = 1 + (atk.element || 0) - (def.element || 0);
@@ -519,6 +528,6 @@
   }
 
   window.AniilogsDamage = Object.freeze({
-    STATS, STAT_ALIASES, BRACKETS, ROLES, bracketOf, roleOf, roleAttack, baseValue, statTotals, combatPower, elementMatchup, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, scalingNote, options,
+    STATS, STAT_ALIASES, BRACKETS, ROLES, bracketOf, roleOf, roleAttack, baseValue, statTotals, combatPower, elementMatchup, duelBoost, hit, toughnessDrain, breakBar, hitsToBreak, scaledValue, scaledRange, scalingNote, options,
   });
 })();

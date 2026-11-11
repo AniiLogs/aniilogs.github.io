@@ -238,12 +238,14 @@ test("PvP: formula 3001's max(0.2, pvpDmg) x 0.15 uses pvp_taken_*, only in PvP,
   const pvp = { ...context, pvp: true };
   const hit = (modifiers, target = {}, ctx = pvp) => D.hit({ ...attacker, modifiers }, { ...defender, modifiers: target }, fireSkill, ctx);
   const base = hit({}).hit;
-  assert.equal(near(base / hit({}, {}, context).hit), 0.15);
+  // x0.15, and the countered matchup (Fire on Grass) takes its PvP value: x0.9.
+  assert.equal(near(base / hit({}, {}, context).hit), near(0.15 * 0.9));
   assert.equal(near(hit({ pvp_taken_dmg_inc_rate_v: 0.2 }).hit / base), 1.2);
   assert.equal(near(hit({ pvp_taken_dmg_inc_rate_v: 0.2 }, { pvp_taken_dmg_dec_rate_v: 0.5 }).hit / base), 0.7);
   assert.equal(near(hit({}, { pvp_taken_dmg_dec_rate_v: 5 }).hit / base), 0.2);
   assert.equal(near(hit({ pvp_taken_dmg_inc_rate_v: 0.5 }, { pvp_taken_dmg_dec_rate_v: 0.5 }, context).hit / hit({}, {}, context).hit), 1);
-  assert.equal(hit({}, { pvp_taken_dmg_dec_rate_v: 0.5 }).break, hit({}, {}, context).break);
+  // BREAK ignores the PvP damage terms (its PvP matchup value is tested below).
+  assert.equal(hit({}, { pvp_taken_dmg_dec_rate_v: 0.5 }).break, hit({}, {}).break);
 });
 
 test("crit: the target's resistance by attack type, from getCriticalDamageRatio", () => {
@@ -288,4 +290,21 @@ test("the Guide's toughness drain matches calc_lv_modify_data: x0.5 from 5 above
   const level = G.sections.find((row) => row.id === "level").paragraphs.join(" ");
   assert.match(level, /5 to 15 levels above you, your hits drain ×0\.5 toughness; 16 to 19 above, ×0\.2; 20 or more above, ×0\.1/u);
   assert.match(level, /BREAK damage changes by the square root/u);
+});
+
+test("PvP matchups: the duel buff takes 0.5 off Counter and Resistance Boost (not below 0), then 0.1 more", () => {
+  const pvp = { ...context, pvp: true };
+  const matchupStep = (result) => result.steps.find((row) => row.label.startsWith("Element matchup"));
+  const run = (target, ctx = pvp) => D.hit(attacker, { ...defender, elements: target }, fireSkill, ctx);
+  assert.equal(near(matchupStep(run([6])).value), near(1.6 * 0.9));
+  assert.equal(near(matchupStep(run([3])).value), near(0.625 / 0.9));
+  assert.equal(near(matchupStep(run([3, 5])).value), near(0.390625 / 0.9));
+  assert.equal(matchupStep(run([3, 6])).value, 1);
+  assert.equal(matchupStep(run([6])).basis, "inferred");
+  assert.equal(matchupStep(run([6], context)).value, 1.6);
+  assert.equal(matchupStep(run([6], context)).basis, "exact");
+  // BREAK uses max(1, matchup), so a countered hit's BREAK damage drops by the same 10%.
+  assert.equal(near(run([6]).break / run([6], context).break), 0.9);
+  assert.equal(D.duelBoost(0.3), -0.1);
+  assert.equal(near(D.duelBoost(0.75)), 0.15);
 });
