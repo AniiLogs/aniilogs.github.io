@@ -163,7 +163,6 @@
         { id: "role-atk", text: "ATK by role. Test: a Lv 70 Heal, Support or REGEN Aniimo with ATK well under 600 should hit a target for about (420 + 0.3 × ATK − DEF) × Might ÷ 10, not (ATK − DEF) × Might ÷ 10; one with ATK above 600 should hit with its own ATK. A BREAK Aniimo should hit for (ATK + 0.42 × (BREAK − ATK ÷ 2) − DEF) × Might ÷ 10." },
         { id: "level-gap", text: "Which column of the level-gap table applies. Test: hit a target at your level and one 10 levels above with the same skill; the ratio (0.7, 0.5 or 0.9) names the column." },
         { id: "wild-species-bonus", text: "Whether a wild Flameruff gets the +10 P.DEF species bonus (P.DEF 171 at Lv 50 instead of 150). Test: hit a Lv 50 wild Flameruff with a known ATK and Might, and compare the number with both P.DEF values." },
-        { id: "frenzied-assault", text: "Surging Wave's Frenzied Assault. Its text says +25% Water Elemental Boost, but the client's data reads a value its row doesn't have, so it comes out as +0%. Test: hit the same target with a Water skill before and during Frenzied Assault." },
         { id: "lightning-cross", text: "Lightning Cross. Its text says +50% CRIT Rate, but the data gives the caster +50% Skill Crit Damage while the skill hits. Test: count crits over many casts against a target with no crit resistance (about 10% expected without other Crit Rate), and compare the size of a crit with a non-crit." },
       ],
     },
@@ -216,7 +215,7 @@
     { kind: "skill", id: 10400211, basis: "exact",
       text: "The game data gives +50% Skill Crit Damage while this skill hits, not the +50% CRIT Rate in the text. So it makes crits bigger, not more frequent. Unconfirmed until tested in the game." },
     { kind: "trait", id: 139301, basis: "exact",
-      text: "Frenzied Assault's +25% Water Elemental Boost isn't in the client's data: the buff reads a value its row doesn't have, so it comes out as +0%. The game's server may still apply it. Unconfirmed until tested in the game." },
+      text: "Frenzied Assault should give +25% Water Elemental Boost, but it's bugged in the game right now and gives 0%: the buff reads a value its row doesn't have. Team Builder shows the 25% and counts it as 0% until the game is fixed." },
   ]);
 
   function explanationFor(kind, id, formId) {

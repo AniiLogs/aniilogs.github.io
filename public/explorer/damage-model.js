@@ -502,7 +502,9 @@
               who: link.on, key: attribute.key, label: attribute.label, bracket: info.bracket,
               basis: link.basis === "by-name" && info.basis === "exact" ? "by-name" : info.basis,
               whole_team: Boolean(link.whole_team),
-              values: attribute.values, ...(attribute.scaling ? { scaling: attribute.scaling } : {}),
+              // A bugged value (team_builder_data "bugged") counts as 0, what the game does now.
+              values: attribute.bugged ? [0] : attribute.values, ...(attribute.scaling ? { scaling: attribute.scaling } : {}),
+              ...(attribute.bugged ? { bugged: attribute.bugged } : {}),
               stacks: Number(link.stacks || buff.max_layer || 1),
               duration: link.duration ?? buff.duration ?? null, requires: link.requires || null,
             });
