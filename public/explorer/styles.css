@@ -15228,3 +15228,276 @@ body.aniilog-artwork-hidden:not(.aniilog-artwork-mode) .catalog-aniilog-record .
 body.aniilog-artwork-mode .catalog-hide-artwork-button {
   display: none;
 }
+
+/* Type matchups (type-matchups.js): the radar on an Aniimo's page and the grid there and in Team Builder. */
+.afp-matchups-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.afp-matchups-summary {
+  flex: 1 1 260px;
+  margin: 0;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.afp-matchups-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.matchup-radar {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.matchup-radar svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.matchup-radar-head {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14%;
+  height: auto;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--line);
+  border-radius: 50%;
+}
+
+.matchup-radar-more { fill: rgba(229, 111, 95, 0.09); }
+.matchup-radar-cover { fill: var(--panel); }
+.matchup-radar-less { fill: rgba(var(--accent-rgb), 0.08); }
+
+.matchup-radar-ring {
+  fill: none;
+  stroke: rgba(155, 181, 178, 0.22);
+  stroke-width: 1;
+}
+
+.matchup-radar-ring--even {
+  stroke: var(--muted);
+  stroke-dasharray: 4 4;
+}
+
+.matchup-radar-spoke {
+  stroke: rgba(155, 181, 178, 0.16);
+  stroke-width: 1;
+}
+
+.matchup-radar-shape {
+  fill: var(--type-color, var(--accent));
+  fill-opacity: 0.28;
+  stroke: var(--type-color, var(--accent));
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.matchup-radar-dot {
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+
+.matchup-radar-name,
+.matchup-radar-value,
+.matchup-radar-even {
+  text-anchor: middle;
+  font-weight: 700;
+}
+
+.matchup-radar-name {
+  fill: var(--text);
+  font-size: 12.5px;
+}
+
+.matchup-radar-value { font-size: 11px; }
+
+.matchup-radar-even {
+  fill: var(--muted);
+  font-size: 10px;
+  text-anchor: start;
+}
+
+.matchup-tone-more { fill: var(--danger); }
+.matchup-tone-less { fill: var(--accent); }
+.matchup-tone-even { fill: var(--muted); }
+
+.matchup-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.matchup-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.matchup-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.matchup-swatch--more { background: rgba(229, 111, 95, 0.55); }
+.matchup-swatch--even { background: rgba(155, 181, 178, 0.2); }
+.matchup-swatch--less { background: rgba(var(--accent-rgb), 0.45); }
+
+.matchup-grid-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* A wide grid scrolls inside its section instead of widening the column. */
+.team-builder-main-column > .team-config-section {
+  min-width: 0;
+}
+
+.matchup-form small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.matchup-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.matchup-grid th {
+  color: var(--muted);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.matchup-grid-corner,
+.matchup-grid-head {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+  padding-right: 8px;
+}
+
+.matchup-grid-corner { font-size: 12px; }
+
+.matchup-grid th.matchup-grid-element {
+  min-width: 46px;
+  padding: 0 2px 4px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.matchup-grid-dot {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 0 auto 3px;
+  border-radius: 50%;
+}
+
+.matchup-cell {
+  min-width: 46px;
+  border-radius: 6px;
+  padding: 7px 4px;
+  color: var(--text);
+  font-weight: 700;
+  text-align: center;
+}
+
+.matchup-cell--more-2 { background: rgba(229, 111, 95, 0.55); }
+.matchup-cell--more-1 { background: rgba(229, 111, 95, 0.26); }
+.matchup-cell--less-1 { background: rgba(var(--accent-rgb), 0.2); }
+.matchup-cell--less-2 { background: rgba(var(--accent-rgb), 0.45); }
+
+.matchup-cell--even {
+  background: rgba(155, 181, 178, 0.07);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.matchup-grid-foot .matchup-cell {
+  background: transparent;
+  color: var(--muted);
+}
+
+.matchup-grid-foot .matchup-cell--risk {
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(229, 111, 95, 0.6);
+}
+
+.matchup-grid-foot .matchup-grid-head { font-size: 12px; }
+
+.matchup-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  padding: 2px 10px 2px 2px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matchup-form:hover,
+.matchup-form:focus-visible {
+  border-color: var(--line);
+}
+
+.matchup-form[aria-pressed="true"],
+.matchup-grid tr.is-current .matchup-form {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.matchup-form img { flex: none; }
+
+.team-matchup-mode {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.team-matchup-mode-button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.team-matchup-mode-button[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+}
