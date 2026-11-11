@@ -45,7 +45,7 @@
       // Stars only exist at the top rank (Egg Emperor)
       { label: "Emperor stars", sort: "stars", value: (e) => (e.seasonRank?.tier === 7 || e.stars ? number(e.stars) : "—") },
       { label: "Season", sort: "cycle", value: (e) => e.cycle || "—" },
-      { label: "Updated", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Last updated", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     eggheist_match: [
       { label: "Loot", sort: "score", value: (e) => number(e.score) },
@@ -54,7 +54,7 @@
       { label: "Time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
       { label: "Total Defeats", info: "defeats", value: (e) => number(e.defeats) },
       { label: "Season", sort: "cycle", value: (e) => e.cycle || "—" },
-      { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Last updated", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
     sim_run: [
       { label: "Battle time", sort: "clear_time_s", value: (e) => duration(e.clearTimeS) },
@@ -64,7 +64,7 @@
       // each gizmo series with its count ("Energy 6 · Valor 2"); runs from before the setup was read: their buff count
       { label: "Gizmos", value: (e) => gizmoSeries(e.extra?.setup) || number(e.buffs?.length) },
       { label: "Party", sort: "party_size", value: (e) => number(e.partySize) },
-      { label: "Date", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
+      { label: "Last updated", sort: "played_at", value: (e) => date(e.playedAt || e.submittedAt) },
     ],
   });
 
@@ -510,6 +510,30 @@
       + '<path d="M12 5.2l1.95 4.1 4.5.55-3.3 3.1.85 4.45L12 15.2l-4 2.2.85-4.45-3.3-3.1 4.5-.55z" fill="#7a4b00"/>';
     return svg;
   }
+  // Line icons for the boards' "last updated": a calendar per row, and circling arrows over that column (drawn here).
+  function lineIcon(kind) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("class", "lb-line-icon"); svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = kind === "calendar"
+      ? '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></g>'
+      : '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></g>';
+    return svg;
+  }
+  // A Per Boss row's "last updated": a calendar icon; hover or tap shows when that player's best run reached AniiLogs.
+  function updatedIcon(unix) {
+    if (!unix) return el("span", { class: "lb-row-when" });
+    const at = new Date(unix * 1000);
+    const tip = `Updated ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (${agoText(unix)})`;
+    const button = el("button", { type: "button", class: "lb-row-when", title: tip, "aria-label": tip, "data-tip": tip,
+      onclick: (event) => {
+        event.stopPropagation();
+        const open = !button.classList.contains("is-open");
+        for (const other of document.querySelectorAll(".lb-row-when.is-open")) other.classList.remove("is-open");
+        button.classList.toggle("is-open", open);
+      } });
+    button.append(lineIcon("calendar"));
+    return button;
+  }
   function stars(value) {
     return el("span", { class: "lb-stars" }, starIcon(), el("span", { text: number(value) }));
   }
@@ -657,11 +681,16 @@
     const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
       el("span", { class: "lb-who" }, playerName(entry, null, rowCheck(entry, ladder)), el("small", { class: "lb-result" }, ...resultLine(entry, ladder, boss))),
+      updatedIcon(entry.updatedAt),
       el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry, boss) }), stars(entry.stars))));
+    // over the rows: what each column is, with the "last updated" column as its icon
+    const head = el("div", { class: "lb-rows-head", "aria-hidden": "true" }, el("span", { text: "#" }), el("span", { text: "Player" }),
+      el("span", { class: "lb-rows-head-when", title: "Last updated" }, lineIcon("update")), el("span", { text: ladder.label.replace(/ \(one player\)$/u, "") }));
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
       "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
     bossHead(boss, "lb-boss-head"),
     el("label", { class: "lb-ladder" }, el("span", { text: "Ladder" }), select),
+    rows.length ? head : null,
     rows.length ? el("ol", { class: "lb-rows" }, rows)
       : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
     boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(boss.total)} →`,
@@ -749,7 +778,7 @@
     { id: "dps", label: "Avg DPS", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK", value: (e) => number(e.breakValue) },
     { id: "heal", label: "Healing", value: (e) => number(e.heal) },
-    { id: "date", label: "Submitted", value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best was sent
+    { id: "date", label: "Last updated", value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best was sent
   ];
   function renderFull(data) {
     const boss = data.bosses[0];
