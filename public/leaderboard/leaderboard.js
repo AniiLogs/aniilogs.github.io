@@ -965,6 +965,8 @@
       ? (simBoard ? "fastest Victory first" : `ranked by ${sortName}`)
       : `${result.sort === board().sorts[0] ? "ranked" : "sorted"} by ${sortName}${reversed}`;
     els.summary.textContent = `${simBoard || board().label} · ${sortedBy} · ${result.bestPerPlayer ? "best per player" : "every run"} · ${number(result.total)} record${result.total === 1 ? "" : "s"}`;
+    // when the newest run on this board reached AniiLogs, as on the Interlink boards (only once the API sends it)
+    if ("updatedAt" in result && result.updatedAt) els.summary.append(` · ${updatedLine(result.updatedAt).textContent}`);
     els.page.textContent = result.total ? `${first}–${last} of ${number(result.total)}` : "";
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= result.total;

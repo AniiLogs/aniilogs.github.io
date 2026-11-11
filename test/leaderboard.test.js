@@ -173,6 +173,7 @@ test("desktop tokens submit without an origin, upsert by run id, and stop workin
   const entries = await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0", { session: SESSIONS.dev })).json();
   assert.equal(entries.total, 1);
   assert.equal(entries.entries[0].score, 22652);
+  assert.ok(Number.isFinite(entries.updatedAt), "the board says when its newest run arrived");
 
   const listed = await (await call(env, "/api/leaderboard/tokens", { session: SESSIONS.dev })).json();
   assert.equal(listed.tokens.length, 1);

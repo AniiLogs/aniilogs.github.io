@@ -5120,7 +5120,8 @@ async function leaderboardEntries(request, env) {
     LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id AND s.teammate IS NULL
     WHERE ${where.join(" AND ")}`;
   const filtered = bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base;
-  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total FROM (${filtered})`).bind(...binds).first();
+  // updatedAt: when the newest run on this board (as filtered) reached AniiLogs, for the "Updated" line over it
+  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(created_at) AS updatedAt FROM (${filtered})`).bind(...binds).first();
   const { results } = await env.DB.prepare(
     `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
   ).bind(...binds, limit, offset).all();
@@ -5133,6 +5134,7 @@ async function leaderboardEntries(request, env) {
     order: order.toLowerCase(),
     bestPerPlayer,
     total: Number(countRow?.total || 0),
+    updatedAt: countRow?.updatedAt == null ? null : Number(countRow.updatedAt),
     offset,
     limit,
     entries: (results || []).map((row, index) => ({
