@@ -651,6 +651,7 @@ const state = {
   aniilogArea: "all",
   aniilogStatView: "Base",
   aniilogFormTab: "Evolution",
+  afpMatchupMode: "pve",
   aniilogSkillSelection: {},
   aniilogGrowth: { level: 70, potentials: {}, heldItem: null, starUp: null },
   aniilogSeason: "all",
@@ -7469,7 +7470,7 @@ const AFP_STAT_KEYS = Object.freeze({
   HP: "hp_max_cur", Attack: "atk_cur", "Magic Attack": "atk_cur", Defense: "def_cur",
   "Magic Defense": "def_mag_cur", "EP Regen": "ep_regen_force_cur", Break: "bp_atk_cur",
 });
-const AFP_TABS = Object.freeze(["Evolution", "Research", "Habitat", "Resonance", "Build", "Rewards"]);
+const AFP_TABS = Object.freeze(["Evolution", "Research", "Habitat", "Resonance", "Build", "Matchups", "Rewards"]);
 const AFP_KEY_LEVELS = Object.freeze([1, 20, 40, 60, 70]);
 const AFP_SKILL_SLOTS = 7;
 
@@ -8426,6 +8427,65 @@ function renderAfpDeveloperTab(entry) {
   return box;
 }
 
+// Tab "Matchups": what this form takes from each attacking element (type-matchups.js) as a radar around its head
+// picture, then every form of the Aniimo in one grid. PvE or PvP values.
+function afpMatchupElements(entry) {
+  const table = state.afpTeamData?.elements || {};
+  const listed = state.afpTeamData?.forms?.[String(entry.form_id)]?.elements;
+  if (Array.isArray(listed) && listed.length) return listed.map(String).filter((id) => table[id]);
+  return (entry.elements || []).map((element) => {
+    const name = String(typeof element === "string" ? element : element?.name || "").toLowerCase();
+    return Object.keys(table).find((id) => [table[id].name, table[id].key].some((value) => String(value || "").toLowerCase() === name));
+  }).filter(Boolean);
+}
+
+function renderAfpMatchupsTab(entry) {
+  const box = document.createElement("div");
+  box.className = "afp-tab-stack afp-matchups";
+  const matchups = window.AniilogsMatchups;
+  if (!state.afpTeamData) {
+    loadAfpTeamData();
+    box.append(afpNone("Loading matchups…"));
+    return box;
+  }
+  const table = state.afpTeamData.elements;
+  const defending = table ? afpMatchupElements(entry) : [];
+  if (!matchups || !defending.length) {
+    box.append(afpNone("No matchup data is listed for this form."));
+    return box;
+  }
+  const mode = state.afpMatchupMode === "pvp" ? "pvp" : "pve";
+  const row = matchups.row(table, defending, mode);
+  const top = document.createElement("div");
+  top.className = "afp-matchups-top";
+  const summary = document.createElement("p");
+  summary.className = "afp-matchups-summary";
+  summary.textContent = matchups.sentence(row);
+  top.append(summary, afpSegmented(matchups.MODES.map((item) => item.label), matchups.MODES.find((item) => item.id === mode).label, (label) => {
+    state.afpMatchupMode = matchups.MODES.find((item) => item.label === label)?.id || "pve";
+    afpRerender();
+  }, "Matchup values"));
+  box.append(top, matchups.renderRadar(row, { mode, color: table[defending[0]]?.color, image: makeIcon("afp-form-icon", entry.icon) }));
+  const family = String(entry.base_id || entry.research_id || entry.name || "");
+  const forms = allCatalogEntriesForView("aniilog").filter((candidate) => String(candidate?.base_id || candidate?.research_id || candidate?.name || "") === family);
+  if (forms.length > 1) {
+    box.append(matchups.renderGrid(table, forms.map((form) => {
+      const head = document.createElement("button");
+      head.type = "button";
+      head.className = "matchup-form";
+      head.append(makeIcon("afp-form-icon", form.icon), String(form.form_label || "Form").replace(/ Form$/u, ""));
+      head.setAttribute("aria-pressed", String(form.id === entry.id));
+      head.addEventListener("click", () => openAniimoPage(form.id, { scrollIndex: false }));
+      return { head, defending: afpMatchupElements(form), current: form.id === entry.id };
+    }).filter((line) => line.defending.length), { mode }));
+  }
+  const note = document.createElement("p");
+  note.className = "afp-matchups-note";
+  note.textContent = matchups.note(mode);
+  box.append(matchups.renderLegend(), note);
+  return box;
+}
+
 function renderAfpTabs(entry) {
   const tabs = [...AFP_TABS, ...(developerModeEnabled() ? ["Developer"] : [])];
   const current = tabs.includes(state.aniilogFormTab) ? state.aniilogFormTab : "Evolution";
@@ -8442,7 +8502,7 @@ function renderAfpTabs(entry) {
   const renderers = {
     Evolution: renderAfpEvolutionTab, Research: renderAfpResearchTab, Habitat: renderAfpHabitatTab,
     Resonance: (value) => renderAniimoProgression(value, state.aniilogData?.aniimo_progression) || afpNone("No Resonance data is listed for this form."),
-    Build: renderAfpBuildTab, Rewards: renderAfpRewardsTab, Developer: renderAfpDeveloperTab,
+    Build: renderAfpBuildTab, Matchups: renderAfpMatchupsTab, Rewards: renderAfpRewardsTab, Developer: renderAfpDeveloperTab,
   };
   body.append(renderers[current](entry));
   section.append(bar, body);

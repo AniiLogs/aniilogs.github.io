@@ -1,4 +1,4 @@
-// game-audit: 1.1.3857679 2026-11-03 RULES (crit, same-element, 10% floor, PvP 0.15, BREAK time 6 s), fallback 3001/3023, role ATK via damage-model.js
+// game-audit: 1.1.3857679 2026-11-03 RULES (crit, same-element, 10% floor, PvP 0.15, BREAK time 6 s; PvP matchup values from duel buff 11158: expected, not seen in play, 1.1.3887621 2026-11-10), fallback 3001/3023, role ATK via damage-model.js
 (() => {
   "use strict";
 
@@ -16,6 +16,7 @@
     sameElement: 0.1, // ability_setting_global_const_data.sameElementDamageAddRatio
     minimumShare: 0.1, // damage is at least 10% of ATK before skill power, however high DEF is
     pvpFactor: 0.15, // formula 3001 pvpFactor when isPvp
+    pvpMatchup: 0.9, // duel buff 11158: -0.1 on Counter Boost and Resistance Boost (expected)
     breakTime: 6, // property_data 1001 break_time (seconds)
     maxSeconds: 300,
   });
@@ -180,9 +181,18 @@
   }
 
   // CombatActionTool: the attack's multiplier against each defending element, multiplied together.
-  function elementFactor(data, attackElement, defenderIds) {
+  // In PvP the duel buff (11158) softens the result once: a net advantage x0.9, a net disadvantage / 0.9,
+  // mixed stays 1 (expected: no scene turns the buff on yet; same values as type-matchups.js).
+  function elementFactor(data, attackElement, defenderIds, pvp = false) {
     const against = data?.elements?.[attackElement]?.against || {};
-    return defenderIds.reduce((factor, id) => factor * (Number(against[id]) || 1), 1);
+    let side = 1;
+    const factor = defenderIds.reduce((product, id) => {
+      const value = Number(against[id]) || 1;
+      side *= value > 1 ? 2 : value < 1 ? 0.5 : 1;
+      return product * value;
+    }, 1);
+    if (!pvp || Math.abs(side - 1) < 1e-9) return factor;
+    return side > 1 ? factor * RULES.pvpMatchup : factor / RULES.pvpMatchup;
   }
 
   // --- Skills -------------------------------------------------------------------------------------
@@ -252,7 +262,7 @@
     const atk = roleAttack(attacker).atk;
     const def = defender.stats[defKey] || 0;
     let damage = Math.max(atk - def, RULES.minimumShare * atk) * (chosenRate(attack) * attack.might / 10);
-    damage *= elementFactor(scenario.data, attack.element, defender.elements);
+    damage *= elementFactor(scenario.data, attack.element, defender.elements, scenario.pvp);
     if (attacker.elements.includes(attack.element)) damage *= 1 + RULES.sameElement;
     if (crit) damage *= Math.min(RULES.critCap, 1 + RULES.critDamage);
     if (scenario.broken) damage *= 1 + scenario.brokenBonus;
@@ -264,7 +274,7 @@
   function breakDamage(attacker, defender, attack, scenario, crit) {
     const bpAtk = attacker.stats.Break || 0;
     let damage = bpAtk * (chosenRate(attack) * attack.might / 10) * attack.breakRate;
-    damage *= Math.max(1, elementFactor(scenario.data, attack.element, defender.elements));
+    damage *= Math.max(1, elementFactor(scenario.data, attack.element, defender.elements, scenario.pvp));
     if (crit) damage *= Math.min(RULES.critCap, 1 + RULES.critDamage);
     return Math.max(damage, 0);
   }
@@ -564,7 +574,7 @@
     pvpInput.addEventListener("change", change(rerender, (target) => {
       settings.pvp = target.checked;
     }));
-    pvp.append(pvpInput, el("span", "", `PvP (the game scales PvP damage to ${Math.round(RULES.pvpFactor * 100)}%)`));
+    pvp.append(pvpInput, el("span", "", `PvP (the game scales PvP damage to ${Math.round(RULES.pvpFactor * 100)}%; matchups use the expected PvP values)`));
     fields.append(pvp, numberField("Time per attack", settings.actionSeconds, { min: 0.3, max: 5, step: 0.1, suffix: "s" }, change(rerender, (target) => {
       settings.actionSeconds = clamp(target.value, 0.3, 5, 1);
     })));
@@ -968,7 +978,7 @@
     );
     root.append(results);
     const sources = el("p", "duel-sources");
-    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. The ATK that goes in depends on the attacker's role, as the game's role-trait tooltips say: DPS uses ATK; BREAK uses formula 3512, ATK + 0.42 × (BREAK − half of ATK), with BREAK counted up to 2.2× ATK; Support, REGEN and Heal use formula 3513, 7 × level (up to Lv 60) + 0.3 × ATK, when that is more than ATK (the “when more” part is inferred from the tooltip, not read from the game). Two elements multiply (1.6 × 1.6 = 2.56×). Same-element attacks get +10%. BREAK dmg is formula 3023: BREAK stat × Might ÷ 10 × the skill’s BREAK rate, and it can crit. Hits to BREAK divides the opponent’s BREAK bar by it and isn’t checked in the game yet. Toughness (a separate stagger gauge) is in each attack’s working. Physical skills hit P.DEF and magic skills M.DEF, both with the role's ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
+    sources.textContent = "From the game's own scripts: HP damage formula 3001 (ATK − DEF, at least 10% of ATK, × Might ÷ 10), BREAK damage formula 3023, crits and elements from the combat code. The ATK that goes in depends on the attacker's role, as the game's role-trait tooltips say: DPS uses ATK; BREAK uses formula 3512, ATK + 0.42 × (BREAK − half of ATK), with BREAK counted up to 2.2× ATK; Support, REGEN and Heal use formula 3513, 7 × level (up to Lv 60) + 0.3 × ATK, when that is more than ATK (the “when more” part is inferred from the tooltip, not read from the game). Two elements multiply (1.6 × 1.6 = 2.56×). With PvP ticked, matchups use the expected PvP values (×1.44 and ×0.69; ×2.3 and ×0.43 with two elements) and 50 points of Counter Boost and Resistance Boost from gear are left out: the game files hold a duel-only effect that does this, but no mode uses it yet, so it isn't confirmed in play. Same-element attacks get +10%. BREAK dmg is formula 3023: BREAK stat × Might ÷ 10 × the skill’s BREAK rate, and it can crit. Hits to BREAK divides the opponent’s BREAK bar by it and isn’t checked in the game yet. Toughness (a separate stagger gauge) is in each attack’s working. Physical skills hit P.DEF and magic skills M.DEF, both with the role's ATK. Stats are base stats, before personality, held items and other bonuses. EP isn't limited, and buffs, traits and skill effects beyond damage aren't included.";
     root.append(sources);
     return root;
   }

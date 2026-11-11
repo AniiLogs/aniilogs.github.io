@@ -37,6 +37,10 @@ test("HP damage follows formula 3001: max(ATK - DEF, 10% ATK) x Might / 10, elem
   assert.ok(Math.abs(duel.hpDamage(attacker, double, fireKick, scenario, false) - plain * 2.56) < 1e-9);
   assert.ok(Math.abs(duel.hpDamage(attacker, defender, fireKick, { ...scenario, pvp: true }, false) - plain * 0.15) < 1e-9);
   assert.ok(Math.abs(duel.hpDamage(attacker, defender, fireKick, { ...scenario, broken: true, brokenBonus: 0.5 }, false) - plain * 1.5) < 1e-9);
+  // PvP matchup values (duel buff, expected): an advantage x0.9 once, a disadvantage / 0.9.
+  assert.ok(Math.abs(duel.hpDamage(attacker, double, fireKick, { ...scenario, pvp: true }, false) - plain * 2.56 * 0.9 * 0.15) < 1e-9);
+  const same = { stats: { Defense: 171 }, elements: ["5"] };
+  assert.ok(Math.abs(duel.hpDamage(attacker, same, fireKick, { ...scenario, pvp: true }, false) - plain * 0.625 / 0.9 * 0.15) < 1e-9);
 });
 
 test("the attacker's role sets the ATK that goes into formula 3001 (formula_data 3512 and 3513)", () => {

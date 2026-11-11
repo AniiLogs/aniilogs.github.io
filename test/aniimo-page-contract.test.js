@@ -12,7 +12,7 @@ test("the Aniimo form page is one fixed grid with the same panels for every form
   assert.match(explorer, /record\.append\(renderAniilogFormGrid\(entry\)\);/u);
   assert.match(pageCode, /renderAfpJumpBar\(\), renderAfpStats\(entry\), renderAfpSkills\(entry\), renderAfpKit\(entry\), renderAfpProfile\(entry\), renderAfpTabs\(entry\)/u);
   assert.match(pageCode, /const AFP_SKILL_SLOTS = 7;/u);
-  assert.match(pageCode, /"Evolution", "Research", "Habitat", "Resonance", "Build", "Rewards"/u);
+  assert.match(pageCode, /"Evolution", "Research", "Habitat", "Resonance", "Build", "Matchups", "Rewards"/u);
   assert.match(styles, /grid-template-areas: "stats skills kit" "profile skills tabs";/u);
 });
 

@@ -89,7 +89,7 @@
         "A countering element deals ×1.6, a resisted one ×0.625. Against two elements the two values multiply: 1.6 × 1.6 = ×2.56, 1.6 × 0.625 = ×1.",
         "Counter Boost (for example Scorching Flames) multiplies your damage only when the matchup is in your favour overall. Resistance Boost divides it only when the matchup is against you. A mixed matchup (one countered, one resisted) counts as neutral, so neither applies.",
         "Elemental Boost and the target's resistance to that element share one pot. If that pot reaches 0 or less, the hit does no damage at all.",
-        "An elemental shield replaces the target's own elements while it is up.",
+        "An elemental shield seems to replace the target's own elements while it is up. This hasn't been checked in the game.",
       ],
     },
     {

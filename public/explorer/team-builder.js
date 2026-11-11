@@ -83,7 +83,7 @@
   }
   if (guideAddress()) window.location.replace(guideAddress());
 
-  // Which Team Builder page is open and the elements picked in Type matchups (per viewer).
+  // Which Team Builder page is open, the elements picked in Type matchups and its PvE or PvP values (per viewer).
   let viewState = loadViewState();
 
   function loadViewState() {
@@ -95,9 +95,10 @@
         memberTab: String(saved?.memberTab || "build"),
         lastPve: String(saved?.lastPve || ""),
         lastPvp: String(saved?.lastPvp || ""),
+        matchupMode: saved?.matchupMode === "pvp" ? "pvp" : "pve",
       };
     } catch {
-      return { page: "team", types: [], memberTab: "build", lastPve: "", lastPvp: "" };
+      return { page: "team", types: [], memberTab: "build", lastPve: "", lastPvp: "", matchupMode: "pve" };
     }
   }
 
@@ -2333,34 +2334,82 @@
     return block;
   }
 
+  // PvE or PvP values (type-matchups.js) for everything on the Type matchups page.
+  function matchupMode() {
+    return viewState.matchupMode === "pvp" ? "pvp" : "pve";
+  }
+
+  function renderMatchupModeSwitch() {
+    const group = el("div", "team-matchup-mode");
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Matchup values");
+    window.AniilogsMatchups.MODES.forEach((mode) => {
+      const control = button(mode.label, "team-matchup-mode-button", () => {
+        viewState.matchupMode = mode.id;
+        saveViewState();
+        render();
+      });
+      control.setAttribute("aria-pressed", String(matchupMode() === mode.id));
+      group.append(control);
+    });
+    return group;
+  }
+
   function renderMatchups(types) {
+    const matchups = window.AniilogsMatchups;
+    const mode = matchupMode();
+    const [, resisted, countered] = matchups.steps(mode);
     const section = el("section", "team-config-section");
     const heading = el("div", "team-section-heading");
     heading.append(el("div", "", "Matchups"), chipRow(types));
     section.append(heading);
-    types.forEach((type) => section.append(matchupBlock(`${element(type).name} defending`, [
-      [`Takes ${STRONG}×`, attackersAt(type, STRONG), "weak"],
-      [`Takes ${WEAK}×`, attackersAt(type, WEAK), "resist"],
-    ])));
+    // One list for the typing as a whole: the game multiplies the values of the defending elements
+    // (CombatActionTool, getElementAgainstValue), so with two elements only the product matters.
+    const taken = matchups.groups(matchups.row(data.elements, types, mode)).filter((group) => group.tone !== "even")
+      .map((group) => [`Takes ${matchups.format(group.value)}`, group.entries.map((entry) => entry.id), group.tone === "more" ? "weak" : "resist"]);
     if (types.length > 1) {
-      // Combat code (CombatActionTool, getElementAgainstValue) multiplies the defending elements' values.
-      const times = (value) => `${Number(value.toFixed(2))}×`;
-      const onAll = (multiplier) => elementIds().filter((attacker) => types.every((type) => element(attacker).against[type] === multiplier));
       const mixed = elementIds().filter((attacker) => {
         const values = types.map((type) => element(attacker).against[type]);
         return values.includes(STRONG) && values.includes(WEAK);
       });
-      section.append(matchupBlock("Across both elements", [
-        [`Takes ${times(STRONG * STRONG)} (${STRONG}× on both)`, onAll(STRONG), "weak"],
-        [`Takes ${times(WEAK * WEAK)} (${WEAK}× on both)`, onAll(WEAK), "resist"],
-        [`Takes ${times(STRONG * WEAK)} (${STRONG}× on one, ${WEAK}× on the other)`, mixed, "mixed"],
-      ]));
-      section.append(el("p", "team-data-note", "In battle the game multiplies the values for each defending element, so 1.6 × 1.6 = 2.56. The attacker's element-advantage stats and an elemental shield on the target (its element replaces the target's) can change the result."));
+      if (mixed.length) taken.push(["Takes ×1 (countered and resisted)", mixed, "mixed"]);
     }
-    types.forEach((type) => section.append(matchupBlock(`${element(type).name} attacking`, [
-      [`Deals ${STRONG}×`, defendersAt(type, STRONG), "strong"],
-      [`Deals ${WEAK}×`, defendersAt(type, WEAK), "resist"],
+    section.append(matchupBlock(types.length > 1 ? "Defending with both elements" : `${element(types[0]).name} defending`, taken));
+    types.forEach((type) => section.append(matchupBlock(`${element(type).name} attacking one element`, [
+      [`Deals ${matchups.format(countered)}`, defendersAt(type, STRONG), "strong"],
+      [`Deals ${matchups.format(resisted)}`, defendersAt(type, WEAK), "resist"],
     ])));
+    section.append(el("p", "team-data-note", `${matchups.note(mode)} An elemental shield on the target may change it too; that isn't confirmed.`));
+    return section;
+  }
+
+  // One grid: the picked typing and every Aniimo in battle, by attacking element.
+  function renderTeamDefence(types) {
+    const matchups = window.AniilogsMatchups;
+    const section = el("section", "team-config-section");
+    const heading = el("div", "team-section-heading");
+    heading.append(el("div", "", "Damage taken"), renderMatchupModeSwitch());
+    section.append(heading);
+    const rows = [];
+    if (types.length) rows.push({ head: chipRow(types), defending: types, current: true, count: false });
+    battleMembers().forEach(({ member, form }) => {
+      const entry = entryForForm(member.formId);
+      const head = button("", "matchup-form", () => openTypes(form.elements));
+      if (entry?.icon) head.append(icon(entry.icon, "team-type-member-icon"));
+      const label = el("span", "", entry?.name || form.name);
+      // Two forms of one Aniimo can be on the team: say which.
+      if (entry?.form_label) label.append(" ", el("small", "", entry.form_label.replace(/ Form$/u, "")));
+      head.append(label);
+      head.title = `${formLabel(entry, form)}: show its matchups`;
+      rows.push({ head, defending: form.elements });
+    });
+    if (!rows.length) {
+      section.append(el("p", "team-empty-copy", "Pick an element or add Aniimo to your team to see what they take from each element."));
+      return section;
+    }
+    section.append(matchups.renderGrid(data.elements, rows, { mode: matchupMode(), foot: "Team members that take more" }), matchups.renderLegend());
+    // With a typing picked, the Matchups section below carries the note.
+    if (matchupMode() === "pvp" && !types.length) section.append(el("p", "team-data-note", matchups.PVP_NOTE));
     return section;
   }
 
@@ -2398,7 +2447,8 @@
     return section;
   }
 
-  // Per element: which of the team's elements hit it for 1.6x, and which members have an element it hits for 1.6x.
+  // Per element: which of the team's elements counter it, and which members it hits for more than x1 across
+  // all of their elements (a member with one countered and one resisting element takes x1, so isn't listed).
   function renderTeamCoverage() {
     const section = el("section", "team-config-section");
     const heading = el("div", "team-section-heading");
@@ -2413,11 +2463,13 @@
     }
     const teamTypes = [...new Set(team.flatMap((row) => row.form.elements.map(String)))];
     const table = el("div", "team-coverage");
-    ["Element", `Your ${STRONG}× hits`, `Members it hits ${STRONG}×`].forEach((label) => table.append(el("span", "team-coverage-head", label)));
+    const matchups = window.AniilogsMatchups;
+    const mode = matchupMode();
+    ["Element", `Your ${matchups.format(matchups.steps(mode)[2])} hits`, "Members that take more"].forEach((label) => table.append(el("span", "team-coverage-head", label)));
     elementIds().forEach((id) => {
       const hits = teamTypes.filter((attacker) => element(attacker)?.against[id] === STRONG);
-      const exposed = team.filter((row) => row.form.elements.some((type) => element(id).against[String(type)] === STRONG));
-      const names = exposed.map((row) => entryForForm(row.member.formId)?.name || row.form.name).join(", ") || "—";
+      const exposed = team.map((row) => ({ ...row, taken: matchups.net(data.elements, row.form.elements, id, mode) })).filter((row) => row.taken > 1);
+      const names = exposed.map((row) => `${entryForForm(row.member.formId)?.name || row.form.name}${row.taken > 2 ? ` (${matchups.format(row.taken)})` : ""}`).join(", ") || "—";
       table.append(elementChip(id), chipRow(hits, "No strong hit"), el("span", exposed.length >= 2 ? "team-coverage-risk" : "", names));
     });
     section.append(table);
@@ -2429,7 +2481,7 @@
     const types = viewState.types.filter((type) => element(type));
     const columns = el("div", "team-builder-columns");
     const main = el("div", "team-builder-main-column");
-    main.append(renderTypePicker());
+    main.append(renderTypePicker(), renderTeamDefence(types));
     if (types.length) main.append(renderMatchups(types), renderTypeAniimo(types));
     else main.append(el("section", "team-builder-empty", "Pick an element above, or tap a team member, to see its matchups and every Aniimo with that typing."));
     const side = el("div", "team-builder-main-column");
