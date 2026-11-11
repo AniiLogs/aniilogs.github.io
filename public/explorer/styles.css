@@ -15649,3 +15649,7 @@ body.aniilog-artwork-mode .catalog-hide-artwork-button {
 
 .matchup-grid tr.matchup-grid-split th,
 .matchup-grid tr.matchup-grid-split td { border-top: 2px solid var(--line); }
+
+.team-bugged {
+  color: #f2b84b;
+}

@@ -811,8 +811,10 @@
           ? `${formatValues(attribute.key, [scaled])} at this build's ${Math.round(scalingStats[attribute.scaling.stat]).toLocaleString("en-US")} ${attribute.scaling.stat}` : "";
         const value = [formatValues(attribute.key, attribute.values), atStat, attribute.formula].filter(Boolean).join(" · ");
         // A row that only applies in a state ("While holding 3 Movements") says so beside its label.
-        list.append(el("dt", "", attribute.condition ? `${attribute.label} (${attribute.condition.replace(/^./u, (c) => c.toLowerCase())})` : attribute.label),
-          el("dd", "", `${value}${attribute.per_stack ? " per stack" : ""}`));
+        const dd = el("dd", "", `${value}${attribute.per_stack ? " per stack" : ""}`);
+        // A value the game doesn't apply right now ("bugged": what it does instead) is shown, with that beside it.
+        if (attribute.bugged) dd.append(el("span", "team-bugged", ` Bugged in the game right now: ${attribute.bugged}.`));
+        list.append(el("dt", "", attribute.condition ? `${attribute.label} (${attribute.condition.replace(/^./u, (c) => c.toLowerCase())})` : attribute.label), dd);
       });
       item.append(list);
     }
@@ -1093,7 +1095,7 @@
       if (effect.link.requires?.length) copy.append(el("span", "team-condition", conditionText(effect.link.requires)));
       if (effect.detail.description) copy.append(el("span", "team-synergy-description", effect.detail.description));
       const values = effect.detail.attributes.filter((attribute) => attribute.values?.length)
-        .map((attribute) => `${attribute.label} ${formatValues(attribute.key, attribute.values)}${attribute.per_stack ? " per stack" : ""}`);
+        .map((attribute) => `${attribute.label} ${formatValues(attribute.key, attribute.values)}${attribute.per_stack ? " per stack" : ""}${attribute.bugged ? ` (bugged in the game right now: ${attribute.bugged})` : ""}`);
       if (values.length) copy.append(el("span", "team-synergy-note", values.join(" · ")));
     } else {
       const value = [formatValues(effect.operation.key, effect.operation.values), ...(effect.operation.formulas || [])].filter(Boolean).join(" · ");
@@ -1111,7 +1113,8 @@
     const totals = new Map();
     effects.forEach((effect) => {
       (effect.detail?.attributes || []).forEach((attribute) => {
-        const value = Number(attribute.values?.[0]);
+        // A bugged value counts as what the game does now (0), not what its text promises.
+        const value = attribute.bugged ? 0 : Number(attribute.values?.[0]);
         if (!Number.isFinite(value)) return;
         const current = totals.get(attribute.key) || { label: attribute.label, key: attribute.key, value: 0, perStack: false };
         current.value += value;
