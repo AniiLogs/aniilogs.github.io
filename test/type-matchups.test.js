@@ -69,3 +69,18 @@ test("both pages use the shared module, and the page loads it before them", () =
 test("Team coverage counts a member by its net multiplier, not by any one of its elements", () => {
   assert.doesNotMatch(teamBuilder, /row\.form\.elements\.some\(\(type\) => element\(id\)\.against/u);
 });
+
+test("a team's radar value is the geometric mean of its members' multipliers", () => {
+  close(M.average(ELEMENTS, [[2], [3]], 5), 1);
+  close(M.average(ELEMENTS, [[2], [6]], 5), 1.6);
+  close(M.average(ELEMENTS, [[2, 6], [3, 5]], 5), Math.sqrt(2.56 * 0.390625));
+  close(M.average(ELEMENTS, [], 5), 1);
+  assert.deepEqual(plain(M.teamRow(ELEMENTS, [[2], [6]]).map((entry) => entry.tone)), ["more", "less", "less", "less"]);
+});
+
+test("Type matchups has a radar beside the lists and a Compare tab for two Aniimo or two saved teams", () => {
+  assert.match(teamBuilder, /matchups\.renderRadar\(matchups\.row\(data\.elements, types, mode\)/u);
+  assert.match(teamBuilder, /\[\["matchups", "Matchups"\], \["compare", "Compare"\]\]/u);
+  assert.match(teamBuilder, /\[\["aniimo", "Two Aniimo"\], \["teams", "Two teams"\]\]/u);
+  assert.match(teamBuilder, /matchups\.teamRow\(data\.elements, membersA/u);
+});

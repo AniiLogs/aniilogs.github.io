@@ -15501,3 +15501,151 @@ body.aniilog-artwork-mode .catalog-hide-artwork-button {
   background: rgba(var(--accent-rgb), 0.18);
   color: var(--text);
 }
+
+/* Type matchups: the radar beside the lists, the Matchups / Compare tabs, and Compare's two sides. */
+.team-matchup-radar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+}
+
+.team-matchup-radar-row > .matchup-radar { margin: 0; }
+
+.team-matchup-lists { display: grid; gap: 8px; }
+
+@media (max-width: 760px) {
+  .team-matchup-radar-row { grid-template-columns: minmax(0, 1fr); }
+  .team-matchup-radar-row > .matchup-radar { margin: 0 auto; }
+}
+
+.team-matchup-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.team-matchup-tab {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.team-matchup-tab[aria-selected="true"] {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.matchup-side-a { --side: #62d9b3; }
+.matchup-side-b { --side: #f2b84b; }
+
+.matchup-compare-pickers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 760px) {
+  .matchup-compare-pickers { grid-template-columns: minmax(0, 1fr); }
+  .matchup-compare-vs { justify-self: center; }
+}
+
+.matchup-compare-pick {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--side);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.matchup-compare-members { color: var(--muted); font-size: 12px; }
+
+.matchup-compare-vs {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.matchup-compare-shape {
+  fill: var(--side);
+  fill-opacity: 0.2;
+  stroke: var(--side);
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+}
+
+.matchup-compare-shape.matchup-side-b { stroke-dasharray: 6 4; }
+
+.matchup-compare-dot {
+  fill: var(--side);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+
+.matchup-compare-value {
+  fill: var(--side);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+.matchup-compare-key {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.matchup-compare-key i {
+  display: inline-block;
+  width: 18px;
+  border-top: 3px solid var(--side);
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.matchup-compare-key .matchup-side-b i { border-top-style: dashed; }
+
+.matchup-compare-summary { display: grid; gap: 8px; font-size: 13.5px; }
+
+.matchup-compare-line {
+  border-left: 3px solid var(--side, var(--line));
+  padding: 4px 10px;
+}
+
+.matchup-compare-line span { color: var(--muted); }
+
+.matchup-compare-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  border-left: 3px solid var(--side);
+  padding-left: 6px;
+}
+
+.matchup-compare-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--side);
+}
+
+.matchup-grid tr.matchup-grid-split th,
+.matchup-grid tr.matchup-grid-split td { border-top: 2px solid var(--line); }
