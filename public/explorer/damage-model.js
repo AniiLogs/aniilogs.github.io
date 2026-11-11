@@ -347,6 +347,8 @@
     return Math.max(0, (Number(boost) || 0) - 0.5) - 0.1;
   }
 
+  // Also left out: 3001's flat terms (additionDamageV before the pots, instantDamageFix - takenDmgDecFix after them),
+  // the play/all/one pots and robEggDmg (Egg Heist, by-name; 3023 takes its square root): the server passes them in.
   function hit(attacker, defender, skill, context = {}) {
     const elementKey = context.elementKeys?.[skill.element]?.add?.replace(ELEMENT_KEY, "$1") || null;
     const s = { ...skill, elementKey, broken: Boolean(context.broken) };

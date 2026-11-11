@@ -18,6 +18,8 @@
         "That base never drops below 10% of your ATK, so even a very tanky target takes something.",
         "The base is then multiplied by a row of separate boosts: the element matchup, a ×1.1 bonus when the skill's element is one of your Aniimo's own, Elemental Boost, crits, Damage Amp and Final Damage.",
         "Physical skills hit against P.DEF and Magical skills against M.DEF. This part is inferred: the game's server picks which defence it passes in, but the stat names and skill categories line up.",
+        "The formula also has flat terms: a flat amount added to the base before the boosts, and one added after them, minus the target's flat damage reduction. Only a few skills set them, and the site's calculators leave them out.",
+        "In Egg Heist the game's server passes one more multiplier into every hit, at the very end (BREAK damage takes its square root). Its value isn't in the client files, so the site leaves it out.",
       ],
     },
     {
@@ -79,7 +81,7 @@
           ["20", "431 / 281 (+77%)", "575 / 374 (+76%)", "609 / 397 (+76%)"],
         ],
       },
-      note: "Target P.DEF: 150 at Lv 50, 201 at Lv 67, 212 at Lv 70. Before personality, held items and other bonuses.",
+      note: "Target P.DEF: 150 at Lv 50, 201 at Lv 67, 212 at Lv 70. Before personality, held items and other bonuses. Unconfirmed: the game's data gives Flameruff a +10 P.DEF species bonus that may apply to wild ones. Then the target's P.DEF is 171, 229 and 242, each row deals about 21–30 less, and 20 points give about +88% instead of +76%.",
     },
     {
       id: "elements",
@@ -99,7 +101,9 @@
       paragraphs: [
         "Every Aniimo starts with 10% Crit Rate and +50% Crit Damage.",
         "Crit Rate adds up from all sources, including bonuses for basic attacks, skills or Ultimates, minus the target's crit resistance, including its resistance to that type of attack. At 100% or more every hit crits.",
+        "The crit is rolled for each hit on its own, so a 3-hit skill can crit on some hits and not others.",
         "A crit multiplies the hit by 1 + Crit Damage, capped at ×3 in total. Crit Damage adds up and subtracts the same way as Crit Rate.",
+        "Crit Rate over 100% is normally wasted. A few skills turn the part over 100% into extra Crit Damage, at their own rate.",
         "A few Crit Rate and Crit Damage bonuses only count while the target is in BREAK (matched by name).",
       ],
     },
@@ -109,7 +113,7 @@
       basis: "exact",
       paragraphs: [
         "The BREAK bar over a target is its BREAK points. Every hit takes BREAK damage off it, and at zero the target is in BREAK. Pets stay in BREAK for 6s.",
-        "BREAK damage uses your BREAK stat: (your BREAK − the target's BREAK defence) × the hit's share × the skill's Might ÷ 10. Some skills add their own BREAK multiplier; most don't. It can crit like normal damage (up to ×3), and a bad element matchup never lowers it. Damage Amp, Final Damage and the same-element bonus don't affect it. BREAK Efficiency and \"BREAK damage taken\" on the target do.",
+        "BREAK damage uses your BREAK stat: (your BREAK − the target's BREAK defence) × the hit's share × the skill's Might ÷ 10. Some skills add their own BREAK multiplier; most don't. It can crit like normal damage (up to ×3). A countering element raises it (×1.6, and Counter Boost on top), but a bad element matchup never lowers it. Elemental Boost, minus the target's resistance to that element, counts as it does for a hit's damage. Damage Amp, Final Damage and the same-element bonus don't affect it. BREAK Efficiency and \"BREAK damage taken\" on the target do.",
         "A pet's BREAK bar grows with its level: about 27,900 at Lv 50 and 52,800 at Lv 70 (formula 3110). Pets have no BREAK defence of their own. So against a pet, hits to BREAK ≈ its BREAK bar ÷ your BREAK damage per hit.",
         "Example: a Lv 50 Flameruff with 20 BREAK potential has BREAK 209. Fire Kick (Might 72) deals about 209 × 7.2 ≈ 1,500 BREAK damage, so about 19 Fire Kicks to BREAK a Lv 50 pet without any BREAK Efficiency.",
         "Toughness is a different, smaller gauge (60 for pets; 10, 30, 50, 120 or unbreakable for other targets). It drains by each skill's own toughness power (a separate value per skill), not your BREAK stat. Casting raises it and super armour blocks it, so it reads as the stagger / interrupt gauge rather than BREAK (inferred).",
@@ -158,6 +162,9 @@
         { id: "whole-team", text: "Whole-team buffs such as Zephyr's Breath and Inspiration: the game holds these on the player and shows them on whichever Aniimo is out. Whether a switched-in Aniimo's hits get stronger is still to confirm. Test: cast one, switch, compare one hit." },
         { id: "role-atk", text: "ATK by role. Test: a Lv 70 Heal, Support or REGEN Aniimo with ATK well under 600 should hit a target for about (420 + 0.3 × ATK − DEF) × Might ÷ 10, not (ATK − DEF) × Might ÷ 10; one with ATK above 600 should hit with its own ATK. A BREAK Aniimo should hit for (ATK + 0.42 × (BREAK − ATK ÷ 2) − DEF) × Might ÷ 10." },
         { id: "level-gap", text: "Which column of the level-gap table applies. Test: hit a target at your level and one 10 levels above with the same skill; the ratio (0.7, 0.5 or 0.9) names the column." },
+        { id: "wild-species-bonus", text: "Whether a wild Flameruff gets the +10 P.DEF species bonus (P.DEF 171 at Lv 50 instead of 150). Test: hit a Lv 50 wild Flameruff with a known ATK and Might, and compare the number with both P.DEF values." },
+        { id: "frenzied-assault", text: "Surging Wave's Frenzied Assault. Its text says +25% Water Elemental Boost, but the client's data reads a value its row doesn't have, so it comes out as +0%. Test: hit the same target with a Water skill before and during Frenzied Assault." },
+        { id: "lightning-cross", text: "Lightning Cross. Its text says +50% CRIT Rate, but the data gives the caster +50% Skill Crit Damage while the skill hits. Test: count crits over many casts against a target with no crit resistance (about 10% expected without other Crit Rate), and compare the size of a crit with a non-crit." },
       ],
     },
     {
@@ -184,14 +191,14 @@
       text: "Besides the extra damage near water, Thunder Slam also gives Sherro +15% Damage Amp for 20s." },
     { kind: "skill", id: 10900480, basis: "exact",
       text: "Once the skill is upgraded, Weakness Mark also lowers the marked target's own damage by 5%, on top of cutting its crit resistance." },
-    { kind: "trait", id: 10252, basis: "text",
-      text: "The +30% is Damage Amp, so it shares a pot with your other Damage Amp. It only counts against targets with more than 5 Fire Debuff stacks." },
+    { kind: "trait", id: 10252, basis: "by-name",
+      text: "The game data makes the +30% Damage Amp, so it shares a pot with your other Damage Amp. That it only counts against targets with more than 5 Fire Debuff stacks comes from the text alone (unconfirmed)." },
     { kind: "skill", id: 10600080, basis: "exact",
       text: "Plant Charge also applies a few hidden effects in the game's data that only change damage in PvP. The text doesn't mention them." },
     { kind: "skill", id: 11200202, basis: "by-name",
       text: "\"BREAK damage taken +15%\" is a debuff on the target. It adds to your own BREAK Efficiency rather than multiplying with it." },
-    { kind: "trait", id: 126301, basis: "text",
-      text: "Nightmare's Dark resistance cut lands on the target, so every Dark-type teammate's hits on it get stronger." },
+    { kind: "trait", id: 126301, basis: "exact",
+      text: "Nightmare's Dark resistance cut lands on the target (the buff lowers the defender's Dark resistance), so every Dark-type teammate's hits on it get stronger." },
     { kind: "skill", id: 10900260, basis: "exact",
       text: "Without Shrouded in Mist, only Turbo gets the boost (+15% damage and BREAK Efficiency). With it, teammates get +30%." },
     { kind: "trait", id: 10503, basis: "exact",
@@ -206,6 +213,10 @@
       text: "The 28–49% and 16–28% grow with Luminelle's ATK: the low end at 0 ATK, +2.6% / +1.5% per 100 ATK, the top at 800 ATK." },
     { kind: "trait", id: 13611, basis: "by-name",
       text: "Solar Grace raises Final Damage, a separate pot from Damage Amp, so it multiplies on top of your Damage Amp buffs." },
+    { kind: "skill", id: 10400211, basis: "exact",
+      text: "The game data gives +50% Skill Crit Damage while this skill hits, not the +50% CRIT Rate in the text. So it makes crits bigger, not more frequent. Unconfirmed until tested in the game." },
+    { kind: "trait", id: 139301, basis: "exact",
+      text: "Frenzied Assault's +25% Water Elemental Boost isn't in the client's data: the buff reads a value its row doesn't have, so it comes out as +0%. The game's server may still apply it. Unconfirmed until tested in the game." },
   ]);
 
   function explanationFor(kind, id, formId) {
