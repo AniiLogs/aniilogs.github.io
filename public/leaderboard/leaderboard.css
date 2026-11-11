@@ -243,7 +243,7 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-ladder { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
 .lb-interlink .lb-ladder select { flex: 1 1 0; width: 100%; min-width: 0; }
 .lb-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; align-items: center; gap: 0.5rem;
+.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 1.4rem auto; align-items: center; gap: 0.5rem;
   border-radius: 8px; padding: 0.25rem 0.45rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .lb-figs { display: grid; justify-items: end; }
 .lb-week-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; margin-top: 0.3rem; }
@@ -302,3 +302,17 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   .lb-split select { width: 100%; min-width: 0; }
   .lb-hide-sm { display: none; }
 }
+
+/* Per Boss: "last updated" as a calendar icon per row (hover or tap for the time), an update icon over that column */
+.lb-rows-head { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 1.4rem auto; gap: 0.5rem; padding: 0 0.45rem 0.15rem;
+  color: var(--muted); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.lb-rows-head > span:first-child { text-align: center; }
+.lb-rows-head > span:last-child { text-align: right; }
+.lb-rows-head-when { display: grid; place-items: center; }
+.lb-line-icon { width: 0.95rem; height: 0.95rem; }
+.lb-row-when { position: relative; display: grid; place-items: center; width: 1.4rem; height: 1.4rem; padding: 0; border: 0;
+  border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.lb-row-when:hover, .lb-row-when:focus-visible, .lb-row-when.is-open { color: var(--teal); outline: none; }
+.lb-row-when.is-open::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 5;
+  padding: 0.25rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: rgb(var(--panel-rgb)); color: var(--ink); box-shadow: var(--shadow);
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
