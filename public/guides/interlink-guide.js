@@ -1,4 +1,4 @@
-// game-audit: 1.1.3857679 2026-11-07 star thresholds, star caps, fight time and revives, season-star buffs, weekly star rewards, assist gifts (bossrush_grade_data, sys_config_data, bossrush_season_reward_data, buff_calc_value_data, bossrush_reward_data and the BossRush client scripts)
+// game-audit: 1.1.3934365 2026-11-12 star thresholds, star caps, fight time and revives, season-star buffs, weekly star rewards, assist gifts (bossrush_grade_data, sys_config_data, bossrush_season_reward_data, buff_calc_value_data, bossrush_reward_data and the BossRush client scripts)
 // The Interlink guide: how stars and score work, what the game files prove, and what only the server knows.
 // Same shape as damage-guide.js; guides.js lists it on the Guides page as "interlink".
 (() => {

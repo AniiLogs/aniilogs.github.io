@@ -12,7 +12,7 @@ test("every game-derived file in the site carries a well-formed game-audit tag",
   // The parts re-checked against game 1.1 say so.
   for (const file of ["public/explorer/damage-model.js", "public/explorer/damage-guide.js", "public/explorer/duel.js"]) {
     const row = result.current.find((entry) => entry.file === file);
-    assert.equal(row?.tag.version, "1.1.3857679", file);
+    assert.equal(row?.tag.version, "1.1.3934365", file);
   }
 });
 

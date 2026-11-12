@@ -1,4 +1,4 @@
-// game-audit: 1.1.3887621 2026-11-10 real_element_against values and getElementAgainstValue; duel buff 11158 (sys_config DUEL_ELEMENT_RESIST_V) for the PvP values, which are expected, not seen in play
+// game-audit: 1.1.3934365 2026-11-12 real_element_against values and getElementAgainstValue; duel buff 11158 (sys_config DUEL_ELEMENT_RESIST_V) for the PvP values, which are expected, not seen in play
 (() => {
   "use strict";
 

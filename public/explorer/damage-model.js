@@ -1,5 +1,5 @@
-// game-audit: 1.1.3857679 2026-11-03 formula_data 3001 3003 3004 3007 3008 3018 3023 3100 3110 3512 3513 and 3025-3030/13025-13030/23025-23030, crit and element code, duel buff 11158 (PvP matchup values: expected, not seen in play; 1.1.3887621 2026-11-10), property_data crit/BREAK bar, Star-Up and held-item level tables, role ATK
-// Damage and stat model from the game's own scripts (build 3846247; re-checked against 1.1 build 3857679).
+// game-audit: 1.1.3934365 2026-11-12 formula_data 3001 3003 3004 3007 3008 3018 3023 3100 3110 3512 3513 and 3025-3030/13025-13030/23025-23030, crit and element code, duel buff 11158 (PvP matchup values: expected, not seen in play), property_data crit/BREAK bar, Star-Up and held-item level tables, role ATK
+// Damage and stat model from the game's own scripts (build 3846247; re-checked against 1.1 builds 3857679 and 3934365).
 // Pure functions for the 1v1 tab, the Guide and the Team Builder Build tab; no DOM. Every rule says where it
 // comes from:
 //   exact   - read from the game's bytecode or tables;
