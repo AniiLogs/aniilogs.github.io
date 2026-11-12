@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="What Aniimo's World Racing update (game build 3934365) changed, from the game's own files, and how AniiLogs followed: balance, world, renames and every site tool.">
+    <meta name="theme-color" content="#f5eecb">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <title>Game update: World Racing (build 3934365) · AniiLogs</title>
+    <link rel="canonical" href="https://aniilogs.github.io/updates/3934365/">
+    <meta property="og:site_name" content="AniiLogs">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Game update: World Racing (build 3934365) · AniiLogs">
+    <meta property="og:description" content="What Aniimo's World Racing update (game build 3934365) changed, from the game's own files, and how AniiLogs followed: balance, world, renames and every site tool.">
+    <meta property="og:url" content="https://aniilogs.github.io/updates/3934365/">
+    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="stylesheet" href="/styles.css?v=0.13.6-dots-behind">
+    <link rel="stylesheet" href="/updates/updates.css?v=0.1.0">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
+    <script src="/explorer/app-config.js?v=20261112-build3934365-chests-r92" defer></script>
+    <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
+    <script src="/site-chrome.js?v=0.1.0" defer></script>
+    <script src="/aniimo-link.js?v=0.1.1" defer></script>
+    <script src="/updates/updates.js?v=0.1.0" defer></script>
+  </head>
+  <body class="site-chrome-page">
+    <div class="sky-speckles" aria-hidden="true"></div>
+    <header class="app-topbar" data-chrome-page="home" data-chrome-account>
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <img class="app-topbar-brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/explorer/" data-chrome-link="map">Map</a>
+        <a href="/explorer/?view=aniilog" data-chrome-link="aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog" data-chrome-link="itemlog">Item-log</a>
+        <a href="/explorer/?view=checklist" data-chrome-link="checklist">Checklists</a>
+        <a href="/explorer/?view=team" data-chrome-link="team">Team Builder</a>
+        <a href="/guides/" data-chrome-link="guides">Guides</a>
+        <a href="/leaderboard/" data-chrome-link="leaderboards">Leaderboards</a>
+        <a href="/companion/" data-chrome-link="companion">Companion App</a>
+        <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
+      </nav>
+      <div class="app-topbar-actions">
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+        <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
+          <option value="en">🇺🇸</option>
+          <option value="de-DE">🇩🇪</option>
+          <option value="es-ES">🇪🇸</option>
+          <option value="fr-FR">🇫🇷</option>
+          <option value="id-ID">🇮🇩</option>
+          <option value="ja">🇯🇵</option>
+          <option value="ko">🇰🇷</option>
+          <option value="pt-PT">🇵🇹</option>
+          <option value="ru-RU">🇷🇺</option>
+          <option value="th-TH">🇹🇭</option>
+          <option value="vi-VN">🇻🇳</option>
+          <option value="zh-CN">🇨🇳</option>
+          <option value="zh-TW">🇹🇼</option>
+        </select>
+        <a class="settings-gear-button" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">
+          <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+          <span class="settings-gear-label">Settings</span>
+        </a>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span data-account hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <a href="/?view=profile" data-profile-link hidden>My Profile</a>
+            <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
+            <a href="/explorer/?settings=1">Settings</a>
+            <button type="button" data-logout hidden>Log out</button>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="upd-main">
+      <a class="upd-back" href="/#patch-notes-title">← All updates</a>
+      <header class="upd-head">
+        <h1>Game update: World Racing</h1>
+        <p class="upd-meta"><span>Game build 3934365</span><time datetime="2026-11-12">November 12, 2026</time></p>
+      </header>
+      <figure class="upd-art"><img data-content-src="assets/maps/breezy-plains-current-preview.webp" alt="" decoding="async"><figcaption>Breezy Plains, where the race tracks are</figcaption></figure>
+      <nav class="upd-toc" aria-label="On this page"><a href="#game">In the game</a><a href="#balance">Balance</a><a href="#world">World</a><a href="#text">Renames &amp; text</a><a href="#site">On the site</a></nav>
+
+      <section class="upd-part" id="game" aria-labelledby="game-title">
+        <h2 id="game-title">In the game</h2>
+        <div class="upd-card">
+          <h3>New: World Racing</h3>
+          <ul>
+            <li>3 courses on Breezy Plains: Greenfield Shallows, Gullcove Cliffs and Redrock Trail.</li>
+            <li>Each has a Solo race and a Multiplayer race. Multiplayer is open daily, 18:00–23:59.</li>
+            <li>New rewards and a new currency, Racing Coin.</li>
+          </ul>
+          <p class="upd-confirm">From the game files; checked in game once the servers are up.</p>
+        </div>
+        <div class="upd-card" id="balance">
+          <h3>Balance</h3>
+          <div class="upd-table-wrap"><table class="upd-table">
+            <thead><tr><th scope="col">What</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead>
+            <tbody>
+              <tr><td>Ice Spike: slow</td><td class="upd-old">20%</td><td class="upd-new">50%</td></tr>
+              <tr><td>Stun: duration</td><td class="upd-old">2 s</td><td class="upd-new">1.5 s</td></tr>
+              <tr><td>Alpha Enhance: max stacks</td><td class="upd-old">5</td><td class="upd-new">7</td></tr>
+              <tr><td>Crocobask, Deepwater Croc King: hits</td><td class="upd-old">3</td><td class="upd-new">5</td></tr>
+              <tr><td>Coraliz: element level / homeland level</td><td class="upd-old">1 / 1</td><td class="upd-new">2 / 3</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div class="upd-card" id="world">
+          <h3>World</h3>
+          <ul>
+            <li><strong>Breezy Plains:</strong> 3 new Flameruff near the Flameruff den. A group of Blazen, Chirpi and Bolty moved about 50 m north.</li>
+            <li><strong>Whisperwake Isles:</strong> a duplicate "Lumin Collection" marker is gone; that Amber is now labelled as Tide on the Wind's reward. 2 Lumin Ambers now show on the in-game map. A few pots, shells and 4 chests moved slightly.</li>
+            <li><strong>Random dungeons:</strong> a new temple dungeon.</li>
+            <li><strong>Egg Heist:</strong> two maps leave the rotation; a new one is in the game files but not in rotation yet.</li>
+          </ul>
+        </div>
+        <div class="upd-card" id="text">
+          <h3>Renames &amp; text</h3>
+          <ul>
+            <li>Bud Ticket → <strong>Wishstar</strong></li>
+            <li>Fallsplash Grass → <strong>Cascadewort</strong></li>
+            <li>Coordinated Strike → <strong>Coordinated Offensive</strong></li>
+            <li>Water Region Elite Pathfinder Challenge → <strong>Elite Pathfinder Challenge</strong></li>
+            <li>About 70 skill, trait and Ultimate descriptions reworded.</li>
+          </ul>
+        </div>
+        <div class="upd-card">
+          <h3>Unchanged</h3>
+          <ul>
+            <li>Interlink bosses and weeks (this season ends December 7).</li>
+            <li>Element matchups and Holo-Battle Sim gizmos.</li>
+            <li>Frenzied Assault still gives 0% (bugged in the game).</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="upd-part" id="site" aria-labelledby="site-title">
+        <h2 id="site-title">On the site</h2>
+        <div class="upd-card">
+          <h3>Team Builder <a class="upd-link" href="/explorer/?view=team">Open →</a></h3>
+          <ul>
+            <li>About 80 skill, trait, buff and held-item texts updated from the game.</li>
+            <li>Crocobask's Deepwater Croc King now counts 5 hits.</li>
+            <li>Selene's Judgment lasts until combat ends (it said "for -1s").</li>
+            <li>Floating Duckweed's new icon on Glameep and Bubbeep.</li>
+          </ul>
+        </div>
+        <div class="upd-card">
+          <h3>Aniilog <a class="upd-link" href="/explorer/?view=aniilog">Open →</a></h3>
+          <ul><li>221 updates, including Coraliz's new levels.</li></ul>
+        </div>
+        <div class="upd-card">
+          <h3>Item-log <a class="upd-link" href="/explorer/?view=itemlog">Open →</a></h3>
+          <ul>
+            <li>32 new items, including the World Racing rewards and Racing Coin.</li>
+            <li>182 renames, 13 items with new sources.</li>
+            <li>Strange Mask is now Epic, Batshadow Pumpkin Legendary.</li>
+          </ul>
+        </div>
+        <div class="upd-card">
+          <h3>Map <a class="upd-link" href="/explorer/">Open →</a></h3>
+          <ul><li>Breezy Plains and Whisperwake updated as above; all chests and your Opened ticks kept.</li></ul>
+        </div>
+        <div class="upd-card">
+          <h3>Guides <a class="upd-link" href="/guides/?guide=interlink">Open →</a></h3>
+          <ul><li>Interlink guide: Coordinated Strike is now Coordinated Offensive.</li></ul>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
+    </footer>
+  </body>
+</html>
