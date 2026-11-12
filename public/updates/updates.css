@@ -1,5 +1,5 @@
 /* One page per game update (public/updates/<build>/): what the game changed, then what the site changed. */
-.upd-main { box-sizing: border-box; width: 100%; max-width: 900px; min-width: 0; margin: 0 auto; padding: 2rem 16px 5rem; overflow-wrap: anywhere; }
+.upd-main { box-sizing: border-box; width: 100%; max-width: 900px; min-width: 0; margin: 0 auto; padding: 2rem 16px 5rem; overflow-wrap: break-word; }
 .upd-back { color: var(--mint); text-decoration: none; font-weight: 700; font-size: 0.9rem; }
 .upd-back:hover, .upd-link:hover { text-decoration: underline; }
 .upd-head h1 { margin: 0.6rem 0 0.3rem; font-size: clamp(1.7rem, 3.4vw, 2.4rem); }
@@ -42,3 +42,14 @@
 .upd-reword-old span, .upd-reword-new span { display: inline-block; min-width: 3.6rem; margin-right: 0.4rem; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
 .upd-reword-old span { color: var(--ink-soft); }
 .upd-reword-new span { color: var(--mint-dark); }
+/* Phones: each table row becomes a small card - the first cell is its title, the others are "Label: value" lines */
+@media (max-width: 640px) {
+  .upd-table-wrap { overflow-x: visible; }
+  .upd-table, .upd-table tbody, .upd-table tr, .upd-table td { display: block; width: auto; }
+  .upd-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .upd-table tr { padding: 0.6rem 0; border-bottom: 1px solid var(--line); }
+  .upd-table td { padding: 0.15rem 0; border: 0; }
+  .upd-table td:first-child { font-weight: 700; font-size: 1rem; padding-bottom: 0.25rem; }
+  .upd-table td[data-label]:not([data-label=""]):not(:first-child)::before { content: attr(data-label) ": "; color: var(--ink-soft); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; }
+  .upd-table td:not(:first-child):empty { display: none; }
+}
