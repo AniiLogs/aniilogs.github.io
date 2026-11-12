@@ -79,16 +79,16 @@
       title: "Season-star buffs",
       basis: "exact",
       paragraphs: [
-        "Season stars unlock two buffs that apply on their own in every Interlink fight. They take turns levelling up: Joint Defense at 16 season stars, Coordinated Strike at 24, then each again every 16 stars, up to level 7 at 112 and 120.",
-        "Coordinated Strike: +2% damage per level (+14% at level 7), and the same again against elements you counter. Joint Defense: 1% less damage taken per level (7% at level 7), again with extra against elements you counter.",
+        "Season stars unlock two buffs that apply on their own in every Interlink fight. They take turns levelling up: Joint Defense at 16 season stars, Coordinated Offensive at 24, then each again every 16 stars, up to level 7 at 112 and 120.",
+        "Coordinated Offensive: +2% damage per level (+14% at level 7), and the same again against elements you counter. Joint Defense: 1% less damage taken per level (7% at level 7), again with extra against elements you counter.",
       ],
       table: {
         columns: ["Season stars", "Unlocks"],
         rows: [
-          ["16", "Joint Defense 1"], ["24", "Coordinated Strike 1"], ["32", "Joint Defense 2"], ["40", "Coordinated Strike 2"],
-          ["48", "Joint Defense 3"], ["56", "Coordinated Strike 3"], ["64", "Joint Defense 4"], ["72", "Coordinated Strike 4"],
-          ["80", "Joint Defense 5"], ["88", "Coordinated Strike 5"], ["96", "Joint Defense 6"], ["104", "Coordinated Strike 6"],
-          ["112", "Joint Defense 7"], ["120", "Coordinated Strike 7"],
+          ["16", "Joint Defense 1"], ["24", "Coordinated Offensive 1"], ["32", "Joint Defense 2"], ["40", "Coordinated Offensive 2"],
+          ["48", "Joint Defense 3"], ["56", "Coordinated Offensive 3"], ["64", "Joint Defense 4"], ["72", "Coordinated Offensive 4"],
+          ["80", "Joint Defense 5"], ["88", "Coordinated Offensive 5"], ["96", "Joint Defense 6"], ["104", "Coordinated Offensive 6"],
+          ["112", "Joint Defense 7"], ["120", "Coordinated Offensive 7"],
         ],
       },
     },
