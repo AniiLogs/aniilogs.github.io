@@ -1,4 +1,4 @@
-// game-audit: 1.1.3857679 2026-11-03 RULES (crit, same-element, 10% floor, PvP 0.15, BREAK time 6 s; PvP matchup values from duel buff 11158: expected, not seen in play, 1.1.3887621 2026-11-10), fallback 3001/3023, role ATK via damage-model.js
+// game-audit: 1.1.3934365 2026-11-12 RULES (crit, same-element, 10% floor, PvP 0.15, BREAK time 6 s; PvP matchup values from duel buff 11158: expected, not seen in play), fallback 3001/3023, role ATK via damage-model.js
 (() => {
   "use strict";
 
