@@ -1,0 +1,30 @@
+/* One page per game update (public/updates/<build>/): what the game changed, then what the site changed. */
+.upd-main { box-sizing: border-box; width: 100%; max-width: 900px; min-width: 0; margin: 0 auto; padding: 2rem 16px 5rem; overflow-wrap: anywhere; }
+.upd-back { color: var(--mint); text-decoration: none; font-weight: 700; font-size: 0.9rem; }
+.upd-back:hover, .upd-link:hover { text-decoration: underline; }
+.upd-head h1 { margin: 0.6rem 0 0.3rem; font-size: clamp(1.7rem, 3.4vw, 2.4rem); }
+.upd-meta { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0; color: var(--ink-soft); font-size: 0.92rem; }
+.upd-art { margin: 1.2rem 0; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; }
+.upd-art img { display: block; width: 100%; height: clamp(140px, 24vw, 220px); object-fit: cover; }
+.upd-art figcaption { padding: 0.45rem 0.9rem; color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; }
+.upd-art:not(:has(img[src])) img { display: none; }
+.upd-toc { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 1.6rem; }
+.upd-toc a { padding: 0.35rem 0.8rem; border: 1px solid var(--line); border-radius: 999px; background: var(--cream); color: var(--ink); text-decoration: none; font-size: 0.88rem; }
+.upd-part { margin-top: 2rem; }
+.upd-part > h2 { margin: 0 0 0.8rem; font-size: 1.4rem; }
+.upd-card { margin-bottom: 1rem; padding: 1.1rem 1.3rem; border: 1px solid var(--line); border-radius: 20px; background: var(--cream); box-shadow: var(--shadow); scroll-margin-top: 5rem; }
+.upd-card h3 { display: flex; justify-content: space-between; gap: 1rem; margin: 0 0 0.6rem; font-size: 1.05rem; }
+.upd-card p, .upd-card li { color: var(--ink-soft); line-height: 1.55; }
+.upd-card strong { color: var(--ink); }
+.upd-card ul { display: grid; gap: 0.35rem; margin: 0.3rem 0 0; padding-left: 1.2rem; }
+.upd-card li::marker { color: var(--mint-dark); }
+.upd-table-wrap { overflow-x: auto; }
+.upd-table { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+.upd-table th, .upd-table td { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; }
+.upd-table th { color: var(--ink-soft); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.upd-old { color: var(--ink-soft); text-decoration: line-through; }
+.upd-new { color: var(--mint-dark); font-weight: 800; }
+.upd-link { flex: none; color: var(--mint-dark); font-size: 0.9rem; font-weight: 700; text-decoration: none; }
+.upd-confirm { margin: 0.6rem 0 0; color: #b9822a; font-size: 0.85rem; }
+:root:not([data-color-mode="light"]) .upd-confirm { color: #f2b84b; }
+@media (max-width: 560px) { .upd-card { padding: 1rem; } .upd-table { font-size: 0.86rem; } }
