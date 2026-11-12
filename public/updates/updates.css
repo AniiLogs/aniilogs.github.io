@@ -28,3 +28,17 @@
 .upd-confirm { margin: 0.6rem 0 0; color: #b9822a; font-size: 0.85rem; }
 :root:not([data-color-mode="light"]) .upd-confirm { color: #f2b84b; }
 @media (max-width: 560px) { .upd-card { padding: 1rem; } .upd-table { font-size: 0.86rem; } }
+.upd-card h4 { margin: 1.1rem 0 0.4rem; color: var(--ink); font-size: 0.95rem; }
+.upd-small { margin: 0.6rem 0 0; color: var(--ink-soft); font-size: 0.88rem; line-height: 1.5; }
+.upd-part > .upd-small { margin: -0.4rem 0 0.9rem; }
+.upd-summary { border-color: var(--mint-dark); }
+.upd-more { margin-top: 0.8rem; }
+.upd-more > summary { cursor: pointer; color: var(--mint-dark); font-weight: 700; font-size: 0.92rem; }
+.upd-more[open] > summary { margin-bottom: 0.6rem; }
+.upd-reword { padding: 0.7rem 0; border-top: 1px solid var(--line); }
+.upd-reword-head { margin: 0 0 0.35rem; }
+.upd-reword-head span { display: block; color: var(--ink-soft); font-size: 0.82rem; }
+.upd-reword-old, .upd-reword-new { margin: 0.2rem 0; font-size: 0.9rem; }
+.upd-reword-old span, .upd-reword-new span { display: inline-block; min-width: 3.6rem; margin-right: 0.4rem; font-size: 0.75rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.upd-reword-old span { color: var(--ink-soft); }
+.upd-reword-new span { color: var(--mint-dark); }
