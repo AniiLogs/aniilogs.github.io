@@ -4455,11 +4455,31 @@ function itemlogMethodSourceOptions(entries = allCatalogEntriesForView("itemlog"
   return [...[...options, ...methods.values()].sort((left, right) => compareText(left.label, right.label)), ...qualityOptions];
 }
 
+// Only the newest build's marks count as "new": an older mark left in the data never joins the filter.
+const itemlogNewestBuildCache = new WeakMap();
+function itemlogNewestBuild() {
+  const data = state.itemlogData;
+  if (!data) return 0;
+  if (itemlogNewestBuildCache.has(data)) return itemlogNewestBuildCache.get(data);
+  let newest = 0;
+  for (const entry of Array.isArray(data.entries) ? data.entries : []) {
+    const build = Number(entry?.added_in_build) || 0;
+    if (build > newest) newest = build;
+  }
+  itemlogNewestBuildCache.set(data, newest);
+  return newest;
+}
+
+function isNewestBuildEntry(entry) {
+  const build = Number(entry?.added_in_build) || 0;
+  return build > 0 && build === itemlogNewestBuild();
+}
+
 function itemlogEntryMatchesFilter(entry, selectedSource, park = "all", tier = "all") {
   if (selectedSource === "all") return true;
   if (selectedSource === "has-held-stats") return Boolean(entry?.held_item_details?.base_attributes?.length);
   if (selectedSource === "has-rv-details") return Boolean(entry?.rv_details);
-  if (selectedSource === "new-in-build") return Boolean(entry?.added_in_build);
+  if (selectedSource === "new-in-build") return isNewestBuildEntry(entry);
   if (selectedSource.startsWith("quality:")) {
     return String(entry?.quality || "") === selectedSource.slice("quality:".length);
   }
@@ -5864,7 +5884,7 @@ function renderCatalogCategoryToolbar(view) {
 
     const expeditionCount = categoryEntries.filter((entry) => !isDeveloperOverlayEntry(entry) && itemlogExpeditionSources(entry).length > 0).length;
     // Items first added to the Item-log by the latest game update carry the build that added them.
-    const newEntries = categoryEntries.filter((entry) => entry?.added_in_build && !isDeveloperOverlayEntry(entry));
+    const newEntries = categoryEntries.filter((entry) => isNewestBuildEntry(entry) && !isDeveloperOverlayEntry(entry));
     const featuredSources = document.createElement("optgroup");
     featuredSources.label = "Featured filters";
     if (newEntries.length) {
