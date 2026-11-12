@@ -285,6 +285,8 @@ h1 span { color: var(--coral); white-space: nowrap; }
 .patch-note ul { display: grid; gap: 0.6rem; margin: 1.1rem 0 0; padding-left: 1.2rem; color: var(--ink-soft); line-height: 1.55; }
 .patch-note li::marker { color: var(--mint-dark); }
 .patch-note strong { color: var(--ink); }
+.patch-note + .patch-note { margin-top: 1rem; }
+.patch-note-part { margin: 1.3rem 0 0; color: var(--ink); font-size: 1rem; }   /* "In the game" / "On the site" */
 @media (prefers-reduced-motion: reduce) { .patch-note-title::before { transition: none; } }
 .section-heading { max-width: 760px; margin: 0 auto 2.5rem; text-align: center; }
 .section-heading h2 { margin: 0.55rem 0 0.9rem; color: var(--ink); font-size: clamp(2.15rem, 4vw, 3.6rem); font-weight: 760; line-height: 1.02; letter-spacing: -0.04em; }
