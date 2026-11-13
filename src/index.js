@@ -3028,6 +3028,58 @@ function sharedBattleData(a, b) {
   return a.filter((player) => b.some((other) => sameBattleData(player, other))).length;
 }
 
+// A run whose Party screen (extra.lineup) shows another party than its result screen: hidden as it arrives (the owner,
+// 13 Nov: such runs are rejected; kept hidden so staff can unhide a false alarm). Names are often misread, so only a
+// clear case counts: at least 3 readable names on each side (3+ letters/digits with a letter, no other scripts), at most
+// one Party name close to a result name (LCS similarity 0.6, names folded for lookalikes), and at least 2 of the others
+// real players: names on the result screens of the sender's other runs. A garbled Party read matches nobody, so it
+// never counts. Checked against every stored run on 13 Nov: 5 of 299 flagged, all another party.
+const PARTY_NAME_SIMILAR = 0.6;
+function readableName(name) {
+  const skeleton = nameSkeleton(name);
+  return skeleton.length >= 3 && /^[a-z0-9<>]+$/u.test(skeleton) && /[a-z]/u.test(String(name).toLowerCase().replace(/[0-9]/gu, ""));
+}
+function nameSimilarity(a, b) {
+  const row = new Array(b.length + 1).fill(0);
+  for (const x of a) {
+    let previous = 0;
+    for (let j = 1; j <= b.length; j += 1) {
+      const kept = row[j];
+      row[j] = x === b[j - 1] ? previous + 1 : Math.max(row[j], row[j - 1]);
+      previous = kept;
+    }
+  }
+  return (2 * row[b.length]) / (a.length + b.length || 1);
+}
+export function otherParty(players, lineup, knownNames) {
+  const names = (list) => [...new Set((Array.isArray(list) ? list : [])
+    .filter((entry) => entry && entry.ai !== true && typeof entry.name === "string" && readableName(entry.name))
+    .map((entry) => nameSkeleton(entry.name)))];
+  const shown = names(players);
+  const party = names(lineup);
+  if (shown.length < 3 || party.length < 3) return false;
+  const missing = party.filter((name) => !shown.some((other) => nameSimilarity(name, other) >= PARTY_NAME_SIMILAR));
+  if (party.length - missing.length > 1) return false;
+  return missing.filter((name) => knownNames.has(name)).length >= 2;
+}
+async function hideOtherParty(env, submissionId, discordId, record) {
+  const lineup = (parseJsonColumn(record.extraJson) || {}).lineup;
+  const players = parseJsonColumn(record.playersJson) || [];
+  if (!Array.isArray(lineup) || lineup.length < 3) return false;
+  const { results } = await env.DB.prepare(
+    "SELECT players_json AS playersJson FROM leaderboard_submissions WHERE discord_id = ? AND submission_id <> ? ORDER BY created_at DESC LIMIT 300",
+  ).bind(discordId, submissionId).all();
+  const known = new Set();
+  for (const row of results || []) {
+    for (const player of parseJsonColumn(row.playersJson) || []) if (typeof player?.name === "string") known.add(nameSkeleton(player.name));
+  }
+  if (!otherParty(players, lineup, known)) return false;
+  await env.DB.prepare(
+    "UPDATE leaderboard_submissions SET status = 'hidden', extra_json = json_set(COALESCE(extra_json, '{}'), '$.autoHidden', 'party') WHERE submission_id = ?",
+  ).bind(submissionId).run();
+  return true;
+}
+
 // Whether two Party screens (extra.lineup) show the same party: every slot both read has the same player (names
 // folded for lookalike letters), both read the same slots, and at least two of them are real players.
 function sameParty(a, b) {
@@ -3171,6 +3223,9 @@ async function submitLeaderboardRecord(request, env) {
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
     record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats, record.trial,
   ).run();
+  // a new run whose Party screen shows another party: hidden (a re-send keeps what staff decided)
+  const otherPartyHidden = existing ? false : await hideOtherParty(env, submissionId, account.discordId, record)
+    .catch((error) => { console.error("Party check failed", error); return false; });
   await corroborateRun(env, submissionId);
   try {
     await storeRunOutcome(env, submissionId);
@@ -3195,6 +3250,7 @@ async function submitLeaderboardRecord(request, env) {
     updated: Boolean(existing),
     evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
     battleEvidenceStored: Boolean(parsed.battle && env.EVIDENCE),
+    ...(otherPartyHidden ? { hidden: "party" } : {}),
   }, existing ? 200 : 201);
 }
 

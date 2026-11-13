@@ -2415,3 +2415,29 @@ test("Show me by: a board row carries the account's Discord name only when its p
   assert.deepEqual(named(season.standings), [["DevOne", "Dev On Discord"], ["UserOne", null]]);
   assert.equal(JSON.stringify(await boards()).includes("User On Discord"), false);
 });
+
+test("a run whose Party screen shows another party is hidden as it arrives; misread names aren't", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const at = Math.floor(Date.now() / 1000) - 600;
+  const people = (...names) => names.map((name, i) => ({ name, avgDps: 1000 + i, ai: false }));
+  const lineup = (...names) => ({ lineup: names.map((name, slot) => ({ slot, name, ai: false })) });
+  const status = (id) => sqlite.prepare("SELECT status, json_extract(extra_json, '$.autoHidden') AS why FROM leaderboard_submissions WHERE client_run_id = ?").get(id);
+  // the earlier party, read right
+  await sendRun(env, token, run("first", { playedAt: at, players: people("UserOne", "Brightfox", "Juniper", "Quillan"), extra: lineup("UserOne", "Brightfox", "Juniper", "Quillan") }));
+  assert.equal(status("first").status, "visible");
+  // a new party, but the Party screen still shows the earlier one: hidden
+  const sent = await sendRun(env, token, run("stale", { playedAt: at + 300, players: people("Tarrow", "UserOne", "Vexley", "Hobnail"), extra: lineup("UserOne", "Brightfox", "Juniper", "Quillan") }));
+  const body = await sent.json();
+  assert.equal(body.hidden, "party");
+  assert.deepEqual({ ...status("stale") }, { status: "hidden", why: "party" });
+  // the Party screen read badly (names nobody has): not hidden
+  await sendRun(env, token, run("garbled", { playedAt: at + 400, players: people("Tarrow", "UserOne", "Vexley", "Hobnail"), extra: lineup("UserOne", "ZzPnyru", "Vxqlrey", "TUN") }));
+  assert.equal(status("garbled").status, "visible");
+  // misreads of the same party (a letter off, lookalikes): not hidden
+  await sendRun(env, token, run("misread", { playedAt: at + 500, players: people("Tarrow", "UserOne", "Vexley", "Hobnail"), extra: lineup("UserOne", "Tarr0w", "Vexly", "H0bnail") }));
+  assert.equal(status("misread").status, "visible");
+  // too few readable names to tell: not hidden
+  await sendRun(env, token, run("unreadable", { playedAt: at + 550, players: people("UserOne", "002", "ㄴㄱ", "L"), extra: lineup("UserOne", "Brightfox", "Juniper", "Quillan") }));
+  assert.equal(status("unreadable").status, "visible");
+});
