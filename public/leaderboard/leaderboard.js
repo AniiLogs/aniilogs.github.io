@@ -459,7 +459,7 @@
     const facts = [];
     if (entry.meterDps !== null && entry.meterDps !== undefined) facts.push(`Meter DPS ${number(entry.meterDps)}`);
     if (entry.meterDamage) facts.push(`meter damage ${number(entry.meterDamage)}`);
-    if (entry.status === "hidden") facts.push("hidden by a moderator");
+    if (entry.status === "hidden") facts.push(entry.extra?.autoHidden === "party" ? "hidden: its Party screen shows another party" : "hidden by a moderator");
     if (facts.length) parts.push(el("p", { class: "lb-facts", text: facts.join(" · ") }));
     const actions = [];
     if (entry.hasEvidence) {
