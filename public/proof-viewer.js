@@ -1,7 +1,7 @@
 // The run's proof viewer, shared by the leaderboards and My runs: every picture of a run in its own tab (the result
 // screen, Battle Data, Holo-Battle Sim's Gizmo screen, the Party screen), a menu best's picture beside its run's, and
 // what each player went in with. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
-// partyPanel. options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
+// partyPanel, allowDelete({ any, onDeleted }). options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
 // pictures (Battle Data shows the whole party: the note says whose row the trophy is).
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
@@ -111,6 +111,24 @@
     return button;
   }
   let hoverTimer = null;
+  // Deleting a run from the viewer: only the owner and administrators (the API's canDeleteRuns; the page passes it to
+  // allowDelete). The API checks again.
+  let deleter = null;
+  function allowDelete(config) { deleter = config || null; }
+  function deleteAction(dialog, submissionId, details) {
+    if (!deleter?.any) return;
+    const what = details.menu ? "menu best" : "run";
+    const button = el("button", { type: "button", class: "danger-button", text: `Delete this ${what}`, onclick: async () => {
+      if (!window.confirm(`Delete this ${what} from the leaderboards, with its pictures? This can't be undone.`)) return;
+      button.disabled = true;
+      const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}`, { method: "DELETE" }).catch(() => null);
+      if (!response?.ok) { button.disabled = false; window.alert(`Could not delete this ${what}.`); return; }
+      proofLists.delete(submissionId);
+      dialog.close();
+      deleter?.onDeleted?.(submissionId);
+    } });
+    dialog.append(el("div", { class: "lb-proof-actions" }, button));
+  }
   let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
   async function openProof(submissionId, check = null, menuId = null, options = {}) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
@@ -129,6 +147,7 @@
     tabs.replaceChildren();
     dialog.querySelector(".lb-proof-party")?.remove();
     dialog.querySelector(".lb-proof-note")?.remove();
+    dialog.querySelector(".lb-proof-actions")?.remove();
     if (options?.note) dialog.insertBefore(el("p", { class: "lb-proof-note", text: String(options.note) }), body);
     body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshots…" }));
     if (!dialog.open) dialog.showModal();             // it stays until a click outside it, × or Esc
@@ -148,6 +167,7 @@
     dialog.querySelector(".lb-proof-party")?.remove();
     const party = partyPanel(details.lineup?.length || details.buffs?.length || !run ? details : run);
     if (party) dialog.append(party);
+    deleteAction(dialog, submissionId, details);
     // a tab for each picture
     const show = async (index) => {
       const picture = pictures[index];
@@ -170,5 +190,5 @@
     const start = options?.shot ? pictures.findIndex((picture) => picture.id === submissionId && picture.shot === options.shot) : -1;
     await show(Math.max(0, start));
   }
-  window.AniilogsProof = Object.freeze({ open: openProof, button: proofButton, checkBadge, partyPanel });
+  window.AniilogsProof = Object.freeze({ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete });
 })();

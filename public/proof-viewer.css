@@ -40,3 +40,5 @@
 .lb-proof-tabs .lb-check { align-self: center; margin-left: auto; font-size: 0.8rem; }
 .lb-proof-dialog .lb-empty { padding: 1.2rem; text-align: center; opacity: 0.7; }
 .lb-proof-party .lb-ai { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); font-size: 0.75em; font-weight: 700; opacity: 0.8; }
+/* the owner and administrators: delete the run, under its pictures */
+.lb-proof-actions { display: flex; justify-content: flex-end; padding: 0 12px 12px; }

@@ -469,7 +469,6 @@
       const hide = entry.status !== "hidden";
       actions.push(el("button", { type: "button", class: "secondary-button", text: hide ? "Hide" : "Unhide", onclick: () => moderate(entry, hide ? "hidden" : "visible") }));
     }
-    if (entry.own) actions.push(el("button", { type: "button", class: "danger-button", text: "Delete my record", onclick: () => removeEntry(entry) }));
     if (actions.length) parts.push(el("div", { class: "lb-actions" }, actions));
     if (!parts.length) parts.push(el("p", { class: "lb-facts", text: "No further details were recorded for this entry." }));
     return el("tr", { class: "lb-detail" }, el("td", { colspan: span }, parts));
@@ -1027,12 +1026,6 @@
     if (!response.ok) window.alert("Could not update this record.");
     void loadEntries();
   }
-  async function removeEntry(entry) {
-    if (!window.confirm("Delete this record from the leaderboard?")) return;
-    const response = await apiFetch(`/leaderboard/submissions/${entry.submissionId}`, { method: "DELETE" });
-    if (!response.ok) window.alert("Could not delete this record.");
-    void loadEntries();
-  }
 
   // ---------------------------------------------------------------- events
   document.querySelectorAll("[data-mode-tab]").forEach((tab) => {
@@ -1111,6 +1104,7 @@
       return gate("Leaderboards are temporarily unavailable.", "The account service could not be reached. Try again shortly.");
     }
     state.status = status;
+    proofViewer.allowDelete({ any: Boolean(status.canDeleteRuns), onDeleted: () => { void loadEntries(); } });   // owner, administrators
     if (!status.public) {
       if (!status.authenticated) return gate("Leaderboards are in developer preview.", "Sign in with a developer account to preview them. ", { href: els.login.href, text: "Sign in with Discord" });
       if (!status.canRead) return gate("Leaderboards are in developer preview.", "They will open to everyone once they are ready.");

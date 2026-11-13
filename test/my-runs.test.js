@@ -16,7 +16,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
     assert.ok(shared > 0 && shared < page.indexOf(`<script src="${script}`), script);
     assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=/u);
   }
-  assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel \}\)/u);
+  assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete \}\)/u);
   // the menu picture beside the run's, and a menu best's run beside it
   assert.match(viewer, /label: "Menu"/u);
   assert.match(viewer, /details\.runProof/u);
