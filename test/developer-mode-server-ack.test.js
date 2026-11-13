@@ -113,5 +113,5 @@ test("settings invalidate ABA status and update immediately; public script ident
   assert(settings.indexOf("applyDeveloperVisibility();") < settings.indexOf("developerAccountWrites.setMode(selected)"));
   assert.match(settings, /developerAccountWrites\.modeChanged\(\)/u);
   const index = await readFile(new URL("../public/explorer/index.html", import.meta.url), "utf8");
-  assert.match(index, /app\.js\?v=0.20.46-matchups-tab/u);
+  assert.match(index, /app\.js\?v=0.20.47-account-transfer/u);
 });

@@ -11372,6 +11372,12 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
 .dispute p, .dispute blockquote { margin: 0; }
 .dispute-proofs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
 .dispute-proof { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #000; }
+.dispute-hint { color: var(--muted, inherit); opacity: 0.8; font-size: 12px; }
+.dispute-transfer { border-color: var(--accent); color: var(--accent-strong); font-weight: 700; }
+.dispute-confirm { display: grid; gap: 6px; padding: 10px; border: 2px solid var(--accent); border-radius: 10px; }
+.dispute-confirm ul { margin: 0; padding-left: 18px; }
+.dispute-confirm input { width: 130px; }
+.dispute-transfer-go:not(:disabled) { background: var(--danger); border-color: var(--danger); color: #fff; }
 .settings-card .desktop-settings-list button { width: auto; flex: 0 0 auto; }
 
 .show-collected-toggle {
