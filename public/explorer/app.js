@@ -2627,6 +2627,7 @@ async function hydrateCloudProgress() {
     const permissions = Array.isArray(accountIdentity.permissions) ? accountIdentity.permissions : [];
     state.canGrantRoles = permissions.includes("roles.grant.developer");
     state.canGrantAdministrator = permissions.includes("roles.grant.administrator");
+    state.canTransferAccounts = permissions.includes("accounts.transfer");
     configureTopbarAccount(accountIdentity);
     applyDeveloperVisibility();
     if (mainViewerResumeRequestV73604.hadRequest) await mainViewerResumeV73604.afterFreshAccount();
@@ -3615,7 +3616,20 @@ function characterDisputesCard() {
             });
             row.append(button);
           }
+          // administrators and the owner: the whole AniiLogs account moves (transferPanel)
+          if (state.canTransferAccounts) {
+            const transfer = document.createElement("button");
+            transfer.type = "button";
+            transfer.className = "dispute-transfer";
+            transfer.textContent = `Transfer everything to ${dispute.claimant}…`;
+            transfer.addEventListener("click", () => void transferPanel(item, dispute, status, load));
+            row.insertBefore(transfer, row.lastChild);
+          }
           item.append(row);
+          if (state.canTransferAccounts) item.append(Object.assign(document.createElement("p"), {
+            className: "dispute-hint",
+            textContent: "Give the UID: only the character moves. Transfer everything: the whole AniiLogs account moves.",
+          }));
         }
         return item;
       })));
@@ -3626,6 +3640,58 @@ function characterDisputesCard() {
   }
   void load();
   return card;
+}
+
+// "Transfer everything" on a dispute: what moves (counted by the server), then TRANSFER typed to confirm. Every
+// character stays with the claimant but must be proven again from the game menu, and the holder's aLogs sign-ins end.
+async function transferPanel(item, dispute, status, reload) {
+  item.querySelector(".dispute-confirm")?.remove();
+  const panel = document.createElement("div");
+  panel.className = "dispute-confirm";
+  item.append(panel);
+  let counts;
+  try {
+    const response = await apiFetch(`/admin/character-disputes/${dispute.id}/transfer`);
+    counts = await response.json();
+    if (!response.ok) throw new Error(counts.error || `HTTP ${response.status}`);
+  } catch (error) {
+    panel.textContent = `Couldn't count what would move: ${error.message}`;
+    return;
+  }
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const title = Object.assign(document.createElement("strong"), { textContent: `Move everything from ${counts.from} to ${counts.to}?` });
+  const list = document.createElement("ul");
+  for (const text of [
+    `${plural(counts.characters, "character")} - each must be proven again from the game menu`,
+    `${plural(counts.runs, "run")} and menu bests, with their pictures`,
+    `${plural(counts.photos, "photo")}, game progress and cloud map progress${counts.mapShares ? `, ${plural(counts.mapShares, "map share")}` : ""}`,
+    `${plural(counts.appSignIns, "aLogs sign-in")} of ${counts.from} signed out - sign aLogs in again as ${counts.to}`,
+  ]) list.append(Object.assign(document.createElement("li"), { textContent: text }));
+  const note = Object.assign(document.createElement("p"), {
+    textContent: `${counts.from} keeps only an empty profile. Runs ${counts.to} already has stay as they are. The dispute is marked granted. This can't be undone from here.`,
+  });
+  const row = document.createElement("div");
+  row.className = "desktop-settings-row";
+  const input = Object.assign(document.createElement("input"), { type: "text", autocomplete: "off", spellcheck: false });
+  input.setAttribute("aria-label", "Type TRANSFER to confirm");
+  const go = Object.assign(document.createElement("button"), { type: "button", className: "dispute-transfer-go", textContent: "Transfer everything", disabled: true });
+  const cancel = Object.assign(document.createElement("button"), { type: "button", textContent: "Cancel" });
+  input.addEventListener("input", () => { go.disabled = input.value.trim() !== "TRANSFER"; });
+  cancel.addEventListener("click", () => panel.remove());
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    const result = await apiFetch(`/admin/character-disputes/${dispute.id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "transfer", confirm: "TRANSFER" }),
+    });
+    const reply = await result.json().catch(() => ({}));
+    status.textContent = result.ok
+      ? `Moved to ${counts.to}: ${plural(reply.transferred?.runs ?? 0, "run")}, ${plural(reply.transferred?.characters ?? 0, "character")}. They prove each character again from the game menu.`
+      : `Could not transfer: ${reply.error || `HTTP ${result.status}`}`;
+    void reload();
+  });
+  row.append(Object.assign(document.createElement("span"), { textContent: "Type TRANSFER:" }), input, go, cancel);
+  panel.replaceChildren(title, list, note, row);
+  input.focus();
 }
 
 function settingsDate(unix) {

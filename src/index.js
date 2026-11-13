@@ -648,8 +648,8 @@ export function administratorAccountAllowed(discordId, env) {
 // Developer and above get the same Developer Mode access; a tester gets none of it. Managing roles is checked by
 // permission name: whoever grants developers grants testers too.
 const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage"]),
-  administrator: Object.freeze(["roles.grant.developer", "logs.read"]),
+  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage", "accounts.transfer"]),
+  administrator: Object.freeze(["roles.grant.developer", "logs.read", "accounts.transfer"]),
   developer: Object.freeze([]),
   tester: Object.freeze([]),
   player: Object.freeze([]),
@@ -3883,7 +3883,8 @@ async function resolveCharacterDispute(request, env, id) {
   } catch (error) {
     return json({ error: error.message }, 400);
   }
-  if (!["grant", "reject"].includes(body.action)) return json({ error: "action must be grant or reject." }, 400);
+  if (body.action === "transfer") return transferAccount(request, env, id, body);
+  if (!["grant", "reject"].includes(body.action)) return json({ error: "action must be grant, reject or transfer." }, 400);
   const dispute = await env.DB.prepare(
     "SELECT game_uid AS gameUid, discord_id AS discordId, character_name AS name, image, mime, status FROM character_disputes WHERE dispute_id = ?",
   ).bind(Number(id)).first();
@@ -3905,6 +3906,71 @@ async function resolveCharacterDispute(request, env, id) {
   await env.DB.prepare("UPDATE character_disputes SET status = ?, resolved_at = ? WHERE dispute_id = ?")
     .bind(body.action === "grant" ? "granted" : "rejected", now, Number(id)).run();
   return json({ ok: true, status: body.action === "grant" ? "granted" : "rejected" });
+}
+
+// Transfer everything (administrators and the owner): a dispute whose claimant is the same player on another Discord
+// account (12 Nov: aLogs signed in with a second Discord account, so 26 runs and the character sat on that one). The
+// holder's whole AniiLogs account moves to the claimant - every character, run, picture, progress, photo and map
+// share - and the claim is forced again: each character stays linked to the claimant but unproven until aLogs, signed
+// in as the claimant, sees the game menu, and the holder's aLogs sign-ins are signed out. The holder keeps an empty
+// profile. A run the claimant already has (same kind and run id) stays as theirs; the holder's copy stays behind.
+async function disputeTransfer(env, id) {
+  const dispute = await env.DB.prepare(
+    `SELECT d.game_uid AS gameUid, d.discord_id AS toId, d.status, gc.discord_id AS fromId,
+       tu.discord_username AS toName, fu.discord_username AS fromName
+     FROM character_disputes d JOIN users tu ON tu.discord_id = d.discord_id
+     LEFT JOIN game_characters gc ON gc.game_uid = d.game_uid LEFT JOIN users fu ON fu.discord_id = gc.discord_id
+     WHERE d.dispute_id = ?`,
+  ).bind(Number(id)).first();
+  if (!dispute) return { error: json({ error: "Dispute not found." }, 404) };
+  if (dispute.status !== "open") return { error: json({ error: "This dispute is already resolved." }, 409) };
+  if (!dispute.fromId || dispute.fromId === dispute.toId) return { error: json({ error: "Nobody else holds this character now." }, 409) };
+  return { dispute };
+}
+
+async function transferCounts(env, fromId) {
+  const count = (sql) => env.DB.prepare(sql).bind(fromId).first().then((row) => Number(row?.n || 0));
+  return {
+    characters: await count("SELECT COUNT(*) AS n FROM game_characters WHERE discord_id = ?"),
+    runs: await count("SELECT COUNT(*) AS n FROM leaderboard_submissions WHERE discord_id = ?"),
+    photos: await count("SELECT COUNT(*) AS n FROM profile_photos WHERE discord_id = ?"),
+    mapShares: await count("SELECT COUNT(*) AS n FROM map_shares WHERE creator_discord_id = ?"),
+    appSignIns: await count("SELECT COUNT(*) AS n FROM leaderboard_tokens WHERE discord_id = ?"),
+  };
+}
+
+// GET: what a transfer would move, for the confirmation.
+async function transferPreview(request, env, id) {
+  const account = await currentAccount(request, env);
+  if (!can(account, "accounts.transfer")) return json({ error: "Administrator access required." }, 403);
+  const { dispute, error } = await disputeTransfer(env, id);
+  if (error) return error;
+  return json({ from: dispute.fromName, to: dispute.toName, ...await transferCounts(env, dispute.fromId) });
+}
+
+async function transferAccount(request, env, id, body) {
+  const account = await currentAccount(request, env);
+  if (!can(account, "accounts.transfer")) return json({ error: "Administrator access required." }, 403);
+  if (body.confirm !== "TRANSFER") return json({ error: "Type TRANSFER to confirm." }, 400);
+  const { dispute, error } = await disputeTransfer(env, id);
+  if (error) return error;
+  const { fromId, toId } = dispute;
+  const counts = await transferCounts(env, fromId);
+  const now = Math.floor(Date.now() / 1000);
+  const move = (sql) => env.DB.prepare(sql).bind(toId, fromId);
+  await env.DB.batch([
+    move("UPDATE OR IGNORE leaderboard_submissions SET discord_id = ? WHERE discord_id = ?"),
+    env.DB.prepare("UPDATE game_characters SET discord_id = ?, verified_at = NULL, linked_at = ? WHERE discord_id = ?").bind(toId, now, fromId),
+    move("UPDATE character_proofs SET discord_id = ? WHERE discord_id = ?"),
+    move("UPDATE character_progress SET discord_id = ? WHERE discord_id = ?"),
+    move("UPDATE OR IGNORE profile_photos SET discord_id = ? WHERE discord_id = ?"),
+    // cloud map progress: the claimant's own stays if they have one
+    move("UPDATE OR IGNORE progress_snapshots SET discord_id = ? WHERE discord_id = ?"),
+    move("UPDATE map_shares SET creator_discord_id = ? WHERE creator_discord_id = ?"),
+    env.DB.prepare("DELETE FROM leaderboard_tokens WHERE discord_id = ?").bind(fromId),
+    env.DB.prepare("UPDATE character_disputes SET status = 'granted', resolved_at = ? WHERE dispute_id = ?").bind(now, Number(id)),
+  ]);
+  return json({ ok: true, status: "granted", transferred: counts });
 }
 
 async function unlinkCharacter(request, env, gameUid) {
@@ -6009,6 +6075,8 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/characters/presence" && request.method === "POST") return saveCharacterPresence(request, env);
   if (url.pathname === "/api/account/preferences" && (request.method === "GET" || request.method === "POST")) return accountPreferences(request, env);
   if (url.pathname === "/api/admin/character-disputes" && request.method === "GET") return listCharacterDisputes(request, env);
+  const transferMatch = url.pathname.match(/^\/api\/admin\/character-disputes\/(\d{1,12})\/transfer$/u);
+  if (transferMatch && request.method === "GET") return transferPreview(request, env, transferMatch[1]);
   const disputeMatch = url.pathname.match(/^\/api\/admin\/character-disputes\/(\d{1,12})(\/proof)?$/u);
   if (disputeMatch && disputeMatch[2] && request.method === "GET") return characterProofImage(request, env, "dispute", disputeMatch[1]);
   if (disputeMatch && !disputeMatch[2] && request.method === "PATCH") return resolveCharacterDispute(request, env, disputeMatch[1]);

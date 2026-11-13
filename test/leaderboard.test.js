@@ -722,6 +722,50 @@ test("characters are linked from the app only; proof takes over an unproven link
   assert.equal((await call(env, `/api/admin/character-disputes/${disputeId}`, { session: SESSIONS.dev, method: "PATCH", body: { action: "grant" } })).status, 409);
 });
 
+test("transfer everything: an administrator moves a whole account to a dispute's claimant and forces a reclaim", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const old = await desktopToken(env, SESSIONS.user);       // the player's second Discord account, aLogs signed in with it
+  const fresh = await desktopToken(env, SESSIONS.dev2);     // the account they want to use
+  const uid = "302000777777";
+  const link = (token, form) => call(env, "/api/leaderboard/characters", { token, method: "POST", form });
+  assert.equal((await link(old, proofForm({ gameUid: uid, name: "Kaela" }))).status, 201);
+  for (const id of ["r1", "r2"]) {
+    assert.equal((await call(env, "/api/leaderboard/submissions", { token: old, method: "POST", body: run(id, { gameUid: uid }) })).status < 300, true);
+  }
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: fresh, method: "POST", body: run("r2") })).status < 300, true);
+  const sent = await call(env, "/api/leaderboard/characters/disputes", { token: fresh, method: "POST", form: proofForm({ gameUid: uid, name: "Kaela", note: "both mine" }) });
+  const { disputeId } = await sent.json();
+  const path = `/api/admin/character-disputes/${disputeId}`;
+
+  // a developer can't (only administrators and the owner); the owner sees what would move
+  assert.equal((await call(env, `${path}/transfer`, { session: SESSIONS.dev2 })).status, 403);
+  assert.equal((await call(env, path, { session: SESSIONS.dev2, method: "PATCH", body: { action: "transfer", confirm: "TRANSFER" } })).status, 403);
+  const preview = await (await call(env, `${path}/transfer`, { session: SESSIONS.dev })).json();
+  assert.deepEqual([preview.from, preview.to, preview.characters, preview.runs, preview.appSignIns], ["user", "dev2", 1, 2, 1]);
+
+  // TRANSFER has to be typed
+  assert.equal((await call(env, path, { session: SESSIONS.dev, method: "PATCH", body: { action: "transfer" } })).status, 400);
+  const done = await call(env, path, { session: SESSIONS.dev, method: "PATCH", body: { action: "transfer", confirm: "TRANSFER" } });
+  assert.equal(done.status, 200);
+  assert.equal((await done.json()).transferred.runs, 2);
+
+  // everything is on the new account; the run it already had stays once (the old copy is left behind)
+  const runs = (id) => sqlite.prepare("SELECT client_run_id AS r FROM leaderboard_submissions WHERE discord_id = ? ORDER BY r").all(id).map((row) => row.r);
+  assert.deepEqual(runs(IDS.dev2), ["r1", "r2"]);
+  assert.deepEqual(runs(IDS.user), ["r2"]);
+  // the character is the new account's but unproven until its aLogs sees the game menu
+  const character = sqlite.prepare("SELECT discord_id AS id, verified_at AS v FROM game_characters WHERE game_uid = ?").get(uid);
+  assert.deepEqual([character.id, character.v], [IDS.dev2, null]);
+  // the old account's aLogs is signed out
+  assert.equal((await call(env, "/api/leaderboard/characters", { token: old })).status, 401);
+  // the dispute is granted and can't be transferred twice
+  assert.equal(sqlite.prepare("SELECT status FROM character_disputes WHERE dispute_id = ?").get(disputeId).status, "granted");
+  assert.equal((await call(env, path, { session: SESSIONS.dev, method: "PATCH", body: { action: "transfer", confirm: "TRANSFER" } })).status, 409);
+  // the reclaim: the new account's aLogs proves it again
+  const reclaimed = await link(fresh, proofForm({ gameUid: uid, name: "Kaela" }));
+  assert.equal((await reclaimed.json()).verified, true);
+});
+
 test("every real teammate gets a row; only a UID recorded with the run claims it, never a name", async () => {
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const a = await desktopToken(env, SESSIONS.dev);
