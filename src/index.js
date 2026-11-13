@@ -648,8 +648,8 @@ export function administratorAccountAllowed(discordId, env) {
 // Developer and above get the same Developer Mode access; a tester gets none of it. Managing roles is checked by
 // permission name: whoever grants developers grants testers too.
 const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage", "accounts.transfer"]),
-  administrator: Object.freeze(["roles.grant.developer", "logs.read", "accounts.transfer"]),
+  owner: Object.freeze(["roles.grant.developer", "roles.grant.administrator", "logs.read", "logs.clear", "beta.manage", "accounts.transfer", "runs.delete"]),
+  administrator: Object.freeze(["roles.grant.developer", "logs.read", "accounts.transfer", "runs.delete"]),
   developer: Object.freeze([]),
   tester: Object.freeze([]),
   player: Object.freeze([]),
@@ -2700,6 +2700,7 @@ async function leaderboardStatus(request, env) {
     canRead: leaderboardAllowed(account, env),
     canSubmit: Boolean(account) && leaderboardAllowed(account, env),
     canModerate: Boolean(account?.developerModeAvailable),
+    canDeleteRuns: can(account, "runs.delete"),         // any run, from the proof viewer: the owner and administrators
     evidenceStorage: Boolean(env.EVIDENCE),
   });
 }
@@ -5348,9 +5349,8 @@ async function deleteSubmission(request, env, submissionId) {
     "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
   if (!row) return json({ error: "Submission not found." }, 404);
-  if (row.discordId !== account.discordId && !account.developerModeAvailable) {
-    return json({ error: "You can only delete your own submissions." }, 403);
-  }
+  // the owner and administrators only (runs.delete), any run; players can't delete theirs (the owner, 13 Nov)
+  if (!can(account, "runs.delete")) return json({ error: "Only the owner and administrators can delete runs." }, 403);
   await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
   for (const key of proofKeys(row)) if (env.EVIDENCE) await env.EVIDENCE.delete(key);
   return json({ ok: true });

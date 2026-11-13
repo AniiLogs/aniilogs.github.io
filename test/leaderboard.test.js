@@ -349,7 +349,7 @@ test("Holo-Battle Sim runs stored before seasons were kept get Season 1 by thems
 
 test("aLogs B2 sends the cropped proof and the whole screens: all four stored, served, and deleted with the run", async () => {
   const EVIDENCE = evidenceStore();
-  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
   const token = await namedToken(env, SESSIONS.user);
   const jpeg = (bytes, mark) => { const data = new Uint8Array(bytes); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
   const form = new FormData();
@@ -384,13 +384,14 @@ test("aLogs B2 sends the cropped proof and the whole screens: all four stored, s
   assert.equal(oldSent.status, 201);
   assert.equal((await call(env, `/api/leaderboard/submissions/${(await oldSent.json()).submissionId}/evidence?shot=full`)).status, 404);
   // deleting the run removes every picture of it
-  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 200);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 403);   // not its sender
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);   // the owner
   assert.equal(EVIDENCE.objects.size, 1);                                             // only the older run's crop is left
 });
 
 test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, served, and deleted with it", async () => {
   const EVIDENCE = evidenceStore();
-  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
   const token = await namedToken(env, SESSIONS.user);
   const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
   const sim = { kind: "sim_run", clientRunId: "sim-1", trial: "Training of Fire", difficulty: "Hard", clearTimeS: 400, cleared: true, partySize: 1,
@@ -447,7 +448,8 @@ test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, se
   assert.equal(menuDetails.runProof, runId);                                          // the run's pictures come with it
   assert.equal(details.menu, undefined);                                              // a result-screen run isn't menu proof
   // deleting the sim run removes every picture of it
-  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 200);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token, method: "DELETE" })).status, 403);   // not its sender
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);   // the owner
   assert.equal(EVIDENCE.objects.size, 3);                                             // the Interlink run's two and the menu's are left
 });
 
@@ -596,7 +598,7 @@ test("free checks on every run; the AI reading only for runs that matter, and at
 
 test("anyone can see a shown entry's proof; a hidden entry's is its submitter's and developers' only", async () => {
   const EVIDENCE = evidenceStore();
-  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
   const userToken = await namedToken(env, SESSIONS.user);
   const form = new FormData();
   form.set("submission", JSON.stringify(run("with-shot")));
@@ -637,7 +639,12 @@ test("anyone can see a shown entry's proof; a hidden entry's is its submitter's 
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run", { session: SESSIONS.user })).json()).total, 0);
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&hidden=1", { session: SESSIONS.dev })).json()).total, 1);
 
-  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token: userToken, method: "DELETE" })).status, 200);
+  // deleting: the owner and administrators only, not the sender nor a developer
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { token: userToken, method: "DELETE" })).status, 403);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev2, method: "DELETE" })).status, 403);
+  assert.equal((await (await call(env, "/api/leaderboard/status", { session: SESSIONS.dev2 })).json()).canDeleteRuns, false);
+  assert.equal((await (await call(env, "/api/leaderboard/status", { session: SESSIONS.dev })).json()).canDeleteRuns, true);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);
   assert.equal(EVIDENCE.objects.size, 0);
 });
 
@@ -2086,7 +2093,7 @@ test("the Party screen's details: every player's lead Aniimo, CP and team comp, 
 
 test("the Party screen's last capture is the lineup's proof: stored, replaced by a newer one, kept like the crops", async () => {
   const EVIDENCE = evidenceStore();
-  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE, ADMIN_DISCORD_IDS: IDS.dev });
   const token = await namedToken(env, SESSIONS.dev);
   const send = (body, parts) => {
     const form = new FormData();
