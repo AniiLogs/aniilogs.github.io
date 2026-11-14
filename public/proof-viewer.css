@@ -35,6 +35,14 @@
 .lb-check.is-pending, .lb-check.is-invalid { box-shadow: inset 0 0 0 1.5px currentColor; }   /* a drawn circle round the i and the x */
 .lb-check.is-invalid { background: color-mix(in srgb, #ef5350 22%, transparent); color: color-mix(in srgb, #ef5350 80%, var(--text)); }
 .lb-check-legend .lb-check { margin: 0 2px 0 0; }
+/* the line over the pictures: which fight the run is (mode chip, the fight in bold, its facts); wraps on a phone */
+.lb-proof-fight { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; padding: 0 52px 8px 12px; color: var(--ink-soft); font-size: 0.88rem; }
+.lb-proof-fight strong { color: var(--ink); font-weight: 750; }
+.lb-proof-mode { align-self: center; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--teal);
+  font-size: 0.74rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
+.lb-proof-fact { white-space: nowrap; }
+.lb-proof-fact::before { content: "· "; }
+@media (max-width: 560px) { .lb-proof-fight { padding: 0 12px 8px; font-size: 0.82rem; } }
 /* a line over the pictures: whose row a trophy is on a whole-party screen */
 .lb-proof-note { margin: 0; padding: 0 52px 8px 12px; color: var(--ink-soft); font-size: 0.86rem; }
 .lb-proof-tabs .lb-check { align-self: center; margin-left: auto; font-size: 0.8rem; }

@@ -20,6 +20,12 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   // the menu picture beside the run's, and a menu best's run beside it
   assert.match(viewer, /label: "Menu"/u);
   assert.match(viewer, /details\.runProof/u);
+  // which fight the run is, over the pictures, from the API's fight; every page loads this version of the viewer
+  assert.match(viewer, /const fight = fightLine\(details\.fight \|\| run\?\.fight\);/u);
+  for (const page of [home, boards]) {
+    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.2-fight">/u);
+    assert.match(page, /<script src="\/proof-viewer\.js\?v=0\.2\.2-fight" defer><\/script>/u);
+  }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);
   assert.match(leaderboard, /const proofViewer = window\.AniilogsProof;/u);

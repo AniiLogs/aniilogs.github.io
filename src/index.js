@@ -5462,7 +5462,9 @@ async function deleteSubmission(request, env, submissionId) {
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
     `SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status,
-       buffs_json AS buffsJson, kind, cycle, boss_id AS bossId FROM leaderboard_submissions WHERE submission_id = ?`,
+       buffs_json AS buffsJson, kind, cycle, boss_id AS bossId, boss_name AS bossName, boss_level AS bossLevel, ${RUN_SCORE("s")} AS score,
+       stars, clear_time_s AS clearTimeS, cleared, difficulty, trial, rank_name AS rankName
+     FROM leaderboard_submissions s WHERE submission_id = ?`,
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
   const extra = parseJsonColumn(row?.extraJson) || {};
@@ -5502,8 +5504,9 @@ async function submissionEvidence(request, env, submissionId) {
          AND COALESCE(r.outcome, '') <> 'invalid' AND r.evidence_key IS NOT NULL
        ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC LIMIT 1`,
     ).bind(row.discordId, row.cycle, row.bossId).first() : null;
+    const fight = await proofFight(env, row);
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
-      ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
+      ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
     listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
     return listed;
   }
@@ -5513,6 +5516,30 @@ async function submissionEvidence(request, env, submissionId) {
   object.writeHttpMetadata?.(headers);
   headers.set("cache-control", visible ? "public, max-age=86400" : "private, no-store");
   return new Response(object.body, { status: 200, headers });
+}
+
+// Which fight a run's pictures are of, for the line over them in the proof viewer (the owner, 14 Nov: a picture is
+// never shown without its context): the mode, the fight's name (the boss, the training, Egg Heist's difficulty or
+// rank), and what the record has of the boss's level, the Interlink week, stars, score, rank points and time.
+async function proofFight(env, row) {
+  const mode = row ? LEADERBOARD_KINDS[row.kind] : null;
+  const whole = (value) => (Number.isFinite(Number(value)) && value !== null ? Number(value) : undefined);
+  const time = row?.clearTimeS != null && Number.isFinite(Number(row.clearTimeS)) ? Number(row.clearTimeS) : undefined;
+  let fight = null;
+  if (mode === "interlink") {
+    const week = row.cycle ? interlinkCycle(await interlinkCycles(env), row.cycle) : null;
+    fight = { mode, kind: row.kind, title: row.bossName || null, level: whole(row.bossLevel),
+      week: week ? { start: week.start, end: week.end } : undefined, stars: whole(row.stars), score: whole(row.score),
+      time: row.kind === "interlink_run" ? time : undefined };
+  } else if (mode === "sim") {
+    fight = { mode, kind: row.kind, title: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
+      difficulty: row.difficulty || undefined, time };
+  } else if (mode === "eggheist") {
+    fight = row.kind === "eggheist_season"
+      ? { mode, kind: row.kind, title: row.rankName || null, season: row.cycle || undefined, points: whole(row.score) }
+      : { mode, kind: row.kind, title: row.difficulty || null, score: whole(row.score), escaped: row.cleared == null ? undefined : Boolean(row.cleared), time };
+  }
+  return fight ? JSON.parse(JSON.stringify(fight)) : null;
 }
 
 // The figures on an Interlink board row, each proven by the row's one run (interlinkBests): metric -> the row's field.

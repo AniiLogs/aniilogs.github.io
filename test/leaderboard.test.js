@@ -2526,3 +2526,31 @@ test("a run whose Party screen shows another party is hidden as it arrives; misr
   await sendRun(env, token, run("unreadable", { playedAt: at + 550, players: people("UserOne", "002", "ㄴㄱ", "L"), extra: lineup("UserOne", "Brightfox", "Juniper", "Quillan") }));
   assert.equal(status("unreadable").status, "visible");
 });
+
+test("the proof viewer's line over the pictures: which fight the run is, for every mode", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const fightOf = async (submission, mark) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(submission));
+    form.set("evidence", jpeg(mark), "result.jpg");
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    const { submissionId } = await sent.json();
+    return (await (await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=list`)).json()).fight;
+  };
+  const week = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).cycle;
+  assert.deepEqual(await fightOf(run("il", { score: 34324, stars: 34, clearTimeS: 187 }), 2), {
+    mode: "interlink", kind: "interlink_run", title: "Omega Infergon", level: 60, week: { start: week.start, end: week.end }, stars: 34, score: 34324, time: 187 });
+  // a menu best: its score and stars, no time
+  assert.deepEqual(await fightOf({ kind: "interlink_best", clientRunId: "best-3005-80000107", cycle: "3005",
+    boss: { id: "80000107", name: "Omega Infergon", level: 60 }, score: 35000, stars: 35 }, 3), {
+    mode: "interlink", kind: "interlink_best", title: "Omega Infergon", level: 60, week: { start: week.start, end: week.end }, stars: 35, score: 35000 });
+  assert.deepEqual(await fightOf({ kind: "sim_run", clientRunId: "sim", trial: "Training of Water", difficulty: "Hard", clearTimeS: 502, cleared: true, partySize: 1 }, 4),
+    { mode: "sim", kind: "sim_run", title: "Training of Water", difficulty: "Hard", time: 502 });
+  assert.deepEqual(await fightOf({ kind: "eggheist_match", clientRunId: "egg", cycle: "S1", score: 20000, clearTimeS: 224, cleared: true, difficulty: "Normal", defeats: 1 }, 5),
+    { mode: "eggheist", kind: "eggheist_match", title: "Normal", score: 20000, escaped: true, time: 224 });
+  assert.deepEqual(await fightOf({ kind: "eggheist_season", clientRunId: "season", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475 }, 6),
+    { mode: "eggheist", kind: "eggheist_season", title: "Egg Emperor", season: "S1", points: 2900 });
+});
