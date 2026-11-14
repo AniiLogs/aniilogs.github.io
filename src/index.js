@@ -1945,6 +1945,41 @@ export function mergedLineup(own, copies) {
   }
   return merged.map((entry) => JSON.parse(JSON.stringify(entry)));
 }
+// The proof viewer's Avg DPS column: each Party-screen player's Average DPS from the run's Battle Data card (this copy's
+// players_json), only where the card is surely that player's - never one player's DPS on another's row. The sender's
+// slot takes the card marked as the sender's (one of each), unless the names say otherwise (the slot's name on another
+// card, or the card's name on another slot); any other
+// slot takes the one card whose name reads the same (nameSkeleton) when no other slot or card has that name. Everything
+// else is null: the viewer says Not captured.
+export function lineupDps(lineup, players) {
+  if (!Array.isArray(lineup)) return lineup;
+  const cards = (Array.isArray(players) ? players : []).filter((card) => card && typeof card === "object");
+  const key = (name) => (typeof name === "string" && name.trim() ? nameSkeleton(name) : null);
+  const tally = (list) => list.reduce((n, item) => (key(item.name) ? n.set(key(item.name), (n.get(key(item.name)) || 0) + 1) : n), new Map());
+  const slotNames = tally(lineup);
+  const cardNames = tally(cards);
+  const unique = (name) => Boolean(name) && slotNames.get(name) === 1 && cardNames.get(name) === 1;
+  const byName = (entry) => (unique(key(entry.name)) ? cards.find((card) => key(card.name) === key(entry.name)) : null);
+  const selfSlots = lineup.filter((entry) => entry?.self);
+  const selfCards = cards.filter((card) => card.self === true);
+  const sender = selfSlots.length === 1 && selfCards.length === 1 ? selfSlots[0] : null;
+  const found = new Map();
+  if (sender) {
+    // the two marks disagree with the names (the sender's name on another card, or the card's name on another slot): neither
+    const named = byName(sender);
+    const card = selfCards[0];
+    const elsewhere = unique(key(card.name)) && key(card.name) !== key(sender.name);
+    if ((!named || named === card) && !elsewhere) found.set(sender, card);
+  }
+  for (const entry of lineup) {
+    if (!entry || found.has(entry) || entry === sender) continue;
+    const card = byName(entry);
+    // the sender's card is theirs alone
+    if (card && !(sender && card === selfCards[0]) && ![...found.values()].includes(card)) found.set(entry, card);
+  }
+  const dps = (card) => (Number.isInteger(card?.avgDps) && card.avgDps > 0 ? card.avgDps : null);
+  return lineup.map((entry) => (entry ? { ...entry, avgDps: dps(found.get(entry)) } : entry));
+}
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
 // rank's name), Result (score, then the fastest time) and Party (its size). Rows without the value go last either
 // way; ties stay newest first.
@@ -5506,7 +5541,7 @@ async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
     `SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status,
        buffs_json AS buffsJson, kind, cycle, boss_id AS bossId, boss_name AS bossName, boss_level AS bossLevel, ${RUN_SCORE("s")} AS score,
-       stars, clear_time_s AS clearTimeS, cleared, difficulty, trial, rank_name AS rankName
+       stars, clear_time_s AS clearTimeS, cleared, difficulty, trial, rank_name AS rankName, team_dps AS teamDps, players_json AS playersJson
      FROM leaderboard_submissions s WHERE submission_id = ?`,
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
@@ -5532,7 +5567,10 @@ async function submissionEvidence(request, env, submissionId) {
   }
   if (shot === "list") {
     const copies = extra.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
-    const lineup = mergedLineup(publicLineup(extra.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup));
+    // each player's Average DPS off this copy's Battle Data card (on the boards already), where the card is surely theirs
+    const lineup = lineupDps(mergedLineup(publicLineup(extra.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
+      parseJsonColumn(row.playersJson));
+    const teamDps = Number.isInteger(row.teamDps) && row.teamDps > 0 ? row.teamDps : null;
     const buffs = (parseJsonColumn(row.buffsJson) || []).slice(0, 12).filter((buff) => buff?.name)
       .map((buff) => ({ name: String(buff.name).slice(0, 60), ...(Number.isInteger(buff.level) ? { level: buff.level } : {}),
         ...(Number.isInteger(buff.floor) ? { floor: buff.floor } : {}) }));
@@ -5549,7 +5587,7 @@ async function submissionEvidence(request, env, submissionId) {
     ).bind(row.discordId, row.cycle, row.bossId).first() : null;
     const fight = await proofFight(env, row);
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
-      ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
+      ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}) });
     listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
     return listed;
   }

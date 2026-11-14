@@ -15,11 +15,40 @@
 
 /* what each player went in with, under the pictures (and in an expanded row) */
 .lb-proof-party { padding: 4px 12px 12px; font-size: 0.88rem; }
-.lb-party-players { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.lb-party-players li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
-.lb-party-lead { font-weight: 650; }
-.lb-party-team, .lb-party-buffs { color: var(--ink-soft); }
-.lb-party-buffs { margin: 6px 0 0; }
+/* a grid: Player | Main Aniimo | With | Avg DPS, a header over it; each row stacks with its labels on a phone */
+.lb-party-grid { display: grid; grid-template-columns: minmax(7rem, 1.1fr) minmax(9rem, 1.3fr) minmax(8rem, 2fr); }
+.lb-party-grid.has-dps { grid-template-columns: minmax(7rem, 1.1fr) minmax(9rem, 1.3fr) minmax(8rem, 2fr) minmax(6.5rem, auto); }
+.lb-party-row { display: contents; }
+.lb-party-row > * { padding: 6px 10px 6px 0; border-top: 1px solid var(--line); min-width: 0; }
+.lb-party-head > * { padding-top: 0; padding-bottom: 4px; border-top: 0; color: var(--ink-soft); font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; }
+.lb-party-grid.has-dps .lb-party-row > :last-child { padding-right: 0; text-align: right; }
+.lb-party-cell { display: flex; align-items: center; overflow-wrap: anywhere; }
+.lb-party-value { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; }
+.lb-party-grid.has-dps .lb-party-cell:last-child { justify-content: flex-end; }
+.lb-party-name { color: var(--ink); font-weight: 400; }
+.lb-party-lead { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; max-width: 100%; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--teal) 9%, transparent); }
+.lb-party-lead-name { color: var(--ink); font-weight: 650; }
+.lb-party-lead-facts { color: var(--ink-soft); font-size: 0.8em; white-space: nowrap; }
+.lb-party-team, .lb-party-none, .lb-party-summary { color: var(--ink-soft); }
+.lb-party-none { font-style: italic; font-size: 0.92em; }
+.lb-party-dps { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+/* team DPS and buffs side by side, apart by a gap (a "·" between them started the second line once it wrapped) */
+.lb-party-summary { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); }
+.lb-party-sum-label { color: var(--ink); font-weight: 650; }
+/* a phone: no header, each player a block of labelled lines */
+@media (max-width: 640px) {
+  .lb-party-grid, .lb-party-grid.has-dps { display: block; }
+  .lb-party-row.lb-party-head { display: none; }
+  .lb-party-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .lb-party-row > * { padding: 0; border-top: 0; }
+  .lb-party-grid.has-dps .lb-party-row > :last-child { text-align: left; }
+  .lb-party-grid.has-dps .lb-party-cell:last-child { justify-content: flex-start; }
+  .lb-party-cell { align-items: baseline; gap: 10px; }
+  .lb-party-cell::before { content: attr(data-label); flex: none; width: 6.5rem; color: var(--ink-soft); font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase; }
+}
 .lb-proof-dialog { width: auto; max-width: min(1280px, 96vw); }
 .lb-proof-image { max-height: 78vh; width: auto; max-width: 100%; }
 
