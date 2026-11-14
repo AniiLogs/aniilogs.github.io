@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, mergedLineup } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -2553,4 +2553,23 @@ test("the proof viewer's line over the pictures: which fight the run is, for eve
     { mode: "eggheist", kind: "eggheist_match", title: "Normal", score: 20000, escaped: true, time: 224 });
   assert.deepEqual(await fightOf({ kind: "eggheist_season", clientRunId: "season", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475 }, 6),
     { mode: "eggheist", kind: "eggheist_season", title: "Egg Emperor", season: "S1", points: 2900 });
+});
+
+test("a shared run's lineup: players found by lead and CP across copies, and no name twice", () => {
+  // 14 Nov: a teammate's copy read two players' names as one player's and shifted a third; the run showed one name twice
+  const lead = (slot, name, cp, extra = {}) => ({ slot, name, cp, aniimo: "Irisalis", aniimoLevel: 70, ...extra });
+  const misread = [lead(0, "Ann", 4234), lead(1, "Neo", 3775), lead(2, "Neo", 3931), lead(3, "Dax", 4148)];
+  const right = [lead(0, "Ann", 4234, { self: true }), lead(1, "Kay", 3775), lead(2, "Dax", 3931), lead(3, "Neo", 4148)];
+  assert.deepEqual(mergedLineup(misread, [right]).map((entry) => entry.name), ["Ann", "Kay", "Dax", "Neo"]);
+  assert.deepEqual(mergedLineup(right, [misread]).map((entry) => entry.name), ["Ann", "Kay", "Dax", "Neo"]);
+  // a player's own copy names them over any other read
+  const theirs = [lead(0, "Ann", 4234), lead(1, "Kai", 3775), lead(2, "Dax", 3931), lead(3, "Neo", 4148, { self: true })];
+  assert.equal(mergedLineup(misread, [theirs])[3].name, "Neo");
+  // no slots: the lead and CP pair the copies
+  assert.equal(mergedLineup([{ name: "Neo", cp: 3775, aniimo: "Irisalis" }], [[{ name: "Kay", cp: 3775, aniimo: "Irisalis", self: true }]])[0].name, "Kay");
+  // nothing settles a name: left out, not shown on two players
+  const one = [lead(0, "Ann", 4234), lead(1, "Neo", 3775), lead(2, "Neo", 3931)];
+  assert.deepEqual(mergedLineup(one, []).map((entry) => entry.name ?? null), ["Ann", "Neo", null]);
+  // without CPs, slots still pair the copies
+  assert.equal(mergedLineup([{ slot: 1, name: "X" }], [[{ slot: 1, name: "Y", self: true }]])[0].name, "Y");
 });
