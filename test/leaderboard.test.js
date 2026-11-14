@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission, mergedLineup } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -422,7 +422,8 @@ test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, se
   // an Interlink run lists its Battle Data after the result screen
   const run = new FormData();
   run.set("submission", JSON.stringify({ kind: "interlink_run", clientRunId: "il-1", cycle: "3005", boss: { id: "80000109", name: "Omega Sherro", level: 60 },
-    score: 20000, stars: 20, clearTimeS: 180, partySize: 2, buffs: [{ name: "Overtime", level: 2 }],
+    score: 20000, stars: 20, clearTimeS: 180, partySize: 2, buffs: [{ name: "Overtime", level: 2 }], teamDps: 9000,
+    players: [{ name: "MinMax", self: true, ai: false, avgDps: 9000, breakValue: 10, damageTaken: 20, heal: 0 }],
     extra: { lineup: [{ slot: 0, name: "MinMax", self: true, aniimo: "Pawney", aniimoLevel: 60, cp: 41000,
       team: [{ aniimo: "Pawney", aniimoLevel: 60, cp: 41000 }, { aniimo: "Emberpup" }] }, { slot: 1, name: "Bot", ai: true }] } }));
   run.set("evidence", jpeg(2), "result.jpg");
@@ -435,6 +436,9 @@ test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, se
   assert.deepEqual(details.buffs, [{ name: "Overtime", level: 2 }]);                  // what the party went in with
   assert.deepEqual(details.lineup.map((p) => [p.name, p.aniimo ?? null, (p.team || []).map((m) => m.aniimo)]),
     [["MinMax", "Pawney", ["Pawney", "Emberpup"]], ["Bot", null, []]]);
+  // each player's Avg DPS off the Battle Data card (null: no card came for the AI), and the team's DPS
+  assert.deepEqual(details.lineup.map((p) => p.avgDps), [9000, null]);
+  assert.equal(details.teamDps, 9000);
   // a better best sent from the game's menu is shown beside the run's pictures, never instead of them
   const menu = new FormData();
   menu.set("submission", JSON.stringify({ kind: "interlink_best", clientRunId: "best-3005-80000109", cycle: "3005",
@@ -2197,14 +2201,17 @@ test("copies of one shared run: a player's own copy is their row's proof and lin
   const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries;
   assert.equal(entries.find((entry) => entry.player === "DevOne").submissionId, devCopy);
   // the proof viewer's lineup: DevOne's slot from DevOne's own copy, on either copy's pictures
-  const lineupOf = async (id) => (await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json()).lineup
-    .map(({ self: _self, ...entry }) => entry);
+  const listOf = async (id) => (await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json()).lineup;
+  const lineupOf = async (id) => (await listOf(id)).map(({ self: _self, avgDps: _dps, ...entry }) => entry);
   const expected = [
     { slot: 1, name: "UserOne", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
     { slot: 2, name: "DevOne", ai: false, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000 },
   ];
   assert.deepEqual(await lineupOf(devCopy), expected);
   assert.deepEqual(await lineupOf(userCopy), expected);                    // the misread name, AI mark and lead are gone
+  // each copy's own Battle Data card: the sender's by its mark, the teammate's by the name read the same
+  assert.deepEqual((await listOf(devCopy)).map((entry) => entry.avgDps), [5000, 7000]);
+  assert.deepEqual((await listOf(userCopy)).map((entry) => entry.avgDps), [5000, 7000]);
   assert.deepEqual(entries.find((entry) => entry.player === "UserOne").extra.lineup.map(({ self: _self, ...entry }) => entry), expected);
 
   // a third player who sent no copy: the newest build's copy, though the other arrived first
@@ -2553,6 +2560,29 @@ test("the proof viewer's line over the pictures: which fight the run is, for eve
     { mode: "eggheist", kind: "eggheist_match", title: "Normal", score: 20000, escaped: true, time: 224 });
   assert.deepEqual(await fightOf({ kind: "eggheist_season", clientRunId: "season", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475 }, 6),
     { mode: "eggheist", kind: "eggheist_season", title: "Egg Emperor", season: "S1", points: 2900 });
+});
+
+test("the proof viewer's Avg DPS: a Battle Data card goes on a player's row only when it is surely theirs", () => {
+  const slot = (n, name, extra = {}) => ({ slot: n, name, ...extra });
+  const card = (name, avgDps, extra = {}) => ({ name, avgDps, breakValue: 1, damageTaken: 1, heal: 0, ...extra });
+  const dps = (lineup, cards) => lineupDps(lineup, cards).map((entry) => entry.avgDps);
+  // the sender's slot takes the sender's card, whatever its name was read as; others by the name read the same
+  assert.deepEqual(dps([slot(0, "Player 1", { self: true }), slot(1, "Player 2"), slot(2, "Player 3", { ai: true }), slot(3, "Player 4")],
+    [card("PIayer l", 4100, { self: true }), card("player 2", 3900), card("Player 3", 2500, { ai: true })]), [4100, 3900, 2500, null]);
+  // a name on two slots or two cards: neither row gets a card
+  assert.deepEqual(dps([slot(0, "Player 1"), slot(1, "Player 1"), slot(2, "Player 2")], [card("Player 1", 100), card("Player 2", 200)]), [null, null, 200]);
+  assert.deepEqual(dps([slot(0, "Player 1"), slot(1, "Player 2")], [card("Player 1", 100), card("Player 1", 300)]), [null, null]);
+  // the sender's slot name is on another card: not sure which is theirs, and that card isn't given to anyone else
+  assert.deepEqual(dps([slot(0, "Player 1", { self: true }), slot(1, "Player 2")], [card("Player 2", 100, { self: true }), card("Player 1", 300)]),
+    [null, null]);
+  // the sender's card's name is another slot's: neither row gets it
+  assert.deepEqual(dps([slot(0, "Player 1"), slot(1, "Player 2", { self: true })], [card("Player 1", 100, { self: true })]), [null, null]);
+  // a lineup without the sender's mark (older builds): the card goes by its name
+  assert.deepEqual(dps([slot(0, "Player 1"), slot(1, "Player 2")], [card("Player 1", 100, { self: true })]), [100, null]);
+  // no name (left out by mergedLineup), no card, no Battle Data, or no DPS on the card: Not captured
+  assert.deepEqual(dps([slot(0, undefined), slot(1, "Player 2")], [card("Player 2", 0)]), [null, null]);
+  assert.deepEqual(dps([slot(0, "Player 1")], null), [null]);
+  assert.equal(lineupDps(null, []), null);
 });
 
 test("a shared run's lineup: a copy that names someone twice is named again from the copies, the rest as before", () => {

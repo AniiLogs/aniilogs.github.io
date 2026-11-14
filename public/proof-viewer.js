@@ -72,22 +72,42 @@
     return proofLists.get(submissionId);
   }
 
-  // What each player went in with (the Party screen when the battle started) and the run's buffs
+  // What each player went in with (the Party screen when the battle started) and the run's buffs: a row per player -
+  // the name, their main Aniimo in its own chip (level and CP beside it), the rest of their team and, when the API sent
+  // it (?shot=list), their Average DPS off the Battle Data card ("Not captured" when no card is surely theirs); under it
+  // the team's DPS and the buffs. On a phone each row stacks.
   function partyPanel(details) {
-    const aniimo = (m) => [m.aniimo, Number.isInteger(m.aniimoLevel) ? `Lv ${m.aniimoLevel}` : "", Number.isInteger(m.cp) ? `CP ${number(m.cp)}` : ""]
-      .filter(Boolean).join(" ");
+    const facts = (m) => [Number.isInteger(m.aniimoLevel) ? `Lv ${m.aniimoLevel}` : "", Number.isInteger(m.cp) ? `CP ${number(m.cp)}` : ""]
+      .filter(Boolean).join(" · ");
+    const aniimo = (m) => [m.aniimo, facts(m)].filter(Boolean).join(" ");
     const players = (details.lineup || []).filter((p) => p.name || p.aniimo);
     const buffs = details.buffs || [];
+    const teamDps = Number.isFinite(details.teamDps) && details.teamDps > 0 ? details.teamDps : null;
     if (!players.length && !buffs.length) return null;
+    // the Avg DPS column only when the API says (an older API, or a board row's lineup, has none: the row's table shows it)
+    const dps = players.some((p) => Object.hasOwn(p, "avgDps"));
+    const cell = (label, ...children) => el("div", { class: "lb-party-cell", "data-label": label }, el("span", { class: "lb-party-value" }, ...children));
+    const summary = [
+      teamDps ? el("span", { class: "lb-party-sum" }, el("span", { class: "lb-party-sum-label", text: "Team avg DPS" }), ` ${number(teamDps)}`) : null,
+      buffs.length ? el("span", { class: "lb-party-sum lb-party-buffs" }, el("span", { class: "lb-party-sum-label", text: "Buffs" }),
+        ` ${buffs.map((b) => `${b.name}${b.level ? ` Lv ${b.level}` : ""}`).join(" · ")}`) : null,
+    ].filter(Boolean);
     return el("div", { class: "lb-proof-party" },
-      players.length ? el("ul", { class: "lb-party-players" }, players.map((p) => {
-        const team = (p.team || []).filter((m) => m.aniimo && m.aniimo !== p.aniimo).map(aniimo);
-        return el("li", {}, el("strong", { text: p.name || "—" }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null,
-          p.aniimo ? el("span", { class: "lb-party-lead", text: aniimo(p) }) : null,
-          team.length ? el("span", { class: "lb-party-team", text: `with ${team.join(", ")}` }) : null);
-      })) : null,
-      buffs.length ? el("p", { class: "lb-party-buffs" }, el("strong", { text: "Buffs " }),
-        buffs.map((b) => `${b.name}${b.level ? ` Lv ${b.level}` : ""}`).join(" · ")) : null);
+      players.length ? el("div", { class: `lb-party-grid${dps ? " has-dps" : ""}`, role: "table", "aria-label": "What each player went in with" },
+        el("div", { class: "lb-party-row lb-party-head", role: "row" },
+          ["Player", "Main Aniimo", "With", ...(dps ? ["Avg DPS"] : [])].map((text) => el("span", { role: "columnheader", text }))),
+        players.map((p) => {
+          const team = (p.team || []).filter((m) => m.aniimo && m.aniimo !== p.aniimo).map(aniimo);
+          const level = facts(p);
+          return el("div", { class: "lb-party-row", role: "row" },
+            cell("Player", el("span", { class: "lb-party-name", text: p.name || "—" }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null),
+            cell("Main Aniimo", p.aniimo ? el("span", { class: "lb-party-lead" }, el("span", { class: "lb-party-lead-name", text: p.aniimo }),
+              level ? el("span", { class: "lb-party-lead-facts", text: level }) : null) : el("span", { class: "lb-party-none", text: "—" })),
+            cell("With", el("span", { class: "lb-party-team", text: team.length ? team.join(", ") : "—" })),
+            dps ? cell("Avg DPS", Number.isFinite(p.avgDps) && p.avgDps > 0 ? el("span", { class: "lb-party-dps", text: number(p.avgDps) })
+              : el("span", { class: "lb-party-none", text: "Not captured", title: "No Battle Data card for this player came with the run" })) : null);
+        })) : null,
+      summary.length ? el("p", { class: "lb-party-summary" }, summary) : null);
   }
   // The line over the pictures: which fight the run is (the API's fight), so a picture is never shown without it.
   // Interlink: the boss, its level, the week, stars, score and time; Holo-Battle Sim: the training, its difficulty and
