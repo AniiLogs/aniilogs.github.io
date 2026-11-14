@@ -668,6 +668,8 @@ const state = {
     homeland: new Set(),
     stages: new Set(),
     forms: new Set(),
+    skillTags: new Set(),      // skill-tags.js ids, e.g. "control"
+    skillTagMatch: "same",     // "same": one skill has every chosen tag; "any": they may be on different skills
     statRules: [],
     mobility: "any",
     exploration: "any",
@@ -4844,7 +4846,7 @@ function aniilogStatRules() {
 
 function hasActiveAniilogFilters() {
   const filters = state.aniilogFilters || {};
-  return ["classes", "elements", "homeland", "stages", "forms"].some((name) => aniilogFilterSet(name).size)
+  return ["classes", "elements", "homeland", "stages", "forms", "skillTags"].some((name) => aniilogFilterSet(name).size)
     || aniilogStatRules().length > 0
     || (filters.mobility && filters.mobility !== "any")
     || (filters.exploration && filters.exploration !== "any")
@@ -4852,7 +4854,7 @@ function hasActiveAniilogFilters() {
 }
 
 function resetAniilogFilters() {
-  ["classes", "elements", "homeland", "stages", "forms"].forEach((name) => aniilogFilterSet(name).clear());
+  ["classes", "elements", "homeland", "stages", "forms", "skillTags"].forEach((name) => aniilogFilterSet(name).clear());
   state.aniilogFilters.statRules = [];
   state.aniilogFilters.mobility = "any";
   state.aniilogFilters.exploration = "any";
@@ -5134,6 +5136,8 @@ function aniilogEntryMatchesFilters(entry) {
   const formKey = normalizeFilterKey(entry?.form_key || entry?.form_label);
   if (formFilters.size && !formFilters.has(formKey)) return false;
 
+  if (!window.AniilogsSkillTags.matches(entry, aniilogFilterSet("skillTags"), filters.skillTagMatch)) return false;
+
   for (const rule of aniilogStatRules()) {
     const stat = rule.statId === ANIILOG_BASE_STAT_TOTAL_OPTION.id
       ? ANIILOG_BASE_STAT_TOTAL_OPTION
@@ -5327,10 +5331,19 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   if (view === "aniilog") {
     const sort = aniilogSortOption();
     const statValue = aniilogSortValue(entry, sort);
+    // With skill tags chosen, the row names the skill that has them ("Tail Slam +1" when more than one does).
+    const tagged = window.AniilogsSkillTags.matchingSkills(entry, aniilogFilterSet("skillTags"), state.aniilogFilters.skillTagMatch);
     meta.textContent = [
       `${aniilogNumberLabel(entry)} - ${entry.form_label || "Basic Form"}`,
       statValue === null ? "" : `${sort.label.replace(" (high to low)", "")} ${formatNumber(statValue, 0)}`,
+      tagged.length ? `${tagged[0].name || "Skill"}${tagged.length > 1 ? ` +${tagged.length - 1}` : ""}` : "",
     ].filter(Boolean).join(" - ");
+    if (tagged.length) {
+      meta.title = tagged.map((ability) => ability.name).filter(Boolean).join(", ");
+      // Opening the Aniimo shows that skill first.
+      const first = tagged.find((ability) => ability.skill_id);
+      if (first) button.dataset.taggedSkillId = first.skill_id;
+    }
   } else {
     const defaultSubtitle = entry.list_subtitle
       || [entry.type || "Item", entry.quality].filter(Boolean).join(" - ");
@@ -5345,6 +5358,9 @@ function createCatalogIndexRow(entry, selectedId, view, virtualIndex) {
   button.append(icon, copy);
   button.addEventListener("click", () => {
     // An Aniimo is its own page (one Back step); an item just changes the selection.
+    if (view === "aniilog" && button.dataset.taggedSkillId) {
+      state.aniilogSkillSelection = { ...(state.aniilogSkillSelection || {}), [entry.id]: button.dataset.taggedSkillId };
+    }
     if (view === "aniilog") openAniimoPage(entry.id, { scrollIndex: false });
     else {
       state.catalogSelection[view] = entry.id;
@@ -5806,6 +5822,62 @@ function renderAniilogStatFilter() {
   return wrapper;
 }
 
+// From a skill's tag on an Aniimo page: the Aniilog list, filtered to that one tag, with the tag section open.
+function showAniimoWithSkillTag(label) {
+  const id = window.AniilogsSkillTags.key(label);
+  if (!id) return;
+  const tags = aniilogFilterSet("skillTags");
+  tags.clear();
+  tags.add(id);
+  state.aniilogFiltersOpen = true;
+  aniilogFilterSectionSet().add("skillTags");
+  updateAniilogFilterResults();
+  window.requestAnimationFrame(() => {
+    document.querySelector(".aniilog-skill-tag-chips")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
+// Skill tags: every tag the game puts on a skill, as a chip to switch on or off, with how many Aniimo have it.
+function renderAniilogSkillTagFilter(entries) {
+  const active = aniilogFilterSet("skillTags");
+  const wrapper = document.createElement("div");
+  wrapper.className = "aniilog-filter-builder aniilog-skill-tags";
+  const chips = document.createElement("div");
+  chips.className = "aniilog-skill-tag-chips";
+  window.AniilogsSkillTags.options(entries).forEach((option) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "aniilog-skill-tag";
+    chip.setAttribute("aria-pressed", String(active.has(option.id)));
+    const label = document.createElement("span");
+    label.textContent = option.label;
+    const count = document.createElement("small");
+    count.textContent = String(option.count);
+    chip.title = `${option.count} Aniimo have a ${option.label} skill`;
+    chip.append(label, count);
+    chip.addEventListener("click", () => toggleAniilogFilter("skillTags", option.id));
+    chips.append(chip);
+  });
+  wrapper.append(chips);
+  if (active.size > 1) {
+    const mode = state.aniilogFilters.skillTagMatch === "any" ? "any" : "same";
+    const match = document.createElement("div");
+    match.className = "aniilog-skill-tag-match";
+    match.setAttribute("role", "group");
+    match.setAttribute("aria-label", "How the chosen tags must match");
+    [["same", "On one skill"], ["any", "Across its skills"]].forEach(([value, text]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.setAttribute("aria-pressed", String(mode === value));
+      button.addEventListener("click", () => setAniilogScalarFilter("skillTagMatch", value));
+      match.append(button);
+    });
+    wrapper.append(match);
+  }
+  return wrapper;
+}
+
 function renderAniilogFilters(allEntries) {
   if (!state.aniilogFiltersOpen) return null;
   const options = collectAniilogFilterOptions(allEntries);
@@ -5845,6 +5917,8 @@ function renderAniilogFilters(allEntries) {
       none: "No core skill",
     }),
   ], skillFilterCount));
+  panel.append(renderAniilogFilterSection("skillTags", "Skill tags", [renderAniilogSkillTagFilter(allEntries)],
+    aniilogFilterSet("skillTags").size));
 
   if (hasActiveAniilogFilters()) {
     const clear = document.createElement("button");
@@ -6425,8 +6499,14 @@ function renderCatalogAbilitySection(title, abilities, emptyText = "No data avai
         badges.className = "catalog-ability-badges";
         const addBadge = (label, type, color = "", iconSrc = "") => {
           if (!label) return;
-          const badge = document.createElement("span");
+          // A skill tag is a button: it lists every Aniimo with a skill that has the same tag (Aniilog filter).
+          const badge = document.createElement(type === "type" ? "button" : "span");
           badge.className = `catalog-ability-badge catalog-ability-badge--${type}`;
+          if (type === "type") {
+            badge.type = "button";
+            badge.title = `Show every Aniimo with a ${label} skill`;
+            badge.addEventListener("click", () => showAniimoWithSkillTag(label));
+          }
           if (color) badge.style.setProperty("--catalog-ability-element-color", color);
           if (iconSrc) {
             const badgeIcon = document.createElement("img");
@@ -12829,7 +12909,7 @@ function clearCatalogFiltersForShortcut(view) {
   state.catalogSearch[view] = "";
   state.catalogCategory[view] = "all";
   if (view === "aniilog") {
-    ["classes", "elements", "homeland", "stages", "forms"].forEach((name) => aniilogFilterSet(name).clear());
+    ["classes", "elements", "homeland", "stages", "forms", "skillTags"].forEach((name) => aniilogFilterSet(name).clear());
     state.aniilogFilters.statRules = [];
     state.aniilogFilters.mobility = "any";
     state.aniilogFilters.exploration = "any";
