@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { leaderboardSubmission } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, mergedLineup } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -303,7 +303,7 @@ test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, trans
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
   const setupOf = (style) => ({
-    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20), level: -4 }, { level: 9 }],
+    team: [{ name: "Scorchhowl", level: 73, mvp: true, nickname: "Blaze" }, { name: "Somniwing", level: 70, nickname: "y".repeat(30) }, { name: "<b>x</b>".repeat(20), level: -4 }, { level: 9 }],
     mvpShares: { damage: 61.5, taken: 30, healing: 500 },
     style, core: "Fervor Mask", transform: "Scorchhowl", coins: 8550, secret: "dropped",
     gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }, { rarity: "Rare" }] }, { series: "Valor", count: 2 }],
@@ -317,7 +317,7 @@ test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, trans
   const all = await board("");
   assert.deepEqual(all.map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);
   assert.deepEqual(all[2].extra.setup, {
-    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20).slice(0, 40) }],
+    team: [{ name: "Scorchhowl", nickname: "Blaze", level: 73, mvp: true }, { name: "Somniwing", nickname: "y".repeat(24), level: 70 }, { name: "<b>x</b>".repeat(20).slice(0, 40) }],
     mvpShares: { damage: 61.5, taken: 30 }, style: "Valor", core: "Fervor Mask", transform: "Scorchhowl",
     gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }] }, { series: "Valor", count: 2 }], coins: 8550,
   });
@@ -2157,6 +2157,91 @@ test("a shared run's lineup: each player's details from whichever copy read them
   assert.deepEqual(await lineupOf(SESSIONS.dev), expected);               // UserOne's CP from UserOne's own copy, not the misread
 });
 
+test("copies of one shared run: a player's own copy is their row's proof and lineup, else the newest build's", async () => {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
+  const userToken = await namedToken(env, SESSIONS.user);     // UserOne 301000000003
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const at = Math.floor(Date.now() / 1000) - 600;
+  const send = async (token, id, body, mark) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(id, { cycle: "3005", score: 30000, stars: 30, clearTimeS: 200, playedAt: at, ...body })));
+    form.set("evidence", jpeg(mark), "result.jpg");
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    return (await sent.json()).submissionId;
+  };
+  const arrived = (id, seconds) => sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ? WHERE submission_id = ?").run(seconds, id);
+  const players = (self) => [{ name: "UserOne", ai: false, self: self === "UserOne", avgDps: 5000 }, { name: "DevOne", ai: false, self: self === "DevOne", avgDps: 7000 }];
+  // UserOne's app sent first and misread DevOne's slot: another name, taken for AI, the wrong lead
+  const userCopy = await send(userToken, "u-copy", { gameUid: "301000000003", clientVersion: "aLogs-0.1.37+rc.13", players: players("UserOne"), extra: { lineup: [
+    { slot: 1, name: "UserOne", ai: false, self: true, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
+    { slot: 2, name: "Dawnlit", ai: true, aniimo: "Chirpi", cp: 100 },
+  ] } }, 2);
+  const devCopy = await send(devToken, "d-copy", { gameUid: "301000000001", clientVersion: "aLogs-0.1.37+rc.12", players: players("DevOne"), extra: { lineup: [
+    { slot: 1, name: "UserOne", ai: false },
+    { slot: 2, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000 },
+  ] } }, 3);
+  arrived(userCopy, at + 10);
+  arrived(devCopy, at + 40);
+  const shared = (id) => JSON.parse(sqlite.prepare("SELECT extra_json FROM leaderboard_submissions WHERE submission_id = ?").get(id).extra_json).sharedRun;
+  assert.ok(shared(userCopy));
+  assert.equal(shared(userCopy), shared(devCopy));
+  const rowOf = async (name) => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses
+    .flatMap((boss) => boss.entries).find((entry) => entry.player === name);
+  // DevOne's row: their own copy (sent later, by an older build) is the proof of every figure on it
+  const devRow = await rowOf("DevOne");
+  assert.equal(devRow.proofId, devCopy);
+  assert.equal(devRow.proofIds.dps, devCopy);
+  assert.equal((await rowOf("UserOne")).proofId, userCopy);
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries;
+  assert.equal(entries.find((entry) => entry.player === "DevOne").submissionId, devCopy);
+  // the proof viewer's lineup: DevOne's slot from DevOne's own copy, on either copy's pictures
+  const lineupOf = async (id) => (await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json()).lineup
+    .map(({ self: _self, ...entry }) => entry);
+  const expected = [
+    { slot: 1, name: "UserOne", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
+    { slot: 2, name: "DevOne", ai: false, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000 },
+  ];
+  assert.deepEqual(await lineupOf(devCopy), expected);
+  assert.deepEqual(await lineupOf(userCopy), expected);                    // the misread name, AI mark and lead are gone
+  assert.deepEqual(entries.find((entry) => entry.player === "UserOne").extra.lineup.map(({ self: _self, ...entry }) => entry), expected);
+
+  // a third player who sent no copy: the newest build's copy, though the other arrived first
+  const dev2Token = await namedToken(env, SESSIONS.dev2);    // DevTwo 301000000002
+  sqlite.prepare("UPDATE game_characters SET verified_at = ? WHERE game_uid = '301000000002'").run(at);
+  const trio = (self) => [...players(self), { name: "DevTwo", ai: false, uid: "301000000002", avgDps: 6000 }];
+  const lineup3 = (self, devTwoLead) => [
+    { slot: 1, name: "UserOne", ai: false, ...(self === "UserOne" ? { self: true } : {}) },
+    { slot: 2, name: "DevOne", ai: false, ...(self === "DevOne" ? { self: true } : {}) },
+    { slot: 3, name: "DevTwo", ai: false, aniimo: devTwoLead },
+  ];
+  const boss = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const older = await send(userToken, "u-trio", { boss, gameUid: "301000000003", clientVersion: "aLogs-0.1.37+rc.12", players: trio("UserOne"),
+    extra: { lineup: lineup3("UserOne", "Tromber") } }, 4);
+  const newer = await send(devToken, "d-trio", { boss, gameUid: "301000000001", clientVersion: "aLogs-0.1.37+rc.13", players: trio("DevOne"),
+    extra: { lineup: lineup3("DevOne", "Somniwing") } }, 5);
+  arrived(older, at + 10);
+  arrived(newer, at + 40);
+  assert.equal(shared(older), shared(newer));
+  const devTwoRow = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses
+    .find((x) => x.id === boss.id).entries.find((entry) => entry.player === "DevTwo");
+  assert.equal(devTwoRow.proofId, newer);
+  assert.equal(devTwoRow.proofIds.dps, newer);
+  const [credited] = (await historyOf(env, "/api/profile/history", SESSIONS.dev2)).runs;
+  assert.equal(credited.submissionId, newer);
+  assert.equal(credited.lineup.find((entry) => entry.slot === 3).aniimo, "Somniwing");
+  assert.ok(dev2Token);
+});
+
+test("client versions rank by release, then RC number", () => {
+  assert.ok(clientVersionRank("aLogs-0.1.37+rc.13") > clientVersionRank("aLogs-0.1.37+rc.12"));
+  assert.ok(clientVersionRank("aLogs-0.1.37") > clientVersionRank("aLogs-0.1.37+rc.13"));
+  assert.ok(clientVersionRank("aLogs-0.1.38+rc.1") > clientVersionRank("aLogs-0.1.37"));
+  assert.ok(clientVersionRank("aLogs-0.2.0+rc.1") > clientVersionRank("aLogs-0.1.99"));
+  assert.equal(clientVersionRank(null), -1);
+});
+
 test("one party run sent by two players: Battle Data cards say who is who when a name was misread or on the wrong slot", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
@@ -2440,4 +2525,51 @@ test("a run whose Party screen shows another party is hidden as it arrives; misr
   // too few readable names to tell: not hidden
   await sendRun(env, token, run("unreadable", { playedAt: at + 550, players: people("UserOne", "002", "ㄴㄱ", "L"), extra: lineup("UserOne", "Brightfox", "Juniper", "Quillan") }));
   assert.equal(status("unreadable").status, "visible");
+});
+
+test("the proof viewer's line over the pictures: which fight the run is, for every mode", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.dev);
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const fightOf = async (submission, mark) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(submission));
+    form.set("evidence", jpeg(mark), "result.jpg");
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    const { submissionId } = await sent.json();
+    return (await (await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=list`)).json()).fight;
+  };
+  const week = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).cycle;
+  assert.deepEqual(await fightOf(run("il", { score: 34324, stars: 34, clearTimeS: 187 }), 2), {
+    mode: "interlink", kind: "interlink_run", title: "Omega Infergon", level: 60, week: { start: week.start, end: week.end }, stars: 34, score: 34324, time: 187 });
+  // a menu best: its score and stars, no time
+  assert.deepEqual(await fightOf({ kind: "interlink_best", clientRunId: "best-3005-80000107", cycle: "3005",
+    boss: { id: "80000107", name: "Omega Infergon", level: 60 }, score: 35000, stars: 35 }, 3), {
+    mode: "interlink", kind: "interlink_best", title: "Omega Infergon", level: 60, week: { start: week.start, end: week.end }, stars: 35, score: 35000 });
+  assert.deepEqual(await fightOf({ kind: "sim_run", clientRunId: "sim", trial: "Training of Water", difficulty: "Hard", clearTimeS: 502, cleared: true, partySize: 1 }, 4),
+    { mode: "sim", kind: "sim_run", title: "Training of Water", difficulty: "Hard", time: 502 });
+  assert.deepEqual(await fightOf({ kind: "eggheist_match", clientRunId: "egg", cycle: "S1", score: 20000, clearTimeS: 224, cleared: true, difficulty: "Normal", defeats: 1 }, 5),
+    { mode: "eggheist", kind: "eggheist_match", title: "Normal", score: 20000, escaped: true, time: 224 });
+  assert.deepEqual(await fightOf({ kind: "eggheist_season", clientRunId: "season", cycle: "S1", rank: { tier: 7, subtier: 1, name: "Egg Emperor" }, score: 2900, stars: 475 }, 6),
+    { mode: "eggheist", kind: "eggheist_season", title: "Egg Emperor", season: "S1", points: 2900 });
+});
+
+test("a shared run's lineup: a copy that names someone twice is named again from the copies, the rest as before", () => {
+  // 14 Nov: a teammate's copy read two players' names as one player's and shifted a third; the run showed one name twice
+  const lead = (slot, name, cp, extra = {}) => ({ slot, name, cp, aniimo: "Irisalis", aniimoLevel: 70, ...extra });
+  const misread = [lead(0, "Ann", 4234), lead(1, "Neo", 3775), lead(2, "Neo", 3931), lead(3, "Dax", 4148)];
+  const right = [lead(0, "Ann", 4234, { self: true }), lead(1, "Kay", 3775), lead(2, "Dax", 3931), lead(3, "Neo", 4148)];
+  assert.deepEqual(mergedLineup(misread, [right]).map((entry) => entry.name), ["Ann", "Kay", "Dax", "Neo"]);
+  assert.deepEqual(mergedLineup(right, [misread]).map((entry) => entry.name), ["Ann", "Kay", "Dax", "Neo"]);
+  // a player's own copy names them over any other read
+  const theirs = [lead(0, "Ann", 4234), lead(1, "Kai", 3775), lead(2, "Dax", 3931), lead(3, "Neo", 4148, { self: true })];
+  assert.equal(mergedLineup(misread, [theirs])[3].name, "Neo");
+  // a lineup without a name twice stays as its copies give it
+  assert.deepEqual(mergedLineup(right, [right]).map((entry) => entry.name), ["Ann", "Kay", "Dax", "Neo"]);
+  // nothing settles a name: left out, not shown on two players
+  const one = [lead(0, "Ann", 4234), lead(1, "Neo", 3775), lead(2, "Neo", 3931)];
+  assert.deepEqual(mergedLineup(one, []).map((entry) => entry.name ?? null), ["Ann", "Neo", null]);
+  // without CPs, slots still pair the copies
+  assert.equal(mergedLineup([{ slot: 1, name: "X" }], [[{ slot: 1, name: "Y", self: true }]])[0].name, "Y");
 });

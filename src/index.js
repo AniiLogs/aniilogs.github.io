@@ -1822,7 +1822,10 @@ function publicSimSetup(setup) {
   const shares = setup.mvpShares && typeof setup.mvpShares === "object" ? setup.mvpShares : {};
   const share = (value) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined);
   const clean = JSON.parse(JSON.stringify({
-    team: list(setup.team, 5).map((member) => ({ name: text(member.name), level: whole(member.level, 999) || undefined, mvp: member.mvp === true || undefined }))
+    // name: the species (aLogs reads it from the card's art since 0.1.37, 14 Nov); nickname: the card's own text when the
+    // player renamed it
+    team: list(setup.team, 5).map((member) => ({ name: text(member.name), nickname: text(member.nickname, 24),
+      level: whole(member.level, 999) || undefined, mvp: member.mvp === true || undefined }))
       .filter((member) => member.name),
     mvpShares: { damage: share(shares.damage), taken: share(shares.taken), healing: share(shares.healing) },
     style: SIM_RULES.styles.includes(setup.style) ? setup.style : undefined,
@@ -1839,20 +1842,108 @@ function publicSimSetup(setup) {
   for (const row of clean.gizmos || []) if (!row.picked.length) delete row.picked;
   return Object.keys(clean).length ? clean : null;
 }
-// A shared run's lineup filled in from every copy of it: each player's details from the copy that read them, the
-// player's own copy first (their app saw their own panel best), then any other.
-function mergedLineup(own, copies) {
+// Copies of one shared run (extra.sharedRun): a player's own copy (sent by their account) is the one their app read
+// best, so wherever one of several copies is shown for a player - their board row and its proof, a best, the history,
+// the Party screen's lineup - their own copy comes first, then the newest aLogs build (aLogs-0.1.37+rc.13 is newer than
+// +rc.12, and the 0.1.37 release newer than its RCs), then the order used before (the owner, 14 Nov: a teammate's app
+// misread names that the player's own copy had right).
+export function clientVersionRank(version) {
+  const match = /^(?:[^-]*-)?(\d+)\.(\d+)\.(\d+)(?:\+rc\.(\d+))?/u.exec(String(version || ""));
+  if (!match) return -1;
+  const [, major, minor, patch, rc] = match.map(Number);
+  return major * 1e12 + minor * 1e8 + patch * 1e4 + (match[4] == null ? 9999 : Math.min(rc, 9998));
+}
+// the same rank in SQL, for ORDER BY
+function clientVersionSql(column) {
+  const tail = (text) => `substr(${text}, instr(${text}, '.') + 1)`;
+  const core = `substr(${column}, instr(${column}, '-') + 1)`;
+  return `COALESCE(CAST(${core} AS INTEGER) * 1000000000000 + CAST(${tail(core)} AS INTEGER) * 100000000
+    + CAST(${tail(tail(core))} AS INTEGER) * 10000
+    + CASE WHEN instr(${column}, '+rc.') > 0 THEN MIN(CAST(substr(${column}, instr(${column}, '+rc.') + 4) AS INTEGER), 9998) ELSE 9999 END, -1)`;
+}
+// which copies are one run (a run nobody else sent is its own group), and the order of a row's copies: its player's
+// (who's) own copy, then the newest build
+const COPY_GROUP = (alias) => `COALESCE(json_extract(${alias}.extra_json, '$.sharedRun'), ${alias}.submission_id)`;
+const OWN_COPY_FIRST = (alias) => `(${alias}.discord_id = ${alias}.who) DESC, ${clientVersionSql(`${alias}.client_version`)} DESC`;
+// CREDITED_RUNS with each row's run_first: when the first copy of its run reached AniiLogs (the "first to get there"
+// tiebreak, so a player's own copy can win over a teammate's copy of the same run without passing an earlier run)
+const CREDITED_COPIES = () => `(SELECT cc.*, MIN(cc.created_at) OVER (PARTITION BY ${COPY_GROUP("cc")}) AS run_first FROM ${CREDITED_RUNS} cc)`;
+// The other copies of these shared runs, each run's newest build first: sharedRun -> [{ id, discordId, lineup }]
+async function sharedCopies(env, sharedIds) {
+  const ids = [...new Set(sharedIds.filter((id) => typeof id === "string"))];
+  const copiesOf = new Map();
+  if (!ids.length) return copiesOf;
+  const copies = await allIn(env, ids, (list) => `SELECT submission_id AS id, discord_id AS discordId, client_version AS version, created_at AS at,
+      json_extract(extra_json, '$.sharedRun') AS shared, json_extract(extra_json, '$.lineup') AS lineup
+    FROM leaderboard_submissions WHERE json_extract(extra_json, '$.sharedRun') IN (${list})`);
+  copies.sort((a, b) => clientVersionRank(b.version) - clientVersionRank(a.version) || a.at - b.at || String(a.id).localeCompare(String(b.id)));
+  for (const copy of copies) {
+    const list = copiesOf.get(copy.shared) || [];
+    list.push({ id: copy.id, discordId: copy.discordId, lineup: publicLineup(parseJsonColumn(copy.lineup)) });
+    copiesOf.set(copy.shared, list);
+  }
+  return copiesOf;
+}
+// A shared run's lineup filled in from every copy of it. Each player's slot comes from their own copy first (their
+// app saw their own panel best): its name, that they're a player and not AI, and their details. A slot nobody's own
+// copy read keeps this copy's name; its details from this copy, else the first other copy (newest build) that read
+// them. Copies are matched by the Party screen's slot (the same on every copy), by name only when a slot is missing:
+// a copy that read one name on two slots can't put a player on the wrong one. Another copy never overrides what a
+// player's own copy read.
+// One player's Party read, filled in from teammates' copies of the same run: a player is found in another copy by slot
+// (else by name), and takes their own copy's name and the fullest details. A name shown twice is a misread
+// (14 Nov: a copy read two players as one, beside the others' Aniimo, and shifted a third): then, and only then, its
+// players are named by what the copies agree on - their own copy's read first, a copy that names no one twice over one that does,
+// one marking several players as its sender (older builds) least - and a name nothing settles is left out rather than
+// shown on the wrong player. Old runs' copies often disagree on who sat where; the rest of a lineup stays as it was.
+export function mergedLineup(own, copies) {
   if (!own) return own;
   const detail = (entry) => Boolean(entry?.aniimo || entry?.team?.length || Number.isInteger(entry?.cp));
-  const same = (a, b) => (a.slot != null && a.slot === b.slot) || (a.name && a.name === b.name);
-  return own.map((entry) => {
-    if (entry.ai) return entry;
-    const others = copies.flatMap((lineup) => lineup || []).filter((other) => same(entry, other) && detail(other));
-    const best = (entry.self && detail(entry) ? entry : null) || others.find((other) => other.self) || (detail(entry) ? entry : null) || others[0];
-    if (!best || best === entry) return entry;
-    const { aniimo, aniimoLevel, cp, team } = best;
-    return JSON.parse(JSON.stringify({ ...entry, aniimo, aniimoLevel, cp, team }));
+  const same = (a, b) => (a.slot != null && b.slot != null ? a.slot === b.slot : Boolean(a.name && a.name === b.name));
+  const merged = own.map((entry) => {
+    const others = copies.flatMap((lineup) => lineup || []).filter((other) => other && same(entry, other));
+    const theirs = entry.self ? null : others.find((other) => other.self);
+    if (entry.ai && !theirs) return { ...entry };
+    const out = theirs ? { ...entry, ...(theirs.name ? { name: theirs.name } : {}), ai: false } : { ...entry };
+    const best = (theirs && detail(theirs) ? theirs : null) || (detail(entry) ? entry : null)
+      || (entry.self ? null : others.find(detail)) || null;
+    if (best && best !== entry) Object.assign(out, { aniimo: best.aniimo, aniimoLevel: best.aniimoLevel, cp: best.cp, team: best.team });
+    return out;
   });
+  const count = (lineup) => (lineup || []).reduce((n, entry) => n.set(entry?.name, (n.get(entry?.name) || 0) + 1), new Map());
+  const shown = count(merged);
+  const twice = [...shown].filter(([name, n]) => name && n > 1).map(([name]) => name);
+  if (twice.length) {
+    const sources = [own, ...copies.filter(Array.isArray)];
+    const weight = (lineup, entry) => {
+      const selves = lineup.filter((other) => other?.self).length;
+      if (entry.self && selves === 1) return 3;
+      return [...count(lineup)].some(([name, n]) => name && n > 1) || selves > 1 ? 0.5 : 1;
+    };
+    // the copy that named someone twice may have shifted the others too (14 Nov: two names one slot along): all of its
+    // players are named again
+    const open = merged.map((_, index) => index);
+    const used = new Set();
+    const claims = [];
+    for (const index of open) {
+      const votes = new Map();
+      for (const lineup of sources) {
+        const match = lineup === own ? own[index] : lineup.find((other) => other && same(own[index], other));
+        if (match?.name) votes.set(match.name, (votes.get(match.name) || 0) + weight(lineup, match));
+      }
+      for (const [name, w] of votes) claims.push({ index, name, w });
+    }
+    claims.sort((a, b) => b.w - a.w);
+    const named = new Map();
+    for (const claim of claims) {
+      if (named.has(claim.index) || used.has(claim.name)) continue;
+      named.set(claim.index, claim.name); used.add(claim.name);
+    }
+    for (const index of open) {
+      if (named.has(index)) merged[index].name = named.get(index); else delete merged[index].name;
+    }
+  }
+  return merged.map((entry) => JSON.parse(JSON.stringify(entry)));
 }
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
 // rank's name), Result (score, then the fastest time) and Party (its size). Rows without the value go last either
@@ -1897,10 +1988,13 @@ async function battleHistory(env, discordId, params, { owner }) {
           AND json_extract(mine.extra_json, '$.instanceId') = json_extract(c.extra_json, '$.instanceId'))
          OR (json_extract(mine.extra_json, '$.sharedRun') IS NOT NULL
           AND json_extract(mine.extra_json, '$.sharedRun') = json_extract(c.extra_json, '$.sharedRun'))))
-      -- one teammate's copy of a shared run is enough
+      -- one teammate's copy of a shared run is enough: the newest build's, then the first sent
       AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions twin WHERE twin.kind = 'interlink_run' AND twin.status = 'visible'
         AND twin.discord_id <> ?1 AND json_extract(c.extra_json, '$.sharedRun') IS NOT NULL
-        AND json_extract(twin.extra_json, '$.sharedRun') = json_extract(c.extra_json, '$.sharedRun') AND twin.submission_id < c.submission_id
+        AND json_extract(twin.extra_json, '$.sharedRun') = json_extract(c.extra_json, '$.sharedRun')
+        AND (${clientVersionSql("twin.client_version")} > ${clientVersionSql("c.client_version")}
+          OR (${clientVersionSql("twin.client_version")} = ${clientVersionSql("c.client_version")}
+            AND (twin.created_at < c.created_at OR (twin.created_at = c.created_at AND twin.submission_id < c.submission_id))))
         AND (${uids.map((uid) => `instr(twin.players_json, '"${uid}"') > 0`).join(" OR ")}))` : null;
   const all = `SELECT * FROM (${own}${credited ? ` UNION ALL ${credited}` : ""})`;
   const where = [];
@@ -1978,19 +2072,7 @@ async function battleHistory(env, discordId, params, { owner }) {
     }
   }
   // the other copies of shared runs (sent by teammates), for the players their apps read
-  const shared = [...new Set(rows.map((row) => parseJsonColumn(row.extra_json)?.sharedRun).filter((id) => typeof id === "string"))];
-  const copiesOf = new Map();
-  if (shared.length) {
-    const { results: copies } = await env.DB.prepare(
-      `SELECT submission_id, json_extract(extra_json, '$.sharedRun') AS shared, json_extract(extra_json, '$.lineup') AS lineup
-       FROM leaderboard_submissions WHERE json_extract(extra_json, '$.sharedRun') IN (${shared.map(() => "?").join(", ")})`,
-    ).bind(...shared).all();
-    for (const copy of copies || []) {
-      const list = copiesOf.get(copy.shared) || [];
-      list.push({ id: copy.submission_id, lineup: publicLineup(parseJsonColumn(copy.lineup)) });
-      copiesOf.set(copy.shared, list);
-    }
-  }
+  const copiesOf = await sharedCopies(env, rows.map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
   const last = rows.at(-1);
   return {
     runs: rows.map((row) => {
@@ -4619,8 +4701,8 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        s.created_at AS firstAt, COALESCE(s.played_at, s.created_at) AS playedAt
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
-               CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.created_at ASC) AS pick
-           FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_RUNS} c) r
+               CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC) AS pick
+           FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_COPIES()} c) r
            WHERE r.status = 'visible' AND r.kind IN (${kinds})${proofOnly ? " AND r.evidence_key IS NOT NULL AND COALESCE(r.outcome, '') <> 'invalid'" : ""} AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}
              AND ${onBoards(unlinked, "r")}) s
@@ -4634,9 +4716,10 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        r.clear_time_s AS clear, r.team_dps AS teamDps, r.p_dps AS dps, r.p_break AS "break", r.p_heal AS heal,
        json_extract(r.extra_json, '$.starCap') AS sentCap,
        (r.evidence_key IS NOT NULL OR r.battle_evidence_key IS NOT NULL) AS hasProof
-     FROM ${CREDITED_RUNS} r
+     FROM ${CREDITED_COPIES()} r
      WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND COALESCE(r.outcome, '') <> 'invalid' AND r.boss_id IS NOT NULL
-       AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""} AND ${onBoards(unlinked, "r")}`,
+       AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""} AND ${onBoards(unlinked, "r")}
+     ORDER BY r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC, r.submission_id ASC`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
   for (const run of figures.results || []) {
     const key = `${run.who}|${run.cycle}|${run.bossId}`;
@@ -5236,8 +5319,8 @@ async function leaderboardEntries(request, env) {
        ORDER BY last_seen_at DESC LIMIT 1) AS anyUid,
       CASE WHEN p.is_public = 1 THEN p.public_id END AS profileId,
       ${discordNameSql("s.who")} AS discordName,
-      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${pickBy("s.")}, s.created_at ASC) AS playerRank
-    FROM ${CREDITED_RUNS} s
+      ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${pickBy("s.")}, s.run_first ASC, ${OWN_COPY_FIRST("s")}, s.created_at ASC) AS playerRank
+    FROM ${CREDITED_COPIES()} s
     JOIN users u ON u.discord_id = s.discord_id
     LEFT JOIN profiles p ON p.discord_id = s.who
     LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id AND s.teammate IS NULL
@@ -5249,6 +5332,10 @@ async function leaderboardEntries(request, env) {
     `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
   ).bind(...binds, limit, offset).all();
   const profiles = await partyProfiles(env, results || []);
+  // a shared run's lineup from every copy of it (mergedLineup), as the history and the proof viewer show it
+  const copiesOf = await sharedCopies(env, (results || []).map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
+  const lineupOf = (row, lineup) => mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
+    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup));
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
   const weeks = kind === "interlink_run" ? await interlinkCycles(env) : [];
   return json({
@@ -5302,7 +5389,7 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: publicLineup(lineup) } : {}),
+      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
@@ -5418,7 +5505,9 @@ async function deleteSubmission(request, env, submissionId) {
 async function submissionEvidence(request, env, submissionId) {
   const row = await env.DB.prepare(
     `SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, status,
-       buffs_json AS buffsJson, kind, cycle, boss_id AS bossId FROM leaderboard_submissions WHERE submission_id = ?`,
+       buffs_json AS buffsJson, kind, cycle, boss_id AS bossId, boss_name AS bossName, boss_level AS bossLevel, ${RUN_SCORE("s")} AS score,
+       stars, clear_time_s AS clearTimeS, cleared, difficulty, trial, rank_name AS rankName
+     FROM leaderboard_submissions s WHERE submission_id = ?`,
   ).bind(submissionId).first();
   const shot = new URL(request.url).searchParams.get("shot");
   const extra = parseJsonColumn(row?.extraJson) || {};
@@ -5442,7 +5531,8 @@ async function submissionEvidence(request, env, submissionId) {
     }
   }
   if (shot === "list") {
-    const lineup = publicLineup(extra.lineup);
+    const copies = extra.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
+    const lineup = mergedLineup(publicLineup(extra.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup));
     const buffs = (parseJsonColumn(row.buffsJson) || []).slice(0, 12).filter((buff) => buff?.name)
       .map((buff) => ({ name: String(buff.name).slice(0, 60), ...(Number.isInteger(buff.level) ? { level: buff.level } : {}),
         ...(Number.isInteger(buff.floor) ? { floor: buff.floor } : {}) }));
@@ -5452,13 +5542,14 @@ async function submissionEvidence(request, env, submissionId) {
     // board's other ladders show.
     const menu = row.kind === "interlink_best";
     const run = menu ? await env.DB.prepare(
-      `SELECT r.submission_id AS id FROM ${CREDITED_RUNS} r
+      `SELECT r.submission_id AS id FROM ${CREDITED_COPIES()} r
        WHERE r.who = ? AND r.kind = 'interlink_run' AND r.cycle IS ? AND r.boss_id IS ? AND r.status = 'visible'
          AND COALESCE(r.outcome, '') <> 'invalid' AND r.evidence_key IS NOT NULL
-       ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.created_at ASC LIMIT 1`,
+       ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC LIMIT 1`,
     ).bind(row.discordId, row.cycle, row.bossId).first() : null;
+    const fight = await proofFight(env, row);
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
-      ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
+      ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(buffs.length ? { buffs } : {}) });
     listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
     return listed;
   }
@@ -5468,6 +5559,30 @@ async function submissionEvidence(request, env, submissionId) {
   object.writeHttpMetadata?.(headers);
   headers.set("cache-control", visible ? "public, max-age=86400" : "private, no-store");
   return new Response(object.body, { status: 200, headers });
+}
+
+// Which fight a run's pictures are of, for the line over them in the proof viewer (the owner, 14 Nov: a picture is
+// never shown without its context): the mode, the fight's name (the boss, the training, Egg Heist's difficulty or
+// rank), and what the record has of the boss's level, the Interlink week, stars, score, rank points and time.
+async function proofFight(env, row) {
+  const mode = row ? LEADERBOARD_KINDS[row.kind] : null;
+  const whole = (value) => (Number.isFinite(Number(value)) && value !== null ? Number(value) : undefined);
+  const time = row?.clearTimeS != null && Number.isFinite(Number(row.clearTimeS)) ? Number(row.clearTimeS) : undefined;
+  let fight = null;
+  if (mode === "interlink") {
+    const week = row.cycle ? interlinkCycle(await interlinkCycles(env), row.cycle) : null;
+    fight = { mode, kind: row.kind, title: row.bossName || null, level: whole(row.bossLevel),
+      week: week ? { start: week.start, end: week.end } : undefined, stars: whole(row.stars), score: whole(row.score),
+      time: row.kind === "interlink_run" ? time : undefined };
+  } else if (mode === "sim") {
+    fight = { mode, kind: row.kind, title: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
+      difficulty: row.difficulty || undefined, time };
+  } else if (mode === "eggheist") {
+    fight = row.kind === "eggheist_season"
+      ? { mode, kind: row.kind, title: row.rankName || null, season: row.cycle || undefined, points: whole(row.score) }
+      : { mode, kind: row.kind, title: row.difficulty || null, score: whole(row.score), escaped: row.cleared == null ? undefined : Boolean(row.cleared), time };
+  }
+  return fight ? JSON.parse(JSON.stringify(fight)) : null;
 }
 
 // The figures on an Interlink board row, each proven by the row's one run (interlinkBests): metric -> the row's field.

@@ -1,6 +1,6 @@
 // The run's proof viewer, shared by the leaderboards and My runs: every picture of a run in its own tab (the result
 // screen, Battle Data, Holo-Battle Sim's Gizmo screen, the Party screen), a menu best's picture beside its run's, and
-// what each player went in with. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
+// what each player went in with, under a line saying which fight it is. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
 // partyPanel, allowDelete({ any, onDeleted }). options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
 // pictures (Battle Data shows the whole party: the note says whose row the trophy is).
 (() => {
@@ -89,6 +89,36 @@
       buffs.length ? el("p", { class: "lb-party-buffs" }, el("strong", { text: "Buffs " }),
         buffs.map((b) => `${b.name}${b.level ? ` Lv ${b.level}` : ""}`).join(" · ")) : null);
   }
+  // The line over the pictures: which fight the run is (the API's fight), so a picture is never shown without it.
+  // Interlink: the boss, its level, the week, stars, score and time; Holo-Battle Sim: the training, its difficulty and
+  // time; Egg Heist: the difficulty or rank and its score, rank points or escape.
+  const FIGHT_MODES = Object.freeze({ interlink: "Interlink", sim: "Holo-Battle Sim", eggheist: "Egg Heist" });
+  function fightLine(fight) {
+    const chip = FIGHT_MODES[fight?.mode];
+    if (!chip) return null;
+    const day = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const seconds = (value) => `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 })} s`;
+    const has = (value) => value !== undefined && value !== null;
+    const facts = [];
+    if (fight.mode === "interlink") {
+      if (fight.week?.start && fight.week?.end) facts.push(`Week of ${day(fight.week.start)} – ${day(fight.week.end)}`);
+      if (has(fight.stars)) facts.push(`${number(fight.stars)} ${fight.stars === 1 ? "star" : "stars"}`);
+      if (has(fight.score)) facts.push(number(fight.score));
+    } else if (fight.mode === "sim") {
+      if (fight.difficulty) facts.push(fight.difficulty);
+    } else if (fight.kind === "eggheist_season") {
+      if (has(fight.points)) facts.push(`${number(fight.points)} rank points`);
+    } else {
+      if (has(fight.score)) facts.push(`${number(fight.score)} pts`);
+      if (typeof fight.escaped === "boolean") facts.push(fight.escaped ? "Escaped" : "Failed");
+    }
+    if (has(fight.time)) facts.push(seconds(fight.time));
+    const title = fight.title || (fight.mode === "eggheist" ? (fight.kind === "eggheist_season" ? "Season rank" : "Match") : "");
+    return el("p", { class: "lb-proof-fight" }, el("span", { class: "lb-proof-mode", text: chip }),
+      title ? el("strong", { text: title }) : null,
+      fight.mode === "interlink" && Number.isInteger(fight.level) ? el("span", { text: `Lv ${fight.level}` }) : null,
+      ...facts.map((fact) => el("span", { class: "lb-proof-fact", text: fact })));
+  }
   function shotLabel(shot, shots) {
     if (shot === "battle") return "Battle Data";
     if (shot === "party") return "Party";
@@ -147,6 +177,7 @@
     tabs.replaceChildren();
     dialog.querySelector(".lb-proof-party")?.remove();
     dialog.querySelector(".lb-proof-note")?.remove();
+    dialog.querySelector(".lb-proof-fight")?.remove();
     dialog.querySelector(".lb-proof-actions")?.remove();
     if (options?.note) dialog.insertBefore(el("p", { class: "lb-proof-note", text: String(options.note) }), body);
     body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshots…" }));
@@ -159,6 +190,10 @@
     // A run whose score a menu best matched: the menu picture goes with the run's (the board's menuProofId)
     const menu = !details.menu && menuId ? await proofDetails(menuId).catch(() => null) : null;
     if (proofOpenFor !== submissionId) return;
+    // which fight it is, over the pictures (a menu best's own facts, else its run's)
+    dialog.querySelector(".lb-proof-fight")?.remove();
+    const fight = fightLine(details.fight || run?.fight);
+    if (fight) dialog.insertBefore(fight, dialog.querySelector(".lb-proof-note") || body);
     const pictures = [
       ...(menu?.shots?.includes("summary") ? [{ id: menuId, shot: "summary", label: "Menu" }] : []),
       ...details.shots.map((shot) => ({ id: submissionId, shot, label: details.menu && shot === "summary" ? "Menu" : shotLabel(shot, details.shots) })),
