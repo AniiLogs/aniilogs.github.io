@@ -303,7 +303,7 @@ test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, trans
   const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const send = async (session, body) => call(env, "/api/leaderboard/submissions", { token: await namedToken(env, session), method: "POST", body });
   const setupOf = (style) => ({
-    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20), level: -4 }, { level: 9 }],
+    team: [{ name: "Scorchhowl", level: 73, mvp: true, nickname: "Blaze" }, { name: "Somniwing", level: 70, nickname: "y".repeat(30) }, { name: "<b>x</b>".repeat(20), level: -4 }, { level: 9 }],
     mvpShares: { damage: 61.5, taken: 30, healing: 500 },
     style, core: "Fervor Mask", transform: "Scorchhowl", coins: 8550, secret: "dropped",
     gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }, { rarity: "Rare" }] }, { series: "Valor", count: 2 }],
@@ -317,7 +317,7 @@ test("Holo-Battle Sim setup (aLogs B5): team with the MVP, Training Style, trans
   const all = await board("");
   assert.deepEqual(all.map((e) => e.player), ["DevTwo", "UserOne", "DevOne"]);
   assert.deepEqual(all[2].extra.setup, {
-    team: [{ name: "Scorchhowl", level: 73, mvp: true }, { name: "Somniwing", level: 70 }, { name: "<b>x</b>".repeat(20).slice(0, 40) }],
+    team: [{ name: "Scorchhowl", nickname: "Blaze", level: 73, mvp: true }, { name: "Somniwing", nickname: "y".repeat(24), level: 70 }, { name: "<b>x</b>".repeat(20).slice(0, 40) }],
     mvpShares: { damage: 61.5, taken: 30 }, style: "Valor", core: "Fervor Mask", transform: "Scorchhowl",
     gizmos: [{ series: "Energy", count: 6, picked: [{ name: "Blessing of Protection", rarity: "Uncommon" }] }, { series: "Valor", count: 2 }], coins: 8550,
   });

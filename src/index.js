@@ -1822,7 +1822,10 @@ function publicSimSetup(setup) {
   const shares = setup.mvpShares && typeof setup.mvpShares === "object" ? setup.mvpShares : {};
   const share = (value) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined);
   const clean = JSON.parse(JSON.stringify({
-    team: list(setup.team, 5).map((member) => ({ name: text(member.name), level: whole(member.level, 999) || undefined, mvp: member.mvp === true || undefined }))
+    // name: the species (aLogs reads it from the card's art since 0.1.37, 14 Nov); nickname: the card's own text when the
+    // player renamed it
+    team: list(setup.team, 5).map((member) => ({ name: text(member.name), nickname: text(member.nickname, 24),
+      level: whole(member.level, 999) || undefined, mvp: member.mvp === true || undefined }))
       .filter((member) => member.name),
     mvpShares: { damage: share(shares.damage), taken: share(shares.taken), healing: share(shares.healing) },
     style: SIM_RULES.styles.includes(setup.style) ? setup.style : undefined,
