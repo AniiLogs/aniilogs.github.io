@@ -15659,3 +15659,95 @@ body.aniilog-artwork-mode .catalog-hide-artwork-button {
 .team-bugged {
   color: #f2b84b;
 }
+
+/* Aniilog filter: skill tags (skill-tags.js). Chips switch on and off; the number is how many Aniimo have the tag. */
+.aniilog-skill-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.aniilog-skill-tag {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid rgba(164, 150, 205, 0.5);
+  border-radius: 4px;
+  background: rgba(83, 74, 116, 0.22);
+  color: #e9eff2;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+}
+
+.aniilog-skill-tag small {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.aniilog-skill-tag:hover,
+.aniilog-skill-tag:focus-visible {
+  border-color: rgba(200, 188, 240, 0.9);
+  outline: none;
+}
+
+.aniilog-skill-tag[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, rgba(var(--background-rgb), 0.9));
+  color: #f4fffc;
+}
+
+.aniilog-skill-tag[aria-pressed="true"] small {
+  color: inherit;
+}
+
+.aniilog-skill-tag-match {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  margin-top: 2px;
+}
+
+.aniilog-skill-tag-match button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.aniilog-skill-tag-match button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.aniilog-skill-tag-match button:last-child {
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.aniilog-skill-tag-match button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: #f4fffc;
+  box-shadow: -1px 0 0 var(--accent);
+}
+
+button.catalog-ability-badge--type {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button.catalog-ability-badge--type:hover,
+button.catalog-ability-badge--type:focus-visible {
+  border-color: rgba(200, 188, 240, 0.95);
+  background: rgba(83, 74, 116, 0.7);
+  outline: none;
+}
