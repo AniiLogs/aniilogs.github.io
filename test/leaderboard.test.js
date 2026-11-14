@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { leaderboardSubmission } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -2155,6 +2155,91 @@ test("a shared run's lineup: each player's details from whichever copy read them
   const lineupOf = async (session) => (await historyOf(env, "/api/profile/history", session)).runs[0].lineup.map(({ self: _self, ...entry }) => entry);
   assert.deepEqual(await lineupOf(SESSIONS.user), expected);              // DevOne's details filled in from DevOne's copy
   assert.deepEqual(await lineupOf(SESSIONS.dev), expected);               // UserOne's CP from UserOne's own copy, not the misread
+});
+
+test("copies of one shared run: a player's own copy is their row's proof and lineup, else the newest build's", async () => {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);       // DevOne 301000000001
+  const userToken = await namedToken(env, SESSIONS.user);     // UserOne 301000000003
+  const jpeg = (mark) => { const data = new Uint8Array(2048); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const at = Math.floor(Date.now() / 1000) - 600;
+  const send = async (token, id, body, mark) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(id, { cycle: "3005", score: 30000, stars: 30, clearTimeS: 200, playedAt: at, ...body })));
+    form.set("evidence", jpeg(mark), "result.jpg");
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.ok([200, 201].includes(sent.status), String(sent.status));
+    return (await sent.json()).submissionId;
+  };
+  const arrived = (id, seconds) => sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ? WHERE submission_id = ?").run(seconds, id);
+  const players = (self) => [{ name: "UserOne", ai: false, self: self === "UserOne", avgDps: 5000 }, { name: "DevOne", ai: false, self: self === "DevOne", avgDps: 7000 }];
+  // UserOne's app sent first and misread DevOne's slot: another name, taken for AI, the wrong lead
+  const userCopy = await send(userToken, "u-copy", { gameUid: "301000000003", clientVersion: "aLogs-0.1.37+rc.13", players: players("UserOne"), extra: { lineup: [
+    { slot: 1, name: "UserOne", ai: false, self: true, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
+    { slot: 2, name: "Dawnlit", ai: true, aniimo: "Chirpi", cp: 100 },
+  ] } }, 2);
+  const devCopy = await send(devToken, "d-copy", { gameUid: "301000000001", clientVersion: "aLogs-0.1.37+rc.12", players: players("DevOne"), extra: { lineup: [
+    { slot: 1, name: "UserOne", ai: false },
+    { slot: 2, name: "DevOne", ai: false, self: true, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000 },
+  ] } }, 3);
+  arrived(userCopy, at + 10);
+  arrived(devCopy, at + 40);
+  const shared = (id) => JSON.parse(sqlite.prepare("SELECT extra_json FROM leaderboard_submissions WHERE submission_id = ?").get(id).extra_json).sharedRun;
+  assert.ok(shared(userCopy));
+  assert.equal(shared(userCopy), shared(devCopy));
+  const rowOf = async (name) => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses
+    .flatMap((boss) => boss.entries).find((entry) => entry.player === name);
+  // DevOne's row: their own copy (sent later, by an older build) is the proof of every figure on it
+  const devRow = await rowOf("DevOne");
+  assert.equal(devRow.proofId, devCopy);
+  assert.equal(devRow.proofIds.dps, devCopy);
+  assert.equal((await rowOf("UserOne")).proofId, userCopy);
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries;
+  assert.equal(entries.find((entry) => entry.player === "DevOne").submissionId, devCopy);
+  // the proof viewer's lineup: DevOne's slot from DevOne's own copy, on either copy's pictures
+  const lineupOf = async (id) => (await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json()).lineup
+    .map(({ self: _self, ...entry }) => entry);
+  const expected = [
+    { slot: 1, name: "UserOne", ai: false, aniimo: "Glameep", aniimoLevel: 60, cp: 20000 },
+    { slot: 2, name: "DevOne", ai: false, aniimo: "Emberpup", aniimoLevel: 55, cp: 11000 },
+  ];
+  assert.deepEqual(await lineupOf(devCopy), expected);
+  assert.deepEqual(await lineupOf(userCopy), expected);                    // the misread name, AI mark and lead are gone
+  assert.deepEqual(entries.find((entry) => entry.player === "UserOne").extra.lineup.map(({ self: _self, ...entry }) => entry), expected);
+
+  // a third player who sent no copy: the newest build's copy, though the other arrived first
+  const dev2Token = await namedToken(env, SESSIONS.dev2);    // DevTwo 301000000002
+  sqlite.prepare("UPDATE game_characters SET verified_at = ? WHERE game_uid = '301000000002'").run(at);
+  const trio = (self) => [...players(self), { name: "DevTwo", ai: false, uid: "301000000002", avgDps: 6000 }];
+  const lineup3 = (self, devTwoLead) => [
+    { slot: 1, name: "UserOne", ai: false, ...(self === "UserOne" ? { self: true } : {}) },
+    { slot: 2, name: "DevOne", ai: false, ...(self === "DevOne" ? { self: true } : {}) },
+    { slot: 3, name: "DevTwo", ai: false, aniimo: devTwoLead },
+  ];
+  const boss = { id: "80000109", name: "Omega Sherro", level: 60 };
+  const older = await send(userToken, "u-trio", { boss, gameUid: "301000000003", clientVersion: "aLogs-0.1.37+rc.12", players: trio("UserOne"),
+    extra: { lineup: lineup3("UserOne", "Tromber") } }, 4);
+  const newer = await send(devToken, "d-trio", { boss, gameUid: "301000000001", clientVersion: "aLogs-0.1.37+rc.13", players: trio("DevOne"),
+    extra: { lineup: lineup3("DevOne", "Somniwing") } }, 5);
+  arrived(older, at + 10);
+  arrived(newer, at + 40);
+  assert.equal(shared(older), shared(newer));
+  const devTwoRow = (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json()).bosses
+    .find((x) => x.id === boss.id).entries.find((entry) => entry.player === "DevTwo");
+  assert.equal(devTwoRow.proofId, newer);
+  assert.equal(devTwoRow.proofIds.dps, newer);
+  const [credited] = (await historyOf(env, "/api/profile/history", SESSIONS.dev2)).runs;
+  assert.equal(credited.submissionId, newer);
+  assert.equal(credited.lineup.find((entry) => entry.slot === 3).aniimo, "Somniwing");
+  assert.ok(dev2Token);
+});
+
+test("client versions rank by release, then RC number", () => {
+  assert.ok(clientVersionRank("aLogs-0.1.37+rc.13") > clientVersionRank("aLogs-0.1.37+rc.12"));
+  assert.ok(clientVersionRank("aLogs-0.1.37") > clientVersionRank("aLogs-0.1.37+rc.13"));
+  assert.ok(clientVersionRank("aLogs-0.1.38+rc.1") > clientVersionRank("aLogs-0.1.37"));
+  assert.ok(clientVersionRank("aLogs-0.2.0+rc.1") > clientVersionRank("aLogs-0.1.99"));
+  assert.equal(clientVersionRank(null), -1);
 });
 
 test("one party run sent by two players: Battle Data cards say who is who when a name was misread or on the wrong slot", async () => {
