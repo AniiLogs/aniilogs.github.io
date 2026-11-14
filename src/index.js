@@ -1890,53 +1890,60 @@ async function sharedCopies(env, sharedIds) {
 // them. Copies are matched by the Party screen's slot (the same on every copy), by name only when a slot is missing:
 // a copy that read one name on two slots can't put a player on the wrong one. Another copy never overrides what a
 // player's own copy read.
-// One player's Party read, filled in from teammates' copies of the same run. A copy's slot numbers and names are its
-// own reads: a player is found in another copy by slot (the Party screen's order is the same for everyone), else by
-// lead Aniimo and CP. Its names are reads too (14 Nov: a copy that misread two names as one player's showed that name
-// twice, beside the other players' Aniimo), so each player's name is the one the copies agree on: their
-// own copy's first, a copy that names no one twice over one that does, and no name twice in the lineup (a name
-// nothing settles is left out rather than shown on the wrong player).
+// One player's Party read, filled in from teammates' copies of the same run: a player is found in another copy by slot
+// (else by name), and takes their own copy's name and the fullest details. A name shown twice is a misread
+// (14 Nov: a copy read two players as one, beside the others' Aniimo, and shifted a third): then, and only then, its
+// players are named by what the copies agree on - their own copy's read first, a copy that names no one twice over one that does,
+// one marking several players as its sender (older builds) least - and a name nothing settles is left out rather than
+// shown on the wrong player. Old runs' copies often disagree on who sat where; the rest of a lineup stays as it was.
 export function mergedLineup(own, copies) {
   if (!own) return own;
   const detail = (entry) => Boolean(entry?.aniimo || entry?.team?.length || Number.isInteger(entry?.cp));
-  const same = (a, b) => (a.slot != null && b.slot != null ? a.slot === b.slot
-    : Number.isInteger(a.cp) && Number.isInteger(b.cp) ? a.cp === b.cp && (!a.aniimo || !b.aniimo || a.aniimo === b.aniimo)
-    : Boolean(a.name && a.name === b.name));
-  const twice = (lineup) => {
-    const names = (lineup || []).map((entry) => entry?.name).filter(Boolean);
-    return new Set(names).size < names.length;
-  };
-  const sources = [own, ...copies.filter(Array.isArray)];
+  const same = (a, b) => (a.slot != null && b.slot != null ? a.slot === b.slot : Boolean(a.name && a.name === b.name));
   const merged = own.map((entry) => {
     const others = copies.flatMap((lineup) => lineup || []).filter((other) => other && same(entry, other));
     const theirs = entry.self ? null : others.find((other) => other.self);
-    const votes = new Map();
-    for (const lineup of sources) {
-      const match = lineup === own ? entry : lineup.find((other) => other && same(entry, other));
-      if (!match?.name) continue;
-      const weight = match.self ? 3 : twice(lineup) ? 0.5 : 1;
-      votes.set(match.name, (votes.get(match.name) || 0) + weight);
-    }
-    if (entry.ai && !theirs) return { entry: { ...entry }, votes };
-    const out = { ...entry, ...(theirs ? { ai: false } : {}) };
+    if (entry.ai && !theirs) return { ...entry };
+    const out = theirs ? { ...entry, ...(theirs.name ? { name: theirs.name } : {}), ai: false } : { ...entry };
     const best = (theirs && detail(theirs) ? theirs : null) || (detail(entry) ? entry : null)
       || (entry.self ? null : others.find(detail)) || null;
     if (best && best !== entry) Object.assign(out, { aniimo: best.aniimo, aniimoLevel: best.aniimoLevel, cp: best.cp, team: best.team });
-    return { entry: out, votes };
+    return out;
   });
-  // names by agreement, the surest first; a name already given goes to no one else
-  const claims = merged.flatMap(({ votes }, index) => [...votes].map(([name, weight]) => ({ index, name, weight })))
-    .sort((a, b) => b.weight - a.weight);
-  const named = new Map(); const used = new Set();
-  for (const claim of claims) {
-    if (named.has(claim.index) || used.has(claim.name)) continue;
-    named.set(claim.index, claim.name); used.add(claim.name);
+  const count = (lineup) => (lineup || []).reduce((n, entry) => n.set(entry?.name, (n.get(entry?.name) || 0) + 1), new Map());
+  const shown = count(merged);
+  const twice = [...shown].filter(([name, n]) => name && n > 1).map(([name]) => name);
+  if (twice.length) {
+    const sources = [own, ...copies.filter(Array.isArray)];
+    const weight = (lineup, entry) => {
+      const selves = lineup.filter((other) => other?.self).length;
+      if (entry.self && selves === 1) return 3;
+      return [...count(lineup)].some(([name, n]) => name && n > 1) || selves > 1 ? 0.5 : 1;
+    };
+    // the copy that named someone twice may have shifted the others too (14 Nov: two names one slot along): all of its
+    // players are named again
+    const open = merged.map((_, index) => index);
+    const used = new Set();
+    const claims = [];
+    for (const index of open) {
+      const votes = new Map();
+      for (const lineup of sources) {
+        const match = lineup === own ? own[index] : lineup.find((other) => other && same(own[index], other));
+        if (match?.name) votes.set(match.name, (votes.get(match.name) || 0) + weight(lineup, match));
+      }
+      for (const [name, w] of votes) claims.push({ index, name, w });
+    }
+    claims.sort((a, b) => b.w - a.w);
+    const named = new Map();
+    for (const claim of claims) {
+      if (named.has(claim.index) || used.has(claim.name)) continue;
+      named.set(claim.index, claim.name); used.add(claim.name);
+    }
+    for (const index of open) {
+      if (named.has(index)) merged[index].name = named.get(index); else delete merged[index].name;
+    }
   }
-  return merged.map(({ entry }, index) => {
-    const out = { ...entry };
-    if (named.has(index)) out.name = named.get(index); else delete out.name;
-    return JSON.parse(JSON.stringify(out));
-  });
+  return merged.map((entry) => JSON.parse(JSON.stringify(entry)));
 }
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
 // rank's name), Result (score, then the fastest time) and Party (its size). Rows without the value go last either
