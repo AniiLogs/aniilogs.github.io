@@ -3516,34 +3516,45 @@ function freeRunChecks(row, cycle) {
 // rules.sim), and - when held - hidden until staff confirm it (POST /api/admin/run-checks/<id>), so a false alarm
 // costs an honest player a delay, never the run. Only a Victory with its time is checked, and only what the app read
 // (a part it couldn't read says nothing).
-// - "clear time": under the floor for its difficulty. Held. (15 Nov, 34 distinct stored runs: the fastest Easy was
-//   2:00, Normal 3:31, Hard 11:21, Challenge 13:29, Trial 6:51; the floors are half the fastest Easy, and under 60% of
-//   the fastest Trial for Hard and up.)
-// - "coins": fewer than 1,000 (the lowest of 21 stored runs with coins read was 3,050, on Easy; Trial 5,750).
-// - "gizmos": a gizmo row read with at most 2 gizmos in all (the lowest of 22 stored was 4).
+// - "clear time": under the floor for its difficulty. Held.
+// - "coins": fewer than a full run's.
+// - "gizmos": a gizmo row read with fewer gizmos in all than a full run's.
 //   Either alone is listed for review and stays on the boards (one misread number); both together are a run that
 //   collected next to nothing: held.
-// The run that prompted these (15 Nov): Lightning Training - Trial in 2:54 with 250 coins, one gizmo and no core.
-const SIM_CHECKS = Object.freeze({
-  minTimeS: Object.freeze({ Easy: 60, Normal: 60, Hard: 240, Challenge: 240, Trial: 240 }),
-  minCoins: 1000,
-  minGizmos: 3,
-});
-export function simRunChecks(row) {
+// The limits aren't in this repository (it is public): they come from the SIM_CHECK_LIMITS secret, JSON
+// {"minTimeS": {"<difficulty>": seconds, ...}, "minCoins": n, "minGizmos": n}. Any part can be left out (that rule is
+// then off); without the secret, or with one that doesn't parse, no Sim run is checked and nothing already held changes.
+export function simCheckLimits(env) {
+  let sent;
+  try {
+    sent = JSON.parse(env?.SIM_CHECK_LIMITS || "null");
+  } catch {
+    return null;
+  }
+  if (!sent || typeof sent !== "object" || Array.isArray(sent)) return null;
+  const whole = (value) => (Number.isInteger(value) && value > 0 && value <= 1e9 ? value : null);
+  const times = sent.minTimeS && typeof sent.minTimeS === "object" && !Array.isArray(sent.minTimeS) ? sent.minTimeS : {};
+  const minTimeS = Object.fromEntries(Object.entries(times).filter(([, value]) => whole(value) !== null));
+  const limits = { minTimeS, minCoins: whole(sent.minCoins), minGizmos: whole(sent.minGizmos) };
+  return Object.keys(minTimeS).length || limits.minCoins || limits.minGizmos ? limits : null;
+}
+export function simRunChecks(row, limits) {
   const flags = [];
   const time = Number(row.clearTimeS);
-  if (row.cleared !== 1 || row.clearTimeS == null || !Number.isFinite(time)) return flags;
-  const floor = SIM_CHECKS.minTimeS[row.difficulty] ?? Math.min(...Object.values(SIM_CHECKS.minTimeS));
-  if (time < floor) flags.push({ rule: "clear time possible for the difficulty", sent: time, expected: floor, hold: true });
+  if (!limits || row.cleared !== 1 || row.clearTimeS == null || !Number.isFinite(time)) return flags;
+  // no difficulty sent, or one without a floor: the lowest floor
+  const floors = Object.values(limits.minTimeS);
+  const floor = limits.minTimeS[row.difficulty] ?? (floors.length ? Math.min(...floors) : null);
+  if (floor !== null && time < floor) flags.push({ rule: "clear time possible for the difficulty", sent: time, expected: floor, hold: true });
   const setup = (parseJsonColumn(row.extraJson) || {}).setup;
   if (setup && typeof setup === "object" && !Array.isArray(setup)) {
-    if (Number.isInteger(setup.coins) && setup.coins >= 0 && setup.coins < SIM_CHECKS.minCoins) {
-      flags.push({ rule: "coins of a full run", sent: setup.coins, expected: SIM_CHECKS.minCoins });
+    if (limits.minCoins && Number.isInteger(setup.coins) && setup.coins >= 0 && setup.coins < limits.minCoins) {
+      flags.push({ rule: "coins of a full run", sent: setup.coins, expected: limits.minCoins });
     }
     const rows = Array.isArray(setup.gizmos) ? setup.gizmos.filter((item) => item && typeof item === "object" && item.series) : [];
     // a series whose count wasn't read has at least one gizmo
     const gizmos = rows.reduce((total, item) => total + (Number.isInteger(item.count) && item.count > 0 ? item.count : 1), 0);
-    if (rows.length && gizmos < SIM_CHECKS.minGizmos) flags.push({ rule: "gizmos of a full run", sent: gizmos, expected: SIM_CHECKS.minGizmos });
+    if (limits.minGizmos && rows.length && gizmos < limits.minGizmos) flags.push({ rule: "gizmos of a full run", sent: gizmos, expected: limits.minGizmos });
   }
   return flags;
 }
@@ -3562,11 +3573,13 @@ async function checkSimRun(env, submissionId) {
        verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
   if (!row || row.kind !== "sim_run") return false;
-  const flags = simRunChecks(row);
+  const limits = simCheckLimits(env);
+  const flags = simRunChecks(row, limits);
   const before = parseJsonColumn(row.verifyJson) || {};
   const was = before.rules?.sim ? before : null;
   const hiddenByCheck = Boolean(was?.held) && row.status === "hidden";
-  if (row.verifyState === "rejected" || (was && JSON.stringify(was.rules.flags || []) === JSON.stringify(flags))) {
+  if (!limits) console.warn("Sim run checks are off: SIM_CHECK_LIMITS isn't set or doesn't parse");
+  if (!limits || row.verifyState === "rejected" || (was && JSON.stringify(was.rules.flags || []) === JSON.stringify(flags))) {
     // a re-send replaced extra_json: the reason it's hidden goes back on
     if (hiddenByCheck) await env.DB.prepare(HELD_BY_CHECK).bind(submissionId).run();
     return hiddenByCheck;
