@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, simRunChecks, simRunHeld } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -2532,6 +2532,116 @@ test("a run whose Party screen shows another party is hidden as it arrives; misr
   // too few readable names to tell: not hidden
   await sendRun(env, token, run("unreadable", { playedAt: at + 550, players: people("UserOne", "002", "ㄴㄱ", "L"), extra: lineup("UserOne", "Brightfox", "Juniper", "Quillan") }));
   assert.equal(status("unreadable").status, "visible");
+});
+
+test("Holo-Battle Sim run checks: what a full run can't be is flagged, and held when it's clear", () => {
+  const row = (difficulty, clearTimeS, setup, cleared = 1) => ({ cleared, clearTimeS, difficulty, extraJson: setup ? JSON.stringify({ setup }) : null });
+  const rules = (...args) => simRunChecks(row(...args)).map((flag) => flag.rule);
+  const TIME = "clear time possible for the difficulty";
+  const COINS = "coins of a full run";
+  const GIZMOS = "gizmos of a full run";
+  // the run that prompted the checks: Trial in 2:54 with 250 coins, one gizmo (its count unread) and no core
+  const spoofed = row("Trial", 174, { team: [{ name: "A", level: 65, mvp: true }], mvpShares: { damage: 98, taken: 29, healing: 0 }, coins: 250, gizmos: [{ series: "Surge", count: null }] });
+  assert.deepEqual(simRunChecks(spoofed), [{ rule: TIME, sent: 174, expected: 240, hold: true }, { rule: COINS, sent: 250, expected: 1000 }, { rule: GIZMOS, sent: 1, expected: 3 }]);
+  assert.equal(simRunHeld(simRunChecks(spoofed)), true);
+  // honest runs as stored on 15 Nov: the fastest of each difficulty, and the leanest setups
+  assert.deepEqual(rules("Easy", 120, { coins: 3350, gizmos: [{ series: "Energy", count: 10 }, { series: "Defense", count: 2 }] }), []);
+  assert.deepEqual(rules("Easy", 123, { coins: 3050, gizmos: [{ series: "Energy" }, { series: "Surge" }, { series: "Valor" }, { series: "Wealth" }] }), []);
+  assert.deepEqual(rules("Normal", 211, { coins: 3500 }), []);
+  assert.deepEqual(rules("Hard", 681, {}), []);
+  assert.deepEqual(rules("Challenge", 809, null), []);
+  assert.deepEqual(rules("Trial", 411, { team: [{ name: "A", level: 70 }] }), []);        // nothing else read: says nothing
+  assert.deepEqual(rules("Trial", 1030, { coins: 5750, gizmos: [{ series: "Energy", count: 6 }, { series: "Valor", count: 2 }] }), []);
+  // each floor: at it passes, a second under is flagged
+  for (const [difficulty, floor] of [["Easy", 60], ["Normal", 60], ["Hard", 240], ["Challenge", 240], ["Trial", 240]]) {
+    assert.deepEqual(rules(difficulty, floor, null), [], difficulty);
+    assert.deepEqual(rules(difficulty, floor - 1, null), [TIME], difficulty);
+  }
+  assert.deepEqual(rules(null, 59, null), [TIME]);                                        // no difficulty sent: the lowest floor
+  assert.deepEqual(rules(null, 60, null), []);
+  assert.deepEqual(rules("Trial", 600, { coins: 999 }), [COINS]);
+  assert.deepEqual(rules("Trial", 600, { coins: 1000 }), []);
+  assert.deepEqual(rules("Trial", 600, { coins: null, gizmos: [] }), []);                 // unread
+  assert.deepEqual(rules("Trial", 600, { coins: "250" }), []);                            // not a number the app read
+  assert.deepEqual(rules("Trial", 600, { gizmos: [{ series: "Surge", count: 2 }] }), [GIZMOS]);
+  assert.deepEqual(rules("Trial", 600, { gizmos: [{ series: "Surge", count: 3 }] }), []);
+  assert.deepEqual(rules("Trial", 600, { gizmos: [{ series: "Surge" }, { series: "Energy" }, { series: "Valor" }] }), []);   // counts unread: one each
+  // a run that isn't a Victory, or has no time, isn't ranked: not checked
+  assert.deepEqual(rules("Trial", 100, { coins: 0 }, 0), []);
+  assert.deepEqual(rules("Trial", null, { coins: 0 }), []);
+  // one misread number is listed, not held; a time under the floor, or coins and gizmos together, are held
+  assert.equal(simRunHeld(simRunChecks(row("Trial", 600, { coins: 12 }))), false);
+  assert.equal(simRunHeld(simRunChecks(row("Trial", 600, { gizmos: [{ series: "Surge", count: 1 }] }))), false);
+  assert.equal(simRunHeld(simRunChecks(row("Trial", 600, { coins: 250, gizmos: [{ series: "Surge", count: 1 }] }))), true);
+  assert.equal(simRunHeld(simRunChecks(row("Trial", 239, { coins: 12000 }))), true);
+  assert.equal(simRunHeld([]), false);
+});
+
+test("a Holo-Battle Sim run that fails its checks is held off the boards as it arrives, until staff review it", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const other = await namedToken(env, SESSIONS.dev2);
+  const full = { coins: 9037, style: "Energy", core: "Energizing Bracer", gizmos: [{ series: "Energy", count: 10 }, { series: "Defense", count: 7 }] };
+  const sim = (id, time, setupOf = full, more = {}) => ({ kind: "sim_run", clientRunId: id, trial: "Lightning Training", difficulty: "Trial", clearTimeS: time,
+    cleared: true, partySize: 1, playedAt: 1794700000, extra: { setup: setupOf }, ...more });
+  const stored = (id) => ({ ...sqlite.prepare(`SELECT status, verify_state AS state, json_extract(extra_json, '$.autoHidden') AS why,
+    json_extract(verify_json, '$.held') AS held FROM leaderboard_submissions WHERE client_run_id = ?`).get(id) });
+  const board = async () => (await (await call(env, "/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&cycle=2&trial=Lightning&difficulty=Trial&best=0")).json())
+    .entries.map((entry) => entry.clearTimeS);
+  const review = (submissionId, decision, session = SESSIONS.dev) => call(env, `/api/admin/run-checks/${submissionId}`, { session, method: "POST", body: { decision } });
+  // honest runs: stored, on the board, not listed
+  const honest = await sendRun(env, other, sim("honest", 626));
+  assert.equal(honest.status, 201);
+  assert.equal((await honest.json()).hidden, undefined);
+  assert.deepEqual(stored("honest"), { status: "visible", state: null, why: null, held: null });
+  // the spoofed run's shape: stored (201) but held, and never on the board
+  const sent = await sendRun(env, token, sim("spoofed", 174, { coins: 250, gizmos: [{ series: "Surge", count: null }] }));
+  assert.equal(sent.status, 201);
+  const spoofed = await sent.json();
+  assert.equal(spoofed.hidden, "check");
+  assert.deepEqual(stored("spoofed"), { status: "hidden", state: "mismatch", why: "check", held: 1 });
+  assert.deepEqual(await board(), [626]);
+  // sent again (the same id, as the app re-sends): still held, the reason still on it
+  assert.equal((await (await sendRun(env, token, sim("spoofed", 174, { coins: 250, gizmos: [{ series: "Surge", count: null }] }))).json()).hidden, "check");
+  assert.deepEqual(stored("spoofed"), { status: "hidden", state: "mismatch", why: "check", held: 1 });
+  // a plausible setup doesn't get a time under the floor through, and neither does a re-send over an accepted run's id
+  assert.equal((await (await sendRun(env, token, sim("fast", 239))).json()).hidden, "check");
+  assert.equal((await (await sendRun(env, token, sim("swap", 700))).json()).hidden, undefined);
+  assert.equal((await (await sendRun(env, token, sim("swap", 100))).json()).hidden, "check");
+  assert.deepEqual(await board(), [626]);
+  // one odd number alone: listed for review, still on the board
+  assert.equal((await (await sendRun(env, token, sim("misread", 800, { ...full, coins: 90 }))).json()).hidden, undefined);
+  assert.deepEqual(stored("misread"), { status: "visible", state: "mismatch", why: null, held: 0 });
+  assert.deepEqual(await board(), [626, 800]);
+  // ... and when the app sends it again read right, the flag goes
+  await sendRun(env, token, sim("misread", 800));
+  assert.deepEqual(stored("misread"), { status: "visible", state: null, why: null, held: null });
+  // the review list (administrators and the owner) has the held runs with their flags
+  const listed = (await (await call(env, "/api/admin/run-checks?state=mismatch", { session: SESSIONS.dev })).json()).runs;
+  assert.deepEqual(listed.map((item) => [item.kind, item.trial, item.difficulty, item.clearTimeS, item.status, item.check.held]).sort((a, b) => a[3] - b[3]),
+    [["sim_run", "Lightning", "Trial", 100, "hidden", true], ["sim_run", "Lightning", "Trial", 174, "hidden", true], ["sim_run", "Lightning", "Trial", 239, "hidden", true]]);
+  assert.deepEqual(listed.find((item) => item.clearTimeS === 174).check.rules.flags.map((flag) => [flag.rule, flag.sent]),
+    [["clear time possible for the difficulty", 174], ["coins of a full run", 250], ["gizmos of a full run", 1]]);
+  assert.equal((await review(spoofed.submissionId, "confirmed", SESSIONS.user)).status, 403);
+  // rejected: stays off the boards, also when sent again
+  assert.equal((await review(spoofed.submissionId, "rejected")).status, 200);
+  assert.deepEqual(stored("spoofed"), { status: "hidden", state: "rejected", why: "check", held: 1 });
+  await sendRun(env, token, sim("spoofed", 174, full));
+  assert.equal(stored("spoofed").status, "hidden");
+  assert.equal(stored("spoofed").state, "rejected");
+  // confirmed (a real fast run): on the boards, and a re-send of the same run doesn't hold it again
+  const fast = listed.find((item) => item.clearTimeS === 239);
+  assert.equal((await review(fast.submissionId, "confirmed")).status, 200);
+  assert.deepEqual(stored("fast"), { status: "visible", state: "confirmed", why: null, held: 1 });
+  assert.equal((await (await sendRun(env, token, sim("fast", 239))).json()).hidden, undefined);
+  assert.deepEqual(stored("fast"), { status: "visible", state: "confirmed", why: null, held: 1 });
+  assert.deepEqual(await board(), [239, 626, 800]);
+  // ... but new numbers under the same id are judged again
+  assert.equal((await (await sendRun(env, token, sim("fast", 90))).json()).hidden, "check");
+  assert.deepEqual(await board(), [626, 800]);
+  // other modes aren't touched: an Interlink run's review stays shadow mode
+  assert.equal((await sendRun(env, token, run("il", { score: 20000 }))).status, 201);
+  assert.equal(stored("il").status, "visible");
 });
 
 test("the proof viewer's line over the pictures: which fight the run is, for every mode", async () => {

@@ -3343,6 +3343,11 @@ async function submitLeaderboardRecord(request, env) {
   // a new run whose Party screen shows another party: hidden (a re-send keeps what staff decided)
   const otherPartyHidden = existing ? false : await hideOtherParty(env, submissionId, account.discordId, record)
     .catch((error) => { console.error("Party check failed", error); return false; });
+  // a Holo-Battle Sim run that fails its checks: held for review (re-sends are checked too, so a held run can't be
+  // swapped in under an accepted one's id)
+  const checkHeld = record.kind === "sim_run"
+    ? await checkSimRun(env, submissionId).catch((error) => { console.error("Sim run checks failed", error); return false; })
+    : false;
   await corroborateRun(env, submissionId);
   try {
     await storeRunOutcome(env, submissionId);
@@ -3367,7 +3372,7 @@ async function submitLeaderboardRecord(request, env) {
     updated: Boolean(existing),
     evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
     battleEvidenceStored: Boolean(parsed.battle && env.EVIDENCE),
-    ...(otherPartyHidden ? { hidden: "party" } : {}),
+    ...(otherPartyHidden ? { hidden: "party" } : checkHeld ? { hidden: "check" } : {}),
   }, existing ? 200 : 201);
 }
 
@@ -3505,6 +3510,81 @@ function freeRunChecks(row, cycle) {
   return flags;
 }
 
+// Holo-Battle Sim runs get their own free checks as they arrive: the numbers aLogs read off the Victory screen (the
+// time, and Data Collection's coins and gizmo row, extra.setup) must be a full run's. The app's word is all the server
+// has, so nothing here is refused outright: a run that fails is stored, listed for review (verify_state "mismatch",
+// rules.sim), and - when held - hidden until staff confirm it (POST /api/admin/run-checks/<id>), so a false alarm
+// costs an honest player a delay, never the run. Only a Victory with its time is checked, and only what the app read
+// (a part it couldn't read says nothing).
+// - "clear time": under the floor for its difficulty. Held. (15 Nov, 34 distinct stored runs: the fastest Easy was
+//   2:00, Normal 3:31, Hard 11:21, Challenge 13:29, Trial 6:51; the floors are half the fastest Easy, and under 60% of
+//   the fastest Trial for Hard and up.)
+// - "coins": fewer than 1,000 (the lowest of 21 stored runs with coins read was 3,050, on Easy; Trial 5,750).
+// - "gizmos": a gizmo row read with at most 2 gizmos in all (the lowest of 22 stored was 4).
+//   Either alone is listed for review and stays on the boards (one misread number); both together are a run that
+//   collected next to nothing: held.
+// The run that prompted these (15 Nov): Lightning Training - Trial in 2:54 with 250 coins, one gizmo and no core.
+const SIM_CHECKS = Object.freeze({
+  minTimeS: Object.freeze({ Easy: 60, Normal: 60, Hard: 240, Challenge: 240, Trial: 240 }),
+  minCoins: 1000,
+  minGizmos: 3,
+});
+export function simRunChecks(row) {
+  const flags = [];
+  const time = Number(row.clearTimeS);
+  if (row.cleared !== 1 || row.clearTimeS == null || !Number.isFinite(time)) return flags;
+  const floor = SIM_CHECKS.minTimeS[row.difficulty] ?? Math.min(...Object.values(SIM_CHECKS.minTimeS));
+  if (time < floor) flags.push({ rule: "clear time possible for the difficulty", sent: time, expected: floor, hold: true });
+  const setup = (parseJsonColumn(row.extraJson) || {}).setup;
+  if (setup && typeof setup === "object" && !Array.isArray(setup)) {
+    if (Number.isInteger(setup.coins) && setup.coins >= 0 && setup.coins < SIM_CHECKS.minCoins) {
+      flags.push({ rule: "coins of a full run", sent: setup.coins, expected: SIM_CHECKS.minCoins });
+    }
+    const rows = Array.isArray(setup.gizmos) ? setup.gizmos.filter((item) => item && typeof item === "object" && item.series) : [];
+    // a series whose count wasn't read has at least one gizmo
+    const gizmos = rows.reduce((total, item) => total + (Number.isInteger(item.count) && item.count > 0 ? item.count : 1), 0);
+    if (rows.length && gizmos < SIM_CHECKS.minGizmos) flags.push({ rule: "gizmos of a full run", sent: gizmos, expected: SIM_CHECKS.minGizmos });
+  }
+  return flags;
+}
+export function simRunHeld(flags) {
+  return flags.some((flag) => flag.hold) || flags.filter((flag) => !flag.hold).length >= 2;
+}
+
+// Runs the Sim checks on a stored run (new or re-sent) and returns whether they hold it off the boards. A re-send
+// with the same flags as before changes nothing (whatever staff decided since stands), and a rejected run stays
+// rejected. One whose flags changed is judged again: held, listed, or cleared (and shown again if only a check hid it).
+const HELD_BY_CHECK = "UPDATE leaderboard_submissions SET status = 'hidden', extra_json = json_set(COALESCE(extra_json, '{}'), '$.autoHidden', 'check') WHERE submission_id = ?";
+const FREED_BY_CHECK = "UPDATE leaderboard_submissions SET status = 'visible', extra_json = json_remove(COALESCE(extra_json, '{}'), '$.autoHidden') WHERE submission_id = ?";
+async function checkSimRun(env, submissionId) {
+  const row = await env.DB.prepare(
+    `SELECT kind, status, cleared, clear_time_s AS clearTimeS, difficulty, extra_json AS extraJson, verify_state AS verifyState,
+       verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?`,
+  ).bind(submissionId).first();
+  if (!row || row.kind !== "sim_run") return false;
+  const flags = simRunChecks(row);
+  const before = parseJsonColumn(row.verifyJson) || {};
+  const was = before.rules?.sim ? before : null;
+  const hiddenByCheck = Boolean(was?.held) && row.status === "hidden";
+  if (row.verifyState === "rejected" || (was && JSON.stringify(was.rules.flags || []) === JSON.stringify(flags))) {
+    // a re-send replaced extra_json: the reason it's hidden goes back on
+    if (hiddenByCheck) await env.DB.prepare(HELD_BY_CHECK).bind(submissionId).run();
+    return hiddenByCheck;
+  }
+  if (!flags.length) {
+    if (!was) return false;
+    await env.DB.prepare("UPDATE leaderboard_submissions SET verify_state = NULL, verify_json = NULL, verify_at = ? WHERE submission_id = ?")
+      .bind(Math.floor(Date.now() / 1000), submissionId).run();
+    if (hiddenByCheck) await env.DB.prepare(FREED_BY_CHECK).bind(submissionId).run();
+    return false;
+  }
+  const held = simRunHeld(flags);
+  await saveRunCheck(env, submissionId, "mismatch", { rules: { sim: true, flags }, held });
+  if (held) await env.DB.prepare(HELD_BY_CHECK).bind(submissionId).run();
+  else if (hiddenByCheck) await env.DB.prepare(FREED_BY_CHECK).bind(submissionId).run();
+  return held;
+}
+
 // The AI reading is for runs that matter: a new personal best for that player, boss and week (a Season Ladder total
 // only changes through those), a run in the top VERIFY_TOP_RANK (default 25) of its boss board, or a run the free
 // checks flagged.
@@ -3637,7 +3717,8 @@ function runCheckBadge(state) {
 // The review list (administrators and the owner, like log reports): runs whose second reading disagreed (?state=,
 // default mismatch), newest first, with what was sent, what was read and the differences. POST
 // /api/admin/run-checks/<id> {decision: "confirmed" | "rejected"} records the review (shadow mode: the run's place on
-// the boards doesn't change).
+// the boards doesn't change). A Holo-Battle Sim run's checks (check.rules.sim) aren't shadow mode: confirmed puts a
+// held run on the boards, rejected takes the run off them.
 const VERIFY_STATES = Object.freeze(["pending", "match", "mismatch", "unreadable", "confirmed", "rejected"]);
 async function listRunChecks(request, env) {
   const account = await leaderboardAccount(request, env);
@@ -3646,7 +3727,7 @@ async function listRunChecks(request, env) {
   if (!VERIFY_STATES.includes(state)) return json({ error: "Unknown state." }, 400);
   const { results } = await env.DB.prepare(
     `SELECT submission_id AS submissionId, kind, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS,
-       players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, verify_at AS checkedAt, created_at AS sentAt,
+       trial, difficulty, status, players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, verify_at AS checkedAt, created_at AS sentAt,
        COALESCE((SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.game_uid = s.game_uid),
          (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
           ORDER BY gc.last_seen_at DESC LIMIT 1)) AS player
@@ -3677,8 +3758,10 @@ async function reviewRunCheck(request, env, submissionId) {
     .bind(submissionId).first();
   if (!row) return json({ error: "No second reading for this run." }, 404);
   const check = { ...(parseJsonColumn(row.verifyJson) || {}), review: { by: account.discordId, decision: body.decision, at: Math.floor(Date.now() / 1000) } };
+  if (check.rules?.sim && body.decision === "rejected") check.held = true;
   await env.DB.prepare("UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ? WHERE submission_id = ?")
     .bind(body.decision, JSON.stringify(check), submissionId).run();
+  if (check.rules?.sim) await env.DB.prepare(body.decision === "confirmed" ? FREED_BY_CHECK : HELD_BY_CHECK).bind(submissionId).run();
   return json({ ok: true, submissionId, state: body.decision });
 }
 
