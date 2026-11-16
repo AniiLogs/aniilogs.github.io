@@ -23,8 +23,8 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   // which fight the run is, over the pictures, from the API's fight; every page loads this version of the viewer
   assert.match(viewer, /const fight = fightLine\(details\.fight \|\| run\?\.fight\);/u);
   for (const page of [home, boards]) {
-    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.2-fight">/u);
-    assert.match(page, /<script src="\/proof-viewer\.js\?v=0\.2\.2-fight" defer><\/script>/u);
+    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.3-leads">/u);
+    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.3-leads" defer><\/script>/u);
   }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);

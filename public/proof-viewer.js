@@ -79,7 +79,9 @@
   function partyPanel(details) {
     const facts = (m) => [Number.isInteger(m.aniimoLevel) ? `Lv ${m.aniimoLevel}` : "", Number.isInteger(m.cp) ? `CP ${number(m.cp)}` : ""]
       .filter(Boolean).join(" · ");
-    const aniimo = (m) => [m.aniimo, facts(m)].filter(Boolean).join(" ");
+    // a renamed Aniimo: its species (read from the Party picture's portrait), then the player's own name for it
+    const nick = (m) => (m.nickname ? `“${m.nickname}”` : "");
+    const aniimo = (m) => [m.aniimo, nick(m), facts(m)].filter(Boolean).join(" ");
     const players = (details.lineup || []).filter((p) => p.name || p.aniimo);
     const buffs = details.buffs || [];
     const teamDps = Number.isFinite(details.teamDps) && details.teamDps > 0 ? details.teamDps : null;
@@ -102,6 +104,7 @@
           return el("div", { class: "lb-party-row", role: "row" },
             cell("Player", el("span", { class: "lb-party-name", text: p.name || "—" }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null),
             cell("Main Aniimo", p.aniimo ? el("span", { class: "lb-party-lead" }, el("span", { class: "lb-party-lead-name", text: p.aniimo }),
+              p.nickname ? el("span", { class: "lb-party-lead-nick", text: nick(p), title: "The player's own name for this Aniimo" }) : null,
               level ? el("span", { class: "lb-party-lead-facts", text: level }) : null) : el("span", { class: "lb-party-none", text: "—" })),
             cell("With", el("span", { class: "lb-party-team", text: team.length ? team.join(", ") : "—" })),
             dps ? cell("Avg DPS", Number.isFinite(p.avgDps) && p.avgDps > 0 ? el("span", { class: "lb-party-dps", text: number(p.avgDps) })
@@ -220,8 +223,23 @@
       ...(run ? run.shots.map((shot) => ({ id: details.runProof, shot, label: shotLabel(shot, run.shots) })) : []),
     ];
     dialog.querySelector(".lb-proof-party")?.remove();
-    const party = partyPanel(details.lineup?.length || details.buffs?.length || !run ? details : run);
+    const shown = details.lineup?.length || details.buffs?.length || !run ? details : run;
+    const party = partyPanel(shown);
     if (party) dialog.append(party);
+    // Each lead as the Party picture shows it (party-portraits.js): a renamed Aniimo's card prints the nickname, so
+    // the name the app read says nothing about the species. The table is drawn again once the picture is read.
+    const shownId = shown === details ? submissionId : details.runProof;
+    const portraits = window.AniilogsPartyPortraits;
+    if (party && portraits?.lineupFromPicture && shown.lineup?.length && shown.shots?.includes("party")) {
+      const mode = (shown.fight || details.fight)?.mode === "eggheist" ? "eggheist" : "interlink";
+      portraits.lineupFromPicture(shownId, shown.lineup, async () => (await fetch(await proofImage(shownId, "party"))).blob(), mode)
+        .then((lineup) => {
+          if (proofOpenFor !== submissionId || lineup === shown.lineup) return;
+          const fresh = partyPanel({ ...shown, lineup });
+          const old = dialog.querySelector(".lb-proof-party");
+          if (fresh && old) old.replaceWith(fresh);
+        });
+    }
     deleteAction(dialog, submissionId, details);
     // a tab for each picture
     const show = async (index) => {
