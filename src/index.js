@@ -20,6 +20,9 @@ const PUBLIC_RELEASE_DATA = new Set([
   "checklist_data.json",
   "itemlog_data.json",
   "map_site_data.json",
+  // the Party screen's head portraits, tile by tile (assets/party-heads/heads.webp): the run viewer reads each
+  // player's lead Aniimo from the run's Party picture with them (public/party-portraits.js)
+  "party_heads.json",
   "petmanual-artwork-manifest.remote.json",
   "rarity-manifest.remote.json",
   "team_builder_data.json",
