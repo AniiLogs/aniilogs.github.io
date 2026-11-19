@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="What Aniimo’s game build 3973445 changed, from the game’s own files, and how AniiLogs followed: two events removed, racing and Homeland season changes, quests, items and the Item-log.">
+    <meta name="theme-color" content="#f5eecb">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <title>Game update: small fixes (build 3973445) · AniiLogs</title>
+    <link rel="canonical" href="https://aniilogs.github.io/updates/3973445/">
+    <meta property="og:site_name" content="AniiLogs">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Game update: small fixes (build 3973445) · AniiLogs">
+    <meta property="og:description" content="What Aniimo’s game build 3973445 changed, from the game’s own files, and how AniiLogs followed: two events removed, racing and Homeland season changes, quests, items and the Item-log.">
+    <meta property="og:url" content="https://aniilogs.github.io/updates/3973445/">
+    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="stylesheet" href="/styles.css?v=0.13.6-dots-behind">
+    <link rel="stylesheet" href="/updates/updates.css?v=0.2.1">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
+    <script src="/explorer/app-config.js?v=20261118-build3973445-r95" defer></script>
+    <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
+    <script src="/site-chrome.js?v=0.1.0" defer></script>
+    <script src="/aniimo-link.js?v=0.1.1" defer></script>
+    <script src="/updates/updates.js?v=0.1.0" defer></script>
+  </head>
+  <body class="site-chrome-page">
+    <div class="sky-speckles" aria-hidden="true"></div>
+    <header class="app-topbar" data-chrome-page="home" data-chrome-account>
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <img class="app-topbar-brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/explorer/" data-chrome-link="map">Map</a>
+        <a href="/explorer/?view=aniilog" data-chrome-link="aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog" data-chrome-link="itemlog">Item-log</a>
+        <a href="/explorer/?view=checklist" data-chrome-link="checklist">Checklists</a>
+        <a href="/explorer/?view=team" data-chrome-link="team">Team Builder</a>
+        <a href="/guides/" data-chrome-link="guides">Guides</a>
+        <a href="/leaderboard/" data-chrome-link="leaderboards">Leaderboards</a>
+        <a href="/companion/" data-chrome-link="companion">Companion App</a>
+        <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
+      </nav>
+      <div class="app-topbar-actions">
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+        <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
+          <option value="en">🇺🇸</option>
+          <option value="de-DE">🇩🇪</option>
+          <option value="es-ES">🇪🇸</option>
+          <option value="fr-FR">🇫🇷</option>
+          <option value="id-ID">🇮🇩</option>
+          <option value="ja">🇯🇵</option>
+          <option value="ko">🇰🇷</option>
+          <option value="pt-PT">🇵🇹</option>
+          <option value="ru-RU">🇷🇺</option>
+          <option value="th-TH">🇹🇭</option>
+          <option value="vi-VN">🇻🇳</option>
+          <option value="zh-CN">🇨🇳</option>
+          <option value="zh-TW">🇹🇼</option>
+        </select>
+        <a class="settings-gear-button" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">
+          <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+          <span class="settings-gear-label">Settings</span>
+        </a>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span data-account hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <a href="/?view=profile" data-profile-link hidden>My Profile</a>
+            <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
+            <a href="/explorer/?settings=1">Settings</a>
+            <button type="button" data-logout hidden>Log out</button>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="upd-main">
+      <a class="upd-back" href="/#patch-notes-title">← All updates</a>
+      <header class="upd-head">
+        <h1>Game update: small fixes</h1>
+        <p class="upd-meta"><span>Game build 3973445</span><time datetime="2026-11-18">November 18, 2026</time></p>
+      </header>
+      <nav class="upd-toc" aria-label="On this page"><a href="#events">Events</a><a href="#racing">World Racing</a><a href="#home">Homeland season</a><a href="#items">Items</a><a href="#quests">Quests</a><a href="#duels">Pathfinder Challenge</a><a href="#looks">Looks and shop</a><a href="#damage">Damage formulas</a><a href="#controls">Controls</a><a href="#text">Text</a><a href="#same">Unchanged</a><a href="#site">On the site</a></nav>
+      <div class="upd-card upd-summary"><h3>At a glance</h3><ul>
+<li>A small update: about 35 of the game’s data tables changed, no Aniimo, skill or buff values among them, and no new items.</li>
+<li><strong>Events:</strong> Jaguaraun’s Fantasia Survey and the An Aniimo Is Born Co-Dev Contest, both listed to start on November 19, are no longer in the game’s files.</li>
+<li><strong>World Racing:</strong> the Smoke Bomb’s smoke is shorter, and a few texts were corrected.</li>
+<li><strong>Homeland season:</strong> construction orders refresh every 4 hours instead of every 6.</li>
+<li><strong>Items:</strong> Advanced Gemstone Dust is now Premium Gemstone Dust.</li>
+<li><strong>Quests:</strong> the two quest chains from the last update now give their Archival Chips.</li>
+<li><strong>Still the same:</strong> the main damage formulas, the element chart, Interlink, the Sanctum, Egg Heist’s tables and the map. Frenzied Assault still gives 0%.</li>
+</ul></div>
+      <section class="upd-part" id="game" aria-labelledby="game-title">
+        <h2 id="game-title">In the game</h2>
+        <p class="upd-small">From the game’s own files (compared with build 3934365). Where the game’s text and its data disagree, we go by the data.</p>
+        <div class="upd-card" id="events"><h3>Events</h3>
+<h4>Removed from the files</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Event</th><th scope="col">Was listed for (UTC)</th><th scope="col">What is gone</th></tr></thead><tbody><tr><td data-label="Event"><strong>Resonance Fantasia: Jaguaraun’s Fantasia Survey</strong></td><td data-label="Was listed for (UTC)">November 19 20:00 – December 9</td><td data-label="What is gone">The event itself, its rules text, the points on Breezy Plains that switched on for it and their two map markers, an NPC menu, and the event’s 7 quests from the event list (the quest rows themselves are still in the files)</td></tr><tr><td data-label="Event"><strong>An Aniimo Is Born – Co-Dev Contest</strong></td><td data-label="Was listed for (UTC)">November 19 20:00 – February 14</td><td data-label="What is gone">The event, its tab in the event list and its info page</td></tr></tbody></table></div>
+<ul>
+<li><strong>Thundercharge Cluster</strong> (use it at a Bloom to draw Jaguaraun in) is no longer sold in the Item Exchange for 1 Roar Stone. The item and its formula are still in the files.</li>
+<li><strong>Prismana Snapshots</strong> is unchanged apart from its wording (see <a href="#text">Text</a>): Jeburst until November 22, then Glameep until November 29.</li>
+<li>The task “Catch 100 Aniimo” (Aniimo Master) is now linked to the current Companion Handbook instead of the first one, which ended on October 28.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> whether the two events still start in game. The files say no; they can return in a later patch.</p></div>
+        <div class="upd-card" id="racing"><h3>World Racing</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Track item</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody><tr><td data-label="Track item"><strong>Smoke Bomb</strong></td><td data-label="Before">Smoke on the other racers for <span class="upd-old">3 s</span></td><td data-label="Now"><span class="upd-new">2 s</span>, drawn with a new screen smoke effect</td></tr><tr><td data-label="Track item"><strong>Mass Slow</strong></td><td data-label="Before">One on-screen notice for the racers it hits</td><td data-label="Now">A second notice is shown as well; the slow itself is unchanged</td></tr><tr><td data-label="Track item"><strong>Mini Cake</strong></td><td data-label="Before">Its guide page said a hit loses every stack</td><td data-label="Now">It says a hit loses up to 2 stacks, which is what the item already did</td></tr></tbody></table></div>
+<ul>
+<li>The rules call the racing party “4 Aniimo in the Battle Team and 3 Racer Aniimo” (it said Battle Party and Active Aniimo).</li>
+<li>Speed Showdown’s hours (18:00 to 00:00) are now converted to your server’s time in the rules.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> what Mass Slow’s second notice looks like in a race.</p></div>
+        <div class="upd-card" id="home"><h3>Homeland season</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Construction orders</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody><tr><td data-label="Construction orders"><strong>Refresh by themselves</strong></td><td data-label="Before">At the daily reset, then <span class="upd-old">6, 12 and 18 hours</span> after it</td><td data-label="Now">At the daily reset, then <span class="upd-new">4, 8, 12, 16 and 20 hours</span> after it</td></tr><tr><td data-label="Construction orders"><strong>3 orders for Premium Gemstone Dust</strong> (5, 15 and 50 of it)</td><td data-label="Before">Asked for a raw material of that name that no formula makes</td><td data-label="Now">Ask for the Crafting Table’s Premium Gemstone Dust</td></tr><tr><td data-label="Construction orders"><strong>18 orders</strong></td><td data-label="Before">No order type set</td><td data-label="Now">Order type 3, like the 6 that already had it</td></tr></tbody></table></div>
+<ul>
+<li>A new message, “You’ve reached the limit for accepting orders.”, replaces the plain “refresh unavailable” tip.</li>
+<li>The text that unlocks the Premium Gemstone Dust formula now links the dust and the Crafting Table the right way round.</li>
+</ul></div>
+        <div class="upd-card" id="items"><h3>Items</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Item</th><th scope="col">Change</th></tr></thead><tbody><tr><td data-label="Item"><strong>Premium Gemstone Dust</strong> (Legendary, made at the Crafting Table)</td><td data-label="Change">Renamed from <span class="upd-old">Advanced Gemstone Dust</span>. A second, unobtainable raw material already had this name.</td></tr><tr><td data-label="Item"><strong>Archival Chip - The Smallest Coral Sea</strong></td><td data-label="Change">Now given by the Coral Sea of Dreams quests</td></tr><tr><td data-label="Item"><strong>Archival Chip - Food Revolution</strong></td><td data-label="Change">Now given by the Squarrel’s Poem of Revolution quests</td></tr><tr><td data-label="Item"><strong>Thundercharge Cluster</strong></td><td data-label="Change">No longer sold in the Item Exchange</td></tr><tr><td data-label="Item"><strong>Creative Voyage</strong> (5 profile frame items, one per region)</td><td data-label="Change">New icons</td></tr><tr><td data-label="Item"><strong>Butterfly Dreamscape</strong> (2), <strong>Hazy Twilight</strong>, <strong>Twilight Haze</strong></td><td data-label="Change">Their text says “makeup” instead of “cosmetic item”</td></tr><tr><td data-label="Item"><strong>Voxel Coin</strong></td><td data-label="Change">The two labels in its limit list (Obtained, Star-Crossed Tea Party) point at new text that has no English yet</td></tr></tbody></table></div>
+<ul>
+<li>No items were added or removed, and no rarity changed.</li>
+<li>Several shops’ item lists were re-sorted; prices and stock are the same.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> whether Voxel Coin’s limit labels show blank in English.</p></div>
+        <div class="upd-card" id="quests"><h3>Quests</h3><ul>
+<li><strong>Coral Sea of Dreams</strong> (Crescent Bay) now gives <strong>Archival Chip - The Smallest Coral Sea</strong> near its end.</li>
+<li><strong>Squarrel’s Poem of Revolution</strong> (Mirrorsea Village) now gives <strong>Archival Chip - Food Revolution</strong>, and one of its steps now switches off an Aniimo spawn point when it starts.</li>
+<li>The names <strong>Chompy</strong> and <strong>Dora</strong> were added as text for that chain.</li>
+<li>4 steps in older quest chains changed type, and one line of quest text now says “the Institute’s Idyll exploration handbook”.</li>
+<li>Readable items (letters, notes, archives) now fill in the same placeholders as dialogue does, such as your character’s name.</li>
+</ul></div>
+        <div class="upd-card" id="duels"><h3>Pathfinder Challenge</h3><ul>
+<li>Two scripted events that sat on <strong>Little Blanket</strong>’s duel now belong to <strong>Healing Angel</strong>’s.</li>
+<li>The second stage of the <strong>Rookie Island Patroller</strong> and <strong>Walking Map</strong> duels has a different title setting.</li>
+<li>Opponents, levels and rewards are unchanged.</li>
+</ul></div>
+        <div class="upd-card" id="looks"><h3>Looks and shop</h3><ul>
+<li><strong>Huffy</strong> (the accessory from First Visit to Whisperwake Isles) now has its accessory data for both your character and your Aniimo.</li>
+<li>Moving an accessory from one Aniimo or slot to another now checks first whether it can be replaced.</li>
+<li>17 hairstyle entries are marked as owned from the start.</li>
+<li>The 5 <strong>Creative Voyage</strong> profile frames have new art.</li>
+<li>The title <strong>Paw-some Pals</strong> got a display setting, the same one the Creative Voyage frames use.</li>
+<li>Shop art for the <strong>Shadow Rose</strong> outfit (November 20) was added, and the <strong>Nightborn Allure</strong> set is flagged to show among rewards.</li>
+<li>One shop poster no longer says the shop is open only from 18:00 to 02:00.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> which hairstyles are free from the start, and where Paw-some Pals now shows.</p></div>
+        <div class="upd-card" id="damage"><h3>Damage formulas</h3><ul>
+<li>The formulas the Damage Guide rests on (3001, 3023, 3512, 3513 and the stat formulas) are the same.</li>
+<li><strong>Formula 3067</strong> changed. It is a second damage formula with its own “egg” factor: ATK is at least 90% of the role’s ATK, damage is at least 0.05, and PvP damage is ×0.3. The egg factor used to multiply only the scaled damage; it now multiplies the flat part too (Flat Damage minus the target’s Flat Damage Reduction).</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> what uses formula 3067. The game’s files don’t say; the code that calls it runs on the server.</p></div>
+        <div class="upd-card" id="controls"><h3>Controls and interface</h3><ul>
+<li>Map with a controller: while a quest’s details are open, the right stick pans the map instead of scrolling the panel.</li>
+<li>Button-prompt fading is only applied to panels and widgets that support it.</li>
+</ul></div>
+        <div class="upd-card" id="text"><h3>Text</h3><ul>
+<li><strong>Prismana Snapshots:</strong> “Capture” is now “Photograph” in its quests and rules, and the rules say “phase” where they said “event” (rewards are per phase).</li>
+<li><strong>Indestructible</strong> (a Sanctum buff): “1 points of Flat Damage Reduction” is now “1 point(s)”. Its numbers are the same: 1 for every 30 P.DEF and M.DEF.</li>
+<li>The other rewordings are listed with what they belong to above: racing rules, the Mini Cake, makeup items and Premium Gemstone Dust.</li>
+<li>3 new strings (Chompy, Dora and the order-limit message), 19 changed and 16 removed (the two removed events’ texts).</li>
+</ul></div>
+        <div class="upd-card" id="same"><h3>Unchanged</h3><ul>
+<li>Every Aniimo’s stats, elements and skills, and every skill and buff value.</li>
+<li>Damage formulas, crit, the element chart, the duel rules, BREAK and Star-Up: re-checked against this build.</li>
+<li>Interlink: the same weeks, bosses and grades. The Sanctum and Egg Heist: the same tables.</li>
+<li>The map: no spawn, chest or Lumin changes.</li>
+<li><strong>Frenzied Assault</strong> (Saws and Whirlbite) still gives 0% Water Boost instead of 25%.</li>
+</ul></div>
+      </section>
+      <section class="upd-part" id="site" aria-labelledby="site-title">
+        <h2 id="site-title">On the site</h2>
+        <div class="upd-card"><h3>Item-log <a class="upd-link" href="/explorer/?view=itemlog">Open →</a></h3><ul><li>Advanced Gemstone Dust is now Premium Gemstone Dust, on the item and in the recipes that use it.</li><li>Archival Chip - The Smallest Coral Sea and Archival Chip - Food Revolution added, each with its quest.</li><li>Thundercharge Cluster no longer lists the Item Exchange.</li><li>The 4 makeup items’ new text.</li><li>The “New in game build” filter now shows this update’s 2 items.</li></ul></div><div class="upd-card"><h3>Guides <a class="upd-link" href="/guides/?guide=damage">Open →</a></h3><ul><li>Damage Guide, duels, type matchups and the Interlink guide re-checked against this build: no changes needed.</li></ul></div><div class="upd-card"><h3>Aniilog, Team Builder, Map and Checklists</h3><ul><li>Nothing in this update changes them.</li></ul></div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
+    </footer>
+  </body>
+</html>
