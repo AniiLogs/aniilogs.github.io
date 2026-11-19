@@ -3,17 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="What Aniimo’s game build 3973445 changed, from the game’s own files, and how AniiLogs followed: two events removed, racing and Homeland season changes, quests, items and the Item-log.">
+    <meta name="description" content="Everything Aniimo changed from November 12 to 18 (game build 3973445): the official fix lists checked against the game’s files, what the files show beyond them, and how AniiLogs followed.">
     <meta name="theme-color" content="#f5eecb">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-    <title>Game update: small fixes (build 3973445) · AniiLogs</title>
+    <title>Game update: November 12–18 fixes (build 3973445) · AniiLogs</title>
     <link rel="canonical" href="https://aniilogs.github.io/updates/3973445/">
     <meta property="og:site_name" content="AniiLogs">
     <meta property="og:type" content="article">
-    <meta property="og:title" content="Game update: small fixes (build 3973445) · AniiLogs">
-    <meta property="og:description" content="What Aniimo’s game build 3973445 changed, from the game’s own files, and how AniiLogs followed: two events removed, racing and Homeland season changes, quests, items and the Item-log.">
+    <meta property="og:title" content="Game update: November 12–18 fixes (build 3973445) · AniiLogs">
+    <meta property="og:description" content="Everything Aniimo changed from November 12 to 18 (game build 3973445): the official fix lists checked against the game’s files, what the files show beyond them, and how AniiLogs followed.">
     <meta property="og:url" content="https://aniilogs.github.io/updates/3973445/">
     <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
     <meta property="og:image:width" content="1200">
@@ -99,90 +99,188 @@
     <main class="upd-main">
       <a class="upd-back" href="/#patch-notes-title">← All updates</a>
       <header class="upd-head">
-        <h1>Game update: small fixes</h1>
-        <p class="upd-meta"><span>Game build 3973445</span><time datetime="2026-11-18">November 18, 2026</time></p>
+        <h1>Game update: November 12–18 fixes</h1>
+        <p class="upd-meta"><span>Game build 3973445 (v1.1.3973445.0)</span><time datetime="2026-11-18">November 18, 2026</time></p>
       </header>
-      <nav class="upd-toc" aria-label="On this page"><a href="#events">Events</a><a href="#racing">World Racing</a><a href="#home">Homeland season</a><a href="#items">Items</a><a href="#quests">Quests</a><a href="#duels">Pathfinder Challenge</a><a href="#looks">Looks and shop</a><a href="#damage">Damage formulas</a><a href="#controls">Controls</a><a href="#text">Text</a><a href="#same">Unchanged</a><a href="#site">On the site</a></nav>
+      <nav class="upd-toc" aria-label="On this page"><a href="#official">Official notes</a><a href="#eggheist">Egg Heist</a><a href="#dash">Aniimo Dash</a><a href="#gathering">Nighttime Gathering</a><a href="#unlisted">Not in the notes</a><a href="#ledger">Every file change</a><a href="#open">Still open</a><a href="#same">Unchanged</a><a href="#site">On the site</a></nav>
       <div class="upd-card upd-summary"><h3>At a glance</h3><ul>
-<li>A small update: about 35 of the game’s data tables changed, no Aniimo, skill or buff values among them, and no new items.</li>
-<li><strong>Events:</strong> Jaguaraun’s Fantasia Survey and the An Aniimo Is Born Co-Dev Contest, both listed to start on November 19, are no longer in the game’s files.</li>
-<li><strong>World Racing:</strong> the Smoke Bomb’s smoke is shorter, and a few texts were corrected.</li>
-<li><strong>Homeland season:</strong> construction orders refresh every 4 hours instead of every 6.</li>
-<li><strong>Items:</strong> Advanced Gemstone Dust is now Premium Gemstone Dust.</li>
-<li><strong>Quests:</strong> the two quest chains from the last update now give their Archival Chips.</li>
-<li><strong>Still the same:</strong> the main damage formulas, the element chart, Interlink, the Sanctum, Egg Heist’s tables and the map. Frenzied Assault still gives 0%.</li>
+<li>This page covers everything since the November 12 update: the game’s official fix lists of November 12, 13, 17 and 18, checked against the game’s files (build 3934365 to 3973445), plus what the files show that the lists don’t.</li>
+<li><strong>Operation: Egg Heist:</strong> a new Egg Emperor rank reward, a Collectible Blind Box in the shop, a calmer Giga-Egg and a Lightning Needle fix in Fair Arena.</li>
+<li><strong>Aniimo Dash:</strong> Mass Slow notifies the racers it hits, the Smoke Bomb is fixed, and Group Race counts are right.</li>
+<li><strong>Nighttime Gathering:</strong> item delivery quests refresh every 4 hours instead of every 6, and the Premium Gemstone Dust quest can be turned in.</li>
+<li><strong>Not in the official notes:</strong> two unannounced events were removed from the files, two quest chains now give their Archival Chips, and Advanced Gemstone Dust is now Premium Gemstone Dust.</li>
+<li><strong>Still the same:</strong> every Aniimo, skill and buff value, the main damage formulas, the element chart, Interlink, the Sanctum and the map. Frenzied Assault still gives 0%.</li>
 </ul></div>
       <section class="upd-part" id="game" aria-labelledby="game-title">
         <h2 id="game-title">In the game</h2>
-        <p class="upd-small">From the game’s own files (compared with build 3934365). Where the game’s text and its data disagree, we go by the data.</p>
-        <div class="upd-card" id="events"><h3>Events</h3>
-<h4>Removed from the files</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Event</th><th scope="col">Was listed for (UTC)</th><th scope="col">What is gone</th></tr></thead><tbody><tr><td data-label="Event"><strong>Resonance Fantasia: Jaguaraun’s Fantasia Survey</strong></td><td data-label="Was listed for (UTC)">November 19 20:00 – December 9</td><td data-label="What is gone">The event itself, its rules text, the points on Breezy Plains that switched on for it and their two map markers, an NPC menu, and the event’s 7 quests from the event list (the quest rows themselves are still in the files)</td></tr><tr><td data-label="Event"><strong>An Aniimo Is Born – Co-Dev Contest</strong></td><td data-label="Was listed for (UTC)">November 19 20:00 – February 14</td><td data-label="What is gone">The event, its tab in the event list and its info page</td></tr></tbody></table></div>
-<ul>
-<li><strong>Thundercharge Cluster</strong> (use it at a Bloom to draw Jaguaraun in) is no longer sold in the Item Exchange for 1 Roar Stone. The item and its formula are still in the files.</li>
-<li><strong>Prismana Snapshots</strong> is unchanged apart from its wording (see <a href="#text">Text</a>): Jeburst until November 22, then Glameep until November 29.</li>
-<li>The task “Catch 100 Aniimo” (Aniimo Master) is now linked to the current Companion Handbook instead of the first one, which ended on October 28.</li>
-</ul><p class="upd-confirm"><strong>Needs verification:</strong> whether the two events still start in game. The files say no; they can return in a later patch.</p></div>
-        <div class="upd-card" id="racing"><h3>World Racing</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Track item</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody><tr><td data-label="Track item"><strong>Smoke Bomb</strong></td><td data-label="Before">Smoke on the other racers for <span class="upd-old">3 s</span></td><td data-label="Now"><span class="upd-new">2 s</span>, drawn with a new screen smoke effect</td></tr><tr><td data-label="Track item"><strong>Mass Slow</strong></td><td data-label="Before">One on-screen notice for the racers it hits</td><td data-label="Now">A second notice is shown as well; the slow itself is unchanged</td></tr><tr><td data-label="Track item"><strong>Mini Cake</strong></td><td data-label="Before">Its guide page said a hit loses every stack</td><td data-label="Now">It says a hit loses up to 2 stacks, which is what the item already did</td></tr></tbody></table></div>
+        <p class="upd-small">Sources: the game’s <a href="https://store.steampowered.com/news/app/4126040">patch notes on Steam</a> (v1.1.3973445.0) and the official <a href="https://aniimo.com/newslist/detail/100275">Known Issues &amp; Fixes</a> post, set against the game’s own files. Where the game’s text and its data disagree, we go by the data.</p>
+        <div class="upd-card" id="official"><h3>Official notes, by date</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Official note</th><th scope="col">Date</th><th scope="col">What the files show</th></tr></thead><tbody>
+<tr><td data-label="Official note"><strong>Lunara’s skill effects could be missing</strong>: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">Aniimo effect materials replaced</td></tr>
+<tr><td data-label="Official note"><strong>Prismana Hypnyto’s model</strong> displayed incorrectly: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">Its model replaced</td></tr>
+<tr><td data-label="Official note"><strong>Right stick with a controller</strong>: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">On the map, with a quest’s details open, the right stick pans the map instead of scrolling the panel</td></tr>
+<tr><td data-label="Official note"><strong>Chat tab</strong> displayed incorrectly: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">Chat panel layout replaced</td></tr>
+<tr><td data-label="Official note"><strong>Smoke Bomb</strong> displayed incorrectly in Aniimo Dash: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">New screen smoke effect; the smoke lasts <span class="upd-old">3 s</span> → <span class="upd-new">2 s</span></td></tr>
+<tr><td data-label="Official note"><strong>An Ultimate’s shown cooldown</strong> could be a little longer than the real one: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">No skill cooldown value changed, so only the display did</td></tr>
+<tr><td data-label="Official note"><strong>Removing members from a Private RV Park</strong>: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Lightning Needle</strong> could break other Pathfinders’ armor in Operation: Egg Heist’s Fair Arena when it shouldn’t: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show">Damage formula 3067 changed (see <a href="#eggheist">Egg Heist</a>)</td></tr>
+<tr><td data-label="Official note"><strong>Aniimo Discovery</strong>: an event Aniimo disappeared after you searched for it and switched to Whisperwake Isles: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Companion Handbook</strong>: the Nurture quest’s description and its progress count disagreed: fixed</td><td data-label="Date">Nov 18</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Egg Heist rank reward</strong>: reach Egg Emperor with 200 stars for a Departure with the Wind: Collectible Gift Box (pick one of the season’s collectibles)</td><td data-label="Date">Nov 17</td><td data-label="What the files show">Not in the data tables; the server sets it</td></tr>
+<tr><td data-label="Official note"><strong>Egg Heist shop</strong> sells the Departure with the Wind: Collectible Blind Box; Egg Emperor players can buy a limited number each week</td><td data-label="Date">Nov 17</td><td data-label="What the files show">The box was already an item; its shop listing isn’t in the data tables</td></tr>
+<tr><td data-label="Official note"><strong>Giga-Egg</strong>: its jumping is limited, and attacking it knocks it back a little. The mode is still in testing</td><td data-label="Date">Nov 17</td><td data-label="What the files show">Not in the data tables</td></tr>
+<tr><td data-label="Official note"><strong>Nighttime Gathering</strong>: the Premium Gemstone Dust quest couldn’t be turned in: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show">3 quests (for 5, 15 and 50 dust) asked for a raw material no formula makes; they now ask for the Crafting Table’s dust</td></tr>
+<tr><td data-label="Official note"><strong>Nighttime Gathering</strong>: how long item delivery quests take to refresh was adjusted</td><td data-label="Date">Nov 13</td><td data-label="What the files show">After the daily reset: <span class="upd-old">6, 12 and 18 hours</span> → <span class="upd-new">4, 8, 12, 16 and 20 hours</span></td></tr>
+<tr><td data-label="Official note"><strong>Nighttime Gathering</strong>: refreshing after accepting a delivery quest took Home Coins without refreshing; refreshing a delivery quest gave an error; no animation when a refresh brought the same quest: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show">A new message, “You’ve reached the limit for accepting orders.”</td></tr>
+<tr><td data-label="Official note"><strong>Nighttime Gathering</strong>: moving out of a Park cleared the Co-building Points earned by submitting items; a quest accepted before 4:00 a.m. refreshed at once: fixed</td><td data-label="Date">Nov 12, 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Season Orders</strong> disappeared: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show">18 orders that had no order type now have one</td></tr>
+<tr><td data-label="Official note"><strong>Voxel Coin cap</strong>: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show">Its limit list was rebuilt; the two labels in it point at text that has no English yet</td></tr>
+<tr><td data-label="Official note"><strong>Growth Tonic</strong> in your Home: the next interaction jumped to View Details: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>RV Park furniture</strong> went missing: fixed; the missing furniture will be reissued later</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Aniimo Dash</strong>: certain Magmarex had the wrong body type and movement when you Twined with them: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Aniimo Dash</strong>: you couldn’t move after turning into Thundercloud: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Operation: Egg Heist</strong>: Twining with an egg shook the minimap: fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Chat messages</strong> refreshing: display fixed</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Home</strong>: performance improved to reduce lag</td><td data-label="Date">Nov 13</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Aniimo Dash Group Race</strong>: the Highest Rank wasn’t shown, and the number of completed races was wrong: fixed</td><td data-label="Date">Nov 12</td><td data-label="What the files show">The three “Complete Group Racing” tasks (10, 20 and 30 races) counted only first places; they now count any of the 8 places</td></tr>
+<tr><td data-label="Official note"><strong>Aniimo Dash</strong>: no notification when another racer’s race-wide Slow hit you: fixed</td><td data-label="Date">Nov 12</td><td data-label="What the files show">Mass Slow shows a second notice to the racers it hits</td></tr>
+<tr><td data-label="Official note"><strong>Aniimo Dash</strong>: a multiplayer match couldn’t start if a racer disconnected: fixed</td><td data-label="Date">Nov 12</td><td data-label="What the files show"></td></tr>
+<tr><td data-label="Official note"><strong>Huffy</strong> couldn’t be claimed in Whisperwake Isles: fixed</td><td data-label="Date">Nov 12</td><td data-label="What the files show">Its accessory data was missing for both your character and your Aniimo; it is there now</td></tr>
+<tr><td data-label="Official note"><strong>Astra</strong>: other Pathfinders’ Aniimo might not show when it was crowded: fixed</td><td data-label="Date">Nov 12</td><td data-label="What the files show"></td></tr>
+</tbody></table></div>
+<p class="upd-small">An empty last column means the fix isn’t in the data we can read (it is in the game’s program or on the server).</p></div>
+        <div class="upd-card" id="eggheist"><h3>Operation: Egg Heist</h3><ul>
+<li><strong>The Lightning Needle fix, in the files:</strong> damage formula 3067 has its own mode factor. The factor used to multiply only the scaled damage; it now multiplies the flat part too (Flat Damage minus the target’s Flat Damage Reduction), which is what a held item like Lightning Needle adds.</li>
+<li>The rest of formula 3067 is the same: ATK is at least 90% of the role’s ATK, damage is at least 0.05, and PvP damage is ×0.3.</li>
+<li>The rank reward, the shop’s Blind Box and the Giga-Egg change are official; none of them is in the game’s data tables, so there are no numbers to add.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> the weekly limit on the Blind Box, and how much less the Giga-Egg jumps.</p></div>
+        <div class="upd-card" id="dash"><h3>Aniimo Dash</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Track item</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody><tr><td data-label="Track item"><strong>Smoke Bomb</strong></td><td data-label="Before">Smoke on the other racers for <span class="upd-old">3 s</span></td><td data-label="Now"><span class="upd-new">2 s</span>, drawn with a new screen smoke effect</td></tr><tr><td data-label="Track item"><strong>Mass Slow</strong></td><td data-label="Before">One on-screen notice</td><td data-label="Now">A second notice for the racers it hits; the slow itself is unchanged</td></tr><tr><td data-label="Track item"><strong>Mini Cake</strong></td><td data-label="Before">Its guide page said a hit loses every stack</td><td data-label="Now">It says a hit loses up to 2 stacks, which is what the item already did</td></tr></tbody></table></div>
 <ul>
 <li>The rules call the racing party “4 Aniimo in the Battle Team and 3 Racer Aniimo” (it said Battle Party and Active Aniimo).</li>
 <li>Speed Showdown’s hours (18:00 to 00:00) are now converted to your server’s time in the rules.</li>
-</ul><p class="upd-confirm"><strong>Needs verification:</strong> what Mass Slow’s second notice looks like in a race.</p></div>
-        <div class="upd-card" id="home"><h3>Homeland season</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Construction orders</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody><tr><td data-label="Construction orders"><strong>Refresh by themselves</strong></td><td data-label="Before">At the daily reset, then <span class="upd-old">6, 12 and 18 hours</span> after it</td><td data-label="Now">At the daily reset, then <span class="upd-new">4, 8, 12, 16 and 20 hours</span> after it</td></tr><tr><td data-label="Construction orders"><strong>3 orders for Premium Gemstone Dust</strong> (5, 15 and 50 of it)</td><td data-label="Before">Asked for a raw material of that name that no formula makes</td><td data-label="Now">Ask for the Crafting Table’s Premium Gemstone Dust</td></tr><tr><td data-label="Construction orders"><strong>18 orders</strong></td><td data-label="Before">No order type set</td><td data-label="Now">Order type 3, like the 6 that already had it</td></tr></tbody></table></div>
-<ul>
-<li>A new message, “You’ve reached the limit for accepting orders.”, replaces the plain “refresh unavailable” tip.</li>
-<li>The text that unlocks the Premium Gemstone Dust formula now links the dust and the Crafting Table the right way round.</li>
+<li>Track 2, Gullcove Cliffs, opens on November 19 at 10:00 server time; track 3, Redrock Trail, after the November 26 update.</li>
 </ul></div>
-        <div class="upd-card" id="items"><h3>Items</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Item</th><th scope="col">Change</th></tr></thead><tbody><tr><td data-label="Item"><strong>Premium Gemstone Dust</strong> (Legendary, made at the Crafting Table)</td><td data-label="Change">Renamed from <span class="upd-old">Advanced Gemstone Dust</span>. A second, unobtainable raw material already had this name.</td></tr><tr><td data-label="Item"><strong>Archival Chip - The Smallest Coral Sea</strong></td><td data-label="Change">Now given by the Coral Sea of Dreams quests</td></tr><tr><td data-label="Item"><strong>Archival Chip - Food Revolution</strong></td><td data-label="Change">Now given by the Squarrel’s Poem of Revolution quests</td></tr><tr><td data-label="Item"><strong>Thundercharge Cluster</strong></td><td data-label="Change">No longer sold in the Item Exchange</td></tr><tr><td data-label="Item"><strong>Creative Voyage</strong> (5 profile frame items, one per region)</td><td data-label="Change">New icons</td></tr><tr><td data-label="Item"><strong>Butterfly Dreamscape</strong> (2), <strong>Hazy Twilight</strong>, <strong>Twilight Haze</strong></td><td data-label="Change">Their text says “makeup” instead of “cosmetic item”</td></tr><tr><td data-label="Item"><strong>Voxel Coin</strong></td><td data-label="Change">The two labels in its limit list (Obtained, Star-Crossed Tea Party) point at new text that has no English yet</td></tr></tbody></table></div>
+        <div class="upd-card" id="gathering"><h3>Nighttime Gathering</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Item delivery quests</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody><tr><td data-label="Item delivery quests"><strong>Refresh by themselves</strong></td><td data-label="Before">At the daily reset, then <span class="upd-old">6, 12 and 18 hours</span> after it</td><td data-label="Now">At the daily reset, then <span class="upd-new">4, 8, 12, 16 and 20 hours</span> after it</td></tr><tr><td data-label="Item delivery quests"><strong>3 quests for Premium Gemstone Dust</strong> (5, 15 and 50 of it)</td><td data-label="Before">Asked for a raw material of that name that no formula makes</td><td data-label="Now">Ask for the Crafting Table’s Premium Gemstone Dust</td></tr><tr><td data-label="Item delivery quests"><strong>18 quests</strong></td><td data-label="Before">No order type set</td><td data-label="Now">Order type 3, like the 6 that already had it</td></tr></tbody></table></div>
 <ul>
-<li>No items were added or removed, and no rarity changed.</li>
-<li>Several shops’ item lists were re-sorted; prices and stock are the same.</li>
-</ul><p class="upd-confirm"><strong>Needs verification:</strong> whether Voxel Coin’s limit labels show blank in English.</p></div>
-        <div class="upd-card" id="quests"><h3>Quests</h3><ul>
-<li><strong>Coral Sea of Dreams</strong> (Crescent Bay) now gives <strong>Archival Chip - The Smallest Coral Sea</strong> near its end.</li>
-<li><strong>Squarrel’s Poem of Revolution</strong> (Mirrorsea Village) now gives <strong>Archival Chip - Food Revolution</strong>, and one of its steps now switches off an Aniimo spawn point when it starts.</li>
-<li>The names <strong>Chompy</strong> and <strong>Dora</strong> were added as text for that chain.</li>
+<li>The Crafting Table’s dust was called <span class="upd-old">Advanced Gemstone Dust</span>; it is now <strong>Premium Gemstone Dust</strong>, the name the quest uses.</li>
+<li>The text that unlocks its formula now links the dust and the Crafting Table the right way round.</li>
+</ul></div>
+        <div class="upd-card" id="unlisted"><h3>Not in the official notes</h3>
+<p>These come from the game’s files only.</p>
+<h4>Two unannounced events removed</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Event</th><th scope="col">Dates in the last build’s files (UTC)</th><th scope="col">What is gone</th></tr></thead><tbody><tr><td data-label="Event"><strong>Resonance Fantasia: Jaguaraun’s Fantasia Survey</strong></td><td data-label="Dates in the last build’s files (UTC)">November 19 20:00 – December 9</td><td data-label="What is gone">The event, its rules text, the points on Breezy Plains that switched on for it and their two map markers, an NPC menu, and its 7 quests from the event list (the quest rows are still in the files)</td></tr><tr><td data-label="Event"><strong>An Aniimo Is Born – Co-Dev Contest</strong></td><td data-label="Dates in the last build’s files (UTC)">November 19 20:00 – February 14</td><td data-label="What is gone">The event, its tab in the event list and its info page</td></tr></tbody></table></div>
+<ul>
+<li>Neither event was in the game’s official notes. Our last note listed them from the files; that was a mistake, and it is corrected there.</li>
+<li><strong>Thundercharge Cluster</strong> (use it at a Bloom to draw Jaguaraun in) is no longer sold in the Item Exchange for 1 Roar Stone. The item and its formula are still in the files.</li>
+</ul>
+<h4>Quests</h4>
+<ul>
+<li><strong>Coral Sea of Dreams</strong> now gives <strong>Archival Chip - The Smallest Coral Sea</strong> near its end.</li>
+<li><strong>Squarrel’s Poem of Revolution</strong> now gives <strong>Archival Chip - Food Revolution</strong>, and one of its steps switches off a spawn point when it starts.</li>
 <li>4 steps in older quest chains changed type, and one line of quest text now says “the Institute’s Idyll exploration handbook”.</li>
 <li>Readable items (letters, notes, archives) now fill in the same placeholders as dialogue does, such as your character’s name.</li>
-</ul></div>
-        <div class="upd-card" id="duels"><h3>Pathfinder Challenge</h3><ul>
+<li>The task “Catch 100 Aniimo” (Aniimo Master) is now linked to the current Companion Handbook instead of the first one, which ended on October 28.</li>
+</ul>
+<h4>Pathfinder Challenge</h4>
+<ul>
 <li>Two scripted events that sat on <strong>Little Blanket</strong>’s duel now belong to <strong>Healing Angel</strong>’s.</li>
-<li>The second stage of the <strong>Rookie Island Patroller</strong> and <strong>Walking Map</strong> duels has a different title setting.</li>
-<li>Opponents, levels and rewards are unchanged.</li>
-</ul></div>
-        <div class="upd-card" id="looks"><h3>Looks and shop</h3><ul>
-<li><strong>Huffy</strong> (the accessory from First Visit to Whisperwake Isles) now has its accessory data for both your character and your Aniimo.</li>
-<li>Moving an accessory from one Aniimo or slot to another now checks first whether it can be replaced.</li>
+<li>The second stage of the <strong>Rookie Island Patroller</strong> and <strong>Walking Map</strong> duels has a different title setting. Opponents, levels and rewards are unchanged.</li>
+</ul>
+<h4>Looks and shop</h4>
+<ul>
+<li>The 5 <strong>Creative Voyage</strong> profile frames (one per region) have new art.</li>
+<li>An accessory worn by an Aniimo in Home Storage can no longer be moved to another Aniimo; a message shows instead.</li>
 <li>17 hairstyle entries are marked as owned from the start.</li>
-<li>The 5 <strong>Creative Voyage</strong> profile frames have new art.</li>
 <li>The title <strong>Paw-some Pals</strong> got a display setting, the same one the Creative Voyage frames use.</li>
-<li>Shop art for the <strong>Shadow Rose</strong> outfit (November 20) was added, and the <strong>Nightborn Allure</strong> set is flagged to show among rewards.</li>
+<li>Shop art for the <strong>Shadow Rose</strong> outfit was added, and the <strong>Nightborn Allure</strong> set is flagged to show among rewards.</li>
 <li>One shop poster no longer says the shop is open only from 18:00 to 02:00.</li>
-</ul><p class="upd-confirm"><strong>Needs verification:</strong> which hairstyles are free from the start, and where Paw-some Pals now shows.</p></div>
-        <div class="upd-card" id="damage"><h3>Damage formulas</h3><ul>
-<li>The formulas the Damage Guide rests on (3001, 3023, 3512, 3513 and the stat formulas) are the same.</li>
-<li><strong>Formula 3067</strong> changed. It is a second damage formula with its own “egg” factor: ATK is at least 90% of the role’s ATK, damage is at least 0.05, and PvP damage is ×0.3. The egg factor used to multiply only the scaled damage; it now multiplies the flat part too (Flat Damage minus the target’s Flat Damage Reduction).</li>
-</ul><p class="upd-confirm"><strong>Needs verification:</strong> what uses formula 3067. The game’s files don’t say; the code that calls it runs on the server.</p></div>
-        <div class="upd-card" id="controls"><h3>Controls and interface</h3><ul>
-<li>Map with a controller: while a quest’s details are open, the right stick pans the map instead of scrolling the panel.</li>
-<li>Button-prompt fading is only applied to panels and widgets that support it.</li>
-</ul></div>
-        <div class="upd-card" id="text"><h3>Text</h3><ul>
-<li><strong>Prismana Snapshots:</strong> “Capture” is now “Photograph” in its quests and rules, and the rules say “phase” where they said “event” (rewards are per phase).</li>
+<li>Several shops’ item lists were re-sorted; prices and stock are the same.</li>
+</ul>
+<h4>Text</h4>
+<ul>
+<li><strong>Prismana Snapshots:</strong> “Capture” is now “Photograph” in its quests and rules, and the rules say “phase” where they said “event”.</li>
+<li><strong>Butterfly Dreamscape</strong> (2), <strong>Hazy Twilight</strong> and <strong>Twilight Haze</strong>: their text says “makeup” instead of “cosmetic item”.</li>
 <li><strong>Indestructible</strong> (a Sanctum buff): “1 points of Flat Damage Reduction” is now “1 point(s)”. Its numbers are the same: 1 for every 30 P.DEF and M.DEF.</li>
-<li>The other rewordings are listed with what they belong to above: racing rules, the Mini Cake, makeup items and Premium Gemstone Dust.</li>
 <li>3 new strings (Chompy, Dora and the order-limit message), 19 changed and 16 removed (the two removed events’ texts).</li>
-</ul></div>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> which hairstyles are free from the start, where Paw-some Pals now shows, and whether Voxel Coin’s limit labels show blank in English.</p></div>
+        <div class="upd-card" id="ledger"><h3>Every change in the files</h3>
+<p>The complete list, including the parts no note mentions. Steam build 26593599 (November 12) to 26724110 (November 18), with no build in between: 26 files added, 26 removed and 23 modified.</p>
+<details class="upd-more"><summary>Data tables: 36 changed</summary>
+<div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Table</th><th scope="col">Rows</th><th scope="col">What changed</th></tr></thead><tbody>
+<tr><td data-label="Table">game_event_data</td><td data-label="Rows">−2</td><td data-label="What changed">Resonance Fantasia (10000098) and the Co-Dev Contest (10000101) removed</td></tr>
+<tr><td data-label="Table">game_event_type_data</td><td data-label="Rows">−1</td><td data-label="What changed">The Co-Dev Contest’s event type and tab (123)</td></tr>
+<tr><td data-label="Table">game_event_type_post_data</td><td data-label="Rows">−2</td><td data-label="What changed">Both events’ rule pages</td></tr>
+<tr><td data-label="Table">event_common_guide_data</td><td data-label="Rows">−1</td><td data-label="What changed">The Co-Dev Contest’s info page (1023)</td></tr>
+<tr><td data-label="Table">activate_sandbox_data</td><td data-label="Rows">−1</td><td data-label="What changed">The Breezy Plains points Resonance Fantasia switched on</td></tr>
+<tr><td data-label="Table">mapmarkid_activityid_data</td><td data-label="Rows">−2</td><td data-label="What changed">Its two map markers</td></tr>
+<tr><td data-label="Table">npc_func_data</td><td data-label="Rows">−1</td><td data-label="What changed">An NPC menu (5190106)</td></tr>
+<tr><td data-label="Table">event_task_map_acttype_data</td><td data-label="Rows">−7</td><td data-label="What changed">The 7 Fantasia Survey quests’ link to the event list</td></tr>
+<tr><td data-label="Table">event_cond_map_act_data</td><td data-label="Rows">1</td><td data-label="What changed">The list of running events, two shorter</td></tr>
+<tr><td data-label="Table">event_task_data</td><td data-label="Rows">1</td><td data-label="What changed">“Catch 100 Aniimo” (Aniimo Master): new condition</td></tr>
+<tr><td data-label="Table">event_task_cond_map_actid_data</td><td data-label="Rows">1</td><td data-label="What changed">That condition now belongs to the current Companion Handbook</td></tr>
+<tr><td data-label="Table">event_task_map_cond_data</td><td data-label="Rows">2</td><td data-label="What changed">The same move, seen from the condition’s side</td></tr>
+<tr><td data-label="Table">custom_trigger_data</td><td data-label="Rows">3</td><td data-label="What changed">Group Racing tasks (10, 20, 30 races): places counted 1 → 8</td></tr>
+<tr><td data-label="Table">shop_commodity_data</td><td data-label="Rows">−1, 1</td><td data-label="What changed">Thundercharge Cluster’s listing removed; Nightborn Allure flagged to show among rewards</td></tr>
+<tr><td data-label="Table">item_shop_data</td><td data-label="Rows">−1, 5</td><td data-label="What changed">Thundercharge Cluster’s shop link removed; 5 items’ shop lists re-sorted</td></tr>
+<tr><td data-label="Table">shop_tag_mapping_data</td><td data-label="Rows">12</td><td data-label="What changed">Shop shelves re-sorted; the Item Exchange shelf loses Thundercharge Cluster</td></tr>
+<tr><td data-label="Table">item_data</td><td data-label="Rows">5</td><td data-label="What changed">The 5 Creative Voyage frame items’ icons</td></tr>
+<tr><td data-label="Table">player_head_frame_data</td><td data-label="Rows">5</td><td data-label="What changed">The 5 Creative Voyage frames’ art</td></tr>
+<tr><td data-label="Table">show_title_data</td><td data-label="Rows">1</td><td data-label="What changed">Paw-some Pals: display setting added</td></tr>
+<tr><td data-label="Table">item_acquire_limit_data</td><td data-label="Rows">1</td><td data-label="What changed">Voxel Coin’s limit list rebuilt</td></tr>
+<tr><td data-label="Table">appearance_data</td><td data-label="Rows">+1, 17</td><td data-label="What changed">Huffy as a character accessory; 17 hairstyles marked as owned from the start</td></tr>
+<tr><td data-label="Table">appearance_jewelry_pet_data</td><td data-label="Rows">+1</td><td data-label="What changed">Huffy as an Aniimo accessory</td></tr>
+<tr><td data-label="Table">home_season_config_data</td><td data-label="Rows">1</td><td data-label="What changed">Nighttime Gathering’s refresh times</td></tr>
+<tr><td data-label="Table">home_season_construction_submit_data</td><td data-label="Rows">21</td><td data-label="What changed">3 Premium Gemstone Dust quests’ item; 18 quests’ order type</td></tr>
+<tr><td data-label="Table">sys_notice_data</td><td data-label="Rows">+1</td><td data-label="What changed">The order-limit message</td></tr>
+<tr><td data-label="Table">sys_event_data</td><td data-label="Rows">+3</td><td data-label="What changed">Two Archival Chip rewards and one spawn switch for the new quest chains</td></tr>
+<tr><td data-label="Table">Quest.quest_base</td><td data-label="Rows">7</td><td data-label="What changed">Those three quest steps, and 4 older steps’ type</td></tr>
+<tr><td data-label="Table">npc_duel_data</td><td data-label="Rows">4</td><td data-label="What changed">Little Blanket, Healing Angel, Rookie Island Patroller, Walking Map</td></tr>
+<tr><td data-label="Table">dialogue_graph_data</td><td data-label="Rows">1</td><td data-label="What changed">One dialogue scene: 4 background characters now share one model</td></tr>
+<tr><td data-label="Table">volume_config_data</td><td data-label="Rows">+1</td><td data-label="What changed">The Smoke Bomb’s screen smoke</td></tr>
+<tr><td data-label="Table">formula_data</td><td data-label="Rows">1</td><td data-label="What changed">Formula 3067</td></tr>
+<tr><td data-label="Table">Buff 7010005</td><td data-label="Rows">1</td><td data-label="What changed">Mass Slow: second notice</td></tr>
+<tr><td data-label="Table">Buff 7010010, Buff 7010011</td><td data-label="Rows">2</td><td data-label="What changed">Smoke Bomb: 3 s → 2 s, new smoke effect</td></tr>
+<tr><td data-label="Table">level_data, keyword_link_data</td><td data-label="Rows">2 tables</td><td data-label="What changed">Only their server-side version changed; the copy in the game is the same (level_data) or not readable (keyword_link_data)</td></tr>
+</tbody></table></div>
+<p class="upd-small">Every other table has the same version stamp as before, including every Aniimo, skill, buff, item, Interlink, Sanctum, Egg Heist and map table.</p></details>
+<details class="upd-more"><summary>Scripts: 8 of 9,805 changed</summary><ul>
+<li><strong>formula_data:</strong> formula 3067 (one other formula was only re-ordered).</li>
+<li><strong>HomeSeasonStationConsecrateCtrl:</strong> shows the order-limit message.</li>
+<li><strong>ItemViewerModel:</strong> readable items fill in dialogue placeholders.</li>
+<li><strong>MapCtrl</strong> and <strong>MapCtrlPartialQuestPerformance:</strong> the right stick on the map.</li>
+<li><strong>UICtrl:</strong> button-prompt fading is only applied to panels and widgets that support it.</li>
+<li><strong>AppearanceV2Model</strong> and <strong>PetComponent:</strong> an accessory worn by an Aniimo in Home Storage can’t be moved to another Aniimo; a message shows instead.</li>
+</ul></details>
+<details class="upd-more"><summary>Text: 3 new, 19 changed, 16 removed</summary><ul>
+<li><strong>New:</strong> Chompy, Dora, and “You’ve reached the limit for accepting orders.”</li>
+<li><strong>Changed (19 strings, 9 different texts):</strong> the racing rules (Battle Team, Racer Aniimo, hours in server time), the Mini Cake guide, Premium Gemstone Dust’s name and its formula’s unlock text, the 4 makeup items, Prismana Snapshots (8 strings), Indestructible, one quest line and one shop poster.</li>
+<li><strong>Removed (16):</strong> the two removed events’ names, descriptions and rules, a “Go Now” button, and Voxel Coin’s two old limit labels.</li>
+<li>The text files of all 13 languages changed with them.</li>
+</ul></details>
+<details class="upd-more"><summary>Art and models: 11 added, 5 removed, 19 bundles replaced</summary><ul>
+<li><strong>Added:</strong> the Smoke Bomb’s screen smoke and its smoke texture; 4 shop pictures for the Shadow Rose outfit; 5 Creative Voyage frame pictures.</li>
+<li><strong>Removed:</strong> the 5 old Creative Voyage frame pictures.</li>
+<li><strong>Replaced bundles, by what they hold:</strong> Prismana Hypnyto’s model (9 meshes); Lunara and Fennelun’s skill effects (38); every Aniimo’s effect materials; shared Aniimo prefabs (2 bundles) and their platform data; the map’s panel (13) and its nodes (90); the chat panel (29) and one more bundle with chat parts; Home collection animations (46); camera and screen effects (208); smoke textures (22); shop pictures (17); English-only pictures (24); and the 4 big bundles of interface icons.</li>
+<li>For a replaced bundle we can say what it holds, not which file inside it changed, unless the file is new.</li>
+</ul></details>
+<details class="upd-more"><summary>Program files: 23 modified</summary><ul>
+<li>The game’s program (Aniimo.exe, GameAssembly.dll, UnityPlayer.dll and its metadata), the script engine (xlua.dll), the anti-cheat module (NEP2.dll), the publisher’s and Discord’s libraries, and the version and file lists.</li>
+<li>What changed inside them isn’t readable from data. The official fixes with no file match above (the Ultimate cooldown display, Private RV Park members, Aniimo Discovery) are most likely here.</li>
+</ul></details></div>
+        <div class="upd-card" id="open"><h3>Still open, from the official list</h3><ul>
+<li><strong>Holo-Battle Interlink:</strong> results may be tallied early, just before a challenge is due to end, and the countdown may jump back at the start of a challenge.</li>
+<li><strong>Aniimo Dash:</strong> you may fail to turn into Thundercloud, which makes your Party disappear.</li>
+<li><strong>Astra:</strong> when it is crowded, other Pathfinders’ Aniimo may not show (listed as fixed on November 12 and still on the list).</li>
+</ul><p class="upd-small">The official list still names four more issues that the November 18 patch notes say are fixed: the Ultimate cooldown display, the Smoke Bomb, the right stick on the map and Lunara’s effects.</p></div>
         <div class="upd-card" id="same"><h3>Unchanged</h3><ul>
 <li>Every Aniimo’s stats, elements and skills, and every skill and buff value.</li>
-<li>Damage formulas, crit, the element chart, the duel rules, BREAK and Star-Up: re-checked against this build.</li>
-<li>Interlink: the same weeks, bosses and grades. The Sanctum and Egg Heist: the same tables.</li>
-<li>The map: no spawn, chest or Lumin changes.</li>
+<li>The formulas the Damage Guide rests on (3001, 3023, 3512, 3513 and the stat formulas), crit, the element chart, the duel rules, BREAK and Star-Up: re-checked against this build.</li>
+<li>Interlink: the same weeks, bosses and grades. The Sanctum: the same tables.</li>
+<li>The map: no spawn, chest or Lumin changes. No items were added or removed, and no rarity changed.</li>
 <li><strong>Frenzied Assault</strong> (Saws and Whirlbite) still gives 0% Water Boost instead of 25%.</li>
 </ul></div>
       </section>
       <section class="upd-part" id="site" aria-labelledby="site-title">
         <h2 id="site-title">On the site</h2>
-        <div class="upd-card"><h3>Item-log <a class="upd-link" href="/explorer/?view=itemlog">Open →</a></h3><ul><li>Advanced Gemstone Dust is now Premium Gemstone Dust, on the item and in the recipes that use it.</li><li>Archival Chip - The Smallest Coral Sea and Archival Chip - Food Revolution added, each with its quest.</li><li>Thundercharge Cluster no longer lists the Item Exchange.</li><li>The 4 makeup items’ new text.</li><li>The “New in game build” filter now shows this update’s 2 items.</li></ul></div><div class="upd-card"><h3>Guides <a class="upd-link" href="/guides/?guide=damage">Open →</a></h3><ul><li>Damage Guide, duels, type matchups and the Interlink guide re-checked against this build: no changes needed.</li></ul></div><div class="upd-card"><h3>Aniilog, Team Builder, Map and Checklists</h3><ul><li>Nothing in this update changes them.</li></ul></div>
+        <div class="upd-card"><h3>Item-log <a class="upd-link" href="/explorer/?view=itemlog">Open →</a></h3><ul><li>Advanced Gemstone Dust is now Premium Gemstone Dust, on the item and in the recipes that use it.</li><li>Archival Chip - The Smallest Coral Sea and Archival Chip - Food Revolution added, each with its quest.</li><li>Thundercharge Cluster no longer lists the Item Exchange.</li><li>The 4 makeup items’ new text.</li><li>The “New in game build” filter now shows this update’s 2 items.</li></ul></div><div class="upd-card"><h3>The last note <a class="upd-link" href="/updates/3934365/">Open →</a></h3><ul><li>It listed Jaguaraun’s Fantasia Survey and the Co-Dev Contest for November 19 from the files. The game never announced them and has now removed them, so both are marked there.</li></ul></div><div class="upd-card"><h3>Guides <a class="upd-link" href="/guides/?guide=damage">Open →</a></h3><ul><li>Damage Guide, duels, type matchups and the Interlink guide re-checked against this build: no changes needed.</li></ul></div><div class="upd-card"><h3>Aniilog, Team Builder, Map and Checklists</h3><ul><li>Nothing in this update changes them.</li></ul></div>
       </section>
     </main>
 
