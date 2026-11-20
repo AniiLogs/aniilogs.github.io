@@ -3058,81 +3058,448 @@ async function readSubmissionRequest(request) {
 }
 
 // Two app users in one Interlink run both send it: same week and boss, played and sent within five minutes of each
-// other, - when both apps read it from the game log - in the same dungeon instance, and either the same score, stars
-// and time or the same party on the Party screen (the same players in the same slots, at least two of them real
-// players: a misread number then doesn't split one run in two). Only full runs
+// other, - when both apps read it from the game log - in the same dungeon instance, and either two or more Battle Data
+// cards in common, or the same score, stars and time, or the same party on the Party screen (the same players in the
+// same slots, at least two of them real players: a misread number then doesn't split one run in two). Only full runs
 // (result screen, timer, party) count: a best score read off the prep screen says nothing about who was in a run.
-// The instance id stays server-side (see leaderboardEntries), so nobody can copy it into a made-up run. Each submission then vouches for the other: the other player's slot in this run's party gets their UID
-// (from their own submission, whose UID only their account can send) and is marked confirmed, and the same the other
-// way round. That is how a teammate's row gets a UID with the run - no name matching after the fact.
+// The instance id stays server-side (see leaderboardEntries), so nobody can copy it into a made-up run. All copies of
+// one run are then settled together (settledRun): each sender's slot in the other copies gets their UID (from their own
+// submission, whose UID only their account can send) and is marked confirmed. That is how a teammate's row gets a UID
+// with the run - no name matching after the fact.
 const CORROBORATE_WINDOW_S = 5 * 60;
-async function corroborateRun(env, submissionId) {
+const CORROBORATE_PASSES = 5;
+// Whether a nearby copy (already through the query's gates) is the same fight as mine. Two copies that both carry
+// cards and share none are two fights, whatever their numbers or Party screens say (two teams on the capped score in
+// the same minutes; the same team's next run). Names never decide it.
+function sameRunCopy(me, other) {
+  const mine = parseJsonColumn(me.playersJson) || [];
+  const theirs = parseJsonColumn(other.playersJson) || [];
+  const shared = sharedBattleData(mine, theirs);
+  if (shared >= 2) return true;
+  if (shared === 0 && mine.filter(hasBattleData).length >= 2 && theirs.filter(hasBattleData).length >= 2) return false;
+  return (other.score === me.score && other.stars === me.stars && other.clearTimeS === me.clearTimeS)
+    || sameParty((parseJsonColumn(me.extraJson) || {}).lineup, (parseJsonColumn(other.extraJson) || {}).lineup);
+}
+// The copies of the run this submission is in: it, the nearby copies that are the same run, and every row already
+// linked to one of them (extra.sharedRun). Null when the submission isn't an Interlink run with a score.
+async function runCopies(env, submissionId) {
   const me = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
        clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson,
        extra_json AS extraJson, json_extract(extra_json, '$.instanceId') AS instanceId, server
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
-  if (!me || me.kind !== "interlink_run" || me.score == null || !me.gameUid) return;
-  const { results: nearby } = await env.DB.prepare(
+  if (!me || me.kind !== "interlink_run" || me.score == null) return null;
+  let matches = [];
+  if (me.gameUid) {
+    const { results: nearby } = await env.DB.prepare(
+      `SELECT submission_id AS id, players_json AS playersJson, extra_json AS extraJson, score, stars, clear_time_s AS clearTimeS
+       FROM leaderboard_submissions
+       WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
+         AND cycle IS ? AND boss_id IS ?
+         AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
+         AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)
+         AND (? IS NULL OR server IS NULL OR server = ?)
+       ORDER BY submission_id LIMIT 40`,
+    ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.at, CORROBORATE_WINDOW_S,
+      me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
+    matches = (nearby || []).filter((other) => sameRunCopy(me, other));
+  }
+  const ids = [me.id, ...matches.map((other) => other.id)];
+  const linked = [...new Set([me, ...matches].map((row) => (parseJsonColumn(row.extraJson) || {}).sharedRun).filter((id) => typeof id === "string"))].slice(0, 40);
+  const { results: rows } = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, game_uid AS gameUid, players_json AS playersJson, extra_json AS extraJson,
-       score, stars, clear_time_s AS clearTimeS
+       client_version AS version, created_at AS at
      FROM leaderboard_submissions
-     WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
-       AND cycle IS ? AND boss_id IS ?
-       AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
-       AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)
-       AND (? IS NULL OR server IS NULL OR server = ?)`,
-  ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.at, CORROBORATE_WINDOW_S,
-    me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
-  const myExtra = parseJsonColumn(me.extraJson) || {};
-  const results = (nearby || []).filter((other) => (other.score === me.score && other.stars === me.stars && other.clearTimeS === me.clearTimeS)
-    || sameParty(myExtra.lineup, (parseJsonColumn(other.extraJson) || {}).lineup)
-    || sharedBattleData(parseJsonColumn(me.playersJson) || [], parseJsonColumn(other.playersJson) || []) >= 2);
-  // the name a submission's sender goes by in that run: their own (self) slot, else their linked character's name
-  const ownName = async (row, players) => players.find((player) => player?.self)?.name
-    || (await env.DB.prepare("SELECT character_name AS name FROM game_characters WHERE game_uid = ?").bind(row.gameUid).first())?.name || null;
-  // put the other sender's UID on their slot (matched by lookalike-folded name, never an AI or the sender's own slot)
-  // The sender's own Battle Data card, when it's in this copy too, says which slot they are however that slot's name
-  // was read: OCR misreads names and at times puts one on the wrong slot, and four numbers don't match by chance.
-  // (Until 8 Nov a misread name split one player into several rows on the boards.)
-  const vouch = (players, name, gameUid, theirPlayers) => {
-    const skeleton = name ? nameSkeleton(name) : null;
-    const own = theirPlayers.find((player) => player?.self)
-      || (skeleton && theirPlayers.find((player) => player?.name && (player.skel || nameSkeleton(player.name)) === skeleton));
-    const byCard = hasBattleData(own) ? players.find((player) => player && !player.self && sameBattleData(player, own)) : null;
-    const slot = byCard || (skeleton && players.find((player) => player?.name && player.ai !== true && !player.self && (player.skel || nameSkeleton(player.name)) === skeleton));
-    if (!slot) return false;
-    const renamed = Boolean(byCard && name && slot.name !== name);
-    const stale = players.filter((player) => player && player !== slot && player.uid === gameUid);
-    if (slot.uid === gameUid && slot.confirmed && !renamed && !(byCard && slot.ai === true) && !stale.length) return false;
-    for (const player of stale) { delete player.uid; delete player.confirmed; }  // the wrong slot had this player's name
-    Object.assign(slot, { uid: gameUid, confirmed: true });
-    if (byCard) slot.ai = false;
-    if (renamed) Object.assign(slot, { name, skel: skeleton });
-    return true;
+     WHERE kind = 'interlink_run' AND (submission_id IN (${ids.map(() => "?").join(", ")})${linked.length
+       ? ` OR json_extract(extra_json, '$.sharedRun') IN (${linked.map(() => "?").join(", ")})` : ""})
+     ORDER BY submission_id`,
+  ).bind(...ids, ...linked).all();
+  const uids = [...new Set((rows || []).map((row) => row.gameUid).filter(Boolean))];
+  const named = new Map();
+  if (uids.length) {
+    const { results: characters } = await env.DB.prepare(
+      `SELECT game_uid AS gameUid, character_name AS name FROM game_characters WHERE game_uid IN (${uids.map(() => "?").join(", ")})`,
+    ).bind(...uids).all();
+    for (const row of characters || []) if (row.name) named.set(String(row.gameUid), row.name);
+  }
+  return (rows || []).map((row) => {
+    const extra = parseJsonColumn(row.extraJson) || {};
+    return {
+      row,
+      sharedRun: typeof extra.sharedRun === "string" ? extra.sharedRun : null,
+      copy: { id: row.id, gameUid: row.gameUid || null, ownName: (row.gameUid && named.get(String(row.gameUid))) || null, version: row.version,
+        at: row.at, players: parseJsonColumn(row.playersJson) || [], lineup: Array.isArray(extra.lineup) ? extra.lineup : null },
+    };
+  });
+}
+// What a pass changes in one copy's players, slot by slot (a pass never adds or removes a slot).
+function settledChanges(before, after) {
+  const counts = { renamed: 0, confirmed: 0, uidsRemoved: 0, unsettled: 0, settled: 0 };
+  after.forEach((slot, index) => {
+    const old = before[index] || {};
+    if (!slot || typeof slot !== "object") return;
+    if ((old.name ?? null) !== (slot.name ?? null)) counts.renamed += 1;
+    if (slot.confirmed && (!old.confirmed || old.uid !== slot.uid)) counts.confirmed += 1;
+    if (old.confirmed && old.uid && old.uid !== slot.uid) counts.uidsRemoved += 1;
+    if (slot.unsettled && !old.unsettled) counts.unsettled += 1;
+    if (old.unsettled && !slot.unsettled) counts.settled += 1;
+  });
+  return counts;
+}
+// Settles every copy of the submission's run (settledRun) and links them as one shared run (server-only
+// extra.sharedRun, for Battle History and the boards). Requests for copies of one run overlap (three players' apps send
+// within seconds): a copy's players are only written where they are still what this pass read, and the group is read
+// again until a pass finds nothing to change, so no request undoes another's work and the end result is the same
+// whatever order the copies arrive in. Returns counts only (no names); with dryRun nothing is written and the counts say
+// what would change. members: the copies' submission ids (for the administrators' walk over stored runs).
+async function corroborateRun(env, submissionId, { dryRun = false } = {}) {
+  const summary = { copies: 0, changed: 0, linked: 0, renamed: 0, confirmed: 0, uidsRemoved: 0, unsettled: 0, settled: 0 };
+  const changed = new Set();
+  let members = [];
+  for (let pass = 1; pass <= CORROBORATE_PASSES; pass += 1) {
+    const group = await runCopies(env, submissionId);
+    if (!group) return { ...summary, members };
+    members = group.map((entry) => entry.copy.id);
+    summary.copies = group.length;
+    const settled = settledRun(group.map((entry) => entry.copy));
+    const writes = group.map((entry) => ({ entry, next: settled.get(entry.copy.id) }))
+      .filter(({ entry, next }) => stableJson(next) !== stableJson(entry.copy.players));
+    // the group's id: the smallest sharedRun already on a member, else the smallest member id
+    const ids = group.map((entry) => entry.copy.id).sort();
+    const linkedIds = group.map((entry) => entry.sharedRun).filter(Boolean).sort();
+    const groupId = group.length >= 2 ? linkedIds[0] || ids[0] : null;
+    const links = groupId ? group.filter((entry) => entry.sharedRun !== groupId) : [];
+    if (!writes.length && !links.length) return { ...summary, members };
+    if (dryRun) {
+      for (const { entry, next } of writes) {
+        for (const [key, value] of Object.entries(settledChanges(entry.copy.players, next))) summary[key] += value;
+      }
+      summary.changed = writes.length;
+      summary.linked = links.filter((entry) => !entry.sharedRun).length;
+      return { ...summary, members };
+    }
+    for (const { entry, next } of writes) {
+      const result = await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ? AND players_json IS ?")
+        .bind(JSON.stringify(next), entry.copy.id, entry.row.playersJson).run();
+      if (!Number(result?.meta?.changes)) continue;     // another request wrote it first: the next pass reads it again
+      changed.add(entry.copy.id);
+      for (const [key, value] of Object.entries(settledChanges(entry.copy.players, next))) summary[key] += value;
+    }
+    for (const entry of links) {
+      const result = await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_set(COALESCE(extra_json, '{}'), '$.sharedRun', ?) WHERE submission_id = ?")
+        .bind(groupId, entry.copy.id).run();
+      if (Number(result?.meta?.changes) && !entry.sharedRun) summary.linked += 1;
+      if (Number(result?.meta?.changes)) changed.add(entry.copy.id);
+    }
+    summary.changed = changed.size;
+  }
+  console.error(`Copies of a run did not settle in ${CORROBORATE_PASSES} passes`, submissionId);
+  return { ...summary, members };
+}
+// JSON with its keys sorted, to compare two players lists by content
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value ?? null);
+}
+
+// One run from all its copies: who sat in which slot of each copy and what they're called. No database, no clock: the
+// answer depends only on the set of copies (sorted by id here), and its own answer fed back in gives the same answer.
+// copies: [{ id, gameUid, ownName (the sender's linked character's name), version (client_version), at (created_at),
+// players (players_json as stored, marks included), lineup (extra.lineup) }]. Returns a Map id -> players (new lists).
+//
+// The server keeps what the app read: a slot it renames (or turns from AI into a player) keeps the app's value in
+// slot.read, so every pass votes on the apps' reads, never on its own earlier answers. Slots stored before that have no
+// read: their values are the reads.
+//
+// 1. Card seats: slots of different copies with the same Battle Data card are one player (a card two slots of one copy
+//    share, or that one copy alone has, says nothing).
+// 2. A card seat holding a copy's own (self) slot is that sender's - unless two senders' own slots share it (the card is
+//    neither's: they go by name), or two other copies agree on another name there and each also reads one of the
+//    sender's names on another slot (the sender's own copy is the one whose cards shifted: its own slot goes by name).
+// 3. Everything else goes by name: a sender is found in the other copies by their names (linked character, own slot),
+//    the rest form seats of one lookalike-folded name. A slot carrying a sender's name while that sender sits on another
+//    slot of the copy carries a name that belongs elsewhere: it neither votes nor joins by name.
+// 4. A seat's name: its sender's; else what most copies read (two at least); else the Party screen's name; else, for a
+//    run only one app sent whose Party screen can't check it, the name as read. Nothing else settles a name: the slot
+//    keeps its read and is marked unsettled (on no board), rather than credit a misread name.
+// 5. A sender's slot in every other copy gets their name, UID and confirmed; a UID this pass gives to another slot of
+//    the copy is taken off the old one. A UID the app itself sent with a team-mate (the game showed it) is left alone.
+export function settledRun(input) {
+  const copies = [...(Array.isArray(input) ? input : [])].sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+  const skelOf = (name) => (typeof name === "string" && name ? nameSkeleton(name) : null);
+  const better = (a, b) => clientVersionRank(copies[b].version) - clientVersionRank(copies[a].version)
+    || (Number(copies[a].at) || 0) - (Number(copies[b].at) || 0) || a - b;    // copy indexes, sorted by id already
+  // each copy's slots as the app read them
+  const work = copies.map((copy) => {
+    const players = (Array.isArray(copy.players) ? copy.players : []).map((slot) => {
+      if (!slot || typeof slot !== "object") return slot;
+      const out = { ...slot };
+      const read = out.read && typeof out.read === "object" ? out.read : {};
+      if (Object.hasOwn(read, "name")) {
+        out.name = read.name;
+        if (typeof out.name === "string" && out.name) out.skel = nameSkeleton(out.name); else delete out.skel;
+      }
+      if (Object.hasOwn(read, "ai")) out.ai = read.ai;
+      delete out.read;
+      delete out.unsettled;
+      return out;
+    });
+    const raw = players.map((slot) => (slot && typeof slot === "object" ? { name: slot.name ?? null, ai: slot.ai ?? null } : null));
+    const ownSkel = skelOf(copy.ownName);
+    let self = players.findIndex((slot) => slot?.self === true);
+    if (self < 0 && ownSkel) self = players.findIndex((slot) => slot && skelOf(slot.name) === ownSkel);
+    const names = new Set([ownSkel, self >= 0 ? skelOf(raw[self].name) : null].filter(Boolean));
+    const name = copy.ownName || (self >= 0 ? raw[self].name : null) || null;
+    return { copy, players, raw, self, names, name };
+  });
+  const named = (c, i) => Boolean(work[c].raw[i]?.name);
+  const isAi = (c, i) => work[c].raw[i]?.ai === true;
+
+  // 1. card seats
+  const seats = [];
+  const seatOf = new Map();       // "c:i" -> seat
+  const at = (c, i) => `${c}:${i}`;
+  const join = (seat, c, i) => { seat.slots.set(c, i); seatOf.set(at(c, i), seat); };
+  const leave = (seat, c) => { const i = seat.slots.get(c); seat.slots.delete(c); if (i !== undefined) seatOf.delete(at(c, i)); };
+  const cards = new Map();
+  work.forEach(({ players }, c) => {
+    const keys = players.map((slot) => (hasBattleData(slot) ? BATTLE_DATA_FIELDS.map((field) => slot[field]).join("|") : null));
+    keys.forEach((key, i) => {
+      if (!key || keys.indexOf(key) !== keys.lastIndexOf(key)) return;
+      cards.set(key, [...(cards.get(key) || []), [c, i]]);
+    });
+  });
+  for (const slots of cards.values()) {
+    if (slots.length < 2) continue;
+    const seat = { slots: new Map(), owner: null, card: true };
+    for (const [c, i] of slots) join(seat, c, i);
+    seats.push(seat);
+  }
+  // 2. whose card seat
+  for (const seat of [...seats]) {
+    const selves = [...seat.slots].filter(([c, i]) => work[c].self === i);
+    if (selves.length >= 2) {
+      for (const [c] of [...seat.slots]) leave(seat, c);
+      seats.splice(seats.indexOf(seat), 1);
+    } else if (selves.length === 1) seat.owner = selves[0][0];
+  }
+  // a slot with a sender's name while that sender sits on another slot of its copy (by card, or their own copy)
+  const wrongName = (c, i) => {
+    const skel = skelOf(work[c].raw[i]?.name);
+    if (!skel) return false;
+    return work.some((sender, s) => {
+      if (!sender.names.has(skel)) return false;
+      if (s === c) return sender.self >= 0 && sender.self !== i;
+      const seat = seats.find((one) => one.owner === s && one.card);
+      return Boolean(seat && seat.slots.has(c) && seat.slots.get(c) !== i);
+    });
   };
-  const mine = parseJsonColumn(me.playersJson) || [];
-  let mineChanged = false;
-  for (const other of results || []) {
-    const theirs = parseJsonColumn(other.playersJson) || [];
-    if (vouch(mine, await ownName(other, theirs), other.gameUid, theirs)) mineChanged = true;
-    if (vouch(theirs, await ownName(me, mine), me.gameUid, mine)) {
-      await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").bind(JSON.stringify(theirs), other.id).run();
+  const wrongBefore = new Set();
+  work.forEach(({ players }, c) => players.forEach((_, i) => { if (wrongName(c, i)) wrongBefore.add(at(c, i)); }));
+  // a sender's own slot outvoted: two other copies agree on a name there that isn't theirs, and each of those copies
+  // reads one of the sender's names on another named slot (raw names: those slots count as names that belong elsewhere
+  // so far). Copies that only misread the sender's name on the sender's card don't outvote them.
+  for (const seat of seats) {
+    if (seat.owner == null) continue;
+    const o = seat.owner;
+    const votes = new Map();
+    const elsewhere = (c, i) => work[c].players.some((_, j) => j !== i && j !== work[c].self && named(c, j)
+      && work[o].names.has(skelOf(work[c].raw[j].name)));
+    for (const [c, i] of seat.slots) {
+      if (c === o || !named(c, i) || isAi(c, i) || wrongBefore.has(at(c, i)) || !elsewhere(c, i)) continue;
+      const skel = skelOf(work[c].raw[i].name);
+      votes.set(skel, (votes.get(skel) || 0) + 1);
+    }
+    if ([...votes].some(([skel, n]) => n >= 2 && !work[o].names.has(skel))) { leave(seat, o); seat.owner = null; }
+  }
+  const wrong = new Set();
+  work.forEach(({ players }, c) => players.forEach((_, i) => { if (wrongName(c, i)) wrong.add(at(c, i)); }));
+
+  // 3. by name: each sender's seat in the copies their card didn't place them in, then seats of one name
+  const senderSeat = new Map();
+  work.forEach((sender, o) => {
+    let seat = seats.find((one) => one.owner === o);
+    if (!seat) {
+      seat = { slots: new Map(), owner: o, card: false };
+      if (sender.self >= 0 && !seatOf.has(at(o, sender.self))) join(seat, o, sender.self);
+      seats.push(seat);
+    }
+    senderSeat.set(o, seat);
+  });
+  const free = (c, i) => !seatOf.has(at(c, i)) && work[c].self !== i && named(c, i) && !isAi(c, i) && !wrong.has(at(c, i));
+  work.forEach((sender, o) => {
+    if (!sender.names.size) return;
+    const seat = senderSeat.get(o);
+    work.forEach((other, c) => {
+      if (c === o || seat.slots.has(c)) return;
+      const i = other.players.findIndex((_, index) => free(c, index) && sender.names.has(skelOf(other.raw[index].name)));
+      if (i >= 0) join(seat, c, i);
+    });
+  });
+  const byName = new Map();
+  work.forEach(({ players }, c) => players.forEach((_, i) => {
+    if (!free(c, i)) return;
+    const skel = skelOf(work[c].raw[i].name);
+    const list = byName.get(skel) || [];
+    let seat = list.find((one) => !one.slots.has(c));
+    if (!seat) { seat = { slots: new Map(), owner: null, card: false }; list.push(seat); seats.push(seat); byName.set(skel, list); }
+    join(seat, c, i);
+  }));
+
+  // the Party screen's name of each slot of a copy: own slot with own entry, then equal names one to one, then the last
+  // slot and entry left. (When the app pairs a Party member with a result row it sends the entry under the row's name, so a
+  // mild misread shows the same wrong name in both places and can't be caught from one copy: only other copies catch it.)
+  const lineupNames = new Set();
+  const party = work.map(({ copy, players, raw, self }) => {
+    const entries = (Array.isArray(copy.lineup) ? copy.lineup : []).filter((entry) => entry && typeof entry.name === "string" && entry.name);
+    for (const entry of entries) lineupNames.add(nameSkeleton(entry.name));
+    const slots = players.map((_, i) => i).filter((i) => raw[i]?.name);
+    const pairs = new Map();
+    const left = new Set(entries);
+    const ownEntry = entries.find((entry) => entry.self === true);
+    if (self >= 0 && slots.includes(self) && ownEntry) { pairs.set(self, ownEntry.name); left.delete(ownEntry); }
+    for (const i of slots) {
+      if (pairs.has(i)) continue;
+      const entry = [...left].find((one) => nameSkeleton(one.name) === skelOf(raw[i].name));
+      if (entry) { pairs.set(i, entry.name); left.delete(entry); }
+    }
+    const open = slots.filter((i) => !pairs.has(i));
+    if (open.length === 1 && left.size === 1) pairs.set(open[0], [...left][0].name);
+    return { pairs, checkable: Boolean(copy.lineup) && entries.length >= slots.length };
+  });
+  // the spelling of a name several slots read: the most common, then the newest build's, the earliest, the lowest id
+  const spelled = (reads) => {
+    const counts = new Map();
+    for (const { name } of reads) counts.set(name, (counts.get(name) || 0) + 1);
+    const most = Math.max(...counts.values());
+    return reads.filter(({ name }) => counts.get(name) === most).sort((a, b) => better(a.c, b.c))[0].name;
+  };
+  // the most voted lookalike-folded name of some reads (ties: the newest build's copy first)
+  const topSkel = (reads) => {
+    const counts = new Map();
+    for (const { name } of reads) counts.set(nameSkeleton(name), (counts.get(nameSkeleton(name)) || 0) + 1);
+    const most = Math.max(...counts.values());
+    const tied = new Set([...counts].filter(([, n]) => n === most).map(([skel]) => skel));
+    const first = reads.filter(({ name }) => tied.has(nameSkeleton(name))).sort((a, b) => better(a.c, b.c))[0];
+    return { skel: nameSkeleton(first.name), most, unique: tied.size === 1 };
+  };
+
+  // 4. each seat's name, and the rule that settled it (1 sender, 2 most copies, 3 Party screen, 4 one copy unchecked)
+  for (const seat of seats) {
+    if (seat.owner != null) { seat.name = work[seat.owner].name; seat.rule = 1; continue; }
+    const voters = [...seat.slots].filter(([c, i]) => named(c, i) && !isAi(c, i) && !wrong.has(at(c, i))).map(([c, i]) => ({ c, i, name: work[c].raw[i].name }));
+    if (!voters.length) { seat.rule = 0; continue; }       // nothing to name (AI reads, or only names that belong elsewhere)
+    const vote = topSkel(voters);
+    if (vote.unique && vote.most >= 2) { seat.name = spelled(voters.filter(({ name }) => nameSkeleton(name) === vote.skel)); seat.rule = 2; continue; }
+    const shown = voters.filter(({ c, i }) => party[c].pairs.has(i)).map(({ c, i }) => ({ c, i, name: party[c].pairs.get(i) }));
+    if (shown.length) {
+      const top = topSkel(shown);
+      const reads = voters.filter(({ name }) => nameSkeleton(name) === top.skel);
+      seat.name = spelled(reads.length ? reads : shown.filter(({ name }) => nameSkeleton(name) === top.skel));
+      seat.rule = 3;
+      continue;
+    }
+    const onLineup = voters.filter(({ name }) => lineupNames.has(nameSkeleton(name)));
+    if (onLineup.length) { seat.name = spelled(onLineup); seat.rule = 3; continue; }
+    if (copies.length === 1 && !party[0].checkable) { seat.rule = 4; continue; }
+    seat.rule = 5;                                          // nothing settles it
+  }
+  // the name a slot ends with (null: unsettled or untouched)
+  const settledName = (c, i) => {
+    const seat = seatOf.get(at(c, i));
+    if (!seat) return null;
+    if (seat.rule === 4) return work[c].raw[i]?.name || null;
+    return seat.rule >= 1 && seat.rule <= 3 ? seat.name : null;
+  };
+  // a sender no name or card found in a copy takes the slot that settled to one of their names
+  work.forEach((sender, o) => {
+    const seat = senderSeat.get(o);
+    if (!sender.names.size) return;
+    work.forEach((other, c) => {
+      if (c === o || seat.slots.has(c)) return;
+      const i = other.players.findIndex((_, index) => {
+        const held = seatOf.get(at(c, index));
+        return other.self !== index && !(held && held.owner != null) && sender.names.has(skelOf(settledName(c, index)));
+      });
+      if (i < 0) return;
+      const held = seatOf.get(at(c, i));
+      if (held) leave(held, c);
+      join(seat, c, i);
+    });
+  });
+
+  // 5. the slots, and 6. the UIDs
+  const out = work.map(({ players }) => players.map((slot) => (slot && typeof slot === "object" ? { ...slot } : slot)));
+  const unsettled = new Set();
+  const renamed = new Map();     // "c:i" -> name
+  for (const seat of seats) {
+    for (const [c, i] of seat.slots) {
+      if (seat.owner === c) continue;                                  // a sender's own slot stays as read
+      if (seat.owner != null) continue;                                // written below with the UID
+      if (isAi(c, i) || !named(c, i)) continue;                        // read as AI or unnamed, nobody's: as it is
+      if (seat.rule >= 1 && seat.rule <= 3) renamed.set(at(c, i), seat.name);
+      else if (seat.rule === 5 || (seat.rule === 0 && wrong.has(at(c, i)))) unsettled.add(at(c, i));
     }
   }
-  if (mineChanged) {
-    await env.DB.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").bind(JSON.stringify(mine), me.id).run();
-  }
-  // link the copies as one shared run (server-only extra.sharedRun: the first copy's id), for Battle History
-  if (results.length) {
-    const group = (results.map((other) => (parseJsonColumn(other.extraJson) || {}).sharedRun).find(Boolean)) || myExtra.sharedRun
-      || [me.id, ...results.map((other) => other.id)].sort()[0];
-    for (const id of [me.id, ...results.map((other) => other.id)]) {
-      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_set(COALESCE(extra_json, '{}'), '$.sharedRun', ?) WHERE submission_id = ?")
-        .bind(group, id).run();
+  // a name that belongs elsewhere, on a slot no card seat names: unsettled (else it would be an unclaimed row of that sender)
+  for (const key of wrong) if (!seatOf.has(key)) unsettled.add(key);
+  // two slots of one copy that end with one name: the one a later rule settled is left unsettled (the copy's own slot
+  // counts first: another slot ending with its sender's name would be a second row of them)
+  out.forEach((players, c) => {
+    const ends = new Map();
+    const own = skelOf(work[c].name);
+    if (work[c].self >= 0 && own) ends.set(own, [{ i: work[c].self, rule: 0 }]);
+    players.forEach((slot, i) => {
+      if (!slot || typeof slot !== "object" || work[c].self === i || unsettled.has(at(c, i))) return;
+      const seat = seatOf.get(at(c, i));
+      const name = seat?.owner != null ? work[seat.owner].name : renamed.get(at(c, i)) ?? (seat?.rule === 4 ? work[c].raw[i].name : null);
+      const skel = skelOf(name);
+      if (!skel) return;
+      ends.set(skel, [...(ends.get(skel) || []), { i, rule: seat?.owner != null ? 1 : seat?.rule ?? 9 }]);
+    });
+    for (const list of ends.values()) {
+      const best = Math.min(...list.map(({ rule }) => rule));
+      for (const { i, rule } of list) if (rule > best) { unsettled.add(at(c, i)); renamed.delete(at(c, i)); }
     }
-  }
+  });
+  const result = new Map();
+  out.forEach((players, c) => {
+    const { raw } = work[c];
+    const uids = new Map();      // slot index -> the sender's UID this pass gives it
+    for (const seat of seats) {
+      if (seat.owner == null || seat.owner === c || !seat.slots.has(c)) continue;
+      const i = seat.slots.get(c);
+      if (unsettled.has(at(c, i))) continue;
+      const sender = work[seat.owner];
+      if (sender.name) renamed.set(at(c, i), sender.name);
+      players[i].ai = false;
+      if (sender.copy.gameUid) uids.set(i, String(sender.copy.gameUid));
+    }
+    players.forEach((slot, i) => {
+      if (!slot || typeof slot !== "object") return;
+      const name = renamed.get(at(c, i));
+      if (name != null && name !== slot.name) Object.assign(slot, { name, skel: nameSkeleton(name) });
+      const uid = uids.get(i);
+      if (uid) {
+        const appUid = slot.uid && !slot.confirmed && String(slot.uid) !== uid;     // the game showed another UID here: kept
+        if (!appUid) Object.assign(slot, { uid, confirmed: true });
+      } else if (slot.confirmed && slot.uid && [...uids.values()].includes(String(slot.uid))) {
+        delete slot.uid;
+        delete slot.confirmed;
+      }
+    });
+    result.set(copies[c].id, players.map((slot, i) => {
+      if (!slot || typeof slot !== "object") return slot;
+      const read = {};
+      if ((slot.name ?? null) !== raw[i].name) read.name = raw[i].name;
+      if ((slot.ai ?? null) !== raw[i].ai) read.ai = raw[i].ai;
+      const marked = unsettled.has(at(c, i)) && !slot.uid;      // a slot with a UID is that player, whatever its name
+      return { ...slot, ...(Object.keys(read).length ? { read } : {}), ...(marked ? { unsettled: true } : {}) };
+    }));
+  });
+  return result;
 }
 
 // A player's Battle Data card in a run: the same four numbers in two copies of a run are the same player.
@@ -3351,7 +3718,7 @@ async function submitLeaderboardRecord(request, env) {
   const checkHeld = record.kind === "sim_run"
     ? await checkSimRun(env, submissionId).catch((error) => { console.error("Sim run checks failed", error); return false; })
     : false;
-  await corroborateRun(env, submissionId);
+  await corroborateRun(env, submissionId).catch((error) => { console.error("Settling the run's copies failed", error); });
   try {
     await storeRunOutcome(env, submissionId);
   } catch (error) {
@@ -4375,6 +4742,8 @@ const CREDITED_RUNS = `(
     FROM leaderboard_submissions c, json_each(c.players_json) pl
     WHERE c.kind = 'interlink_run' AND ${ON_BOARDS("c")} AND json_extract(pl.value, '$.ai') = 0
       AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
+      -- a name no copy of the run agrees on and no Party screen shows (settledRun): on no board, Show unlinked included
+      AND COALESCE(json_extract(pl.value, '$.unsettled'), 0) = 0
       -- older apps don't mark the sender's own slot: skip the slot with the sender's linked character name
       AND json_extract(pl.value, '$.name') <> COALESCE(
         (SELECT character_name FROM game_characters me WHERE me.game_uid = c.game_uid AND me.discord_id = c.discord_id), '')
@@ -4450,8 +4819,10 @@ async function partyProfiles(env, rows) {
 function withProfiles(players, profiles) {
   if (!Array.isArray(players)) return players;
   return players.map((player) => {
-    if (!player?.name || player.ai) return player;
-    const { skel: _skeleton, uid: _uid, confirmed: _confirmed, ...shown } = player;
+    if (!player || typeof player !== "object") return player;
+    // server-only marks: the folded name, recorded UIDs, and what the app read before the copies settled a name
+    const { skel: _skeleton, uid: _uid, confirmed: _confirmed, read: _read, unsettled: _unsettled, ...shown } = player;
+    if (!player.name || player.ai) return shown;
     const publicId = profiles.get(String(player.name).toLowerCase());
     const identity = profiles.identities ? profiles.identities(player.name) : { lookalike: false };
     return { ...shown, ...(publicId ? { profileId: publicId } : {}), ...(identity.lookalike ? { lookalike: true } : {}) };
@@ -4617,6 +4988,43 @@ async function backfillRunOutcomes(request, env) {
   const filled = await fillRunOutcomes(env, max);
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM leaderboard_submissions WHERE kind = 'interlink_run' AND outcome IS NULL AND clear_time_s IS NOT NULL").first();
   return json({ updated: filled.updated, counts: filled.counts, left: Number(left?.n || 0) });
+}
+
+// POST /api/admin/run-names {apply?, max?, after?} (administrators and the owner): settles the names and marks of stored
+// Interlink runs' copies again (settledRun, as each new copy does), max runs a call (default 100, at most 500) in the
+// order they were stored, after the cursor the last call answered. A dry run unless apply is true: the counts say what
+// would change. Each run's group of copies is done once a call. Counts only: no names, UIDs or ids of players.
+// A run whose copies fall on two pages of the walk is looked at on both, so a dry run's counts can count it twice (an
+// applied run finds nothing the second time).
+async function settleRunNames(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try { body = (await readJsonBody(request, 512)) || {}; } catch { /* the defaults */ }
+  const apply = body.apply === true;
+  const max = Math.min(500, Math.max(1, Number.parseInt(body.max ?? "100", 10) || 100));
+  const after = String(body.after || "").match(/^(\d{1,12})\.([A-Za-z0-9_-]{1,40})$/u);
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS id, created_at AS at FROM leaderboard_submissions
+     WHERE kind = 'interlink_run' AND (? IS NULL OR created_at > ? OR (created_at = ? AND submission_id > ?))
+     ORDER BY created_at, submission_id LIMIT ?`,
+  ).bind(after ? 1 : null, after ? Number(after[1]) : 0, after ? Number(after[1]) : 0, after ? after[2] : "", max + 1).all();
+  const rows = (results || []).slice(0, max);
+  const totals = { copies: 0, changed: 0, linked: 0, renamed: 0, confirmed: 0, uidsRemoved: 0, unsettled: 0, settled: 0 };
+  const done = new Set();
+  let groups = 0;
+  for (const row of rows) {
+    if (done.has(row.id)) continue;
+    const { members, ...counts } = await corroborateRun(env, row.id, { dryRun: !apply });
+    done.add(row.id);
+    for (const id of members) done.add(id);
+    if (!members.length) continue;
+    groups += 1;
+    for (const key of Object.keys(totals)) totals[key] += Number(counts[key]) || 0;
+  }
+  const last = rows.at(-1);
+  return json({ dryRun: !apply, rows: rows.length, groups, ...totals, next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
 }
 
 function interlinkStarCaps(cycleId) {
@@ -6429,6 +6837,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/trophies" && request.method === "PUT") return saveHiddenTrophies(request, env);
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
   if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
+  if (url.pathname === "/api/admin/run-names" && request.method === "POST") return settleRunNames(request, env);
   // a profile id or a game UID (resolveProfileId)
   const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})\/history$/u);
   if (historyMatch && request.method === "GET") return publicBattleHistory(request, env, historyMatch[1]);
