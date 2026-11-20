@@ -547,7 +547,7 @@ test("the live UI loads only the package-pinned reviewed private content route",
   assert.match(explorerConfig, /contentAvailable: true/u);
   assert.match(explorerConfig, /const contentBaseUrl = isLocalPreview/u);
   assert.match(explorerConfig, /contentPackageVersion: 3535596/u);
-  assert.match(explorerConfig, /contentRevision = "20261118-build3973445-r95"/u);
+  assert.match(explorerConfig, /contentRevision = "20261119-build3989635-r96"/u);
   assert.match(explorerConfig, /aniilogs-api\.pages\.dev\/api\/content\/releases\/3535596/u);
   assert.match(explorerHtml, /id="contentUnavailable"[^>]*hidden/u);
   assert.doesNotMatch(explorerHtml, /src="https:\/\/aniilogs-api\.pages\.dev\/api\/content/u);
@@ -708,7 +708,7 @@ test("the shown game build is separate from the R2 release id", async () => {
   // The R2 release and the live viewer's approved package stay on 3535596.
   assert.match(config, /contentPackageVersion: 3535596,/u);
   assert.match(config, /releases\/3535596"/u);
-  assert.match(config, /gameBuild: 3973445,/u);
+  assert.match(config, /gameBuild: 3989635,/u);
   assert.match(explorer, /const GAME_BUILD = String\(SITE_CONFIG\.gameBuild \|\| CONTENT_PACKAGE_VERSION \|\| ""\)\.trim\(\);/u);
   assert.match(explorer, /\? `Game build \$\{GAME_BUILD\}`/u);
   assert.match(explorer, /sourcePackage !== CONTENT_PACKAGE_VERSION/u);

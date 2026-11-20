@@ -1,10 +1,10 @@
-// game-audit: 1.1.3973445 2026-11-18 every section, table, example and i-note (claim-by-claim list kept with the owner's private notes)
+// game-audit: 1.1.3989635 2026-11-19 every section, table, example and i-note (claim-by-claim list kept with the owner's private notes)
 // The Try-Hard Guide's text and the "i" notes for skills and traits whose game text leaves something
 // out. Plain-text paragraphs (no HTML); the page renders them. Each section says how sure it is:
 // exact (read from the game's scripts or tables), by-name (matched to a game attribute by its name),
 // inferred (a reasoned reading), text (from the game's own skill text, not its effect data). A section
 // may carry `tests`: [{ id, text }] for things to check in the game before they can be trusted. Numbers come
-// from build 3846247, re-checked against game 1.1 (builds 3857679, 3934365 and 3973445); see damage-model.js for the maths.
+// from build 3846247, re-checked against game 1.1 (builds 3857679, 3934365, 3973445 and 3989635); see damage-model.js for the maths.
 (() => {
   const TITLE = "Try-Hard Guide";
 
