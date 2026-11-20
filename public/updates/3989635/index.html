@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Everything Aniimo’s November 19 patch changed (game build 3989635), read from the game’s files: Operation: Egg Heist’s new reward and shop listing, Nighttime Gathering quests, reworded text, and how AniiLogs followed.">
+    <meta name="theme-color" content="#f5eecb">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <title>Game update: November 19 patch (build 3989635) · AniiLogs</title>
+    <link rel="canonical" href="https://aniilogs.github.io/updates/3989635/">
+    <meta property="og:site_name" content="AniiLogs">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Game update: November 19 patch (build 3989635) · AniiLogs">
+    <meta property="og:description" content="Everything Aniimo’s November 19 patch changed (game build 3989635), read from the game’s files: Operation: Egg Heist’s new reward and shop listing, Nighttime Gathering quests, reworded text, and how AniiLogs followed.">
+    <meta property="og:url" content="https://aniilogs.github.io/updates/3989635/">
+    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="stylesheet" href="/styles.css?v=0.13.6-dots-behind">
+    <link rel="stylesheet" href="/updates/updates.css?v=0.2.1">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
+    <script src="/explorer/app-config.js?v=20261119-build3989635-r96" defer></script>
+    <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
+    <script src="/site-chrome.js?v=0.1.0" defer></script>
+    <script src="/aniimo-link.js?v=0.1.1" defer></script>
+    <script src="/updates/updates.js?v=0.1.0" defer></script>
+  </head>
+  <body class="site-chrome-page">
+    <div class="sky-speckles" aria-hidden="true"></div>
+    <header class="app-topbar" data-chrome-page="home" data-chrome-account>
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <img class="app-topbar-brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/explorer/" data-chrome-link="map">Map</a>
+        <a href="/explorer/?view=aniilog" data-chrome-link="aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog" data-chrome-link="itemlog">Item-log</a>
+        <a href="/explorer/?view=checklist" data-chrome-link="checklist">Checklists</a>
+        <a href="/explorer/?view=team" data-chrome-link="team">Team Builder</a>
+        <a href="/guides/" data-chrome-link="guides">Guides</a>
+        <a href="/leaderboard/" data-chrome-link="leaderboards">Leaderboards</a>
+        <a href="/companion/" data-chrome-link="companion">Companion App</a>
+        <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
+      </nav>
+      <div class="app-topbar-actions">
+        <label class="theme-picker-label">
+          <span class="theme-picker-copy">Theme</span>
+          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+            <option value="default">Night</option>
+            <option value="meadow">Meadow</option>
+            <option value="emberpup">Emberpup</option>
+            <option value="pawney">Pawney</option>
+          </select>
+        </label>
+        <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
+          <option value="en">🇺🇸</option>
+          <option value="de-DE">🇩🇪</option>
+          <option value="es-ES">🇪🇸</option>
+          <option value="fr-FR">🇫🇷</option>
+          <option value="id-ID">🇮🇩</option>
+          <option value="ja">🇯🇵</option>
+          <option value="ko">🇰🇷</option>
+          <option value="pt-PT">🇵🇹</option>
+          <option value="ru-RU">🇷🇺</option>
+          <option value="th-TH">🇹🇭</option>
+          <option value="vi-VN">🇻🇳</option>
+          <option value="zh-CN">🇨🇳</option>
+          <option value="zh-TW">🇹🇼</option>
+        </select>
+        <a class="settings-gear-button" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">
+          <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+          <span class="settings-gear-label">Settings</span>
+        </a>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span data-account hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <a href="/?view=profile" data-profile-link hidden>My Profile</a>
+            <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
+            <a href="/explorer/?settings=1">Settings</a>
+            <button type="button" data-logout hidden>Log out</button>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="upd-main">
+      <a class="upd-back" href="/#patch-notes-title">← All updates</a>
+      <header class="upd-head">
+        <h1>Game update: November 19 patch</h1>
+        <p class="upd-meta"><span>Game build 3989635 (v1.1.3989635)</span><time datetime="2026-11-19">November 19, 2026</time></p>
+      </header>
+      <nav class="upd-toc" aria-label="On this page"><a href="#eggheist">Egg Heist</a><a href="#gathering">Nighttime Gathering</a><a href="#events">Events</a><a href="#text">Text</a><a href="#ledger">Every file change</a><a href="#same">Unchanged</a><a href="#site">On the site</a></nav>
+      <div class="upd-card upd-summary"><h3>At a glance</h3><ul>
+<li>The game posted no notes for this patch (Steam build 26779353, November 19). Everything on this page comes from the game’s files, build 3973445 to 3989635.</li>
+<li><strong>Operation: Egg Heist:</strong> the Egg Emperor rank reward and the shop’s Collectible Blind Box, both announced on November 17, are now in the files.</li>
+<li><strong>Nighttime Gathering:</strong> 20 new item delivery quests, and 4 large ore quests that could never come up now can.</li>
+<li><strong>Events:</strong> the Whisperwake Isles Exploration Plan stays in the event list until November 24.</li>
+<li><strong>Text:</strong> 1,282 English strings reworded. A group of Pathfinders is now a Team and the Aniimo you bring are your Party, and 23 items have a new name.</li>
+<li><strong>Still the same:</strong> every Aniimo, skill and buff value, the damage formulas, Holo-Battle Interlink, the Sanctum and the map’s spawns and chests. Frenzied Assault still gives 0%.</li>
+</ul></div>
+      <section class="upd-part" id="game" aria-labelledby="game-title">
+        <h2 id="game-title">In the game</h2>
+        <p class="upd-small">Checked for an official note on this build: the game’s <a href="https://store.steampowered.com/news/app/4126040">patch notes on Steam</a>, the official <a href="https://aniimo.com/newslist/detail/100275">Known Issues &amp; Fixes</a> post and the news channels of the game’s official Discord. None has anything newer than November 18, so this page rests on the game’s own files. Where the game’s text and its data disagree, we go by the data.</p>
+        <div class="upd-card" id="eggheist"><h3>Operation: Egg Heist</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Operation: Egg Heist</th><th scope="col">Before, in the files</th><th scope="col">Now</th></tr></thead><tbody>
+<tr><td data-label="Operation: Egg Heist"><strong>Rank rewards, Egg Emperor</strong></td><td data-label="Before, in the files">At 0, 300 and 1,000 stars</td><td data-label="Now">A fourth at <span class="upd-new">200 stars</span>: Departure with the Wind: Collectible Gift Box</td></tr>
+<tr><td data-label="Operation: Egg Heist"><strong>Departure with the Wind: Collectible Gift Box</strong></td><td data-label="Before, in the files">Not an item</td><td data-label="Now">A new item: “Open to choose one Departure with the Wind season collectible from Operation: Egg Heist.”</td></tr>
+<tr><td data-label="Operation: Egg Heist"><strong>Departure with the Wind: Collectible Blind Box</strong></td><td data-label="Before, in the files">An item with no shop listing</td><td data-label="Now">Egg Heist Shop: <span class="upd-new">500,000 Eggshell Coin</span>, limit 1 (the shop’s weekly limit), needs “Reach [Egg Emperor] in Egg Heist.”</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>The Gift Box’s 11 choices:</strong> Soul Tremor, Feather Bathed in Light, Rose Thorn Blade, Cloudsoft Slumber, Butterfly Dream Amber, Prismatic Iris, Songbird Serenade, Ironhelm Shieldguard, Evercrystal Egg, Wolfspirit Ghost Lantern and Dragonflame Horn.</li>
+<li>Both were announced on November 17. The <a href="/updates/3973445/">last note</a> said they were not in the data tables; with this build they are.</li>
+<li>The Giga-Egg mode’s description now says it “may be adjusted based on player feedback” (it said “will be adjusted based on playtest results”).</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> the Blind Box’s price in the shop. Its row also holds a second price of 1,000,000 Eggshell Coin for a “special time” and gives no dates for one, so the shop should show 500,000.</p></div>
+        <div class="upd-card" id="gathering"><h3>Nighttime Gathering</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Item delivery quests</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody>
+<tr><td data-label="Item delivery quests"><strong>Weird Jelly Beans</strong> (100, 300 or 1,000)</td><td data-label="Before">No quest</td><td data-label="Now"><span class="upd-new">6 quests</span></td></tr>
+<tr><td data-label="Item delivery quests"><strong>Breezy Plains Dewdrop Crystal</strong> and <strong>Whisperwake Isles Dewdrop Crystal</strong> (15 or 50 of each)</td><td data-label="Before">No quest</td><td data-label="Now"><span class="upd-new">8 quests</span></td></tr>
+<tr><td data-label="Item delivery quests"><strong>Aniipod</strong> (15), <strong>Aniipod Pro</strong> (25), <strong>Aniipod Mega</strong> (50)</td><td data-label="Before">No quest</td><td data-label="Now"><span class="upd-new">6 quests</span></td></tr>
+<tr><td data-label="Item delivery quests"><strong>Copper Ore</strong> ×5,000, <strong>Quartz Ore</strong> ×4,000, <strong>Gem</strong> ×2,000, <strong>Silver Ore</strong> ×2,000</td><td data-label="Before">In the list with <span class="upd-old">weight 0</span>, so never offered</td><td data-label="Now">Weights <span class="upd-new">40, 40, 30 and 10</span></td></tr>
+</tbody></table></div>
+<ul>
+<li>The new quests are worth 1,200, 2,700 or 6,000, by size.</li>
+<li>The same 10 quests are in the table twice, under different order types.</li>
+</ul></div>
+        <div class="upd-card" id="events"><h3>Events</h3><ul>
+<li><strong>Whisperwake Isles Exploration Plan:</strong> its place in the event list now ends at the end of <span class="upd-new">November 24</span> (it was the end of <span class="upd-old">November 19</span>).</li>
+<li><strong>Legendary Journey: Echoes of the Singing Sea</strong> is now written <strong>Legendary Journey - Gathering the Sea’s Echoes</strong>.</li>
+<li><strong>Breezy Plains Cup: Full Throttle</strong> is now <strong>Breezy Plains Cup - Full Throttle</strong>.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> whether the Exploration Plan’s quests and rewards also run until November 24, or only its tab.</p></div>
+        <div class="upd-card" id="text"><h3>Text</h3>
+<p>1,282 English strings were reworded and 2 are new (the Gift Box’s name and text). None was removed.</p>
+<h4>Team and Party</h4>
+<ul>
+<li>A group of Pathfinders is a <strong>Team</strong>: Create Team, Join Team, Leave Team, Disband Team, Remove from Team, Team Channel, Team Preparation, Team Confirmation, “The team is full.” About 64 strings; they said Party.</li>
+<li>The Aniimo you bring are your <strong>Party</strong>: Aniimo Party, Aniimo Party Info, Party Switch Cooldown, “Deployed Party cannot be empty”, and “party members” in skill and buff texts. About 47 strings; they said Team, Roster, teammate or ally.</li>
+<li>Screens titled just “Party” and Operation: Egg Heist’s Team Mode keep their names.</li>
+</ul>
+<h4>Items: 23 renamed</h4>
+<div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody>
+<tr><td data-label="Before"><span class="upd-old">“Haven’s Letter”</span></td><td data-label="Now"><span class="upd-new">Harvey’s Letter</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">“Her Highness the Princess and Friends Part 1”</span> and <span class="upd-old">Part 2</span></td><td data-label="Now"><span class="upd-new">The Princess and Her Friends Part 1</span> and <span class="upd-new">Part 2</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">Tidesung Horn</span></td><td data-label="Now"><span class="upd-new">Azureville Horn</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">Moondew Radish Seeds</span>, <span class="upd-old">Sweet Potato Seeds</span>, <span class="upd-old">Waxing Moon Pepper Seeds</span></td><td data-label="Now"><span class="upd-new">Moondew Radish Seed</span>, <span class="upd-new">Sweet Potato Seed</span>, <span class="upd-new">Waxing Moon Pepper Seed</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">Anonymous Research Notes</span></td><td data-label="Now"><span class="upd-new">Anonymous Research Note</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">Archival Chip - Ending 1 - The Power of Believing</span></td><td data-label="Now"><span class="upd-new">Archival Chip - Ending 1: The Power of Believing</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">Archival Chip - Ending 2 - Victory’s Slump</span></td><td data-label="Now"><span class="upd-new">Archival Chip - Ending 2 - A Hollow Victory</span></td></tr>
+<tr><td data-label="Before"><span class="upd-old">Archival Chip - Ending 3 - Itsy’s Tiny Changes</span></td><td data-label="Now"><span class="upd-new">Archival Chip - Ending 3 - Tiny’s Tiny Changes</span></td></tr>
+<tr><td data-label="Before">12 more readable items, written in quotation marks</td><td data-label="Now">The same names without the marks: A Scribbled Bill, Ancient Notes, Eko Keeper Training Manual, Elaini’s Letter, Gu-Speech Learning Guide, Island Patrol Code, To Mirrorsea Village, To the Stars, Whistle-Speech Beginner’s Guide, Youth Counseling, Freedom Score and New Freedom Score</td></tr>
+</tbody></table></div>
+<ul>
+<li>141 items have reworded use or description text.</li>
+</ul>
+<h4>Other names</h4>
+<ul>
+<li>The stun that Coraliz’s skill applies: <span class="upd-old">Stun</span> → <span class="upd-new">Stunned</span>. The general Stun status keeps its name.</li>
+<li><span class="upd-old">Aniimo Outings</span> → <span class="upd-new">Aniimo Outing</span></li>
+<li><span class="upd-old">Deck Build</span>, <span class="upd-old">RV Deck</span> → <span class="upd-new">Terrace Build</span>, <span class="upd-new">RV Terrace</span></li>
+<li><span class="upd-old">Loadout</span> → <span class="upd-new">Inventory</span></li>
+<li><span class="upd-old">“Loosen the soil”</span> → <span class="upd-new">“Till the soil”</span> (Home)</li>
+<li><span class="upd-old">Pumpkin Aeon</span> → <span class="upd-new">Pumpkin God</span> (Nighttime Gathering)</li>
+<li><span class="upd-old">Jadeite Marrow</span>, the gathering point → <span class="upd-new">Jadecore Cluster</span>. The item Jadeite Marrow keeps its name.</li>
+<li><span class="upd-old">Ascension Successful!</span> → <span class="upd-new">Rating Improved!</span> (Aniimo Dash)</li>
+<li><span class="upd-old">Level Up</span> → <span class="upd-new">Level up</span>, and “After BREAK” → “After break” in three tips.</li>
+<li>Quest Aniimo: Dejected Lilipole and Dejected Reefish → <span class="upd-new">Gloomy</span>; Gray-White Reefish → <span class="upd-new">Pale Reefish</span>; Sleepy Reefish → <span class="upd-new">Drowsy Reefish</span>; Vigilant Scorchhowl → <span class="upd-new">Watchful Scorchhowl</span>; Enthusiastic Puffby → <span class="upd-new">Eager Puffby</span>.</li>
+</ul>
+<h4>Skills, traits and buffs: wording only</h4>
+<ul>
+<li>9 skill texts, 5 Aniimo trait texts and 9 buff texts were reworded, mostly “team” → “party”. Their tables of numbers are the same as before.</li>
+<li>One of those skill texts also lost a doubled word (“the target for for 1.5s”).</li>
+</ul>
+<h4>The rest</h4>
+<ul>
+<li>Quest and badge-challenge dialogue, 60 quiz strings, event rules, tips and notices.</li>
+<li><strong>By language:</strong> English 1,282, Japanese 701, Korean 683, Portuguese 171, German 42, Indonesian 35, Vietnamese 13, Thai 7, Russian 2, and 1 each in Spanish, French, Simplified and Traditional Chinese.</li>
+</ul></div>
+        <div class="upd-card" id="ledger"><h3>Every change in the files</h3>
+<p>The complete list. Steam build 26724110 (November 18) to 26779353 (November 19): 18 files added, 15 removed and 23 modified.</p>
+<details class="upd-more"><summary>Data tables: 13 changed</summary>
+<div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Table</th><th scope="col">Rows</th><th scope="col">What changed</th></tr></thead><tbody>
+<tr><td data-label="Table">item_data</td><td data-label="Rows">+1</td><td data-label="What changed">Departure with the Wind: Collectible Gift Box (5200019)</td></tr>
+<tr><td data-label="Table">item_effect_data, item_cd_map</td><td data-label="Rows">+1 each</td><td data-label="What changed">The Gift Box’s “choose one” use</td></tr>
+<tr><td data-label="Table">item_use_type_map</td><td data-label="Rows">2</td><td data-label="What changed">Two use-type lists re-sorted, the Gift Box added to one</td></tr>
+<tr><td data-label="Table">drop_data</td><td data-label="Rows">+2</td><td data-label="What changed">The Gift Box’s 11 choices, and the rank reward that gives the box</td></tr>
+<tr><td data-label="Table">egg_rank_reward_data</td><td data-label="Rows">1</td><td data-label="What changed">Egg Emperor: a reward at 200 stars</td></tr>
+<tr><td data-label="Table">shop_commodity_data, item_shop_data</td><td data-label="Rows">+1 each</td><td data-label="What changed">The Blind Box’s Egg Heist Shop listing</td></tr>
+<tr><td data-label="Table">shop_tag_mapping_data</td><td data-label="Rows">1</td><td data-label="What changed">The Egg Heist Shop’s shelf, with the new listing first</td></tr>
+<tr><td data-label="Table">home_season_construction_submit_data</td><td data-label="Rows">+20, 4</td><td data-label="What changed">20 new item delivery quests; 4 ore quests’ weights</td></tr>
+<tr><td data-label="Table">game_event_data</td><td data-label="Rows">2</td><td data-label="What changed">Whisperwake Isles Exploration Plan’s two rows: when its tab ends</td></tr>
+<tr><td data-label="Table">custom_en_data</td><td data-label="Rows">2</td><td data-label="What changed">Terrace Build, Aniimo Outing</td></tr>
+<tr><td data-label="Table">keyword_link_data</td><td data-label="Rows">1 table</td><td data-label="What changed">Only its server-side version changed; the copy in the game isn’t readable</td></tr>
+</tbody></table></div>
+<p class="upd-small">Every other table has the same version stamp as before, including every Aniimo, skill, buff, Holo-Battle Interlink, Sanctum and map table.</p></details>
+<details class="upd-more"><summary>Scenes: 2 changed</summary><ul>
+<li><strong>Idyll:</strong> one chest puzzle in Zephyrus Landbridge was re-wired: its script got one more link, and its two spawn points (its chest and its Aniimo) got a different spawn type. Nothing moved.</li>
+<li><strong>Whisperwake Isles:</strong> two quest scripts changed, and one character in Crescent Bay was added to one of the scene’s character lists.</li>
+<li>Idyll’s list of placed objects also changed; our reader can’t open that table.</li>
+</ul></details>
+<details class="upd-more"><summary>Scripts: 1 of 9,805 changed</summary><ul>
+<li><strong>UIConst:</strong> the pop-up that asks you to rate the game is now full-screen with a blurred background.</li>
+</ul></details>
+<details class="upd-more"><summary>Text: 2 new, 1,282 changed, 0 removed</summary><ul>
+<li><strong>New:</strong> the Gift Box’s name and text.</li>
+<li><strong>Changed:</strong> see <a href="#text">Text</a> above. The text files of all 13 languages changed.</li>
+</ul></details>
+<details class="upd-more"><summary>Art and models: 57 files added, 3 new bundles, 8 bundles replaced</summary><ul>
+<li>All of it is Pathfinder outfit data: the Shadow Rose set’s accessory and hair texture, and cloth data for 5 other outfits.</li>
+</ul></details>
+<details class="upd-more"><summary>Program files: 23 modified</summary><ul>
+<li>The game’s program (Aniimo.exe, GameAssembly.dll, UnityPlayer.dll), the script engine (xlua.dll), the anti-cheat module (NEP2.dll), the publisher’s and Discord’s libraries, and the version and file lists.</li>
+<li>What changed inside them isn’t readable from data.</li>
+</ul></details></div>
+        <div class="upd-card" id="same"><h3>Unchanged</h3><ul>
+<li>Every Aniimo’s stats, elements and skills, and every skill and buff value.</li>
+<li>The damage formulas, crit, the element chart, the duel rules, BREAK and Star-Up: the formula script and every table the guides cite are the same as in the last build.</li>
+<li>Holo-Battle Interlink: the same weeks, bosses and grades. The Sanctum: the same tables.</li>
+<li>The map: no spawn, chest or Lumin changes apart from the one puzzle above. No rarity changed.</li>
+<li><strong>Frenzied Assault</strong> (Saws and Whirlbite) still gives 0% Water Boost instead of 25%.</li>
+</ul></div>
+      </section>
+      <section class="upd-part" id="site" aria-labelledby="site-title">
+        <h2 id="site-title">On the site</h2>
+        <div class="upd-card"><h3>Item-log <a class="upd-link" href="/explorer/?view=itemlog">Open →</a></h3><ul><li>Departure with the Wind: Collectible Gift Box added, with its rank reward and its 11 choices. Each of those collectibles now names the Gift Box as a source.</li><li>Departure with the Wind: Collectible Blind Box now lists its shop price: 500,000 Eggshell Coin, limit 1.</li><li>21 items renamed, on the item and in the recipes and chests that name it. The game renamed 23; the other 2 aren’t in the Item-log.</li><li>New use or description text on 134 items, and the reworded source names (Homeland Aniimo Outing, Catching new Aniimo).</li><li>The “New in game build” filter now shows the Gift Box.</li></ul></div><div class="upd-card"><h3>Aniilog and Team Builder <a class="upd-link" href="/explorer/?view=aniilog">Open →</a></h3><ul><li>The reworded skill and trait texts, on 25 forms of 12 Aniimo: Coraliz, Dewlop, Dewple, Fragrancier, Glameep, Hypnowl, Mesmerowl, Reefish, Royalby, Sparkelf, Sugartini and Turbo.</li><li>Team Builder: the stun that Coraliz’s skill applies is named Stunned, and 2 buff texts are reworded.</li><li>Japanese, Korean and Simplified Chinese follow where the site has the text.</li></ul></div><div class="upd-card"><h3>The last note <a class="upd-link" href="/updates/3973445/">Open →</a></h3><ul><li><strong>A correction:</strong> it said 18 Nighttime Gathering quests had no order type and got one, and tied that to the official “Season Orders disappeared” fix. That was our misread of the table: those rows did not change. The three lines that said so are corrected.</li></ul></div><div class="upd-card"><h3>Guides <a class="upd-link" href="/guides/?guide=damage">Open →</a></h3><ul><li>Damage Guide, duels, type matchups and the Interlink guide re-checked against this build: no changes needed.</li></ul></div><div class="upd-card"><h3>Map and Checklists</h3><ul><li>Nothing in this update changes them.</li></ul></div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
+    </footer>
+  </body>
+</html>
