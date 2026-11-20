@@ -3057,8 +3057,9 @@ async function readSubmissionRequest(request) {
     party: picture("party"), gizmos };
 }
 
-// Two app users in one Interlink run both send it: same week and boss, played and sent within five minutes of each
-// other, - when both apps read it from the game log - in the same dungeon instance, and either two or more Battle Data
+// Two app users in one Interlink run both send it: same week and boss, stored within five minutes of each other (the
+// site's clock only: the app's played time follows the sender's PC clock, which betas sent off by whole hours), - when
+// both apps read it from the game log - in the same dungeon instance, and either two or more Battle Data
 // cards in common, or the same score, stars and time, or the same party on the Party screen (the same players in the
 // same slots, at least two of them real players: a misread number then doesn't split one run in two). Only full runs
 // (result screen, timer, party) count: a best score read off the prep screen says nothing about who was in a run.
@@ -3085,7 +3086,7 @@ function sameRunCopy(me, other) {
 async function runCopies(env, submissionId) {
   const me = await env.DB.prepare(
     `SELECT submission_id AS id, discord_id AS discordId, kind, game_uid AS gameUid, cycle, boss_id AS bossId, score, stars,
-       clear_time_s AS clearTimeS, COALESCE(played_at, created_at) AS at, created_at AS sentAt, players_json AS playersJson,
+       clear_time_s AS clearTimeS, created_at AS sentAt, players_json AS playersJson,
        extra_json AS extraJson, json_extract(extra_json, '$.instanceId') AS instanceId, server
      FROM leaderboard_submissions WHERE submission_id = ?`,
   ).bind(submissionId).first();
@@ -3097,11 +3098,11 @@ async function runCopies(env, submissionId) {
        FROM leaderboard_submissions
        WHERE kind = 'interlink_run' AND submission_id <> ? AND discord_id <> ? AND game_uid IS NOT NULL AND game_uid <> ?
          AND cycle IS ? AND boss_id IS ?
-         AND ABS(COALESCE(played_at, created_at) - ?) <= ? AND ABS(created_at - ?) <= ?
+         AND ABS(created_at - ?) <= ?
          AND (? IS NULL OR json_extract(extra_json, '$.instanceId') IS NULL OR json_extract(extra_json, '$.instanceId') = ?)
          AND (? IS NULL OR server IS NULL OR server = ?)
        ORDER BY submission_id LIMIT 40`,
-    ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId, me.at, CORROBORATE_WINDOW_S,
+    ).bind(me.id, me.discordId, me.gameUid, me.cycle, me.bossId,
       me.sentAt, CORROBORATE_WINDOW_S, me.instanceId, me.instanceId, me.server, me.server).all();
     matches = (nearby || []).filter((other) => sameRunCopy(me, other));
   }

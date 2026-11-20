@@ -970,7 +970,7 @@ test("a menu best's viewer shows the run a teammate's app sent for that player, 
   assert.equal(details.runProof, runId);                    // the same run the clear ladder shows
 });
 
-test("only runs played and sent within five minutes vouch; prep-screen scores and late runs never do", async () => {
+test("only runs stored within five minutes of each other vouch, whatever their played time says; prep-screen scores and late runs never do", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
   const a = await desktopToken(env, SESSIONS.dev);
   const b = await desktopToken(env, SESSIONS.dev2);
@@ -990,13 +990,13 @@ test("only runs played and sent within five minutes vouch; prep-screen scores an
   const mine = () => sqlite.prepare("SELECT players_json FROM leaderboard_submissions WHERE client_run_id = 'm1'").get();
   assert.equal(vouched(mine()), false);
 
-  // the same score from a run played more than five minutes apart is another run
-  await send(b, run("k-other", { ...shared, gameUid: "302000000002", playedAt: 1792700000 + 6 * 60,
+  // the same numbers stored more than five minutes apart are another run, whatever playedAt says (here: the same second)
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id = 'm1'").run();
+  await send(b, run("k-other", { ...shared, gameUid: "302000000002", playedAt: 1792700000,
     players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
   assert.equal(vouched(mine()), false);
 
   // played together, but sent more than five minutes after the first one: too late to vouch
-  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id = 'm1'").run();
   await send(b, run("k-late", { ...shared, gameUid: "302000000002", playedAt: 1792700030,
     players: [{ name: "Kaela", ai: false, self: true }, { name: "MinMax", ai: false }] }));
   assert.equal(vouched(mine()), false);
@@ -3265,4 +3265,56 @@ test("POST /api/admin/run-names: administrators only, a dry run by default, appl
   await assertSettled(env, sqlite);
   const twice = await (await names({ apply: true })).json();
   assert.deepEqual([twice.changed, twice.linked, twice.renamed, twice.confirmed, twice.uidsRemoved, twice.unsettled, twice.settled], [0, 0, 0, 0, 0, 0, 0]);
+});
+
+// two senders' copies of one run (DevOne, UserOne), each with its own played time as the app sent it
+async function copiesPlayedAt(env, devPlayedAt, userPlayedAt, { cards = true } = {}) {
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const players = (me) => [["DevOne", 0], ["UserOne", 1], ["Rook", 2]].map(([name, n]) => ({ name, ai: false, ...(name === me ? { self: true } : {}),
+    ...(cards ? copyCard(n) : {}) }));
+  const body = (id, gameUid, me, playedAt) => run(id, { gameUid, score: 21000, stars: 21, clearTimeS: 170, playedAt, players: players(me) });
+  return {
+    dev: () => sendRun(env, dev, body("copy-DevOne", "301000000001", "DevOne", devPlayedAt)),
+    user: () => sendRun(env, user, body("copy-UserOne", "301000000003", "UserOne", userPlayedAt)),
+  };
+}
+function assertOneRun(sqlite) {
+  const rows = storedCopies(sqlite);
+  const stored = sqlite.prepare("SELECT MAX(created_at) - MIN(created_at) AS gap FROM leaderboard_submissions WHERE kind = 'interlink_run'").get();
+  assert.ok(stored.gap <= 2, "stored within 2 seconds");
+  assert.ok(rows[0].extra.sharedRun && rows[0].extra.sharedRun === rows[1].extra.sharedRun, "one run");
+  const slot = (id, name) => rows.find((row) => row.id === id).players.find((p) => p.name === name);
+  assert.deepEqual([slot("copy-DevOne", "UserOne").uid, slot("copy-DevOne", "UserOne").confirmed], ["301000000003", true]);
+  assert.deepEqual([slot("copy-UserOne", "DevOne").uid, slot("copy-UserOne", "DevOne").confirmed], ["301000000001", true]);
+}
+
+test("same run by the site's clock: copies stored seconds apart whose played times differ by an hour (a PC clock's time zone) are one run", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const send = await copiesPlayedAt(env, at, at + 3600);
+  assert.equal((await send.dev()).status, 201);
+  assert.equal((await send.user()).status, 201);
+  assertOneRun(sqlite);
+});
+
+test("same run by the site's clock: played times six hours apart the other way round are one run too", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const send = await copiesPlayedAt(env, at, at - 6 * 3600);
+  assert.equal((await send.dev()).status, 201);
+  assert.equal((await send.user()).status, 201);
+  assertOneRun(sqlite);
+});
+
+test("same run by the site's clock: equal score, stars and time stored 20 minutes apart are two runs; nobody vouches", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const send = await copiesPlayedAt(env, at, at, { cards: false });
+  assert.equal((await send.dev()).status, 201);
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 1200 WHERE client_run_id = 'copy-DevOne'").run();
+  assert.equal((await send.user()).status, 201);
+  const rows = storedCopies(sqlite);
+  assert.deepEqual(rows.map((row) => row.extra.sharedRun ?? null), [null, null]);
+  assert.equal(rows.some((row) => row.players.some((p) => p.confirmed)), false);
 });
