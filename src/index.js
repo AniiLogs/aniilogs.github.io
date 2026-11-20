@@ -4682,19 +4682,48 @@ function withOwnBest(row, ladderId) {
   const { key, ascending } = INTERLINK_LADDERS[ladderId];
   const now = row[key] == null ? null : Number(row[key]);
   if (now !== null && (ascending ? best.value >= now : best.value <= now)) return row;
-  const copy = { ...row, [key]: best.value, figureRuns: { ...row.figureRuns, [ladderId]: best.hasProof ? best.runId : null } };
+  // figureGroup / figureFirst: the run the ranked figure came from (runGroup stays the row's own run)
+  const copy = { ...row, [key]: best.value, figureRuns: { ...row.figureRuns, [ladderId]: best.hasProof ? best.runId : null },
+    figureGroup: best.group, figureFirst: best.first };
   if (ladderId === "score") delete copy.menuProofId;      // that row's menu best is of another score
   Object.defineProperty(copy, "ownBests", { value: row.ownBests, enumerable: false });
   return copy;
 }
 
+// Ladders of one player's own figure: each player is their own row there, never pooled with their team.
+const ONE_PLAYER_LADDERS = Object.freeze(["dps", "break", "heal"]);
+
+// One Interlink run sent by each of its players is one result, so a team ladder ranks runs, not copies: the players
+// whose best is the same run, with the same figures, are one team row and share its place. Equal results share a
+// place and the next is skipped (1, 2, 2, 4, counting team rows). Ties are listed by when that run first reached
+// AniiLogs. Two copies of one run read differently stay two rows. figures(a, b): the ladder's order, no arrival.
+// Each row gets rank (its team row's place) and team (the 1-based index of its team row on the board).
+function rankedTeams(rows, figures, pooled) {
+  const first = (row) => row.figureFirst ?? row.runFirst ?? row.firstAt;
+  const teamKey = (row) => (row.runGroup == null ? null : `${row.runGroup}|${row.figureGroup ?? row.runGroup}`);
+  const keyOrder = (a, b) => {
+    const x = teamKey(a) ?? ""; const y = teamKey(b) ?? "";
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
+  const sorted = rows.sort((a, b) => figures(a, b) || first(a) - first(b) || keyOrder(a, b) || a.firstAt - b.firstAt);
+  let teams = 0; let place = 0; let lead = null; let previous = null;
+  return sorted.map((row) => {
+    const key = teamKey(row);
+    const joins = pooled && previous && key !== null && key === teamKey(previous) && figures(previous, row) === 0;
+    if (!joins) {
+      teams += 1;
+      if (!lead || figures(lead, row) !== 0) { place = teams; lead = row; }   // a tie keeps the place of the first row it ties
+    }
+    previous = row;
+    return { rank: place, team: teams, ...row };
+  });
+}
+
 function rankedLadder(rows, ladderId) {
   const ladder = INTERLINK_LADDERS[ladderId] || INTERLINK_LADDERS.score;
   const value = (row) => Number(row[ladder.key]);
-  return rows.filter((row) => Number.isFinite(value(row)) && row[ladder.key] !== null)
-    .sort((a, b) => (ladder.ascending ? value(a) - value(b) : value(b) - value(a))
-      || (Number(b.score) || 0) - (Number(a.score) || 0) || a.firstAt - b.firstAt)
-    .map((row, index) => ({ rank: index + 1, ...row }));
+  const figures = (a, b) => (ladder.ascending ? value(a) - value(b) : value(b) - value(a)) || (Number(b.score) || 0) - (Number(a.score) || 0);
+  return rankedTeams(rows.filter((row) => Number.isFinite(value(row)) && row[ladder.key] !== null), figures, !ONE_PLAYER_LADDERS.includes(ladderId));
 }
 
 async function interlinkCycles(env) {
@@ -4832,7 +4861,8 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
           ORDER BY gc.last_seen_at DESC LIMIT 1)) END AS uid,
        (SELECT CASE WHEN p.is_public = 1 THEN p.public_id END FROM profiles p WHERE p.discord_id = s.who) AS profileId,
        ${discordNameSql("s.who")} AS discordName,
-       s.created_at AS firstAt, COALESCE(s.played_at, s.created_at) AS playedAt
+       s.created_at AS firstAt, COALESCE(s.played_at, s.created_at) AS playedAt,
+       ${COPY_GROUP("s")} AS runGroup, s.run_first AS runFirst    -- which run the picked copy is, and when it first arrived
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
                CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC) AS pick
@@ -4849,13 +4879,17 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
     `SELECT r.who, r.cycle, r.boss_id AS bossId, r.submission_id AS runId, r.kind, ${RUN_SCORE("r")} AS score, r.stars, r.cleared,
        r.clear_time_s AS clear, r.team_dps AS teamDps, r.p_dps AS dps, r.p_break AS "break", r.p_heal AS heal,
        json_extract(r.extra_json, '$.starCap') AS sentCap,
-       (r.evidence_key IS NOT NULL OR r.battle_evidence_key IS NOT NULL) AS hasProof
+       (r.evidence_key IS NOT NULL OR r.battle_evidence_key IS NOT NULL) AS hasProof,
+       ${COPY_GROUP("r")} AS runGroup, r.run_first AS runFirst
      FROM ${CREDITED_COPIES()} r
      WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND COALESCE(r.outcome, '') <> 'invalid' AND r.boss_id IS NOT NULL
        AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""} AND ${onBoards(unlinked, "r")}
      ORDER BY r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC, r.submission_id ASC`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
+  const members = new Map();          // who was on each run: runGroup -> Set of who
   for (const run of figures.results || []) {
+    if (!members.has(run.runGroup)) members.set(run.runGroup, new Set());
+    members.get(run.runGroup).add(run.who);
     const key = `${run.who}|${run.cycle}|${run.bossId}`;
     const own = ownBests.get(key) || {};
     // a clear counts as the boards count one: finished, with that boss's stars for a clear that week
@@ -4870,7 +4904,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
       if (run[ladderId] == null || !Number.isFinite(value)) continue;
       const best = own[ladderId];
       if (!best || (INTERLINK_LADDERS[ladderId].ascending ? value < best.value : value > best.value)) {
-        own[ladderId] = { value, runId: run.runId, hasProof: Boolean(run.hasProof) };
+        own[ladderId] = { value, runId: run.runId, hasProof: Boolean(run.hasProof), group: run.runGroup, first: run.runFirst };
       }
     }
     ownBests.set(key, own);
@@ -4914,7 +4948,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
   }
   // A week the game data lists only counts its own three bosses: a misread boss name (the battle prep screen's name
   // sits over the boss art) can't add a fourth board or count a score twice.
-  return (results || []).filter((row) => {
+  const out = (results || []).filter((row) => {
     const cycle = interlinkCycle(list, row.cycle);
     return !cycle || cycle.bosses.some((boss) => boss.id === String(row.bossId));
   }).map((row) => {
@@ -4928,13 +4962,18 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
     delete row.sentCap; delete row.sentLimit;
     return row;
   });
+  // who was on each run (a board's "also on this run"), beside the rows so every other caller reads them as before
+  Object.defineProperty(out, "runMembers", { value: members, enumerable: false });
+  return out;
 }
 
-// A boss board: most stars, then highest score, then fastest clear (no clear last), then whoever got there first.
+// A boss board: most stars, then highest score, then fastest clear (no clear last), then the run that got there first
+// (rankedTeams: one row per run).
 function rankedBossRuns(rows) {
   const time = (row) => (row.clearTimeS == null ? Infinity : Number(row.clearTimeS));
-  return rows.sort((a, b) => (Number(b.stars) || 0) - (Number(a.stars) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0)
-    || time(a) - time(b) || a.firstAt - b.firstAt).map((row, index) => ({ rank: index + 1, ...row }));
+  const figures = (a, b) => (Number(b.stars) || 0) - (Number(a.stars) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0)
+    || (time(a) === time(b) ? 0 : time(a) - time(b));
+  return rankedTeams(rows, figures, true);
 }
 
 function ranked(rows, key) {
@@ -5309,7 +5348,9 @@ async function interlinkBoards(request, env) {
   // One week: the three boss boards and the week total.
   const cycle = interlinkCycle(list, params.get("cycle")) || currentInterlinkCycle(list);
   const asked = String(params.get("ladder") || "");
-  const rows = (await interlinkBests(env, [cycle.id], list, server, unlinked)).map((row) => withOwnBest(row, asked));
+  const bests = await interlinkBests(env, [cycle.id], list, server, unlinked);
+  const runMembers = bests.runMembers || new Map();
+  const rows = bests.map((row) => withOwnBest(row, asked));
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
     const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind; delete row.playedAt;
     row.proofIds = Object.fromEntries(Object.entries(ROW_FIGURES).filter(([, figure]) => row[figure] != null)
@@ -5350,15 +5391,45 @@ async function interlinkBoards(request, env) {
   const orderParam = params.get("order");
   const reversed = Boolean(ladder) && (orderParam === "asc" || orderParam === "desc")
     && orderParam !== (INTERLINK_LADDERS[ladder].ascending ? "asc" : "desc");
+  // ?rows=teams: limit/offset page by team rows (one per run, rankedTeams), each page every player of its team rows;
+  // otherwise by players
+  const byTeams = params.get("rows") === "teams";
+  const pooled = !ONE_PLAYER_LADDERS.includes(ladder);
   const caps = interlinkStarCaps(cycle.id);
   const bosses = bossIds.filter((id) => !onlyBoss || id === onlyBoss).map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
     const slotIndex = cycle.bosses.findIndex((boss) => boss.id === id);
     const runs = rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row }));
-    const all = (ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs))
-      .map(({ discordId, cycle: _c, bossId, bossName, firstAt, ...row }) => ({ ...row, player: row.player || "Pathfinder",
-        updatedAt: firstAt, own: own(discordId) }));         // updatedAt: when this best run reached the site
-    if (reversed) all.reverse();
+    const ranked = ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs);
+    // "also on this run": players on the run a team row shows who are ranked in another of this board's team rows
+    // (their best is another run), on the row's first entry
+    const also = new Map();
+    if (pooled) {
+      for (const lead of ranked) {
+        if (also.has(lead.team)) continue;
+        const on = runMembers.get(lead.figureGroup ?? lead.runGroup);
+        also.set(lead.team, on ? ranked.filter((row) => row.team !== lead.team && on.has(row.discordId)).map((row) => ({
+          player: row.player || "Pathfinder", rank: row.rank, profileId: row.profileId || null,
+          ...(row.discordName ? { discordName: row.discordName } : {}) })) : []);
+      }
+    }
+    const all = ranked.map(({ discordId, cycle: _c, bossId, bossName, firstAt, runGroup, runFirst, figureGroup, figureFirst, ...row }, index) => ({
+      ...row, player: row.player || "Pathfinder", updatedAt: firstAt, own: own(discordId),   // updatedAt: when this best run reached the site
+      ...((index === 0 || ranked[index - 1].team !== row.team) && also.get(row.team)?.length ? { also: also.get(row.team) } : {}) }));
+    const teams = all.length ? all[all.length - 1].team : 0;
+    const teamRows = [];                                     // the entries of each team row, in rank order
+    for (const entry of all) {
+      if (teamRows.length && teamRows[teamRows.length - 1][0].team === entry.team) teamRows[teamRows.length - 1].push(entry);
+      else teamRows.push([entry]);
+    }
+    let entries;
+    if (byTeams) {
+      if (reversed) teamRows.reverse();                      // a team row's players keep their order
+      entries = (limit ? teamRows.slice(offset, offset + limit) : teamRows).flat();
+    } else {
+      if (reversed) all.reverse();
+      entries = limit ? all.slice(offset, offset + limit) : all;
+    }
     return {
       id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id,
       slot: slotIndex >= 0 ? INTERLINK_RULES.slots[slotIndex] || null : null,
@@ -5366,7 +5437,8 @@ async function interlinkBoards(request, env) {
       starCap: slotIndex >= 0 ? caps[slotIndex] ?? null : null,
       level: listed?.level ?? cycle.level ?? null,
       total: all.length,
-      entries: limit ? all.slice(offset, offset + limit) : all,
+      teams,
+      entries,
     };
   });
   const totals = new Map();
@@ -5385,7 +5457,7 @@ async function interlinkBoards(request, env) {
   return json({
     cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers,
     ladder: ladder || "stars", order: ladder ? (Boolean(INTERLINK_LADDERS[ladder].ascending) !== reversed ? "asc" : "desc") : null,
-    offset, limit, updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
+    offset, limit, rows: byTeams ? "teams" : "players", updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
     seasons: interlinkSeasons(list),
     rules: { slots: INTERLINK_RULES.slots, slotsConfirmed: INTERLINK_RULES.slotsConfirmed, starCaps: caps,
       clearStars: interlinkStarRule(cycle.id).clear, ladders: Object.keys(INTERLINK_LADDERS) },

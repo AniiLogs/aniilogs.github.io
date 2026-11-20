@@ -4,6 +4,7 @@
   const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
   const AUTH_SESSION_STORAGE_KEY = "aniilogs:auth:session:v1";
   const PREFERENCES_KEY = "aniilogs:explorer:preferences:v1";
+  const ROWS_KEY = "aniilogs:leaderboard:rows:v1";
   const PAGE_SIZE = 50;
 
   // Boards per mode: which records they rank, what they can be ranked by, and which filters apply.
@@ -83,12 +84,21 @@
     // Interlink: the week shown, the board opened with "View all" and its ladder, each board's ladder, the boss a phone
     // shows (0 left, 1 center, 2 right), and the Season Ladder's season, split ("all": the whole season) and order
     week: "", viewBoss: "", viewLadder: "score", ladders: {}, slot: 1, season: "", split: "", rank: "score", rankOrder: "",
+    // the team ladders' rows: "teams" (one row per run, its players together) or "players" (one row each), every board
+    rows: "teams",
     status: null, facets: null, total: 0, expanded: new Set(), requestId: 0, push: false,
   };
 
   // ---------------------------------------------------------------- helpers
   function sessionToken() {
     try { return String(window.localStorage.getItem(AUTH_SESSION_STORAGE_KEY) || ""); } catch { return ""; }
+  }
+  // the Teams / Players choice, kept for the next visit (a page that can't store it starts on Teams)
+  function storedRows() {
+    try { return window.localStorage.getItem(ROWS_KEY) === "players" ? "players" : "teams"; } catch { return "teams"; }
+  }
+  function storeRows(value) {
+    try { window.localStorage.setItem(ROWS_KEY, value); } catch { /* the choice lasts for this page only */ }
   }
   function developerModeOn() {
     try { return Boolean(JSON.parse(window.localStorage.getItem(PREFERENCES_KEY) || "{}").developerMode); } catch { return false; }
@@ -171,6 +181,7 @@
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
     state.viewOrder = state.viewBoss && ["asc", "desc"].includes(state.order) ? state.order : "";   // "View all": its ladder flipped
     state.season = params.get("season") || ""; state.split = params.get("split") || "";
+    state.rows = ["teams", "players"].includes(params.get("rows")) ? params.get("rows") : storedRows();
     // the Season Ladder's sorted column (?rank=, so ?rank=stars from older links still works) and ?order=
     state.rank = Object.hasOwn(SEASON_SORTS, params.get("rank") || "") ? params.get("rank") : "score";
     state.rankOrder = board().custom === "season" && ["asc", "desc"].includes(state.order) ? state.order : "";
@@ -191,6 +202,7 @@
     if (state.unlinked) params.set("unlinked", "1");                   // every board: everyone's records, not only linked players
     if (board().custom === "boss") {
       if (state.week) params.set("week", state.week);
+      if (state.rows === "players") params.set("rows", "players");      // Teams is the default
       if (state.viewBoss) {
         params.set("boss", state.viewBoss);
         params.set("ladder", state.viewLadder);
@@ -672,28 +684,103 @@
 
   // Per Boss: the week's three boards, each with its own ladder menu. A row: the player and how the run ended on the
   // left, the ladder's figure over the stars on the right.
+  // Team ladders rank runs: one Interlink run sent by each of its players is one result, its players sharing a row and
+  // its place (Teams), or one row each with that place (Players). Avg DPS, BREAK and healing are one player's own.
+  const TEAM_LADDERS = ["score", "stars", "clear", "teamDps"];
+  // the Teams / Players switch: on team ladders, once the API sends team rows (boss.teams)
+  function hasTeams(boss, ladder) {
+    return TEAM_LADDERS.includes(ladder.id) && boss.teams !== undefined;
+  }
+  function teamView(boss, ladder) {
+    return hasTeams(boss, ladder) && state.rows === "teams";
+  }
+  // a board's entries as its team rows: the players of one row are next to each other and share `team`
+  function teamsOf(entries) {
+    const teams = [];
+    for (const entry of entries) {
+      if (teams.length && teams[teams.length - 1][0].team === entry.team) teams[teams.length - 1].push(entry);
+      else teams.push([entry]);
+    }
+    return teams;
+  }
+  // a team row's "last updated": when the first of its players' copies reached AniiLogs
+  function teamUpdated(members) {
+    const times = members.map((entry) => entry.updatedAt).filter(Boolean);
+    return times.length ? Math.min(...times) : null;
+  }
+  // players on the run a team row shows whose own best is another run, so they're ranked in another row
+  function alsoLine(entry) {
+    if (!entry?.also?.length) return null;
+    return el("small", { class: "lb-also", text: `Also on this run: ${entry.also.map((other) => `${other.discordName || other.player} (place ${other.rank})`).join(", ")}` });
+  }
+  // a team row's players, each with their "you" and marks, joined by a muted dot
+  function teamNames(members) {
+    return el("span", { class: "lb-who-name lb-team-names" }, ...members.flatMap((entry, index) => [
+      index ? el("span", { class: "lb-sep", "aria-hidden": "true", text: "·" }) : null,
+      rowName(entry), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry)]));
+  }
+  // a team row's result: how the run ended, its one check badge and its proof pictures
+  function teamResult(lead, ladder, boss) {
+    const [text, proof] = resultLine(lead, ladder, boss);
+    return [text, checkBadge(rowCheck(lead, ladder)), proof];
+  }
+  function setRows(value, focusBoard = null) {
+    if (state.rows === value) return;
+    state.rows = value;
+    storeRows(value);
+    if (state.viewBoss) { state.offset = 0; void loadEntries(); return; }
+    writeUrl();
+    // every board on the page in the new view, each with its own ladder
+    for (const node of els.interlink.querySelectorAll(".lb-boss[data-board-id]")) {
+      const { boardId, week } = node.dataset;
+      void loadBoard(boardId, state.ladders[`${week}:${boardId}`], week).then(() => {
+        if (focusBoard !== `${week}:${boardId}`) return;
+        els.interlink.querySelector(`[data-week="${CSS.escape(week)}"][data-board-id="${CSS.escape(boardId)}"] .lb-seg [aria-pressed="true"]`)?.focus();
+      });
+    }
+  }
+  function rowsSwitch(focusBoard = null) {
+    const choice = (value, label) => el("button", { type: "button", "aria-pressed": String(state.rows === value), text: label,
+      onclick: () => setRows(value, focusBoard) });
+    return el("div", { class: "lb-show", role: "group", "aria-label": "Show" }, el("span", { text: "Show" }),
+      el("div", { class: "lb-seg" }, choice("teams", "Teams"), choice("players", "Players")));
+  }
+
   function bossBoard(boss, cycleId = state.week) {
     const ladder = ladderOf(state.ladders[`${cycleId}:${boss.id}`]);
     const select = el("select", { "aria-label": `Rank the ${boss.slot || boss.name} board by`,
       onchange: (event) => { void loadBoard(boss.id, event.target.value, cycleId); } },
     ...LADDERS.map((item) => el("option", { value: item.id, text: item.label })));
     select.value = ladder.id;
-    const rows = boss.entries.map((entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row" },
+    const teams = teamView(boss, ladder);
+    const playerRow = (entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row", "data-place": String(entry.rank) },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
       el("span", { class: "lb-who" }, playerName(entry, null, rowCheck(entry, ladder)), el("small", { class: "lb-result" }, ...resultLine(entry, ladder, boss))),
       updatedIcon(entry.updatedAt),
-      el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry, boss) }), stars(entry.stars))));
+      el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry, boss) }), stars(entry.stars)));
+    const teamRow = (members) => {
+      const lead = members[0];
+      return el("li", { class: members.some((entry) => entry.own) ? "lb-row lb-team is-own" : "lb-row lb-team", "data-place": String(lead.rank) },
+        el("span", { class: "lb-rk", text: String(lead.rank) }),
+        el("span", { class: "lb-who" }, teamNames(members), el("small", { class: "lb-result" }, ...teamResult(lead, ladder, boss)), alsoLine(lead)),
+        updatedIcon(teamUpdated(members)),
+        el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(lead, boss) }), stars(lead.stars)));
+    };
+    const rows = teams ? teamsOf(boss.entries).map(teamRow) : boss.entries.map(playerRow);
     // over the rows: what each column is, with the "last updated" column as its icon
-    const head = el("div", { class: "lb-rows-head", "aria-hidden": "true" }, el("span", { text: "#" }), el("span", { text: "Player" }),
+    const head = el("div", { class: "lb-rows-head", "aria-hidden": "true" }, el("span", { text: "#" }), el("span", { text: teams ? "Team" : "Player" }),
       el("span", { class: "lb-rows-head-when", title: "Last updated" }, lineIcon("update")), el("span", { text: ladder.label.replace(/ \(one player\)$/u, "") }));
+    const count = teams ? boss.teams : boss.total;
+    const noun = boss.teams === undefined ? "" : ` ${teams ? "team" : "player"}${count === 1 ? "" : "s"}`;
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
       "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
     bossHead(boss, "lb-boss-head"),
     el("label", { class: "lb-ladder" }, el("span", { text: "Ladder" }), select),
+    hasTeams(boss, ladder) && boss.total ? rowsSwitch(`${cycleId}:${boss.id}`) : null,   // nothing to switch on an empty board
     rows.length ? head : null,
     rows.length ? el("ol", { class: "lb-rows" }, rows)
       : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
-    boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(boss.total)} →`,
+    boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(count)}${noun} →`,
       onclick: () => {
         state.push = true;
         state.returnWeek = state.week; state.week = cycleId;     // back from "View all" returns to this page
@@ -705,6 +792,7 @@
     const key = `${cycleId}:${bossId}`;
     state.ladders[key] = ladderOf(ladderId).id;
     const ask = new URLSearchParams({ cycle: cycleId, boss: bossId, ladder: state.ladders[key], limit: String(BOARD_ROWS) });
+    if (state.rows === "teams") ask.set("rows", "teams");       // the top rows are team rows
     if (state.server) ask.set("server", state.server);
     if (state.unlinked) ask.set("unlinked", "1");
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
@@ -800,7 +888,9 @@
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
           el("span", { text: `${boss.slot ? `${boss.slot} boss` : boss.name} · ${weekRange(data.cycle)}` })),
         updatedLine(data.updatedAt)),
-      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`));
+      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`),
+      hasTeams(boss, ladder) && boss.total ? rowsSwitch() : null);
+    const teams = teamView(boss, ladder);
     els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" }),
       columns.map((column) => headCell(column.label, {
         sortable: LADDERS.some((item) => item.id === column.id), active: column.id === ladder.id, order, className: ranked(column),
@@ -812,21 +902,47 @@
           void loadEntries();
         },
       }))));
-    els.rows.replaceChildren(...(boss.entries.length ? boss.entries.map((entry) => el("tr", { class: entry.own ? "is-own" : null },
+    const playerRow = (entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
       el("td", { class: "lb-player" }, playerName(entry, null, rowCheck(entry, ladder))),
       columns.map((column) => el("td", { class: ranked(column) },
-        column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder, boss)) : column.value(entry, boss)))))
+        column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder, boss)) : column.value(entry, boss))));
+    // Teams: one group of rows per team row, one row per player. The run's figures (and its place, result and when it
+    // was sent) span the group; each player's row has their name and their own Avg DPS, BREAK and healing.
+    const teamRows = (members) => {
+      const lead = members[0];
+      const span = members.length > 1 ? String(members.length) : null;
+      const shared = { ...lead, updatedAt: teamUpdated(members) };
+      const own = members.some((entry) => entry.own);
+      return members.map((entry, index) => el("tr", { class: [index ? "" : "lb-team-first", own ? "is-own" : ""].join(" ").trim() || null },
+        index ? null : el("td", { class: "lb-rank", rowspan: span, text: String(lead.rank) }),
+        el("td", { class: "lb-player" }, el("span", { class: "lb-who-name" }, rowName(entry),
+          entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry)),
+        index === members.length - 1 ? alsoLine(lead) : null),
+        columns.map((column) => {
+          if (ONE_PLAYER_COLUMNS.includes(column.id)) return el("td", { class: ranked(column) }, column.value(entry, boss));
+          if (index) return null;
+          return el("td", { class: ranked(column), rowspan: span },
+            column.id === "clear" ? el("span", { class: "lb-result" }, ...teamResult(lead, ladder, boss)) : column.value(shared, boss));
+        })));
+    };
+    const shown = teams ? teamsOf(boss.entries) : boss.entries;
+    els.rows.replaceChildren(...(shown.length ? shown.flatMap((item) => (teams ? teamRows(item) : [playerRow(item)]))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
     els.tableWrap.hidden = false;
-    const first = boss.total ? state.offset + 1 : 0;
-    const last = state.offset + boss.entries.length;
-    els.page.textContent = boss.total ? `${first}–${last} of ${number(boss.total)}` : "";
-    for (const node of [els.prev, els.next, els.page]) node.hidden = boss.total <= FULL_ROWS;
+    // Teams pages by team rows
+    const count = teams ? boss.teams : boss.total;
+    const first = count ? state.offset + 1 : 0;
+    const last = state.offset + shown.length;
+    els.page.textContent = count ? `${first}–${last} of ${number(count)}` : "";
+    for (const node of [els.prev, els.next, els.page]) node.hidden = count <= FULL_ROWS;
     els.prev.disabled = state.offset <= 0;
-    els.next.disabled = last >= boss.total;
-    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"} · ${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
+    els.next.disabled = last >= count;
+    const players = `${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
+    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"} · ${
+      teams ? `${number(boss.teams)} team${boss.teams === 1 ? "" : "s"} · ${players}` : players}`;
   }
+  const ONE_PLAYER_COLUMNS = ["dps", "break", "heal"];     // a player's own figures: one cell each in a team's rows
   function fold(column, ladder) {
     return column.id !== ladder.id && !["score", "stars", "clear", "date"].includes(column.id) ? "lb-hide-sm" : "";
   }
@@ -938,6 +1054,7 @@
       ask.set("ladder", "score");
       ask.set("limit", String(BOARD_ROWS));
     }
+    if (state.rows === "teams") ask.set("rows", "teams");       // limit and offset count team rows
     const data = await get(ask);
     if (requestId !== state.requestId) return;
     if (!data) { failed(); return; }
