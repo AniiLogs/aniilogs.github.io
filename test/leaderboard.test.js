@@ -2880,3 +2880,49 @@ test("team rows: the run's grouping never leaves the API; the desktop app's week
   assert.ok(app.entries.every((e) => "uid" in e && e.stars === 15 && Number.isInteger(e.score)));
   assert.equal(app.entries.find((e) => e.player === "DevOne").uid, "301000000001");
 });
+
+// one run sent by DevOne with three teammates; dps: each player's Avg DPS (undefined: none on their card)
+async function dpsRun(env, id, score, dps, at = 1) {
+  const a = await namedToken(env, SESSIONS.dev);
+  const players = Object.entries(dps).map(([name, avgDps]) => ({ name, ai: false, ...(name === "DevOne" ? { self: true } : {}),
+    ...(avgDps === undefined ? {} : { avgDps }) }));
+  const sent = await sendRun(env, a, run(id, { gameUid: "301000000001", boss: tuckingBoss, score, stars: 15, clearTimeS: 150, cleared: true,
+    playedAt: 1792700000 + at * 600, players }));
+  assert.equal(sent.status, 201);
+}
+const names = (boss) => boss.entries.map((e) => e.player);
+
+test("team rows: under rows=teams a team row's players come by their Avg DPS, highest first; none last", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await dpsRun(env, "carry", 20000, { DevOne: 5000, Kestrel: 9000, Lumen: 7000, Morrow: undefined });
+  const teams = (await interlinkBoard(env, "ladder=score&rows=teams")).boss;
+  assert.deepEqual(names(teams), ["Kestrel", "Lumen", "DevOne", "Morrow"]);
+  assert.deepEqual(teams.entries.map((e) => [e.rank, e.team]), [[1, 1], [1, 1], [1, 1], [1, 1]]);
+  // without rows=teams: the order as before (the sender's own row, then the teammates as the run lists them)
+  assert.deepEqual(names((await interlinkBoard(env, "ladder=score")).boss), ["DevOne", "Kestrel", "Lumen", "Morrow"]);
+});
+
+test("team rows: players with the same Avg DPS keep the order they had", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await dpsRun(env, "even", 20000, { DevOne: 5000, Lumen: 7000, Kestrel: 7000, Morrow: 9000 });
+  const before = names((await interlinkBoard(env, "ladder=score")).boss);
+  assert.deepEqual(before, ["DevOne", "Kestrel", "Lumen", "Morrow"]);
+  // Kestrel and Lumen tie on 7,000: in the order they had
+  const tied = before.filter((name) => name === "Kestrel" || name === "Lumen");
+  assert.deepEqual(names((await interlinkBoard(env, "ladder=score&rows=teams")).boss), ["Morrow", ...tied, "DevOne"]);
+});
+
+test("team rows: by Avg DPS, also stays on the row's first entry and the reversed order keeps each row's players", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await dpsRun(env, "lower", 20000, { DevOne: 5000, Kestrel: 9000, Lumen: 7000, Morrow: undefined }, 1);
+  await dpsRun(env, "higher", 25000, { DevOne: 6000, Quillet: 8000 }, 2);         // DevOne's best: in this row
+  const { boss } = await interlinkBoard(env, "ladder=score&rows=teams");
+  assert.deepEqual(boss.entries.map((e) => [e.player, e.rank, e.team]),
+    [["Quillet", 1, 1], ["DevOne", 1, 1], ["Kestrel", 2, 2], ["Lumen", 2, 2], ["Morrow", 2, 2]]);
+  assert.deepEqual(boss.entries.filter((e) => "also" in e).map((e) => [e.player, e.also]), [["Kestrel", [{ player: "DevOne", rank: 1, profileId: null }]]]);
+  assert.deepEqual([boss.teams, boss.total], [2, 5]);
+  const reversed = (await interlinkBoard(env, "ladder=score&rows=teams&order=asc")).boss;
+  assert.deepEqual(names(reversed), ["Kestrel", "Lumen", "Morrow", "Quillet", "DevOne"]);
+  // paging by team rows: the second team row, its players by Avg DPS
+  assert.deepEqual(names((await interlinkBoard(env, "ladder=score&rows=teams&limit=1&offset=1")).boss), ["Kestrel", "Lumen", "Morrow"]);
+});

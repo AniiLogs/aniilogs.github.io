@@ -5401,6 +5401,18 @@ async function interlinkBoards(request, env) {
     const slotIndex = cycle.bosses.findIndex((boss) => boss.id === id);
     const runs = rows.filter((row) => String(row.bossId) === id).map((row) => ({ ...row }));
     const ranked = ladder ? rankedLadder(runs, ladder) : rankedBossRuns(runs);
+    // Teams: a team row's players by their own Avg DPS in that run, highest first, so the team sees who carried; a
+    // player without one after the others, ties as they were. The team rows keep their order and places.
+    if (byTeams && pooled) {
+      const dps = (row) => (row.avgDps == null || !Number.isFinite(Number(row.avgDps)) ? null : Number(row.avgDps));
+      for (let start = 0; start < ranked.length;) {
+        let end = start + 1;
+        while (end < ranked.length && ranked[end].team === ranked[start].team) end += 1;
+        const members = ranked.slice(start, end).sort((a, b) => (dps(a) === null ? (dps(b) === null ? 0 : 1) : dps(b) === null ? -1 : dps(b) - dps(a)));
+        ranked.splice(start, members.length, ...members);
+        start = end;
+      }
+    }
     // "also on this run": players on the run a team row shows who are ranked in another of this board's team rows
     // (their best is another run), on the row's first entry
     const also = new Map();
