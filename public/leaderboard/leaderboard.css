@@ -242,6 +242,17 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-unconfirmed-note { flex-basis: 100%; }
 .lb-ladder { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
 .lb-interlink .lb-ladder select { flex: 1 1 0; width: 100%; min-width: 0; }
+/* Show: Teams / Players, under the Ladder menu: its label as wide as "Ladder" so both controls line up */
+.lb-ladder > span:first-child, .lb-show > span:first-child { flex: none; width: 2.75rem; }
+.lb-show { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
+.lb-full-head + .lb-show { max-width: 22rem; }
+.lb-seg { display: flex; flex: 1 1 0; gap: 3px; box-sizing: border-box; min-width: 0; min-height: 2.35rem; padding: 3px; border: 1px solid var(--line);
+  border-radius: 12px; background-color: var(--panel-2); }
+.lb-seg button { flex: 1 1 0; min-width: 0; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit;
+  font-size: 0.85rem; font-weight: 700; padding: 0.25rem 0.5rem; cursor: pointer; transition: background-color 0.15s, color 0.15s, box-shadow 0.15s; }
+.lb-seg button:hover { color: var(--text); }
+.lb-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-primary); font-weight: 850; }
+.lb-seg button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22), inset 0 0 0 1px var(--accent); }
 .lb-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 1.4rem 4.2rem; align-items: center; gap: 0.5rem;
   border-radius: 8px; padding: 0.25rem 0.45rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
@@ -253,9 +264,18 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-row:nth-child(odd) { background: color-mix(in srgb, var(--panel) 70%, transparent); }
 .lb-row.is-own { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
 .lb-rk { color: var(--muted); font-weight: 900; text-align: center; }
-.lb-row:nth-child(1) .lb-rk { color: #e8b923; }
-.lb-row:nth-child(2) .lb-rk { color: #a9b6ba; }
-.lb-row:nth-child(3) .lb-rk { color: #d08a5a; }
+/* medals by place, not by position: rows that tie share a place and its colour */
+.lb-row[data-place="1"] .lb-rk { color: #e8b923; }
+.lb-row[data-place="2"] .lb-rk { color: #a9b6ba; }
+.lb-row[data-place="3"] .lb-rk { color: #d08a5a; }
+/* Teams: one row per run, its players' names wrapping onto more lines; who else was on the run under the result */
+.lb-team-names { column-gap: 0.3rem; }
+.lb-team-names > * { flex: 0 1 auto; }
+.lb-team-names > a, .lb-team-names > span:not([class]) { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-team-names .lb-you { margin-left: 0; }
+.lb-sep { color: var(--muted); font-weight: 700; }
+.lb-also { display: block; color: var(--muted); font-size: 0.75rem; font-style: italic; white-space: normal; }
+.lb-team .lb-who { gap: 2px; }
 .lb-who { display: grid; min-width: 0; }
 /* the name and its marks (you, unclaimed, Verified, the proof button) wrap onto a second line rather than being cut off;
    only a name too long for the whole line is shortened */
@@ -279,6 +299,10 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   background: color-mix(in srgb, var(--panel-2) 55%, transparent); padding: 0.8rem 1rem; }
 .lb-full-head h3 { font-size: 1.3rem; }
 .lb-table .is-ranked { color: var(--accent); font-weight: 900; }
+/* Teams: a line between teams; the figures they share span the team's rows, at its top */
+.lb-table tr.lb-team-first:not(:first-child) td { border-top: 1px solid var(--line); }
+.lb-table td[rowspan] { vertical-align: top; }
+.lb-table .lb-also { margin-top: 2px; }
 .lb-who-name .lb-proof { margin-left: 2px; }
 
 /* Season Ladder */

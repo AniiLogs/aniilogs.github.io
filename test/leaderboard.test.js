@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -2738,4 +2738,531 @@ test("a shared run's lineup: a copy that names someone twice is named again from
   assert.deepEqual(mergedLineup(one, []).map((entry) => entry.name ?? null), ["Ann", "Neo", null]);
   // without CPs, slots still pair the copies
   assert.equal(mergedLineup([{ slot: 1, name: "X" }], [[{ slot: 1, name: "Y", self: true }]])[0].name, "Y");
+});
+
+// ---------------------------------------------------------------- team rows: one row per run on the team ladders
+const TEAM_FIELDS = ["runGroup", "runFirst", "figureGroup", "figureFirst"];
+const tuckingBoss = { id: "80000100", name: "Omega Tucking", level: 60 };
+const interlinkBoard = async (env, query, bossId = tuckingBoss.id) => {
+  const data = await (await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=1${query ? `&${query}` : ""}`)).json();
+  return { data, boss: data.bosses.find((x) => x.id === bossId) };
+};
+
+test("team rows: one run sent by two of its four players is one team row; they all share its place", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await desktopToken(env, SESSIONS.dev);
+  const b = await desktopToken(env, SESSIONS.dev2);
+  const c = await desktopToken(env, SESSIONS.user);
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  await call(env, "/api/leaderboard/characters", { token: a, method: "POST", form: proofForm({ gameUid: "302000000001", name: "Fennick" }) });
+  await call(env, "/api/leaderboard/characters", { token: b, method: "POST", form: proofForm({ gameUid: "302000000002", name: "Marlowe" }) });
+  await call(env, "/api/leaderboard/characters", { token: c, method: "POST", form: proofForm({ gameUid: "302000000003", name: "Quillon" }) });
+  const party = (me) => ["Fennick", "Marlowe", "Brindle", "Oswin"].map((name) => ({ name, ai: false, self: name === me }));
+  const shared = { boss: tuckingBoss, score: 16064, stars: 15, clearTimeS: 150, cleared: true, playedAt: 1792700000 };
+  await send(a, run("tm1", { ...shared, gameUid: "302000000001", players: party("Fennick") }));
+  await send(b, run("tm2", { ...shared, gameUid: "302000000002", playedAt: 1792700060, players: party("Marlowe") }));
+  // another team's run, lower
+  await send(c, run("tm3", { ...shared, score: 15000, gameUid: "302000000003", players: [{ name: "Quillon", ai: false, self: true }, { name: "Tamsin", ai: false }] }));
+
+  const { boss } = await interlinkBoard(env, "ladder=score");
+  const top = boss.entries.filter((e) => e.score === 16064);
+  assert.deepEqual(top.map((e) => e.player).sort(), ["Brindle", "Fennick", "Marlowe", "Oswin"]);
+  assert.deepEqual([...new Set(top.map((e) => [e.rank, e.team].join("|")))], ["1|1"]);
+  assert.deepEqual(boss.entries.filter((e) => e.score === 15000).map((e) => [e.player, e.rank, e.team]).sort(), [["Quillon", 2, 2], ["Tamsin", 2, 2]]);
+  assert.deepEqual([boss.teams, boss.total], [2, 6]);
+  // the default order (most stars, then score) pools the same way
+  const plain = (await interlinkBoard(env, "")).boss;
+  assert.deepEqual([plain.teams, plain.total, plain.entries.filter((e) => e.score === 16064).every((e) => e.rank === 1 && e.team === 1)], [2, 6, true]);
+});
+
+// one sender, four runs of four teams: they share the sender, each run has a teammate of its own
+// (sent a minute apart, so the tie lists the run that arrived first first)
+async function fourRuns(env, sqlite) {
+  const a = await namedToken(env, SESSIONS.dev);                    // DevOne
+  const send = async (id, score, mate, at) => {
+    await sendRun(env, a, run(id, { gameUid: "301000000001", boss: tuckingBoss, score, stars: 15, clearTimeS: 150 + at,
+      cleared: true, playedAt: 1792700000 + at * 600, players: [{ name: "DevOne", ai: false, self: true }, { name: mate, ai: false }] }));
+    sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - ? WHERE client_run_id = ?").run((5 - at) * 60, id);
+  };
+  await send("r1", 20000, "Ashgrove", 1);
+  await send("r2", 18000, "Birchly", 2);
+  await send("r3", 18000, "Cedarby", 3);
+  await send("r4", 15000, "Duneworth", 4);
+}
+
+test("team rows: equal results share a place and the next place is skipped (1, 2, 2, 4)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await fourRuns(env, sqlite);
+  const { boss } = await interlinkBoard(env, "ladder=score");
+  assert.deepEqual(boss.entries.map((e) => [e.player, e.rank, e.team]),
+    [["DevOne", 1, 1], ["Ashgrove", 1, 1], ["Birchly", 2, 2], ["Cedarby", 2, 3], ["Duneworth", 4, 4]]);
+  assert.deepEqual([boss.teams, boss.total], [4, 5]);
+});
+
+test("team rows: a teammate whose best is another run sits in that row; the run they were also on says so", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await fourRuns(env, sqlite);
+  const { boss } = await interlinkBoard(env, "ladder=score");
+  const row = (player) => boss.entries.find((e) => e.player === player);
+  assert.equal(row("DevOne").team, row("Ashgrove").team);           // DevOne's best is the 20,000 run
+  // the first entry of each other run's row names DevOne, at their place
+  for (const player of ["Birchly", "Cedarby", "Duneworth"]) assert.deepEqual(row(player).also, [{ player: "DevOne", rank: 1, profileId: null }]);
+  // the row DevOne is in names nobody else; only a row's first entry carries it
+  assert.equal("also" in row("DevOne") || "also" in row("Ashgrove"), false);
+});
+
+test("team rows: two copies with different score reads: every player takes the higher read, two spellings of one name settle to one player, one team row", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const devToken = await namedToken(env, SESSIONS.dev);
+  const userToken = await namedToken(env, SESSIONS.user);
+  const lineup = (self) => [{ slot: 1, name: "UserOne", ai: false, ...(self === "UserOne" ? { self: true } : {}) },
+    { slot: 2, name: "DevOne", ai: false, ...(self === "DevOne" ? { self: true } : {}) }, { slot: 3, name: "Mario", ai: true }];
+  // the two copies read the third player's name differently, so each of those rows has one copy only
+  const party = (self, third) => [{ name: "UserOne", ai: false, self: self === "UserOne" }, { name: "DevOne", ai: false, self: self === "DevOne" },
+    { name: third, ai: false }];
+  const at = Math.floor(Date.now() / 1000) - 60;
+  await sendRun(env, userToken, run("u-read", { gameUid: "301000000003", score: 34324, stars: 34, playedAt: at, players: party("UserOne", "Pipwick"), extra: { lineup: lineup("UserOne") } }));
+  await sendRun(env, devToken, run("d-read", { gameUid: "301000000001", score: 34234, stars: 34, playedAt: at + 20, players: party("DevOne", "P1pwick"), extra: { lineup: lineup("DevOne") } }));
+  const shared = (id) => (JSON.parse(sqlite.prepare("SELECT extra_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).extra_json) || {}).sharedRun;
+  assert.ok(shared("u-read") && shared("u-read") === shared("d-read"));   // one run
+  const boss = (await (await call(env, "/api/leaderboard/interlink?cycle=3005&ladder=score&unlinked=1")).json()).bosses.find((x) => x.id === "80000107");
+  // the players both copies credit take the higher read. The third player's two reads fold to one name, so since the
+  // copies are settled together (settledRun) both copies credit one player under one spelling (which one: the newest
+  // build's, then the first sent, then the lower id - random here), and the lower copy has no row of its own left.
+  assert.deepEqual(boss.entries.map((e) => [e.player.replace("P1pwick", "Pipwick"), e.score, e.rank, e.team]).sort((x, y) => x[3] - y[3] || x[0].localeCompare(y[0])),
+    [["DevOne", 34324, 1, 1], ["Pipwick", 34324, 1, 1], ["UserOne", 34324, 1, 1]]);
+  assert.equal(boss.teams, 1);
+});
+
+test("team rows: a one-player ladder (Avg DPS) is never pooled", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  await sendRun(env, a, run("solo-dps", { gameUid: "301000000001", boss: tuckingBoss, score: 20000, stars: 15, players: [
+    { name: "DevOne", ai: false, self: true, avgDps: 9000 }, { name: "Larkspur", ai: false, avgDps: 7000 }, { name: "Mirefen", ai: false, avgDps: 7000 }] }));
+  const { boss } = await interlinkBoard(env, "ladder=dps");
+  assert.deepEqual(boss.entries.map((e) => [e.avgDps, e.rank, e.team]), [[9000, 1, 1], [7000, 2, 2], [7000, 2, 3]]);
+  assert.equal("also" in boss.entries[0], false);
+  assert.deepEqual([boss.teams, boss.total], [3, 3]);
+  // the same run on the score ladder: one team row
+  const score = (await interlinkBoard(env, "ladder=score")).boss;
+  assert.deepEqual(score.entries.map((e) => [e.rank, e.team]), [[1, 1], [1, 1], [1, 1]]);
+});
+
+test("team rows: ?rows=teams pages by team rows, otherwise by players; the answer says which", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await fourRuns(env, sqlite);
+  const byTeams = await interlinkBoard(env, "ladder=score&rows=teams&limit=1&offset=1");
+  assert.equal(byTeams.data.rows, "teams");
+  assert.deepEqual(byTeams.boss.entries.map((e) => e.player), ["Birchly"]);
+  const first = await interlinkBoard(env, "ladder=score&rows=teams&limit=1");
+  assert.deepEqual(first.boss.entries.map((e) => e.player), ["DevOne", "Ashgrove"]);    // every player of the team row
+  const byPlayers = await interlinkBoard(env, "ladder=score&limit=1&offset=1");
+  assert.equal(byPlayers.data.rows, "players");
+  assert.deepEqual(byPlayers.boss.entries.map((e) => e.player), ["Ashgrove"]);
+  // reversed: the team rows the other way round, a team row's players in their order
+  const reversed = await interlinkBoard(env, "ladder=score&rows=teams&order=asc");
+  assert.deepEqual(reversed.boss.entries.map((e) => [e.player, e.rank]),
+    [["Duneworth", 4], ["Cedarby", 2], ["Birchly", 2], ["DevOne", 1], ["Ashgrove", 1]]);
+  assert.deepEqual([byTeams.boss.teams, byTeams.boss.total], [4, 5]);
+});
+
+test("team rows: the run's grouping never leaves the API; the desktop app's week call still gets every player", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await fourRuns(env, sqlite);
+  for (const query of ["", "ladder=score", "ladder=teamDps&rows=teams", "ladder=dps", "ladder=clear&limit=2"]) {
+    const text = await (await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=1&${query}`)).text();
+    for (const field of TEAM_FIELDS) assert.equal(text.includes(field), false, `${field} in ?${query}`);
+  }
+  const overview = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
+  assert.ok(overview.trophies?.length);
+  for (const field of TEAM_FIELDS) assert.equal(JSON.stringify(overview).includes(field), false, `${field} in the profile`);
+  // the desktop app's call: no ladder, no limit, every per-player entry with its uid, stars and score
+  const app = (await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json()).bosses.find((x) => x.id === tuckingBoss.id);
+  assert.equal(app.entries.length, 5);
+  assert.ok(app.entries.every((e) => "uid" in e && e.stars === 15 && Number.isInteger(e.score)));
+  assert.equal(app.entries.find((e) => e.player === "DevOne").uid, "301000000001");
+});
+
+// one run sent by DevOne with three teammates; dps: each player's Avg DPS (undefined: none on their card)
+async function dpsRun(env, id, score, dps, at = 1) {
+  const a = await namedToken(env, SESSIONS.dev);
+  const players = Object.entries(dps).map(([name, avgDps]) => ({ name, ai: false, ...(name === "DevOne" ? { self: true } : {}),
+    ...(avgDps === undefined ? {} : { avgDps }) }));
+  const sent = await sendRun(env, a, run(id, { gameUid: "301000000001", boss: tuckingBoss, score, stars: 15, clearTimeS: 150, cleared: true,
+    playedAt: 1792700000 + at * 600, players }));
+  assert.equal(sent.status, 201);
+}
+const names = (boss) => boss.entries.map((e) => e.player);
+
+test("team rows: under rows=teams a team row's players come by their Avg DPS, highest first; none last", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await dpsRun(env, "carry", 20000, { DevOne: 5000, Kestrel: 9000, Lumen: 7000, Morrow: undefined });
+  const teams = (await interlinkBoard(env, "ladder=score&rows=teams")).boss;
+  assert.deepEqual(names(teams), ["Kestrel", "Lumen", "DevOne", "Morrow"]);
+  assert.deepEqual(teams.entries.map((e) => [e.rank, e.team]), [[1, 1], [1, 1], [1, 1], [1, 1]]);
+  // without rows=teams: the order as before (the sender's own row, then the teammates as the run lists them)
+  assert.deepEqual(names((await interlinkBoard(env, "ladder=score")).boss), ["DevOne", "Kestrel", "Lumen", "Morrow"]);
+});
+
+test("team rows: players with the same Avg DPS keep the order they had", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await dpsRun(env, "even", 20000, { DevOne: 5000, Lumen: 7000, Kestrel: 7000, Morrow: 9000 });
+  const before = names((await interlinkBoard(env, "ladder=score")).boss);
+  assert.deepEqual(before, ["DevOne", "Kestrel", "Lumen", "Morrow"]);
+  // Kestrel and Lumen tie on 7,000: in the order they had
+  const tied = before.filter((name) => name === "Kestrel" || name === "Lumen");
+  assert.deepEqual(names((await interlinkBoard(env, "ladder=score&rows=teams")).boss), ["Morrow", ...tied, "DevOne"]);
+});
+
+test("team rows: by Avg DPS, also stays on the row's first entry and the reversed order keeps each row's players", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await dpsRun(env, "lower", 20000, { DevOne: 5000, Kestrel: 9000, Lumen: 7000, Morrow: undefined }, 1);
+  await dpsRun(env, "higher", 25000, { DevOne: 6000, Quillet: 8000 }, 2);         // DevOne's best: in this row
+  const { boss } = await interlinkBoard(env, "ladder=score&rows=teams");
+  assert.deepEqual(boss.entries.map((e) => [e.player, e.rank, e.team]),
+    [["Quillet", 1, 1], ["DevOne", 1, 1], ["Kestrel", 2, 2], ["Lumen", 2, 2], ["Morrow", 2, 2]]);
+  assert.deepEqual(boss.entries.filter((e) => "also" in e).map((e) => [e.player, e.also]), [["Kestrel", [{ player: "DevOne", rank: 1, profileId: null }]]]);
+  assert.deepEqual([boss.teams, boss.total], [2, 5]);
+  const reversed = (await interlinkBoard(env, "ladder=score&rows=teams&order=asc")).boss;
+  assert.deepEqual(names(reversed), ["Kestrel", "Lumen", "Morrow", "Quillet", "DevOne"]);
+  // paging by team rows: the second team row, its players by Avg DPS
+  assert.deepEqual(names((await interlinkBoard(env, "ladder=score&rows=teams&limit=1&offset=1")).boss), ["Kestrel", "Lumen", "Morrow"]);
+});
+
+// ---------------------------------------------------------------- copies of one run: marks and names
+// Three senders (the test accounts' characters) and a team-mate without the app.
+const SENDERS = { DevOne: ["301000000001", SESSIONS.dev], DevTwo: ["301000000002", SESSIONS.dev2], UserOne: ["301000000003", SESSIONS.user] };
+const copyCard = (n) => ({ avgDps: 5000 + n, breakValue: 600 + n, damageTaken: 7000 + n, heal: 80 + n });
+// an env on the same database whose first statement matching `pattern` waits, once it is reached, until released
+function heldAt(env, pattern) {
+  let open; const opened = new Promise((resolve) => { open = resolve; });
+  let arrive; const arrived = new Promise((resolve) => { arrive = resolve; });
+  let used = false;
+  const hold = (statement) => Object.fromEntries(["first", "all", "run"].map((method) => [method, async () => { arrive(); await opened; return statement[method](); }]));
+  const DB = { ...env.DB, prepare(sql) {
+    const prepared = env.DB.prepare(sql);
+    if (used || !pattern.test(sql)) return prepared;
+    used = true;
+    return { ...hold(prepared), bind: (...values) => hold(prepared.bind(...values)) };
+  } };
+  return { env: { ...env, DB }, arrived, release: () => open() };
+}
+// the pause point: a copy's first write of a players_json (the old code's and the new code's both start so)
+const HELD_WRITE = /^UPDATE leaderboard_submissions SET players_json/u;
+async function threeSenders(env) {
+  const tokens = {};
+  for (const [name, [, session]] of Object.entries(SENDERS)) tokens[name] = await namedToken(env, session);
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const body = (me, slots, offset = 0) => run(`copy-${me}`, { gameUid: SENDERS[me][0], score: 21000, stars: 21, clearTimeS: 170, playedAt: at + offset,
+    players: slots.map(([name, card], index) => ({ name, ai: false, ...(name === me && index === slots.findIndex(([n]) => n === me) ? { self: true } : {}),
+      ...(card == null ? {} : copyCard(card)) })) });
+  const right = [["DevOne", 0], ["DevTwo", 1], ["UserOne", 2], ["Rook", 3]];
+  return { tokens, body, right, send: (me, slots = right, onEnv = env, offset = 0) => sendRun(onEnv, tokens[me], body(me, slots, offset)) };
+}
+const storedCopies = (sqlite) => sqlite.prepare("SELECT client_run_id AS id, players_json AS players, extra_json AS extra FROM leaderboard_submissions WHERE kind = 'interlink_run' ORDER BY client_run_id").all()
+  .map((row) => ({ id: row.id, players: JSON.parse(row.players), extra: JSON.parse(row.extra || "{}") || {} }));
+// on the board (Show unlinked) each sender once, as themselves (so no unclaimed row with a sender's name)
+async function sendersOnce(env, senders) {
+  const { boss } = await interlinkBoard(env, "", "80000107");
+  for (const name of senders) {
+    assert.deepEqual(boss.entries.filter((e) => e.player.toLowerCase() === name.toLowerCase()).map((e) => e.unclaimed), [false], `${name} once, as themselves`);
+  }
+  return boss;
+}
+// every copy: each other sender's slot carries their UID, confirmed; one sharedRun for all; the board as above
+async function assertSettled(env, sqlite, senders = Object.keys(SENDERS)) {
+  const rows = storedCopies(sqlite);
+  for (const row of rows) {
+    const me = row.id.replace(/^copy-/u, "");
+    for (const other of senders.filter((name) => name !== me)) {
+      const slot = row.players.find((player) => player.name === other && !player.self);
+      assert.deepEqual([slot?.uid, slot?.confirmed], [SENDERS[other][0], true], `${other}'s slot in ${me}'s copy`);
+    }
+  }
+  const groups = new Set(rows.map((row) => row.extra.sharedRun));
+  assert.equal(groups.size, 1, "one sharedRun for every copy");
+  assert.ok([...groups][0], "the copies are linked");
+  return sendersOnce(env, senders);
+}
+
+test("copies of one run: a copy held between its read and its write loses no other copy's marks (B held while C completes)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  assert.equal((await s.send("DevOne")).status, 201);
+  const held = heldAt(env, HELD_WRITE);
+  const devTwo = s.send("DevTwo", s.right, held.env, 10);
+  await Promise.race([held.arrived, devTwo]);
+  assert.equal((await s.send("UserOne", s.right, env, 20)).status, 201);
+  held.release();
+  assert.equal((await devTwo).status, 201);
+  await assertSettled(env, sqlite);
+});
+
+test("copies of one run: a copy held between its read and its write loses no other copy's marks (C held while B completes)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  assert.equal((await s.send("DevOne")).status, 201);
+  const held = heldAt(env, HELD_WRITE);
+  const userOne = s.send("UserOne", s.right, held.env, 20);
+  await Promise.race([held.arrived, userOne]);
+  assert.equal((await s.send("DevTwo", s.right, env, 10)).status, 201);
+  held.release();
+  assert.equal((await userOne).status, 201);
+  await assertSettled(env, sqlite);
+});
+
+test("copies of one run: two copies both held after their reads, released one after the other, lose nothing", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  assert.equal((await s.send("DevOne")).status, 201);
+  const first = heldAt(env, HELD_WRITE);
+  const second = heldAt(env, HELD_WRITE);
+  const devTwo = s.send("DevTwo", s.right, first.env, 10);
+  await Promise.race([first.arrived, devTwo]);
+  const userOne = s.send("UserOne", s.right, second.env, 20);
+  await Promise.race([second.arrived, userOne]);
+  first.release();
+  assert.equal((await devTwo).status, 201);
+  second.release();
+  assert.equal((await userOne).status, 201);
+  await assertSettled(env, sqlite);
+});
+
+test("copies of one run: three copies sent at once (Promise.all) are all marked and linked", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  const sent = await Promise.all([s.send("DevOne"), s.send("DevTwo", s.right, env, 10), s.send("UserOne", s.right, env, 20)]);
+  assert.deepEqual(sent.map((r) => r.status), [201, 201, 201]);
+  await assertSettled(env, sqlite);
+});
+
+test("copies of one run: a copy whose Battle Data cards are shifted against its names (three senders)", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  // DevOne's app put each card one row up from DevTwo on: DevTwo carries UserOne's card, UserOne Rook's, Rook none
+  assert.equal((await s.send("DevOne", [["DevOne", 0], ["DevTwo", 2], ["UserOne", 3], ["Rook", null]])).status, 201);
+  assert.equal((await s.send("DevTwo", s.right, env, 10)).status, 201);
+  assert.equal((await s.send("UserOne", s.right, env, 20)).status, 201);
+  await sendersOnce(env, Object.keys(SENDERS));
+});
+
+test("copies of one run: a copy whose Battle Data cards are shifted against its names (two senders, two team-mates)", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  // Kaela and Rook have no app; DevOne's copy put UserOne's card on Kaela's row and Rook's on UserOne's
+  assert.equal((await s.send("DevOne", [["DevOne", 0], ["Kaela", 2], ["UserOne", 3], ["Rook", null]])).status, 201);
+  assert.equal((await s.send("UserOne", [["DevOne", 0], ["Kaela", 1], ["UserOne", 2], ["Rook", 3]], env, 20)).status, 201);
+  await sendersOnce(env, ["DevOne", "UserOne"]);
+});
+
+// settledRun on its own: copies as corroborateRun hands them over
+const seat = (name, more = {}) => ({ name, ai: false, skel: name ? name.toLowerCase() : undefined, uid: null, ...more });
+const copyOf = (id, gameUid, ownName, players, more = {}) => ({ id, gameUid, ownName, version: "aLogs-0.1.37+rc.30", at: 1000, players, lineup: null, ...more });
+const asObject = (map) => Object.fromEntries([...map].sort(([a], [b]) => (a < b ? -1 : 1)));
+const feedBack = (copies, map) => copies.map((copy) => ({ ...copy, players: map.get(copy.id) }));
+function threeCopies() {
+  const card = (n) => copyCard(n);
+  return [
+    copyOf("aa", "900000000001", "Ashby", [seat("Ashby", { self: true, ...card(0) }), seat("Brenna", card(1)), seat("Corwin", card(2)), seat("Dorrit")]),
+    copyOf("bb", "900000000002", "Brenna", [seat("Ashby", card(0)), seat("Brenna", { self: true, ...card(1) }), seat("Corwin", card(2)), seat("Dorrit", card(3))]),
+    copyOf("cc", "900000000003", "Corwin", [seat("Ashbee", card(0)), seat("Brenna"), seat("Corwin", { self: true }), seat("Dorrat")], { version: "aLogs-0.1.36" }),
+  ];
+}
+
+test("settledRun: every order of three copies gives the same answer, and its answer fed back in gives it again", () => {
+  const copies = threeCopies();
+  const orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  const answers = orders.map((order) => JSON.stringify(asObject(settledRun(order.map((i) => copies[i])))));
+  assert.equal(new Set(answers).size, 1);
+  const first = settledRun(copies);
+  assert.deepEqual(asObject(settledRun(feedBack(copies, first))), asObject(first));
+  assert.deepEqual(asObject(settledRun(feedBack(copies, settledRun(feedBack(copies, first))))), asObject(first));
+  // what it settled: Ashby's misread in cc carries his card, so it is Ashby; each sender's slot is confirmed in the others
+  const cc = first.get("cc");
+  assert.deepEqual([cc[0].name, cc[0].uid, cc[0].confirmed, cc[0].read], ["Ashby", "900000000001", true, { name: "Ashbee" }]);
+  assert.deepEqual(first.get("aa").map((p) => p.uid ?? null), [null, "900000000002", "900000000003", null]);
+  // Corwin's card is on no copy of his own: two copies agree on the name, so that slot is his
+  assert.deepEqual([first.get("bb")[2].uid, first.get("bb")[2].confirmed], ["900000000003", true]);
+  // Dorrit: two copies read Dorrit; Dorrat (one copy, no card, no Party screen) is settled by nothing
+  assert.deepEqual([cc[3].name, cc[3].unsettled, first.get("aa")[3].unsettled], ["Dorrat", true, undefined]);
+  // the input is not changed
+  assert.equal(copies[2].players[0].name, "Ashbee");
+});
+
+test("settledRun: two copies agree against a third; a sender's own name wins over what the others read", () => {
+  const out = settledRun([
+    copyOf("aa", "900000000001", "Ashby", [seat("Ashby", { self: true }), seat("Pellam", copyCard(4))]),
+    copyOf("bb", "900000000002", "Brenna", [seat("Brenna", { self: true }), seat("Pellam", copyCard(4)), seat("Ashbee")]),
+    copyOf("cc", "900000000003", "Corwin", [seat("Corwin", { self: true }), seat("Pellum", copyCard(4)), seat("Ashbee")]),
+  ]);
+  // one card: Pellum (one copy) against Pellam (two): Pellam, the read kept
+  assert.deepEqual([out.get("cc")[1].name, out.get("cc")[1].read], ["Pellam", { name: "Pellum" }]);
+  // two copies read Ashbee, but no card ties that slot to Ashby and his names are Ashby: Ashbee stays a name of its own
+  assert.deepEqual(out.get("bb")[2].name, "Ashbee");
+  // with Ashby's card on the slot, his own name wins over both reads
+  const card = copyCard(7);
+  const carded = settledRun([
+    copyOf("aa", "900000000001", "Ashby", [seat("Ashby", { self: true, ...card })]),
+    copyOf("bb", "900000000002", "Brenna", [seat("Brenna", { self: true }), seat("Xq7", { ai: true, ...card })]),
+  ]);
+  assert.deepEqual(carded.get("bb")[1], { ...seat("Ashby", { ...card }), uid: "900000000001", confirmed: true, skel: "ashby", read: { name: "Xq7", ai: true } });
+});
+
+test("settledRun: one copy - a result name not on its full Party screen takes the Party name by elimination; two left over are unsettled", () => {
+  const lineup = [{ slot: 1, name: "DevOne", self: true }, { slot: 2, name: "Kaela" }, { slot: 3, name: "Rook" }];
+  const one = settledRun([copyOf("aa", "301000000001", "DevOne", [seat("DevOne", { self: true }), seat("Xq7"), seat("Rook")], { lineup })]).get("aa");
+  assert.deepEqual(one.map((p) => [p.name, p.read?.name ?? null, Boolean(p.unsettled)]), [["DevOne", null, false], ["Kaela", "Xq7", false], ["Rook", null, false]]);
+  const two = settledRun([copyOf("aa", "301000000001", "DevOne", [seat("DevOne", { self: true }), seat("Xq7"), seat("Zz9")], { lineup })]).get("aa");
+  assert.deepEqual(two.map((p) => [p.name, Boolean(p.unsettled)]), [["DevOne", false], ["Xq7", true], ["Zz9", true]]);
+  // a copy without a Party screen, and one whose Party screen has fewer names than its result screen: as read
+  for (const short of [null, [{ slot: 1, name: "DevOne", self: true }]]) {
+    const players = [seat("DevOne", { self: true }), seat("Xq7"), seat("Zz9")];
+    assert.deepEqual(settledRun([copyOf("aa", "301000000001", "DevOne", players, { lineup: short })]).get("aa"), players);
+  }
+});
+
+test("settledRun: a sender's own slot outvoted by two other copies is placed by name (their own copy's cards shifted)", () => {
+  const c = (n) => copyCard(n);
+  const out = settledRun([
+    // Ashby's app put Dorrit's card on Ashby's row and Ashby's on Dorrit's
+    copyOf("aa", "900000000001", "Ashby", [seat("Ashby", { self: true, ...c(3) }), seat("Brenna", c(1)), seat("Corwin", c(2)), seat("Dorrit", c(0))]),
+    copyOf("bb", "900000000002", "Brenna", [seat("Ashby", c(0)), seat("Brenna", { self: true, ...c(1) }), seat("Corwin", c(2)), seat("Dorrit", c(3))]),
+    copyOf("cc", "900000000003", "Corwin", [seat("Ashby", c(0)), seat("Brenna", c(1)), seat("Corwin", { self: true, ...c(2) }), seat("Dorrit", c(3))]),
+  ]);
+  for (const id of ["bb", "cc"]) {
+    const players = out.get(id);
+    assert.deepEqual([players[0].name, players[0].uid, players[0].confirmed], ["Ashby", "900000000001", true], id);
+    assert.deepEqual([players[3].name, players[3].uid ?? null, players[3].read], ["Dorrit", null, undefined], id);
+  }
+  // in Ashby's own copy nothing is called Ashby but his own slot
+  assert.deepEqual(out.get("aa").filter((p) => p.name === "Ashby" && !p.unsettled).length, 1);
+});
+
+test("settledRun: two copies that misread a sender's name the same way on the sender's card don't outvote them", () => {
+  const c = (n) => copyCard(n);
+  const out = settledRun([
+    copyOf("aa", "900000000001", "Ashby", [seat("Ashby", { self: true, ...c(0) }), seat("Brenna", c(1)), seat("Corwin", c(2))]),
+    copyOf("bb", "900000000002", "Brenna", [seat("Ashbee", c(0)), seat("Brenna", { self: true, ...c(1) }), seat("Corwin", c(2))]),
+    copyOf("cc", "900000000003", "Corwin", [seat("Ashbee", c(0)), seat("Brenna", c(1)), seat("Corwin", { self: true, ...c(2) })]),
+  ]);
+  for (const id of ["bb", "cc"]) {
+    const slot = out.get(id)[0];
+    assert.deepEqual([slot.name, slot.uid, slot.confirmed, slot.read], ["Ashby", "900000000001", true, { name: "Ashbee" }], id);
+  }
+  assert.equal([...out.values()].flat().some((p) => p.unsettled), false);
+});
+
+test("settledRun: two senders' own slots on one card: the card is neither's, both are placed by name", () => {
+  const shared = copyCard(1);
+  const out = settledRun([
+    copyOf("aa", "900000000001", "Ashby", [seat("Ashby", { self: true, ...shared }), seat("Brenna", copyCard(2))]),
+    copyOf("bb", "900000000002", "Brenna", [seat("Ashby", copyCard(3)), seat("Brenna", { self: true, ...shared })]),
+  ]);
+  assert.deepEqual([out.get("aa")[1].name, out.get("aa")[1].uid], ["Brenna", "900000000002"]);
+  assert.deepEqual([out.get("bb")[0].name, out.get("bb")[0].uid], ["Ashby", "900000000001"]);
+  assert.equal(JSON.stringify([...out.values()]).includes("read"), false);
+});
+
+// two senders' copies through the API; players: [name, { more }] per slot
+async function twoCopies(env, devPlayers, userPlayers, { devExtra, userExtra, numbers = {} } = {}) {
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const body = (id, gameUid, me, players, extra, offset) => run(id, { gameUid, score: 21000, stars: 21, clearTimeS: 170, playedAt: at + offset, ...numbers,
+    players: players.map(([name, more = {}]) => ({ name, ai: false, ...(name === me ? { self: true } : {}), ...more })), ...(extra ? { extra } : {}) });
+  assert.equal((await sendRun(env, dev, body("copy-DevOne", "301000000001", "DevOne", devPlayers, devExtra, 0))).status, 201);
+  assert.equal((await sendRun(env, user, body("copy-UserOne", "301000000003", "UserOne", userPlayers, userExtra, 10))).status, 201);
+}
+
+test("copies of one run: a misread on one copy takes its Party screen's name, and both copies credit one player", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const lineup = [{ slot: 1, name: "UserOne", self: true }, { slot: 2, name: "DevOne" }, { slot: 3, name: "Dorrit" }];
+  await twoCopies(env, [["DevOne"], ["UserOne"], ["Dorrit"]], [["UserOne"], ["DevOne"], ["Xq7"]], { userExtra: { lineup } });
+  const userCopy = storedCopies(sqlite).find((row) => row.id === "copy-UserOne").players;
+  assert.deepEqual([userCopy[2].name, userCopy[2].read], ["Dorrit", { name: "Xq7" }]);
+  const boss = await sendersOnce(env, ["DevOne", "UserOne"]);
+  assert.deepEqual(boss.entries.map((e) => e.player).sort(), ["DevOne", "Dorrit", "UserOne"]);
+});
+
+test("copies of one run: a name only one copy read, on no Party screen, is unsettled: on no board, still in the stored slot", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await twoCopies(env, [["DevOne"], ["UserOne"], ["Pellam"]], [["UserOne"], ["DevOne"]]);
+  const devCopy = storedCopies(sqlite).find((row) => row.id === "copy-DevOne").players;
+  assert.deepEqual([devCopy[2].name, devCopy[2].unsettled], ["Pellam", true]);
+  const boss = await sendersOnce(env, ["DevOne", "UserOne"]);
+  assert.deepEqual(boss.entries.map((e) => e.player).sort(), ["DevOne", "UserOne"]);
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&unlinked=1")).json()).entries;
+  assert.equal(entries.some((e) => e.player === "Pellam"), false);
+});
+
+test("copies of one run: read and unsettled never leave the API (boards, entries, history)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const lineup = [{ slot: 1, name: "UserOne", self: true }, { slot: 2, name: "DevOne" }, { slot: 3, name: "Dorrit" }, { slot: 4, name: "Mario", ai: true }];
+  await twoCopies(env, [["DevOne"], ["UserOne"], ["Dorrit"], ["Pellam"]], [["UserOne"], ["DevOne"], ["Xq7"], ["Mario", { ai: true }]], { userExtra: { lineup } });
+  const stored = JSON.stringify(storedCopies(sqlite));
+  assert.ok(stored.includes("\"read\"") && stored.includes("\"unsettled\""));      // there is something to leak
+  const answers = [
+    await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1"),
+    await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1&ladder=score&rows=teams"),
+    await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0&unlinked=1"),
+    await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0", { session: SESSIONS.dev }),
+    await call(env, "/api/profile/history", { session: SESSIONS.dev }),
+    await call(env, "/api/profile/history", { session: SESSIONS.user }),
+  ];
+  for (const response of answers) {
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.equal(text.includes("\"read\"") || text.includes("\"unsettled\""), false, text.slice(0, 200));
+  }
+});
+
+test("same run: equal score, stars and time with cards on both copies and none shared are two fights; without cards, one run", async () => {
+  const carded = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await twoCopies(carded.env, [["DevOne", copyCard(1)], ["Kestrel", copyCard(2)]], [["UserOne", copyCard(5)], ["Lumen", copyCard(6)]]);
+  assert.deepEqual(storedCopies(carded.sqlite).map((row) => row.extra.sharedRun ?? null), [null, null]);
+  const plain = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await twoCopies(plain.env, [["DevOne"], ["UserOne"]], [["UserOne"], ["DevOne"]]);
+  const linked = storedCopies(plain.sqlite).map((row) => row.extra.sharedRun);
+  assert.ok(linked[0] && linked[0] === linked[1]);
+});
+
+test("copies of one run: a re-sent copy (players replaced, link dropped) gets its marks again and the others stay right", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const s = await threeSenders(env);
+  for (const [me, offset] of [["DevOne", 0], ["DevTwo", 10], ["UserOne", 20]]) assert.equal((await s.send(me, s.right, env, offset)).status, 201);
+  await assertSettled(env, sqlite);
+  const before = storedCopies(sqlite).filter((row) => row.id !== "copy-DevTwo");
+  const again = await s.send("DevTwo", s.right, env, 10);
+  assert.equal(again.status, 200);
+  await assertSettled(env, sqlite);
+  assert.deepEqual(storedCopies(sqlite).filter((row) => row.id !== "copy-DevTwo"), before);
+});
+
+test("POST /api/admin/run-names: administrators only, a dry run by default, apply settles stored runs, and a second apply finds nothing", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const s = await threeSenders(env);
+  for (const [me, offset] of [["DevOne", 0], ["DevTwo", 10], ["UserOne", 20]]) assert.equal((await s.send(me, s.right, env, offset)).status, 201);
+  // stored the way they were before: no marks, no link (copies that overwrote each other)
+  for (const row of storedCopies(sqlite)) {
+    const players = row.players.map(({ confirmed: _c, read: _r, unsettled: _u, ...player }) => ({ ...player, uid: null }));
+    sqlite.prepare("UPDATE leaderboard_submissions SET players_json = ?, extra_json = json_remove(extra_json, '$.sharedRun') WHERE client_run_id = ?").run(JSON.stringify(players), row.id);
+  }
+  const snapshot = () => JSON.stringify(sqlite.prepare("SELECT submission_id, players_json, extra_json FROM leaderboard_submissions ORDER BY submission_id").all());
+  const before = snapshot();
+  const names = (body, session = SESSIONS.dev) => call(env, "/api/admin/run-names", { session, method: "POST", body });
+  assert.equal((await names({}, SESSIONS.user)).status, 403);
+  const dry = await (await names({})).json();
+  assert.deepEqual([dry.dryRun, dry.rows, dry.groups, dry.copies, dry.changed, dry.linked, dry.confirmed, dry.next], [true, 3, 1, 3, 3, 3, 6, null]);
+  assert.equal(snapshot(), before);
+  const text = JSON.stringify(dry);
+  for (const secret of ["DevOne", "Rook", "301000000", "copy-"]) assert.equal(text.includes(secret), false);
+  // a page at a time
+  const page = await (await names({ max: 1 })).json();
+  assert.deepEqual([page.rows, page.groups, typeof page.next], [1, 1, "string"]);
+  assert.deepEqual((await (await names({ max: 5, after: page.next })).json()).rows, 2);
+  const applied = await (await names({ apply: true })).json();
+  assert.deepEqual([applied.dryRun, applied.changed, applied.linked, applied.confirmed], [false, 3, 3, 6]);
+  await assertSettled(env, sqlite);
+  const twice = await (await names({ apply: true })).json();
+  assert.deepEqual([twice.changed, twice.linked, twice.renamed, twice.confirmed, twice.uidsRemoved, twice.unsettled, twice.settled], [0, 0, 0, 0, 0, 0, 0]);
 });
