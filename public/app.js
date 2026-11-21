@@ -346,9 +346,9 @@ function interlinkPartLine(part, { current = false, publicId = null, runsOpen = 
   if (part.rank) {
     const rank = element("a", "profile-position", `#${part.rank}`);
     rank.href = `/leaderboard/?mode=interlink&kind=interlink_ladder&season=${part.season}&split=${part.split}`;
-    rank.title = `Position ${part.rank} of ${part.players} players in ${part.label} · open its ladder`;
+    rank.title = `Place ${part.rank} of ${part.players} players in ${part.label} (tied totals share a place) · open its ladder`;
     const where = element("span", "interlink-part-rank");
-    where.append(rank, element("small", "", ` of ${numberFormat.format(part.players)}`));
+    where.append(rank, element("small", "", ` of ${numberFormat.format(part.players)} player${part.players === 1 ? "" : "s"}`));
     line.append(where);
   }
   if (!current && runsOpen) {
@@ -646,9 +646,11 @@ function trophyTile(trophy) {
   if (place?.position) {
     const medal = place.position <= 3 ? ` is-top${place.position}` : "";
     const link = element("a", `trophy-place${medal}`, `#${place.position}`);
-    link.append(element("small", "", ` of ${numberFormat.format(place.players)}`));
+    // what "of M" counts: teams on a team ladder (Score, Fastest clear, Team DPS), players on the others
+    const counted = place.counts === "teams" ? (place.players === 1 ? "team" : "teams") : (place.players === 1 ? "player" : "players");
+    link.append(element("small", "", ` of ${numberFormat.format(place.players)} ${counted}`));
     link.href = `/leaderboard/?${new URLSearchParams(trophy.board || {})}`;
-    link.title = `Position ${place.position} of ${place.players} players on this ladder · open the board`;
+    link.title = `Place ${place.position} of ${place.players} ${counted} on this ladder (tied results share a place) · open the board`;
     foot.append(link);
   }
   const proof = trophy.proof;

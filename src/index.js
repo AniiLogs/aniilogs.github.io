@@ -5890,9 +5890,24 @@ function rankedBossRuns(rows) {
   return rankedTeams(rows, figures, true);
 }
 
-function ranked(rows, key) {
-  return rows.sort((a, b) => b[key] - a[key] || a.firstAt - b.firstAt).map((row, index) => ({ rank: index + 1, ...row }));
+// Places with ties (the rule of the boss boards, rankedTeams): rows equal on everything the order compares share the
+// place of the first of them, and the next place is skipped (1, 1, 3). figures(a, b): the order, never who arrived
+// first; equal rows are listed by who got there first (firstAt). Each row gets rank.
+function placed(rows, figures) {
+  let lead = null; let place = 0;
+  return rows.sort((a, b) => figures(a, b) || a.firstAt - b.firstAt).map((row, index) => {
+    if (!lead || figures(lead, row) !== 0) { lead = row; place = index + 1; }
+    return { rank: place, ...row };
+  });
 }
+function ranked(rows, key) {
+  return placed(rows, (a, b) => (Number(b[key]) || 0) - (Number(a[key]) || 0));
+}
+// The Season Ladder's orders (?sort=): combined score, or total stars then score. The profile's places use the same.
+const SEASON_ORDERS = Object.freeze({
+  total: (a, b) => b.total - a.total,
+  stars: (a, b) => b.stars - a.stars || b.total - a.total,
+});
 
 function publicCycle(cycle) {
   return cycle ? { id: cycle.id, season: cycle.season, start: cycle.start, end: cycle.end, bosses: cycle.bosses } : null;
@@ -5912,7 +5927,8 @@ async function interlinkSeasonStanding(env, discordId, season = null) {
   }
   const mine = totals.get(discordId);
   if (!mine) return { season, total: 0, stars: 0, weeks: 0, rank: null, players: totals.size };
-  const rank = 1 + [...totals.values()].filter((p) => p.total > mine.total || (p.total === mine.total && p.firstAt < mine.firstAt)).length;
+  // the place the Season Ladder gives (ties share it)
+  const rank = placed([...totals].map(([id, p]) => ({ id, ...p })), SEASON_ORDERS.total).find((p) => p.id === discordId).rank;
   return { season, total: mine.total, stars: mine.stars, weeks: mine.weeks.size, rank, players: totals.size };
 }
 
@@ -5957,7 +5973,8 @@ async function interlinkProfileParts(env, discordId, pre = null) {
     const players = totals.get(part) || new Map();
     const own = mine.filter((row) => partOf(row.cycle) === part);
     const me = players.get(discordId);
-    const rank = me ? 1 + [...players.values()].filter((p) => p.total > me.total || (p.total === me.total && p.firstAt < me.firstAt)).length : null;
+    // the place the Season Ladder gives that part (ties share it)
+    const rank = me ? placed([...players].map(([id, p]) => ({ id, ...p })), SEASON_ORDERS.total).find((p) => p.id === discordId).rank : null;
     return {
       season: part.season, split: part.split, label: part.label, start: part.start, end: part.end,
       total: own.reduce((sum, row) => sum + (Number(row.score) || 0), 0),
@@ -6042,7 +6059,10 @@ function interlinkTrophies(rows, list, discordId) {
       const board = rankedBoard(row, trophy.ladder);
       const placed = board.find((entry) => entry.discordId === discordId);
       if (!placed) continue;
-      const candidate = { value: Number(placed[ladder.key]), position: placed.rank, players: board.length, firstAt: row.firstAt, row: placed };
+      // "of M" as the board counts it: its team rows on a team ladder (rankedTeams' team numbers), players on the others
+      const teams = !ONE_PLAYER_LADDERS.includes(trophy.ladder);
+      const candidate = { value: Number(placed[ladder.key]), position: placed.rank, players: teams ? (board.at(-1)?.team ?? 0) : board.length,
+        counts: teams ? "teams" : "players", firstAt: row.firstAt, row: placed };
       if (betterTrophy(candidate, best, ladder.ascending)) best = candidate;
     }
     if (!best) continue;
@@ -6058,7 +6078,7 @@ function interlinkTrophies(rows, list, discordId) {
         week: week ? { cycle: week.id, start: week.start, end: week.end } : { cycle: row.cycle } },
       character: row.player || null,
       submissionId: row.figureRuns?.[trophy.proof] || row.runId,
-      placement: { position: best.position, players: best.players },
+      placement: { position: best.position, players: best.players, counts: best.counts },
       board: { mode: "interlink", kind: "interlink_boss", week: String(row.cycle), boss: String(row.bossId), ladder: trophy.ladder },
       proof: proofId ? { id: proofId, shot: trophy.shot || "summary", ...(trophy.proof === "score" && row.menuProofId ? { menuId: row.menuProofId } : {}),
         ...(trophy.shot === "battle" ? { slice: { figure: LADDER_FIGURE_NAMES[trophy.ladder], player: row.player || null } } : {}) } : null,
@@ -6089,7 +6109,7 @@ function interlinkTrophies(rows, list, discordId) {
       id: "interlink-week", mode: "interlink", label: "Best Interlink week", unit: "score", value: bestWeek.value, stars: bestWeek.stars,
       context: { week: week ? { cycle: week.id, start: week.start, end: week.end } : { cycle: bestWeek.cycle } },
       submissionId: null,                     // three bosses' runs: each boss's proof is on the Interlink card and the board
-      placement: { position: bestWeek.position, players: bestWeek.players },
+      placement: { position: bestWeek.position, players: bestWeek.players, counts: "players" },
       board: { mode: "interlink", kind: "interlink_boss", week: String(bestWeek.cycle) },
       proof: null,
     });
@@ -6139,7 +6159,7 @@ function eggHeistTrophies(seasons, loot, escape) {
       context: { season: best.cycle },
       character: best.character || null,
       submissionId: best.submissionId,
-      placement: { position: best.position, players: best.players },
+      placement: { position: best.position, players: best.players, counts: best.counts },
       board: { mode: "eggheist", kind: "eggheist_season", cycle: String(best.cycle) },
       proof: { id: best.submissionId, shot: "summary" },
     });
@@ -6201,6 +6221,16 @@ async function profileBoards(env, discordId) {
   const leaderboards = Object.fromEntries(kinds.map((kind, index) => [kind, standings[index]]));
   const list = await interlinkCycles(env);
   const rows = list.length ? await interlinkBests(env, list.map((cycle) => cycle.id), list) : [];
+  // Interlink entries: their place on that week's boss board as the board ranks it (its Score ladder, team rows), not a
+  // count of their own: the same function the board uses, so the two never disagree
+  for (const kind of ["interlink_run", "interlink_best"]) {
+    leaderboards[kind] = (leaderboards[kind] || []).map((entry) => {
+      const board = rankedLadder(rows.filter((row) => row.cycle === entry.cycle && String(row.bossId) === String(entry.boss?.id))
+        .map((row) => withOwnBest(row, "score")), "score");
+      const mine = board.find((row) => row.discordId === discordId);
+      return mine ? { ...entry, position: mine.rank, players: board.at(-1)?.team ?? 0, counts: "teams" } : entry;
+    });
+  }
   leaderboards.interlinkSeason = await interlinkSeasonStanding(env, discordId);
   leaderboards.interlinkParts = await interlinkProfileParts(env, discordId, { list, rows });
   let trophies = [];
@@ -6249,10 +6279,9 @@ async function interlinkBoards(request, env, internal = false) {
     }
     // ranked by combined score; ?sort=stars ranks by total stars (then score)
     const order = params.get("sort") === "stars" ? "stars" : "total";
-    const sorted = [...players.values()].sort((a, b) => (order === "stars" ? b.stars - a.stars || b.total - a.total : b.total - a.total)
-      || a.firstAt - b.firstAt);
-    const standings = sorted.map(({ discordId, weeks: played, weekTotals, firstAt, ...row }, index) => ({
-      rank: index + 1, ...row, weeks: played.size, bestWeek: Math.max(0, ...weekTotals.values()), own: own(discordId),
+    // players equal on the order's figures share a place (1, 1, 3)
+    const standings = placed([...players.values()], SEASON_ORDERS[order]).map(({ discordId, weeks: played, weekTotals, firstAt, ...row }) => ({
+      ...row, weeks: played.size, bestWeek: Math.max(0, ...weekTotals.values()), own: own(discordId),
     }));
     return json({
       season, split, sort: order === "stars" ? "stars" : "score",

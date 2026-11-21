@@ -1325,9 +1325,10 @@ test("the profile overview gathers the owner's characters, board positions and c
   assert.deepEqual(overview.characters.map((row) => [row.gameUid, row.name]), [["302000105986", "MinMax"]]);
 
   const { interlink_run: runs, interlink_week: weeks, sim_run: sims, eggheist_season: heists } = overview.leaderboards;
-  // Best per boss, ranked among every player on that boss, as the board shows it.
-  assert.deepEqual(runs.map((row) => [row.boss.name, row.score, row.position, row.players, row.character]),
-    [["Omega Infergon", 22000, 2, 2, "MinMax"], ["Omega Tucking", 9000, 1, 1, null]]);
+  // Best per boss, placed as that week's board places it (its Score ladder, team rows). DevTwo's 25,000 isn't on the
+  // board (no character linked), so it doesn't count against MinMax either (it did before the profile read the board).
+  assert.deepEqual(runs.map((row) => [row.boss.name, row.score, row.position, row.players, row.counts, row.character]),
+    [["Omega Infergon", 22000, 1, 1, "teams", "MinMax"], ["Omega Tucking", 9000, 1, 1, "teams", null]]);
   assert.deepEqual(weeks, []);
   assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 2]]);
   assert.deepEqual(heists.map((row) => [row.cycle, row.seasonRank.name, row.stars, row.score, row.position, row.players]),
@@ -3844,4 +3845,123 @@ test("run checks: the reader's own failures and a run sent lower than its pictur
   assert.deepEqual(recheck.staff, { "picture shows less": 1 });
   const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
   assert.ok(entries.every((entry) => entry.check == null));
+});
+
+// ---------------------------------------------------------------- tied places: week total, Season Ladder, profiles
+// Three runs on one boss in week 3005, each a team (made-up names; only DevOne, DevTwo and UserOne have accounts):
+// 30,000 by DevOne with Ashby (a two-way tie at the top), 25,000 by DevTwo with Brisk and Corra (a three-way tie in the
+// middle) and 20,000 by UserOne alone. Places on the week total and the Season Ladder: 1, 1, 3, 3, 3, 6. creditUser:
+// UserOne sends nothing and is the third player of DevTwo's run instead, credited by UID.
+async function tiedWeek(env, sqlite, { creditUser = false } = {}) {
+  const dev = await namedToken(env, SESSIONS.dev);
+  const dev2 = await namedToken(env, SESSIONS.dev2);
+  const user = await namedToken(env, SESSIONS.user);
+  const at = Math.floor(Date.now() / 1000) - 3600;
+  const seat = (name, avgDps, more = {}) => ({ name, ai: false, avgDps, ...more });
+  const send = async (token, id, gameUid, score, time, players, minutesAgo) => {
+    assert.equal((await sendRun(env, token, run(id, { gameUid, score, stars: 20, clearTimeS: time, cleared: false, playedAt: at, players }))).status, 201, id);
+    sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ? WHERE client_run_id = ?").run(at - minutesAgo * 60, id);
+  };
+  await send(dev, "tie-top", "301000000001", 30000, 150, [seat("DevOne", 9000, { self: true }), seat("Ashby", 7000)], 50);
+  // UserOne credited by UID in DevTwo's run (the game showed it; UserOne's character is proven), or a name-only Corra
+  const third = creditUser ? seat("UserOne", 4000, { uid: "301000000003" }) : seat("Corra", 4000);
+  await send(dev2, "tie-mid", "301000000002", 25000, 160, [seat("DevTwo", 7000, { self: true }), seat("Brisk", 5000), third], 40);
+  if (!creditUser) await send(user, "tie-low", "301000000003", 20000, 170, [seat("UserOne", 6000, { self: true })], 30);
+  if (creditUser) sqlite.prepare("UPDATE game_characters SET verified_at = ? WHERE game_uid = '301000000003'").run(at);
+}
+const placesOf = (rows) => rows.map((row) => [row.discordName || row.player, row.rank]).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]));
+
+test("tied places: the week total and the Season Ladder give equal totals one place and skip the next (1, 1, 3, 3, 3, 6)", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await tiedWeek(env, sqlite);
+  const week = (await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json()).week;
+  assert.deepEqual(placesOf(week), [["Ashby", 1], ["DevOne", 1], ["Brisk", 3], ["Corra", 3], ["DevTwo", 3], ["UserOne", 6]]);
+  const ladder = await (await call(env, "/api/leaderboard/interlink?season=1&split=all&unlinked=1")).json();
+  assert.deepEqual(placesOf(ladder.standings), [["Ashby", 1], ["DevOne", 1], ["Brisk", 3], ["Corra", 3], ["DevTwo", 3], ["UserOne", 6]]);
+  // equal rows are listed by who got there first, but the place doesn't say it
+  assert.deepEqual(ladder.standings.map((row) => row.rank), [1, 1, 3, 3, 3, 6]);
+  // by total stars (all 20): a tie on stars falls to the score, then the same places
+  const byStars = await (await call(env, "/api/leaderboard/interlink?season=1&split=all&unlinked=1&sort=stars")).json();
+  assert.deepEqual(byStars.standings.map((row) => row.rank), [1, 1, 3, 3, 3, 6]);
+  // linked players only (the page's default): DevOne 1, DevTwo 2, UserOne 3
+  const linked = await (await call(env, "/api/leaderboard/interlink?season=1&split=all")).json();
+  assert.deepEqual(placesOf(linked.standings), [["DevOne", 1], ["DevTwo", 2], ["UserOne", 3]]);
+});
+
+test("tied places across a page: View all in Players view gives equal rows the same place on both pages", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await tiedWeek(env, sqlite);
+  const page = async (offset) => (await (await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=1&boss=80000107&ladder=score&limit=3&offset=${offset}`)).json()).bosses[0];
+  const first = await page(0);
+  const second = await page(3);
+  // place 2 is the second team row (DevTwo's run): its three players split 1 + 2 over the pages, place 2 on both
+  assert.deepEqual(first.entries.map((e) => e.rank), [1, 1, 2]);
+  assert.deepEqual(second.entries.map((e) => e.rank), [2, 2, 3]);
+  // the Avg DPS ladder (one player's own), paged two a page: the two 7,000s are not equal on everything the ladder sorts
+  // by (its next figure is the run's score: 30,000 against 25,000), so they don't share
+  const dps = async (offset) => (await (await call(env, `/api/leaderboard/interlink?cycle=3005&unlinked=1&boss=80000107&ladder=dps&limit=2&offset=${offset}`)).json()).bosses[0].entries.map((e) => [e.avgDps, e.rank]);
+  assert.deepEqual([...await dps(0), ...await dps(2), ...await dps(4)], [[9000, 1], [7000, 2], [7000, 3], [6000, 4], [5000, 5], [4000, 6]]);
+});
+
+// the profile's places against the board's, for one account
+async function profileAgainstBoard(env, session, name) {
+  const overview = await (await call(env, "/api/profile/overview", { session })).json();
+  const trophy = (id) => overview.trophies.find((item) => item.id === id);
+  const board = async (ladder, rows) => (await (await call(env, `/api/leaderboard/interlink?cycle=3005&boss=80000107&ladder=${ladder}${rows ? "&rows=teams" : ""}`)).json()).bosses[0];
+  const score = await board("score", true);
+  const dps = await board("dps", false);
+  return {
+    score: { profile: trophy("interlink-score")?.placement, board: { position: score.entries.find((e) => e.player === name)?.rank, players: score.teams, counts: "teams" } },
+    dps: { profile: trophy("interlink-dps")?.placement, board: { position: dps.entries.find((e) => e.player === name)?.rank, players: dps.total, counts: "players" } },
+    part: overview.leaderboards?.interlinkParts?.current,
+    entry: overview.leaderboards?.interlink_run?.[0],
+    ladder: (await (await call(env, "/api/leaderboard/interlink?season=1&split=all")).json()).standings.find((row) => row.player === name),
+  };
+}
+
+test("profile places agree with the boards: a team ladder counts teams, a one-player ladder players, the season part the Season Ladder", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await tiedWeek(env, sqlite);
+  for (const [session, name] of [[SESSIONS.dev, "DevOne"], [SESSIONS.dev2, "DevTwo"], [SESSIONS.user, "UserOne"]]) {
+    const seen = await profileAgainstBoard(env, session, name);
+    assert.deepEqual(seen.score.profile, seen.score.board, `${name}: score`);
+    assert.deepEqual(seen.dps.profile, seen.dps.board, `${name}: Avg DPS`);
+    assert.equal(seen.part?.rank, seen.ladder?.rank, `${name}: season part`);
+    // the profile's board entry (leaderboards.interlink_run): the Score board's place and team count
+    assert.deepEqual([seen.entry?.position, seen.entry?.players, seen.entry?.counts], [seen.score.board.position, seen.score.board.players, "teams"], `${name}: entry`);
+  }
+  // what the numbers are: DevTwo is the second team of three on Score, second of three players on Avg DPS
+  const dev2 = await profileAgainstBoard(env, SESSIONS.dev2, "DevTwo");
+  assert.deepEqual([dev2.score.profile, dev2.dps.profile], [{ position: 2, players: 3, counts: "teams" }, { position: 2, players: 3, counts: "players" }]);
+});
+
+test("profile places agree with the boards for a team-mate credited by UID from someone else's copy", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await tiedWeek(env, sqlite, { creditUser: true });
+  const seen = await profileAgainstBoard(env, SESSIONS.user, "UserOne");
+  assert.ok(seen.score.board.position, "UserOne is on the board from DevTwo's copy");
+  assert.deepEqual(seen.score.profile, seen.score.board);
+  assert.deepEqual(seen.dps.profile, seen.dps.board);
+  assert.deepEqual([seen.score.profile.position, seen.part?.rank, seen.ladder?.rank], [2, 2, 2]);   // tied with DevTwo on the Season Ladder
+  assert.equal((await (await call(env, "/api/leaderboard/interlink?season=1&split=all")).json()).standings.find((row) => row.player === "DevTwo").rank, 2);
+});
+
+test("the app's board check (board_has) reads the same shape: every player's row with uid, stars and score under bosses[].id, ties included", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  await tiedWeek(env, sqlite, { creditUser: true });
+  // the call old and new aLogs builds make: ?cycle=&unlinked=1, no ladder, no limit, no rows
+  const data = await (await call(env, "/api/leaderboard/interlink?cycle=3005&unlinked=1")).json();
+  assert.ok(Array.isArray(data.bosses));
+  const boss = data.bosses.find((item) => item.id === "80000107");
+  assert.equal(typeof boss.id, "string");
+  assert.equal(boss.entries.length, boss.total);                 // every player, not a page or team rows
+  for (const entry of boss.entries) {
+    assert.ok("uid" in entry, "uid on every row");
+    assert.equal(typeof entry.stars, "number");
+    assert.equal(typeof entry.score, "number");
+  }
+  const byUid = (uid) => boss.entries.find((entry) => entry.uid === uid);
+  assert.deepEqual([byUid("301000000001").stars, byUid("301000000001").score], [20, 30000]);
+  assert.deepEqual([byUid("301000000002").stars, byUid("301000000002").score], [20, 25000]);
+  assert.deepEqual([byUid("301000000003").stars, byUid("301000000003").score], [20, 25000]);   // credited from DevTwo's copy
 });
