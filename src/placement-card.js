@@ -1,11 +1,33 @@
 // game-audit: n/a draws a placement's share card from board figures; no game data
 // A placement's share card: a 1200x630 PNG drawn without a canvas library, so it fits the API's small CPU budget.
 // Flat rectangles and pre-rasterised letters (src/card-glyphs.js) on an indexed-colour image (one byte a pixel, at
-// most 256 colours), deflated by the runtime's own CompressionStream.
+// most 256 colours), deflated by its own small encoder (zlibRuns). Names in other scripts take their letters from packs
+// kept in R2 (src/placement-links.js).
 // The letters (src/card-glyphs.js) come in with each call, from src/index.js: the API build inlines modules that import
 // nothing themselves.
 let CARD_FONTS = null;
 
+// the accents the card draws over its own letters
+const MARKS = Object.freeze({ "́": "acute", "̀": "grave", "̂": "circumflex", "̈": "diaeresis", "̃": "tilde", "̊": "ring" });
+function ownGlyph(font, char) {
+  return font.glyphs[char] || (font.glyphs[char.toUpperCase()] && !font.glyphs[char.toLowerCase()] ? font.glyphs[char.toUpperCase()] : null);
+}
+// The script packs a text needs on the names' size (fonts: the card's letter sets): the block (first code point, 4 hex
+// digits) of each letter the card can't draw itself, letter or letter-and-accents
+export function packBlocksFor(texts, fonts) {
+  const font = fonts.body;
+  const blocks = new Set();
+  for (const text of texts) {
+    for (const whole of String(text ?? "").normalize("NFC")) {
+      if (ownGlyph(font, whole)) continue;
+      const [base, ...marks] = [...whole.normalize("NFD")];
+      if (marks.length && ownGlyph(font, base) && marks.every((mark) => MARKS[mark])) continue;
+      const cp = whole.codePointAt(0);
+      if (cp > 0x7e && cp <= 0xffff) blocks.add((cp & 0xff00).toString(16).padStart(4, "0"));
+    }
+  }
+  return [...blocks].sort();
+}
 export const CARD_WIDTH = 1200;
 export const CARD_HEIGHT = 630;
 
@@ -110,22 +132,32 @@ class Picture {
     const at = y * this.stride + 1 + x;
     this.raw[at] = level >= 15 ? c : this.blend(c, this.raw[at], level);
   }
-  // letters: the glyph's own key, or a letter with an accent split off (NFD)
+  // letters: the card's own drawing of a letter; else that letter with its accents drawn over it (NFD); else, on the
+  // names' size, a letter from the script packs (this.extra, src/placement-links.js); else the letter without accents
+  // it has no drawing of; else an empty box
   glyphs(text, fontName) {
     const font = CARD_FONTS[fontName];
-    const marks = { "́": "acute", "̀": "grave", "̂": "circumflex", "̈": "diaeresis", "̃": "tilde", "̊": "ring" };
+    const extra = fontName === "body" ? this.extra : null;
     const out = [];
-    for (const char of String(text).normalize("NFD")) {
-      const mark = marks[char];
-      if (mark) {
-        const base = out[out.length - 1];
-        const key = `${mark}.${base && /[A-Z]/u.test(base.char) ? "u" : "l"}`;
-        if (base && font.glyphs[key]) out.push({ char, glyph: font.glyphs[key], over: base });
-        continue;
-      }
-      if (/\p{M}/u.test(char)) continue;                 // another accent: the letter without it
-      const glyph = font.glyphs[char] || (font.glyphs[char.toUpperCase()] && !font.glyphs[char.toLowerCase()] ? font.glyphs[char.toUpperCase()] : null);
-      out.push({ char, glyph, missing: !glyph });
+    for (const whole of String(text).normalize("NFC")) {
+      const own = ownGlyph(font, whole);
+      if (own) { out.push({ char: whole, glyph: own }); continue; }
+      const [base, ...marks] = [...whole.normalize("NFD")];
+      const accents = (all) => {
+        const item = { char: base, glyph: ownGlyph(font, base) };
+        out.push(item);
+        for (const mark of marks) {
+          const key = `${MARKS[mark]}.${/[A-Z]/u.test(base) ? "u" : "l"}`;
+          if (MARKS[mark] && font.glyphs[key]) out.push({ char: mark, glyph: font.glyphs[key], over: item });
+          else if (all) return;
+        }
+      };
+      if (marks.length && ownGlyph(font, base) && marks.every((mark) => MARKS[mark])) { accents(true); continue; }
+      const packed = extra?.get(whole.codePointAt(0));
+      if (packed) { out.push({ char: whole, glyph: packed, packed: true }); continue; }
+      if (marks.length && ownGlyph(font, base)) { accents(false); continue; }   // the accents it has, the letter
+      if (/^\p{M}+$/u.test(whole)) continue;             // a lone accent: left out
+      out.push({ char: whole, glyph: null, missing: true });
     }
     return out;
   }
@@ -159,7 +191,19 @@ class Picture {
         pen += font.size * 0.62 + spacing;
         continue;
       }
-      const [advance, left, top, , height, offset] = item.glyph;
+      const [advance, left, top, width, height, offset, bits] = item.glyph;
+      if (item.packed) {                                 // a script pack's letter: 4-bit coverage, two pixels a byte
+        const ox = Math.round(pen);
+        for (let row = 0; row < height; row += 1) {
+          for (let col = 0; col < width; col += 1) {
+            const i = row * width + col; const byte = bits[offset + (i >> 1)];
+            const level = i & 1 ? byte & 15 : byte >> 4;
+            if (level) this.put(ox + left + col, y + top + row, c, level);
+          }
+        }
+        pen += advance / 16 + spacing;
+        continue;
+      }
       // an accent sits over the middle of the letter before it
       const ox = item.over ? Math.round(item.over.x + item.over.advance / 2) : Math.round(pen);
       // each row's spans: a solid one is one fill, an edge's pixels are blended one by one
@@ -330,6 +374,7 @@ function background(letters) {
 
 export async function drawPlacementCard(model, letters) {
   const p = background(await atlas(letters));
+  p.extra = letters.extra || null;                       // letters from the script packs: code point -> glyph
   const W = CARD_WIDTH;
   const PAD = 64;
   // top: brand and mode

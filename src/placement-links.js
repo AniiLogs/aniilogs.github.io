@@ -79,7 +79,64 @@ export function cardPlayers({ ladder, lead, members, lineup }) {
 }
 const listNames = (names) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
-export function createPlacementLinks({ boardData, copyGroupSql, json, browserWriteAllowed, readJsonBody, siteOrigin, drawCard, runPlayers = null }) {
+// Letters in other scripts for the names on a card (scripts/build-card-script-packs.mjs): one pack per 256 code points,
+// kept in R2 as card-glyphs/v1/<block>.bin, read when a name needs it and kept in the isolate. A pack that isn't there
+// (yet) is asked again after 5 minutes; until then its letters are boxes, as before packs existed.
+export const GLYPH_PACK_BLOCK = /^[0-9a-f]{2}00$/u;
+export const glyphPackKey = (block) => `card-glyphs/v1/${block}.bin`;
+// a pack's letters: code point -> [advance in 1/16 px, left, top, width, height, byte offset, pictures]; null if it isn't one
+export async function readGlyphPack(block, bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  const data = new Uint8Array(await new Response(stream).arrayBuffer());
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  if (data.length < 8 || String.fromCharCode(...data.subarray(0, 4)) !== "ACP1" || data[4] !== 1) return null;
+  const count = view.getUint16(6, true);
+  const start = 8 + count * 12;
+  if (start > data.length) return null;
+  const pictures = data.subarray(start);
+  const base = parseInt(block, 16);
+  const letters = new Map();
+  for (let i = 0; i < count; i += 1) {
+    const at = 8 + i * 12;
+    const width = data[at + 6]; const height = data[at + 7]; const offset = view.getUint32(at + 8, true);
+    if (offset + Math.ceil((width * height) / 2) > pictures.length) return null;
+    letters.set(base + data[at], [view.getUint16(at + 2, true), view.getInt8(at + 4), view.getInt8(at + 5), width, height, offset, pictures]);
+  }
+  return letters;
+}
+const PACK_RETRY_MS = 5 * 60 * 1000;
+
+export function createPlacementLinks({ boardData, copyGroupSql, json, browserWriteAllowed, readJsonBody, siteOrigin, drawCard, runPlayers = null,
+  packBlocks = null }) {
+  const packs = new Map();                               // block -> { at, letters: Promise<Map | null> }
+  function pack(env, block) {
+    const kept = packs.get(block);
+    if (kept && (kept.found || Date.now() - kept.at < PACK_RETRY_MS)) return kept.letters;
+    const entry = { at: Date.now(), found: false };
+    entry.letters = (async () => {
+      const object = env.EVIDENCE ? await env.EVIDENCE.get(glyphPackKey(block)) : null;
+      if (!object) return null;
+      const letters = await readGlyphPack(block, new Uint8Array(await new Response(object.body).arrayBuffer()));
+      entry.found = Boolean(letters);
+      return letters;
+    })().catch((error) => { console.error("Could not read a card letter pack", error); return null; });
+    packs.set(block, entry);
+    return entry.letters;
+  }
+  // the card with the packs its names use (their blocks in card.packs, so the stored picture changes once a pack
+  // arrives), and those letters for drawing it
+  async function withPacks(env, card) {
+    const blocks = packBlocks ? packBlocks(card.players.map((player) => player.name)) : [];
+    const extra = new Map(); const found = [];
+    const loaded = await Promise.all(blocks.map((block) => pack(env, block)));   // read side by side
+    for (const [i, block] of blocks.entries()) {
+      const letters = loaded[i];
+      if (!letters) continue;
+      found.push(block);
+      for (const [cp, glyph] of letters) extra.set(cp, glyph);
+    }
+    return { card: found.length ? { ...card, packs: found } : card, extra };
+  }
   // the run a link was made for, and every copy of it (one Interlink run sent by each of its players)
   async function runOf(env, submissionId) {
     const run = await env.DB.prepare(
@@ -222,7 +279,8 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
       return new Response(null, { status: 302, headers: { location: target, "cache-control": "no-store", vary: "user-agent" } });
     }
     const origin = new URL(request.url).origin;
-    const { title, description, card } = describe(found);
+    const { title, description, card: drawn } = describe(found);
+    const { card } = await withPacks(env, drawn);
     const { hash } = await cardKey(link.code, card);
     const image = `${origin}/api/links/${link.code}.png?p=${found.place}&v=${hash}`;
     return page(200, { title, tabTitle: `${title} · AniiLogs`, description, url: `${origin}/${link.code}`, image,
@@ -251,13 +309,13 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     }
     const found = await placement(env, link);
     if (!found) return json({ error: "This run isn't available." }, 404);
-    const { card } = describe(found);
+    const { card, extra } = await withPacks(env, describe(found).card);
     const { key } = await cardKey(link.code, card);
     if (store && key !== asked) {
       const kept = await store.get(key);
       if (kept) return pngResponse(kept.body, false);
     }
-    const png = await drawCard(card);
+    const png = await drawCard(card, extra);
     if (store) {
       const put = store.put(key, png, { httpMetadata: { contentType: "image/png" } });
       if (env.waitUntil) env.waitUntil(put.catch((error) => console.error("Could not keep a placement card", error)));
