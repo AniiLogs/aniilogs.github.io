@@ -3797,3 +3797,17 @@ test("limit previews: counts and distributions only, for candidate limits sent i
   assert.equal(some.screen.rowsFlagged, 0);                                     // 50 is under 100
   assert.equal(JSON.stringify(some).includes("UserOne"), false);
 });
+
+test("run checks: a re-check can set aside readings that read nothing, so those runs are read again", async () => {
+  const AI = { async run() { return { response: "" }; } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  await sendWithScreens(env, token, run("blank"));
+  assert.equal(stateOf(sqlite, "blank").state, "unreadable");
+  const recheck = async (body) => (await call(env, "/api/admin/run-checks/recheck", { session: SESSIONS.dev, method: "POST", body })).json();
+  assert.deepEqual((await recheck({})).outcomes, { "no badge (picture unreadable)": 1 });
+  assert.deepEqual((await recheck({ retryUnreadable: true })).outcomes, { "would be read": 1 });
+  const applied = await recheck({ retryUnreadable: true, apply: true });
+  assert.deepEqual(applied.outcomes, { "waiting for a reading": 1 });
+  assert.deepEqual([stateOf(sqlite, "blank").state, stateOf(sqlite, "blank").check.queued], ["pending", true]);
+});

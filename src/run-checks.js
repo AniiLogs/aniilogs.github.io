@@ -223,7 +223,7 @@ export function staffReasons(check, state) {
 
 // ---------------------------------------------------------------- choosing limits from the data
 function spread(values) {
-  const sorted = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  const sorted = values.filter((value) => value !== null && value !== undefined && value !== "").map(Number).filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return { rows: 0 };
   const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))];
   return { rows: sorted.length, min: sorted[0], p10: at(0.1), p50: at(0.5), p90: at(0.9), p99: at(0.99), max: sorted.at(-1) };

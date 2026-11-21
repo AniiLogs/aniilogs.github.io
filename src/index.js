@@ -4110,7 +4110,7 @@ async function runCopyRows(env, submissionId, row) {
 // else queue the run ("pending" until it is read). dryRun: nothing is read or written. force: read its pictures again
 // (POST /api/admin/run-checks/<id>/read; a staff decision still stands). Returns what happened, counts-friendly:
 // { outcome, state, changed, misread: [rule], version, staff: [reason] } - or null for a run that isn't an Interlink run.
-async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = false, force = false, cycles = null } = {}) {
+async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = false, force = false, cycles = null, retryUnreadable = false } = {}) {
   const row = await env.DB.prepare(RUN_CHECK_COLUMNS).bind(submissionId).first();
   if (!row || row.kind !== "interlink_run") return null;
   const before = parseJsonColumn(row.verifyJson) || {};
@@ -4124,6 +4124,11 @@ async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = 
   const earlier = !fresh && !force;
   let reading = earlier ? before.reading || null : null;
   let reading2 = earlier ? before.reading2 || null : null;
+  // a reading that read nothing, set aside to be read again (POST /api/admin/run-checks/recheck {retryUnreadable})
+  if (retryUnreadable && reading && !compareReading(row, reading.result, reading.battle).checked) {
+    reading = null;
+    reading2 = null;
+  }
   let readings = earlier ? Number(before.readings) || (reading ? 1 : 0) + (reading2 ? 1 : 0) : 0;
   let reason = force ? "read on request" : agreement.contradicted ? "copies disagree" : earlier ? before.reason || null : null;
   let asked = Boolean(reason);
@@ -4387,6 +4392,8 @@ async function reviewRunCheck(request, env, submissionId) {
 // the cursor the last call answered. A dry run unless apply is true. Never touches a run a staff member decided, never
 // reads a picture (a run that needs a reading is queued, with apply), and changes nothing but the check's own columns.
 // Counts only: per outcome, per staff reason, and the misreads per rule and app build (for fixing the app's reader).
+// retryUnreadable: true sets aside a stored reading that read nothing, so the run is read again (queued, with apply) -
+// for once the second reading works again.
 async function recheckRunChecks(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
@@ -4410,7 +4417,7 @@ async function recheckRunChecks(request, env) {
   let changed = 0;
   for (const row of rows) {
     const before = await env.DB.prepare("SELECT verify_state AS state FROM leaderboard_submissions WHERE submission_id = ?").bind(row.id).first();
-    const checked = await checkRun(env, row.id, { dryRun: !apply, ai: false, cycles });
+    const checked = await checkRun(env, row.id, { dryRun: !apply, ai: false, cycles, retryUnreadable: body.retryUnreadable === true });
     if (!checked) continue;
     outcomes[checked.outcome] = (outcomes[checked.outcome] || 0) + 1;
     if (checked.changed) {
