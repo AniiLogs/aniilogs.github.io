@@ -3,7 +3,8 @@
 // what each player went in with, under a line saying which fight it is. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
 // partyPanel, allowDelete({ any, onDeleted }). options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
 // pictures (Battle Data shows the whole party: the note says whose row the trophy is). options.tab "comments": open on
-// the run's Comments tab (comments.js; also when the viewer already shows that run).
+// the run's Comments tab (comments.js; also when the viewer already shows that run). options.link { run, ladder, player?,
+// code?, realPlayers? } (the boards): a button copying a link to that place, and the Solo / Duo / Trio tag.
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
   const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
@@ -69,7 +70,8 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const details = await response.json();
         return { ...details, shots: Array.isArray(details.shots) && details.shots.length ? details.shots : ["summary"] };
-      })().catch(() => ({ shots: ["summary", "battle"] })));     // an older API: the two it always had
+      // a run that isn't there (a link to a deleted run): no pictures; an older API: the two it always had
+      })().catch((error) => ({ shots: String(error?.message) === "HTTP 404" ? [] : ["summary", "battle"] })));
     }
     return proofLists.get(submissionId);
   }
@@ -288,6 +290,11 @@
     // the run check's badge beside the tabs
     const badge = checkBadge(check);
     if (badge) tabs.append(badge);
+    // options.link (the boards): the run's Solo / Duo / Trio tag and a link to its place (leaderboard/share.js)
+    const share = options?.link && window.AniilogsShare;
+    const shareTag = share ? share.tag(options.link.realPlayers) : null;
+    const shareButton = share && details.shots.length ? share.button(options.link) : null;
+    if (shareTag || shareButton) tabs.append(el("span", { class: "lb-proof-share" }, shareTag, shareButton));
     // options.tab "comments" opens on the Comments tab (a link to a run's comments); a run with no pictures left too
     if (comments && (options?.tab === "comments" || (!pictures.length && await comments.ready))) {
       if (proofOpenFor === submissionId) await showComments();

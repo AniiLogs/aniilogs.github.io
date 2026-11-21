@@ -77,6 +77,7 @@
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"),
     serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), unlinked: $("[data-unlinked]"), rowsPick: $("[data-rows-pick]"),
+    partyPick: $("[data-party-pick]"), partySelect: $("[data-party-select]"),
     interlink: $("[data-interlink]"), tableWrap: $("[data-table-wrap]"),
   };
   const state = {
@@ -182,6 +183,7 @@
     state.viewOrder = state.viewBoss && ["asc", "desc"].includes(state.order) ? state.order : "";   // "View all": its ladder flipped
     state.season = params.get("season") || ""; state.split = params.get("split") || "";
     state.rows = ["teams", "players"].includes(params.get("rows")) ? params.get("rows") : storedRows();
+    state.players = ["1", "2", "3", "4"].includes(params.get("players")) ? params.get("players") : "";   // the Party filter
     // the Season Ladder's sorted column (?rank=, so ?rank=stars from older links still works) and ?order=
     state.rank = Object.hasOwn(SEASON_SORTS, params.get("rank") || "") ? params.get("rank") : "score";
     state.rankOrder = board().custom === "season" && ["asc", "desc"].includes(state.order) ? state.order : "";
@@ -203,6 +205,7 @@
     if (board().custom === "boss") {
       if (state.week) params.set("week", state.week);
       if (state.rows === "players") params.set("rows", "players");      // Teams is the default
+      if (state.players) params.set("players", state.players);         // the Party filter: hides rows, places stay
       if (state.viewBoss) {
         params.set("boss", state.viewBoss);
         params.set("ladder", state.viewLadder);
@@ -242,6 +245,8 @@
   function writeUrl() {
     const url = new URL(window.location.href);
     url.search = query().toString();
+    // a run open from the address (openRunFromUrl) stays in it until its viewer closes, so the address can be shared
+    for (const [key, value] of Object.entries(state.openRun || {})) if (value) url.searchParams.set(key, value);
     const push = state.push && url.href !== window.location.href;
     state.push = false;
     if (push) {
@@ -310,6 +315,8 @@
     els.tableWrap.hidden = false;
     for (const node of [els.prev, els.next, els.page]) node.hidden = Boolean(custom);
     if (custom !== "boss") showRowsPick();          // Season Ladder and the other modes: no Show switch
+    els.partyPick.hidden = custom !== "boss";       // the Party filter: Interlink's boss boards only
+    els.partySelect.value = state.players;
     if (custom) return;
     const sorts = board().sorts;
     if (!sorts.includes(state.sort)) { state.sort = sorts[0]; state.order = ""; }
@@ -658,10 +665,16 @@
     return el("time", { class: "lb-when", datetime: at.toISOString(), title: `New best sent ${at.toLocaleString()} (${agoText(unix)})`,
       text: `${label}${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` });
   }
-  // How a board row's run ended, with its proof pictures beside it
+  // How a board row's run ended, with its proof pictures beside it: [Solo / Duo / Trio tag, text, pictures, link]. The
+  // link (share.js) is the row's place on this ladder: a one-player ladder's is the player's own row.
   function resultLine(entry, ladder, boss = null) {
-    return [clearText(entry, boss), proofButton(entry.proofIds?.[ladder.proof] || entry.proofId, rowCheck(entry, ladder), entry.menuProofId)];
+    const proofId = entry.proofIds?.[ladder.proof] || entry.proofId;
+    const link = proofId ? { run: proofId, ladder: ladder.id, player: ONE_PLAYER_COLUMNS.includes(ladder.id) ? entry.player : undefined } : null;
+    return [share?.tag(entry.realPlayers) || null, clearText(entry, boss),
+      proofButton(proofId, rowCheck(entry, ladder), entry.menuProofId, link ? { link: { ...link, realPlayers: entry.realPlayers } } : {}),
+      share?.button(link) || null];
   }
+  const share = window.AniilogsShare;
   // A board row's badge: its run's check, or "invalid" when the row has no proof pictures at all
   function rowCheck(entry, ladder) {
     return Object.keys(entry.proofIds || {}).length ? entry.checks?.[ladder.proof] || entry.checks?.score : "invalid";
@@ -741,8 +754,8 @@
   }
   // a team row's result: how the run ended, its one check badge and its proof pictures
   function teamResult(lead, ladder, boss) {
-    const [text, proof] = resultLine(lead, ladder, boss);
-    return [text, checkBadge(rowCheck(lead, ladder)), proof];
+    const [tag, text, proof, link] = resultLine(lead, ladder, boss);
+    return [tag, text, checkBadge(rowCheck(lead, ladder)), proof, link];
   }
   // The page's one Teams / Players switch (beside Server and Show unlinked): it changes every board on the page, or
   // View all's table. The control stays in place while the boards reload, so keyboard focus stays on the pressed button.
@@ -804,7 +817,7 @@
     el("label", { class: "lb-ladder" }, el("span", { text: "Ladder" }), select),
     rows.length ? head : null,
     rows.length ? el("ol", { class: "lb-rows" }, rows)
-      : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
+      : el("p", { class: "lb-empty", text: state.players ? "No runs of this party size on this board." : ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
     boss.total ? el("button", { type: "button", class: "lb-more", text: `View all ${number(count)}${noun} →`,
       onclick: () => {
         state.push = true;
@@ -818,6 +831,7 @@
     state.ladders[key] = ladderOf(ladderId).id;
     const ask = new URLSearchParams({ cycle: cycleId, boss: bossId, ladder: state.ladders[key], limit: String(BOARD_ROWS) });
     if (state.rows === "teams") ask.set("rows", "teams");       // the top rows are team rows
+    if (state.players) ask.set("players", state.players);
     if (state.server) ask.set("server", state.server);
     if (state.unlinked) ask.set("unlinked", "1");
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
@@ -1091,6 +1105,7 @@
       ask.set("limit", String(BOARD_ROWS));
     }
     if (state.rows === "teams") ask.set("rows", "teams");       // limit and offset count team rows
+    if (state.players) ask.set("players", state.players);       // the Party filter: rows hidden, places kept
     const data = await get(ask);
     if (requestId !== state.requestId) return;
     if (!data) { failed(); return; }
@@ -1213,6 +1228,7 @@
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
   els.unlinked.addEventListener("change", () => { state.unlinked = els.unlinked.checked; state.offset = 0; void loadEntries(); });
+  els.partySelect.addEventListener("change", () => { state.players = els.partySelect.value; state.offset = 0; void loadEntries(); });
   for (const button of els.rowsPick.querySelectorAll("[data-rows-choice]")) button.addEventListener("click", () => setRows(button.dataset.rowsChoice));
   // a board opened with "View all" pages by FULL_ROWS, the record boards by PAGE_SIZE
   const pageSize = () => (board().custom ? FULL_ROWS : PAGE_SIZE);
@@ -1248,21 +1264,33 @@
     els.gateTitle.textContent = title;
     els.gateDetail.replaceChildren(detail, link ? el("a", { href: link.href, text: link.text }) : "");
   }
-  // A link to one run (/leaderboard/?run=<submission id>&tab=comments, as notifications send): its viewer opens on
-  // load, on the tab named by `tab`; closing it takes run and tab out of the address. A run that isn't there shows
-  // "This run isn't available" in the viewer. (A stand-in: the shareable-links work replaces this function.)
+  // A link to one run: /leaderboard/?run=<submission id> (any copy of a team run), as a placement's short link sends
+  // (with week, boss, ladder, rows and offset for the board behind it, and link: its code) and notifications do
+  // (&tab=comments). The viewer opens on load, on the tab `tab` names (an unknown one is ignored); its link button
+  // copies that place on `ladder` (Score when none). run, tab and link stay in the address while it's open (writeUrl)
+  // and leave it, without a reload, when it closes. A run that isn't there shows "This run isn't available".
   function openRunFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const runId = params.get("run") || "";
     if (!/^[A-Za-z0-9_-]{8,40}$/u.test(runId)) return;
-    const tab = params.get("tab") || "";
-    void proofViewer.open(runId, null, null, tab ? { tab } : {});
-    document.querySelector("dialog.lb-proof-dialog")?.addEventListener("close", () => {
+    const tab = ["comments"].includes(params.get("tab")) ? params.get("tab") : "";
+    const ladder = ladderOf(params.get("ladder")).id;
+    const code = /^[23456789abcdefghjkmnpqrstuvwxyz]{5}$/u.test(params.get("link") || "") ? params.get("link") : "";
+    state.openRun = { run: runId, tab, link: code };
+    void proofViewer.open(runId, null, null, { ...(tab ? { tab } : {}), link: { run: runId, ladder, code } });
+    // closed (×, Esc, a click outside, or another page's code): seen as its open attribute going, which also works where
+    // the close event is held back (a page in the background)
+    const dialog = document.querySelector("dialog.lb-proof-dialog");
+    if (!dialog) return;
+    const watch = new MutationObserver(() => {
+      if (dialog.open) return;
+      watch.disconnect();
+      state.openRun = null;
       const url = new URL(window.location.href);
-      url.searchParams.delete("run");
-      url.searchParams.delete("tab");
+      for (const key of ["run", "tab", "link"]) url.searchParams.delete(key);
       window.history.replaceState(window.history.state, "", url);
-    }, { once: true });
+    });
+    watch.observe(dialog, { attributes: true, attributeFilter: ["open"] });
   }
   async function start() {
     if (!API_URL) return gate("Leaderboards are unavailable.", "The AniiLogs API is not configured for this page.");

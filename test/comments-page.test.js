@@ -48,7 +48,7 @@ test("notifications ask only while signed in and the tab is visible, about once 
 test("a run link opens the viewer on the tab it names; the Comments tab can be picked from outside", () => {
   const boards = read("leaderboard/leaderboard.js");
   assert.match(boards, /function openRunFromUrl\(\)/u);
-  assert.match(boards, /proofViewer\.open\(runId, null, null, tab \? \{ tab \} : \{\}\)/u);
+  assert.match(boards, /proofViewer\.open\(runId, null, null, \{ \.\.\.\(tab \? \{ tab \} : \{\}\), link: \{ run: runId, ladder, code \} \}\)/u);
   const viewer = read("proof-viewer.js");
   assert.match(viewer, /options\?\.tab === "comments"/u);
   assert.match(viewer, /window\.AniilogsComments\.mount\(commentsRun\)/u);
