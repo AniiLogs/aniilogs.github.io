@@ -108,7 +108,8 @@ export async function runAccounts(env, copies) {
     let players = [];
     try { players = JSON.parse(copy.playersJson || "[]"); } catch { players = []; }
     for (const slot of Array.isArray(players) ? players : []) {
-      if (slot && !slot.ai && slot.uid) slots.push({ uid: String(slot.uid), confirmed: slot.confirmed === true || slot.confirmed === 1 });
+      // a slot with a UID is a person, whatever the app's ai flag says (src/bots.js)
+      if (slot && slot.uid) slots.push({ uid: String(slot.uid), confirmed: slot.confirmed === true || slot.confirmed === 1 });
     }
   }
   const uids = [...new Set(slots.map((slot) => slot.uid))].slice(0, 60);

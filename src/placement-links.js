@@ -29,18 +29,9 @@ export const PLACEMENT_LADDERS = Object.freeze({
   heal: { label: "Healing", proof: "heal", one: true, key: "heal" },
 });
 
-// Solo / Duo / Trio: a run that had fewer than four real players, bots (players marked ai) filling the rest. A full
-// team, or a run whose players don't say, gets none. It's information only: it never changes a place.
+// Solo / Duo / Trio: a run that had fewer than four real players, bots filling the rest (who is a bot: src/bots.js,
+// realPlayersOf). A full team gets none. It's information only: it never changes a place.
 export const TEAM_TAGS = Object.freeze({ 1: "Solo", 2: "Duo", 3: "Trio" });
-export function realPlayersOf(players) {
-  let list = players;
-  if (typeof list === "string") { try { list = JSON.parse(list); } catch { return null; } }
-  if (!Array.isArray(list)) return null;
-  const slots = list.filter((player) => player && typeof player === "object");
-  const bots = slots.filter((player) => player.ai === true).length;
-  const real = slots.filter((player) => player.ai !== true && player.name).length;
-  return bots && real >= 1 && real <= 3 ? real : null;
-}
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/gu, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const number = (value) => (value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value).toLocaleString("en-US"));

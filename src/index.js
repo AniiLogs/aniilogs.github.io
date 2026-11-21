@@ -2,7 +2,8 @@
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard } from "./placement-card.js";
-import { createPlacementLinks, PLACEMENT_CARD_PATH, PLACEMENT_PATH, realPlayersOf } from "./placement-links.js";
+import { botSql, realPlayersOf, slotIsBot } from "./bots.js";
+import { createPlacementLinks, PLACEMENT_CARD_PATH, PLACEMENT_PATH } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
@@ -1806,7 +1807,7 @@ function publicLineup(lineup) {
   const text = (value) => (typeof value === "string" ? value.slice(0, 40) : undefined);
   const level = (value) => (Number.isInteger(value) && value >= 1 && value <= 999 ? value : undefined);
   return lineup.slice(0, 4).filter((item) => item && typeof item === "object").map((item) => JSON.parse(JSON.stringify({
-    slot: level(item.slot), name: text(item.name), ai: typeof item.ai === "boolean" ? item.ai : undefined, self: item.self === true || undefined,
+    slot: level(item.slot), name: text(item.name), ai: slotIsBot(item), self: item.self === true || undefined,
     // every player's lead, its level and CP, and the team they went in with (public, the owner's decision)
     aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
     cp: Number.isInteger(item.cp) && item.cp >= 0 && item.cp <= 10000000 ? item.cp : undefined,
@@ -2006,10 +2007,11 @@ export function lineupWithCards(lineup, players) {
   for (const card of cards) {
     if (count >= 4) break;
     if (key(card.name) && slotKeys.has(key(card.name))) continue;
-    if (!key(card.name) && card.ai !== true && dpsOf(card) === null) continue;      // nothing to show
+    const bot = slotIsBot(card, lineup);
+    if (!key(card.name) && !bot && dpsOf(card) === null) continue;      // nothing to show
     if (dpsOf(card) !== null && taken.has(dpsOf(card))) continue;                     // its card is already on a slot
     const named = typeof card.name === "string" && card.name.trim() && !card.unsettled;
-    out.push({ ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }), ai: card.ai === true, avgDps: dpsOf(card), fromBattleData: true });
+    out.push({ ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }), ai: bot, avgDps: dpsOf(card), fromBattleData: true });
     count += 1;
   }
   return out;
@@ -2061,7 +2063,7 @@ async function battleHistory(env, discordId, params, { owner }) {
     WHERE c.kind = 'interlink_run' AND c.status = 'visible' AND c.discord_id <> ?1${owner ? "" : " AND COALESCE(c.outcome, '') <> 'invalid'"}
       AND (${uids.map((uid) => `instr(c.players_json, '"${uid}"') > 0`).join(" OR ")})
       AND EXISTS (SELECT 1 FROM json_each(c.players_json) pl JOIN game_characters gc ON gc.game_uid = json_extract(pl.value, '$.uid')
-        WHERE gc.discord_id = ?1 AND json_extract(pl.value, '$.ai') = 0
+        WHERE gc.discord_id = ?1 AND NOT ${botSql("pl", "c")}
           AND (gc.verified_at IS NOT NULL OR json_extract(pl.value, '$.confirmed') = 1))
       AND NOT EXISTS (SELECT 1 FROM leaderboard_submissions mine WHERE mine.discord_id = ?1 AND mine.kind = 'interlink_run'
         AND ((json_extract(mine.extra_json, '$.instanceId') IS NOT NULL
@@ -2177,7 +2179,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         difficulty: row.difficulty || null,
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
-        players: withProfiles(parseJsonColumn(row.players_json), profiles) || [],
+        players: withProfiles(parseJsonColumn(row.players_json), profiles, extra.lineup) || [],
         lineup: mergedLineup(publicLineup(extra.lineup), copies),
         // the buffs the party went in with (the leader picks them on the Party screen)
         buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
@@ -4378,7 +4380,7 @@ async function staffRunChecks(request, env) {
       return {
         ...row,
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
-        players: (parseJsonColumn(playersJson) || []).slice(0, 4).map((player) => ({ name: player?.name ?? null, avgDps: player?.avgDps ?? null, ai: Boolean(player?.ai) })),
+        players: (parseJsonColumn(playersJson) || []).slice(0, 4).map((player, _i, all) => ({ name: player?.name ?? null, avgDps: player?.avgDps ?? null, ai: slotIsBot(player, all) })),
         reasons: staffReasons(check, state),
         // what the reading read, where it was read
         read: read ? { score: readNumber(read.score), stars: readNumber(read.stars), time: read.time ?? null } : null,
@@ -5110,7 +5112,7 @@ const CREDITED_RUNS = `(
       json_extract(pl.value, '$.avgDps') AS p_dps, json_extract(pl.value, '$.breakValue') AS p_break,
       json_extract(pl.value, '$.damageTaken') AS p_taken, json_extract(pl.value, '$.heal') AS p_heal
     FROM leaderboard_submissions c, json_each(c.players_json) pl
-    WHERE c.kind = 'interlink_run' AND ${ON_BOARDS("c")} AND json_extract(pl.value, '$.ai') = 0
+    WHERE c.kind = 'interlink_run' AND ${ON_BOARDS("c")} AND NOT ${botSql("pl", "c")}
       AND COALESCE(json_extract(pl.value, '$.self'), 0) = 0 AND json_extract(pl.value, '$.name') IS NOT NULL
       -- a name no copy of the run agrees on and no Party screen shows (settledRun): on no board, Show unlinked included
       AND COALESCE(json_extract(pl.value, '$.unsettled'), 0) = 0
@@ -5174,7 +5176,7 @@ async function partyProfiles(env, rows) {
   const shown = [];
   for (const row of rows) {
     for (const player of parseJsonColumn(row.players_json) || []) {
-      if (player?.name && !player.ai) { names.add(String(player.name).toLowerCase()); shown.push(String(player.name)); }
+      if (player?.name && !slotIsBot(player, parseJsonColumn(row.extra_json)?.lineup)) { names.add(String(player.name).toLowerCase()); shown.push(String(player.name)); }
     }
   }
   const identities = await nameIdentities(env, shown);
@@ -5186,16 +5188,18 @@ async function partyProfiles(env, rows) {
      WHERE p.is_public = 1 AND p.public_id IS NOT NULL AND lower(gc.character_name) IN (${names})`);
   return Object.assign(new Map(results.map((row) => [row.name, row.publicId])), { identities });
 }
-function withProfiles(players, profiles) {
+// lineup: the run's Party entries (a slot's CP for the bot rule, bots.js); each player's ai is the site's rule
+function withProfiles(players, profiles, lineup = null) {
   if (!Array.isArray(players)) return players;
   return players.map((player) => {
     if (!player || typeof player !== "object") return player;
     // server-only marks: the folded name, recorded UIDs, and what the app read before the copies settled a name
     const { skel: _skeleton, uid: _uid, confirmed: _confirmed, read: _read, unsettled: _unsettled, ...shown } = player;
-    if (!player.name || player.ai) return shown;
+    const ai = slotIsBot(player, lineup);
+    if (!player.name || ai) return { ...shown, ai };
     const publicId = profiles.get(String(player.name).toLowerCase());
     const identity = profiles.identities ? profiles.identities(player.name) : { lookalike: false };
-    return { ...shown, ...(publicId ? { profileId: publicId } : {}), ...(identity.lookalike ? { lookalike: true } : {}) };
+    return { ...shown, ai, ...(publicId ? { profileId: publicId } : {}), ...(identity.lookalike ? { lookalike: true } : {}) };
   });
 }
 
@@ -6277,11 +6281,11 @@ async function interlinkBoards(request, env, internal = false) {
     for (let i = 0; i < proofRunIds.length; i += 90) {
       const chunk = proofRunIds.slice(i, i + 90);
       const { results } = await env.DB.prepare(
-        `SELECT submission_id AS id, verify_state AS state, players_json AS playersJson FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
+        `SELECT submission_id AS id, verify_state AS state, players_json AS playersJson, json_extract(extra_json, '$.lineup') AS lineupJson FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
       ).bind(...chunk).all();
       for (const result of results || []) {
         badges.set(result.id, runCheckBadge(result.state));
-        realPlayers.set(result.id, realPlayersOf(result.playersJson));
+        realPlayers.set(result.id, realPlayersOf(result.playersJson, result.lineupJson));
       }
     }
   } catch (error) {
@@ -6531,7 +6535,7 @@ async function leaderboardEntries(request, env) {
       defeats: row.defeats ?? null,
       server: row.server || null,
       profileId: row.profileId || null,
-      players: withProfiles(parseJsonColumn(row.players_json), profiles),
+      players: withProfiles(parseJsonColumn(row.players_json), profiles, parseJsonColumn(row.extra_json)?.lineup),
       buffs: parseJsonColumn(row.buffs_json),
       extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
