@@ -186,6 +186,35 @@ test("links: the same placement gives one code, from either copy of the run; a r
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM placement_links").get().n, 4);
 });
 
+test("a link on a two-boss Center: the preview and the card name both bosses; a run that timed out at 3:00 says so", async () => {
+  const { env, sqlite } = await setup();
+  const now = Math.floor(Date.now() / 1000);
+  const bosses = [{ id: "80000109", name: "Omega Sherro" }, { id: "80000120", name: "Alpha Blazen", second: { id: "80000119", name: "Omega Tucking" } }, { id: "80000101", name: "Alpha Bouldus" }];
+  sqlite.prepare("INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES ('4003', 1, ?, ?, ?, 'x', ?)")
+    .run(now - 86400, now + 86400 * 5, JSON.stringify(bosses), now);
+  const who = await player(env, sqlite, "Larkspur");
+  const party = [["Larkspur", false, 30000], ["Flora", true], ["Mario", true], ["Tammy", true]];
+  const body = { kind: "interlink_run", clientRunId: "pair", cycle: "4003", boss: { id: "80000120", name: "Alpha Blazen", level: 60 }, score: 52000, stars: 40,
+    clearTimeS: 180, cleared: false, teamDps: 60000, gameUid: who.gameUid, playedAt: now - 600,
+    players: party.map(([name, ai, avgDps]) => ({ name, ai, ...(name === who.name ? { self: true } : {}), ...(avgDps ? { avgDps } : {}) })),
+    extra: { lineup: party.map(([name, ai], slot) => ({ slot: slot + 1, name, ai, ...(name === who.name ? { self: true } : {}) })) } };
+  const form = new FormData();
+  form.set("submission", JSON.stringify(body));
+  form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: who.token, method: "POST", form })).status, 201);
+  const { code } = await (await createLink(env, { run: idOf(sqlite, "pair"), ladder: "score" })).json();
+  const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
+  const tag = (property) => html.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)">`, "u"))?.[1];
+  assert.match(tag("og:title"), /^#1 on Score · Alpha Blazen \+ Omega Tucking · Week of /u);
+  assert.match(tag("og:description"), /Timed Out: 3:00\. .*Holo-Battle Interlink, Center boss\.$/u);
+  // a person lands on that board, which names both bosses too
+  const person = await call(env, `/${code}`, { ua: BROWSER_UA });
+  const to = new URL(person.headers.get("location"));
+  assert.deepEqual([to.searchParams.get("week"), to.searchParams.get("boss")], ["4003", "80000120"]);
+  const landed = (await (await call(env, `/api/leaderboard/interlink?cycle=4003&boss=80000120`)).json()).bosses[0];
+  assert.deepEqual([landed.name, landed.second?.name], ["Alpha Blazen", "Omega Tucking"]);
+});
+
 test("opening a link: a crawler gets the preview tags with the overall place; a person goes to the boards with the run open", async () => {
   const { env, sqlite } = await board();
   const duo = idOf(sqlite, "duo-c");

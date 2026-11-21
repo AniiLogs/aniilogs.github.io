@@ -3049,6 +3049,107 @@ test("team rows on a two-boss week: copies sent under the first and the second b
   assert.deepEqual([middle.teams, middle.total], [1, 3]);
 });
 
+// Week 4003's Center: Alpha Blazen, then Omega Tucking when it falls, in one run. Every place that names a boss names
+// that fight by both (its runs are stored under the first boss). The run here is shaped like the live ones: all 40
+// stars at the full 180 s clock with the second boss still up (cleared false).
+test("a two-boss week: the Center is named by both bosses on its board, the run viewer, the profile, My runs and the menus", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE: evidenceStore() });
+  const now = Math.floor(Date.now() / 1000);
+  const week = { id: "4003", season: 1, start: now - 86400, end: now + 86400 * 5,
+    bosses: [{ id: "80000109", name: "Omega Sherro" }, { id: "80000120", name: "Alpha Blazen", second: { id: "80000119", name: "Omega Tucking" } }, { id: "80000101", name: "Alpha Bouldus" }] };
+  sqlite.prepare("INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(week.id, week.season, week.start, week.end, JSON.stringify(week.bosses), IDS.dev, week.start);
+  const token = await namedToken(env, SESSIONS.dev);
+  const form = (body) => { const data = new FormData(); data.set("submission", JSON.stringify(body));
+    const jpeg = new Uint8Array(2048); jpeg.set([0xff, 0xd8, 0xff, 7]); data.set("evidence", new Blob([jpeg], { type: "image/jpeg" }), "result.jpg"); return data; };
+  const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST",
+    form: form(run("pair-1", { cycle: "4003", boss: { id: "80000119", name: "Omega Tucking", level: 60 }, score: 52000, stars: 40, clearTimeS: 180, cleared: false, playedAt: now - 600 })) });
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  assert.equal((await sendRun(env, token, run("side-1", { cycle: "4003", boss: { id: "80000109", name: "Omega Sherro", level: 60 }, score: 21000, stars: 20, clearTimeS: 150, cleared: true, playedAt: now - 300 }))).status, 201);
+
+  // the board: the Center's entry carries its second boss; the sides don't; the run timed out at 3:00 (no clear time)
+  const data = await (await call(env, "/api/leaderboard/interlink?cycle=4003&ladder=score&rows=teams")).json();
+  assert.deepEqual(data.bosses.map((boss) => [boss.slot, boss.name, boss.second ?? null, boss.starCap]), [
+    ["Left", "Omega Sherro", null, 20], ["Center", "Alpha Blazen", { id: "80000119", name: "Omega Tucking" }, 40], ["Right", "Alpha Bouldus", null, 20]]);
+  assert.deepEqual(data.bosses[1].entries.map((e) => [e.stars, e.outcome, e.clearTimeS, e.runTimeS]), [[40, "time-up", null, 180]]);
+  assert.equal("twoBossStarsConfirmed" in data.rules, false);
+  // "View all" asks for one board: the same entry
+  const one = await (await call(env, "/api/leaderboard/interlink?cycle=4003&boss=80000120&ladder=score&rows=teams&limit=25")).json();
+  assert.deepEqual(one.bosses.map((boss) => [boss.name, boss.second?.name]), [["Alpha Blazen", "Omega Tucking"]]);
+
+  // the run viewer's title line
+  const fight = (await (await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=list`)).json()).fight;
+  assert.equal(fight.title, "Alpha Blazen + Omega Tucking");
+
+  // My runs / Battle History: the run's boss with its second; the boss menu by both; the search box finds it by either
+  const mine = (q = "") => historyOf(env, `/api/profile/history?page=1${q ? `&q=${q}` : ""}`, SESSIONS.dev);
+  const history = await mine();
+  const pair = history.runs.find((r) => r.submissionId === submissionId);
+  assert.deepEqual(pair.boss, { id: "80000120", name: "Alpha Blazen", level: 60, second: { id: "80000119", name: "Omega Tucking" } });
+  assert.equal(pair.outcome, "time-up");
+  assert.equal(history.runs.find((r) => r.submissionId !== submissionId).boss.second, undefined);
+  assert.deepEqual(history.filters.bosses.map((b) => b.name).sort(), ["Alpha Blazen + Omega Tucking", "Omega Sherro"]);
+  assert.deepEqual((await mine("tucking")).runs.map((r) => r.submissionId), [submissionId]);
+  assert.deepEqual((await mine("blazen")).runs.map((r) => r.submissionId), [submissionId]);
+  assert.equal((await mine("sherro")).runs.some((r) => r.submissionId === submissionId), false);
+
+  // the runs page's boss menu and rows
+  const facets = await (await call(env, "/api/leaderboard/facets?mode=interlink")).json();
+  assert.deepEqual(facets.bosses.map((b) => b.name).sort(), ["Alpha Blazen + Omega Tucking", "Omega Sherro"]);
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&cycle=4003&boss=80000120")).json()).entries;
+  assert.deepEqual(entries.map((e) => e.boss.second), [{ id: "80000119", name: "Omega Tucking" }]);
+
+  // the profile: the week's tree, its board entry and the trophy that names the fight
+  const overview = await (await call(env, "/api/profile/overview", { session: SESSIONS.dev })).json();
+  const bosses = overview.leaderboards.interlinkParts.current.weeks[0].bosses;
+  assert.deepEqual(bosses.map((b) => [b.name, b.second?.name ?? null]), [["Omega Sherro", null], ["Alpha Blazen + Omega Tucking", "Omega Tucking"]]);
+  const entry = overview.leaderboards.interlink_run.find((e) => e.boss?.id === "80000120");
+  assert.deepEqual(entry.boss.second, { id: "80000119", name: "Omega Tucking" });
+  const best = overview.trophies.find((trophy) => trophy.id === "interlink-score");
+  assert.equal(best.context.boss.name, "Alpha Blazen + Omega Tucking");
+});
+
+test("the boards page: the rules line under a two-boss week says only what live runs showed", () => {
+  const page = readFileSync(resolve(import.meta.dirname, "..", "public", "leaderboard", "leaderboard.js"), "utf8");
+  const source = page.match(/ {2}function rulesLine\([\s\S]*?\r?\n {2}\}\r?\n/u)?.[0];
+  assert.ok(source, "rulesLine is in the page");
+  const rulesLine = new Function(`${source}; return rulesLine;`)();
+  const slots = ["Left", "Center", "Right"];
+  const text = (parts) => parts.map((part) => `${part.label || ""}${part.text}${part.pair ? " [own line]" : ""}`);
+  const single = [{ slot: "Left", slotIndex: 0, name: "Omega Sherro" }, { slot: "Center", slotIndex: 1, name: "Alpha Glameep" }, { slot: "Right", slotIndex: 2, name: "Alpha Bouldus" }];
+  assert.deepEqual(text(rulesLine([20, 40, 20], [20, 40, 20], slots, single)), ["Max stars 20 / 40 / 20", "A kill is 20 / 40 / 20 stars"]);
+  assert.deepEqual(text(rulesLine([15, 30, 15], [15, 15, 15], slots, single)), ["Max stars 15 / 30 / 15", "A kill is 15 stars"]);
+  const paired = single.map((boss) => (boss.slotIndex === 1 ? { ...boss, name: "Alpha Blazen", second: { id: "80000119", name: "Omega Tucking" } } : boss));
+  // the cap is confirmed (no "unconfirmed"); no word on what a Center kill is worth; one sentence for the two bosses
+  assert.deepEqual(text(rulesLine([20, 40, 20], [20, 40, 20], slots, paired)), [
+    "Max stars 20 / 40 / 20", "A kill is 20 stars on the Left and Right", "The Center is two bosses in one run: Alpha Blazen, then Omega Tucking. [own line]"]);
+  assert.doesNotMatch(page, /unconfirmed\)|twoBossStarsConfirmed|How its stars add up/u);
+  // the profile's week tree says "Both Killed" for a two-boss fight, as the boards do
+  const app = readFileSync(resolve(import.meta.dirname, "..", "public", "app.js"), "utf8");
+  assert.match(app, /const killed = boss\.second \? "Both Killed" : "Boss Killed";/u);
+  assert.match(page, /const killed = boss\?\.second \? "Both Killed" : "Boss Killed";/u);
+});
+
+test("a boss is named by both only where a week pairs it: an id a week lists alone stays one boss", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const now = Math.floor(Date.now() / 1000);
+  const add = (id, start, bosses) => sqlite.prepare("INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES (?, 1, ?, ?, ?, ?, ?)")
+    .run(id, start, start + 86400 * 6, JSON.stringify(bosses), IDS.dev, start);
+  // made-up weeks: boss 80000150 is the paired Center of one week and a fight of its own in another
+  add("4003", now - 86400 * 8, [{ id: "80000140", name: "Alpha One" }, { id: "80000150", name: "Alpha Two", second: { id: "80000151", name: "Omega Three" } }, { id: "80000160", name: "Alpha Four" }]);
+  add("4004", now - 86400, [{ id: "80000140", name: "Alpha One" }, { id: "80000150", name: "Alpha Two" }, { id: "80000160", name: "Alpha Four" }]);
+  const token = await namedToken(env, SESSIONS.dev);
+  for (const [id, cycle] of [["w1", "4003"], ["w2", "4004"]]) {
+    assert.equal((await sendRun(env, token, run(id, { cycle, boss: { id: "80000150", name: "Alpha Two", level: 60 }, score: 30000, stars: 30, playedAt: now - 600 }))).status, 201);
+  }
+  const history = await historyOf(env, "/api/profile/history?page=1", SESSIONS.dev);
+  assert.deepEqual(history.runs.map((r) => [r.cycle, r.boss.second?.name ?? null]).sort(), [["4003", "Omega Three"], ["4004", null]]);
+  assert.deepEqual(history.filters.bosses.map((b) => b.name), ["Alpha Two"]);           // one menu entry for both weeks
+  const boards = await (await call(env, "/api/leaderboard/interlink?cycle=4004")).json();
+  assert.equal(boards.bosses[1].second, undefined);
+});
+
 // ---------------------------------------------------------------- copies of one run: marks and names
 // Three senders (the test accounts' characters) and a team-mate without the app.
 const SENDERS = { DevOne: ["301000000001", SESSIONS.dev], DevTwo: ["301000000002", SESSIONS.dev2], UserOne: ["301000000003", SESSIONS.user] };

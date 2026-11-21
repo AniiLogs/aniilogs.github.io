@@ -1781,7 +1781,10 @@ const HISTORY_PAGE_SIZES = Object.freeze([20, 30, 50]);
 // viewer's time zone, ?tz= minutes east of UTC: "2026-11-03", "Nov", "November 3"). Never a UID.
 const HISTORY_MODE_WORDS = Object.freeze({ interlink: "holo-battle interlink", sim: "holo-battle sim simulation trial training", eggheist: "egg heist eggheist" });
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-function historySearch(params, binds) {
+// A two-boss fight is found by either boss: its runs are stored under the first one's name (list: the weeks).
+function historySearch(params, binds, list = []) {
+  const pairs = (list || []).flatMap((week) => (week.bosses || []).filter((boss) => boss.second?.name && /^\d{1,12}$/u.test(String(boss.id))
+    && interlinkPairOf(list, boss.id)).map((boss) => ({ id: String(boss.id), second: String(boss.second.name).toLowerCase() })));
   const words = String(params.get("q") || "").slice(0, 80).toLowerCase().split(/\s+/u).filter(Boolean).slice(0, 6).map((word) => word.slice(0, 40));
   if (!words.length) return [];
   const tz = Number.parseInt(params.get("tz") || "0", 10);
@@ -1795,7 +1798,8 @@ function historySearch(params, binds) {
   return words.map((word) => {
     const n = binds.push(`%${word.replace(/[\\%_]/gu, (c) => `\\${c}`)}%`);
     const modes = Object.entries(HISTORY_MODE_WORDS).filter(([, text]) => text.includes(word)).map(([mode]) => `'${mode}'`);
-    return `(${["boss_name", "rank_name", "trial", "difficulty"].map((column) => `${column} ${like(n)}`).join(" OR ")}
+    const paired = [...new Set(pairs.filter((pair) => pair.second.includes(word)).map((pair) => `'${pair.id}'`))];
+    return `(${["boss_name", "rank_name", "trial", "difficulty"].map((column) => `${column} ${like(n)}`).join(" OR ")}${paired.length ? ` OR boss_id IN (${paired.join(", ")})` : ""}
       OR ${names("players_json", "$", n)} OR ${names("extra_json", "$.lineup", n)}
       OR (${day}) ${like(n)}${modes.length ? ` OR mode IN (${modes.join(", ")})` : ""}${"menu best".includes(word) ? " OR kind = 'interlink_best'" : ""})`;
   });
@@ -2085,7 +2089,9 @@ async function battleHistory(env, discordId, params, { owner }) {
   if (mode) { where.push(`mode = ?${binds.push(mode)}`); }
   // My runs: menu bests on their own, and the search box
   if (params.get("mode") === "menu") where.push("kind = 'interlink_best'");
-  where.push(...historySearch(params, binds));
+  // the weeks: a week's dates and a two-boss fight's second boss (also found by the search box)
+  const weekList = await interlinkCycles(env);
+  where.push(...historySearch(params, binds, weekList));
   // a part of an Interlink season (?split=<week id block>, Season 1.0 is 3, 1.1 is 4), and with ?best=1 only the
   // runs that are this player's best of each boss and week in it (as the boards and the season totals count them)
   const split = /^\d{1,4}$/u.test(String(params.get("split") || "")) ? Number(params.get("split")) : null;
@@ -2136,7 +2142,6 @@ async function battleHistory(env, discordId, params, { owner }) {
   }
   const profiles = await partyProfiles(env, rows);
   // a week's dates, for its label ("Week of Oct 28")
-  const weekList = await interlinkCycles(env);
   const weekDates = (id) => { const week = interlinkCycle(weekList, id); return week ? { start: week.start, end: week.end } : {}; };
   // the filter menus (first page only): what this player's record has
   let filters;
@@ -2147,7 +2152,8 @@ async function battleHistory(env, discordId, params, { owner }) {
       facet(`SELECT boss_id AS id, MAX(boss_name) AS name, COUNT(*) AS count FROM (${all}) WHERE boss_id IS NOT NULL GROUP BY boss_id ORDER BY name`),
       facet(`SELECT cycle AS value, COUNT(*) AS count FROM (${all}) WHERE cycle IS NOT NULL AND mode = 'interlink' GROUP BY cycle ORDER BY CAST(cycle AS INTEGER) DESC`),
     ]);
-    filters = { modes, bosses, weeks: weeks.map((row) => ({ ...row, ...weekDates(row.value) })) };
+    filters = { modes, bosses: bosses.map((row) => ({ ...row, name: interlinkBossName(weekList, row.id, row.name) })),
+      weeks: weeks.map((row) => ({ ...row, ...weekDates(row.value) })) };
     {
       const [menus] = await facet(`SELECT COUNT(*) AS count FROM (${all}) WHERE kind = 'interlink_best'`);
       if (menus?.count) filters.modes.push({ value: "menu", count: menus.count });
@@ -2167,7 +2173,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         mode: row.mode,
         cycle: row.cycle,
         week: row.cycle ? weekDates(row.cycle) : null,
-        boss: row.boss_id ? { id: row.boss_id, name: row.boss_name, level: row.boss_level } : null,
+        boss: row.boss_id ? { id: row.boss_id, name: row.boss_name, level: row.boss_level, ...pairField(weekList, row.boss_id, row.cycle) } : null,
         score: row.score,
         stars: row.stars,
         clearTimeS: row.clear_time_s,
@@ -4329,15 +4335,16 @@ async function listRunChecks(request, env) {
   const state = new URL(request.url).searchParams.get("state") || "mismatch";
   if (!VERIFY_STATES.includes(state)) return json({ error: "Unknown state." }, 400);
   const { results } = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, kind, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS,
+    `SELECT submission_id AS submissionId, kind, cycle, boss_id AS bossId, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS,
        trial, difficulty, status, players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, verify_at AS checkedAt, created_at AS sentAt,
        ${RUN_PLAYER_NAME} AS player
      FROM leaderboard_submissions s WHERE verify_state = ? ORDER BY verify_at DESC LIMIT 100`,
   ).bind(state).all();
+  const list = await interlinkCycles(env);
   return json({
     state,
-    runs: (results || []).map(({ playersJson, verifyJson, ...row }) => ({
-      ...row, players: parseJsonColumn(playersJson) || [], check: parseJsonColumn(verifyJson) || {}, proof: proofLinks(row.submissionId),
+    runs: (results || []).map(({ playersJson, verifyJson, bossId, ...row }) => ({
+      ...row, bossName: interlinkBossName(list, bossId, row.bossName, row.cycle), players: parseJsonColumn(playersJson) || [], check: parseJsonColumn(verifyJson) || {}, proof: proofLinks(row.submissionId),
     })),
   });
 }
@@ -4362,19 +4369,20 @@ async function staffRunChecks(request, env) {
   const count = Number(counted?.n || 0);
   if (new URL(request.url).searchParams.get("count") === "1") return json({ count });
   const { results } = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, kind, mode, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS, cleared,
+    `SELECT submission_id AS submissionId, kind, mode, cycle, boss_id AS bossId, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS, cleared,
        trial, difficulty, defeats, team_dps AS teamDps, rank_name AS rankName, status, client_version AS version,
        players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, created_at AS sentAt, ${RUN_PLAYER_NAME} AS player
      FROM leaderboard_submissions s WHERE ${STAFF_LISTED} ORDER BY created_at DESC LIMIT 100`,
   ).all();
+  const list = await interlinkCycles(env);
   return json({
     count,
-    runs: (results || []).map(({ playersJson, verifyJson, state, ...row }) => {
+    runs: (results || []).map(({ playersJson, verifyJson, state, bossId, ...row }) => {
       const check = parseJsonColumn(verifyJson) || {};
       const listed = state === "mismatch" && !check.review;
       const read = check.reading?.result || null;
       return {
-        ...row,
+        ...row, bossName: interlinkBossName(list, bossId, row.bossName, row.cycle),
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         players: (parseJsonColumn(playersJson) || []).slice(0, 4).map((player, _i, all) => ({ name: player?.name ?? null, avgDps: player?.avgDps ?? null, ai: slotIsBot(player, all) })),
         reasons: staffReasons(check, state),
@@ -5217,7 +5225,9 @@ function withProfiles(players, profiles, lineup = null) {
 //   slotsConfirmed says whether that order has been checked in the game (the meter reads it: left, middle, right).
 // - starCaps: each slot's max stars (caps) and the stars that count as a clear (clear: the game offers ending
 //   early from there); the last entry whose fromCycle is at or below the week's id applies. Weeks before 4000:
-//   15 stars cleared any boss. From 4000 a kill is every star: 20 / 40 / 20 (the center boss needs 40).
+//   15 stars cleared any boss. From 4000 a kill is every star: 20 / 40 / 20 (the center boss needs 40). A two-boss
+//   center (weeks 4003 on) is different: live runs earned all 40 with the second boss still up at the clock's end, so
+//   there 40 is the cap and where ending early opens, not proof of a kill (those runs are "time-up" at 3:00).
 // - clocks: a fight's clock (sys_config_data BossRushCombatDuration, 180) and the Overtime blessing's extra time (60),
 //   from the week each applies (the last entry whose fromCycle is at or below the week's id). A run that ends before
 //   its clock without the kill's stars was quit early - the game still shows its result and Battle Data screens.
@@ -5673,6 +5683,34 @@ function interlinkSecondMiddle(week, bossId) {
   if (middle.second) return String(middle.second.id) === String(bossId) ? middle : null;
   return Number(week.id) >= 4003 && INTERLINK_SECOND_MIDDLE_IDS.includes(String(bossId)) ? middle : null;
 }
+// The second boss of the two-boss fight a run is filed under ({ id, name }), else null. A run on such a fight is stored
+// under its first boss (interlinkSecondMiddle), and that boss is a fight of its own in its week only, so its id names
+// the pair: with cycleId in that week, without one in every week the weeks list it (an id some week lists without a
+// second boss is never a pair).
+function interlinkPairOf(list, bossId, cycleId = null) {
+  const id = String(bossId ?? "");
+  if (!id) return null;
+  const weeks = cycleId == null ? list || [] : [interlinkCycle(list || [], cycleId)].filter(Boolean);
+  let pair = null;
+  for (const week of weeks) {
+    for (const boss of week.bosses || []) {
+      if (String(boss.id) !== id) continue;
+      if (!boss.second?.name) return null;
+      pair = { id: String(boss.second.id), name: boss.second.name };
+    }
+  }
+  return pair;
+}
+// A run's boss field for a two-boss fight: { second: { id, name } } (the page names it by both), else nothing.
+function pairField(list, bossId, cycleId) {
+  const pair = cycleId == null ? null : interlinkPairOf(list, bossId, cycleId);
+  return pair ? { second: pair } : {};
+}
+// A boss as the site names it: a two-boss fight by both bosses ("Alpha Blazen + Omega Tucking").
+function interlinkBossName(list, bossId, name, cycleId = null) {
+  const pair = name ? interlinkPairOf(list, bossId, cycleId) : null;
+  return pair ? `${name} + ${pair.name}` : name ?? null;
+}
 
 function currentInterlinkCycle(list, now = Math.floor(Date.now() / 1000)) {
   const started = list.filter((cycle) => cycle.start <= now);
@@ -5991,7 +6029,8 @@ async function interlinkProfileParts(env, discordId, pre = null) {
       total: bests.reduce((sum, row) => sum + (Number(row.score) || 0), 0),
       stars: bests.reduce((sum, row) => sum + (Number(row.stars) || 0), 0),
       bosses: bests.sort((a, b) => slot(a.bossId) - slot(b.bossId)).map((row) => ({
-        id: row.bossId, name: bossLabel(cycle, row), score: row.score, stars: row.stars, outcome: row.outcome || null,
+        id: row.bossId, name: bossLabel(cycle, row), ...pairField([cycle], row.bossId, cycle.id),
+        score: row.score, stars: row.stars, outcome: row.outcome || null,
         clearTimeS: row.clearTimeS ?? null, runTimeS: row.runTimeS ?? null, runId: row.runId,
         ...(row.hasProof ? { proofId: row.runId } : {}), ...(row.menuProofId ? { menuProofId: row.menuProofId } : {}),
       })),
@@ -6228,7 +6267,8 @@ async function profileBoards(env, discordId) {
       const board = rankedLadder(rows.filter((row) => row.cycle === entry.cycle && String(row.bossId) === String(entry.boss?.id))
         .map((row) => withOwnBest(row, "score")), "score");
       const mine = board.find((row) => row.discordId === discordId);
-      return mine ? { ...entry, position: mine.rank, players: board.at(-1)?.team ?? 0, counts: "teams" } : entry;
+      const named = entry.boss ? { ...entry, boss: { ...entry.boss, ...pairField(list, entry.boss.id, entry.cycle) } } : entry;
+      return mine ? { ...named, position: mine.rank, players: board.at(-1)?.team ?? 0, counts: "teams" } : named;
     });
   }
   leaderboards.interlinkSeason = await interlinkSeasonStanding(env, discordId);
@@ -6402,6 +6442,8 @@ async function interlinkBoards(request, env, internal = false) {
     }
     return {
       id, name: listed?.name || rows.find((row) => String(row.bossId) === id)?.bossName || id,
+      // a two-boss fight (weeks 4003 on, the Center): its second boss, so the page names the board by both
+      ...(listed?.second?.name ? { second: { id: String(listed.second.id), name: listed.second.name } } : {}),
       slot: slotIndex >= 0 ? INTERLINK_RULES.slots[slotIndex] || null : null,
       slotIndex: slotIndex >= 0 ? slotIndex : null,
       starCap: slotIndex >= 0 ? caps[slotIndex] ?? null : null,
@@ -6514,7 +6556,7 @@ async function leaderboardEntries(request, env) {
   const lineupOf = (row, lineup) => mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
     .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup));
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
-  const weeks = kind === "interlink_run" ? await interlinkCycles(env) : [];
+  const weeks = kind === "interlink_run" || kind === "interlink_best" ? await interlinkCycles(env) : [];
   return json({
     kind,
     sort: sortKey,
@@ -6541,7 +6583,7 @@ async function leaderboardEntries(request, env) {
       kind: row.kind,
       mode: row.mode,
       cycle: row.cycle,
-      boss: { id: row.boss_id, name: row.boss_name, level: row.boss_level },
+      boss: { id: row.boss_id, name: row.boss_name, level: row.boss_level, ...pairField(weeks, row.boss_id, row.cycle) },
       score: row.score,
       seasonRank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
       stars: row.stars,
@@ -6622,7 +6664,11 @@ async function leaderboardFacets(request, env) {
     mode,
     servers: await gameServers(env, mode),
     cycles,
-    bosses,
+    // a two-boss fight by both bosses (its runs are stored under the first)
+    bosses: mode === "interlink" ? await (async () => {
+      const list = await interlinkCycles(env);
+      return bosses.map((row) => ({ ...row, name: interlinkBossName(list, row.id, row.name) }));
+    })() : bosses,
     levels,
     partySizes: parties,
     difficulties,
@@ -6748,7 +6794,8 @@ async function proofFight(env, row) {
   let fight = null;
   if (mode === "interlink") {
     const week = row.cycle ? interlinkCycle(await interlinkCycles(env), row.cycle) : null;
-    fight = { mode, kind: row.kind, title: row.bossName || null, level: whole(row.bossLevel),
+    // a two-boss fight by both bosses
+    fight = { mode, kind: row.kind, title: week ? interlinkBossName([week], row.bossId, row.bossName || null, week.id) : row.bossName || null, level: whole(row.bossLevel),
       week: week ? { start: week.start, end: week.end } : undefined, stars: whole(row.stars), score: whole(row.score),
       time: row.kind === "interlink_run" ? time : undefined };
   } else if (mode === "sim") {
@@ -7477,6 +7524,10 @@ async function api(request, env) {
       currentAccount, json, readJsonBody, browserWriteAllowed,
       roleOf: async (discordId, scopedEnv) => (await accountRoleFields(discordId, scopedEnv)).role,
       simTrialName: (trial, difficulty, cycle) => simStageName(trial, difficulty, cycle),
+      interlinkBossNames: async (scopedEnv) => {
+        const list = await interlinkCycles(scopedEnv);
+        return (bossId, name, cycle) => interlinkBossName(list, bossId, name, cycle);
+      },
     });
   }
   if (url.pathname === "/api/v1/shares" && request.method === "POST") return createMapShare(request, env);
