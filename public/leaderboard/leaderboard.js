@@ -943,7 +943,7 @@
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" },
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
-          el("span", { text: `${boss.slot ? `${boss.slot} boss` : boss.name} · ${weekRange(data.cycle)}` })),
+          el("span", { text: `${boss.slot ? `${boss.slot} ${boss.second ? "bosses" : "boss"}` : bossName(boss)} · ${weekRange(data.cycle)}` })),
         updatedLine(data.updatedAt)),
       bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`));
     state.fullTeams = hasTeams(boss, ladder) && Boolean(boss.total);       // the page's Show switch applies

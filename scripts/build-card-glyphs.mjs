@@ -315,6 +315,11 @@ export const CARD_FONT_SPECS = Object.freeze({
   body: { size: 36, weight: 62, letters: ALL, accents: true },
   small: { size: 28, weight: 46, letters: ALL, accents: true },
   label: { size: 22, weight: 64, letters: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -·" },
+  // the title stepped down when the boss's name doesn't fit at 54 (a two-boss fight: "Alpha Glameep + Alpha Jabster");
+  // no accents (boss names have none); after the others, so their letters (and every card drawn with them) stay byte for byte as they were
+  title48: { size: 48, weight: 66, letters: ALL },
+  title42: { size: 42, weight: 66, letters: ALL },
+  title36: { size: 36, weight: 66, letters: ALL },
 });
 
 export function buildAtlas() {

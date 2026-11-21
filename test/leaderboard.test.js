@@ -3129,6 +3129,8 @@ test("the boards page: the rules line under a two-boss week says only what live 
   const app = readFileSync(resolve(import.meta.dirname, "..", "public", "app.js"), "utf8");
   assert.match(app, /const killed = boss\.second \? "Both Killed" : "Boss Killed";/u);
   assert.match(page, /const killed = boss\?\.second \? "Both Killed" : "Boss Killed";/u);
+  // "View all"'s crumb: "Center bosses" on a two-boss board, "Left boss" on the others
+  assert.match(page, /\$\{boss\.slot\} \$\{boss\.second \? "bosses" : "boss"\}/u);
 });
 
 test("a boss is named by both only where a week pairs it: an id a week lists alone stays one boss", async () => {
