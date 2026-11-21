@@ -3993,7 +3993,7 @@ function freeRunChecks(row, cycle) {
     if (team > 0 && (dps > team * 1.1 || dps > share)) misread.push({ rule: "Avg DPS plausible", player: player.name || null, sent: dps, teamDps: team });
   }
   if (row.cleared === 1 && row.stars != null && Number(row.stars) < clear) misread.push({ rule: "cleared needs full stars", sent: row.stars, expected: clear });
-  return { flags, misread, notes };
+  return { flags, misread, notes, cap };
 }
 
 // Holo-Battle Sim runs get their own free checks as they arrive: the numbers aLogs read off the Victory screen (the
@@ -4105,7 +4105,7 @@ async function runMatters(env, row, submissionId) {
 
 // At most VERIFY_DAILY_LIMIT readings a UTC day (default 500, the owner's cap: two screens a run is about 80
 // neurons, so at most ~40,000 neurons a day, ~$0.33 above Workers AI's free 10,000), counted from the readings made
-// today (a run's first reading and a second reading each count; re-checking a run doesn't).
+// today (each reading of a run counts, and so did the second readings stored on 21 Nov; re-checking a run doesn't).
 async function aiReadingsLeft(env) {
   const limit = Math.max(0, Number.parseInt(env.VERIFY_DAILY_LIMIT || "500", 10) || 0);
   const day = Math.floor(Date.now() / 86400000) * 86400;
@@ -4155,27 +4155,23 @@ async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = 
   const before = parseJsonColumn(row.verifyJson) || {};
   const decided = row.verifyState === "confirmed" || row.verifyState === "rejected" || Boolean(before.review);
   if (decided && !force) return { outcome: "staff decided (left alone)", state: row.verifyState, changed: false, misread: [], version: row.version, staff: [] };
-  const { flags, misread, notes } = freeRunChecks(row, interlinkCycle(cycles || await interlinkCycles(env), row.cycle));
+  const { flags, misread, notes, cap } = freeRunChecks(row, interlinkCycle(cycles || await interlinkCycles(env), row.cycle));
   const { me, copies } = await runCopyRows(env, submissionId, row);
   const agreement = copyAgreement(me, copies);
   const full = (parseJsonColumn(row.extraJson) || {}).proofFull || {};
   const readable = Boolean(full.evidence) && (dryRun || Boolean(env.AI && env.EVIDENCE));
   const earlier = !fresh && !force;
   let reading = earlier ? before.reading || null : null;
-  let reading2 = earlier ? before.reading2 || null : null;
   // a reading that read nothing, set aside to be read again (POST /api/admin/run-checks/recheck {retryUnreadable})
-  if (retryUnreadable && reading && !compareReading(row, reading.result, reading.battle).checked) {
-    reading = null;
-    reading2 = null;
-  }
-  let readings = earlier ? Number(before.readings) || (reading ? 1 : 0) + (reading2 ? 1 : 0) : 0;
+  if (retryUnreadable && reading && !compareReading(row, reading.result, reading.battle).checked) reading = null;
+  let readings = earlier ? Number(before.readings) || (reading ? 1 : 0) : 0;
   let reason = force ? "read on request" : agreement.contradicted ? "copies disagree" : earlier ? before.reason || null : null;
   let asked = Boolean(reason);
-  const compared = () => ({ first: reading ? compareReading(row, reading.result, reading.battle) : null, second: reading2 ? compareReading(row, reading2.result, null) : null });
-  const judge = () => {
-    const { first, second } = compared();
-    return interlinkVerdict({ flags, misread, agreement, reading: first, reading2: second, wanted: Boolean(reason) || !asked, readable });
-  };
+  const compared = () => (reading ? compareReading(row, reading.result, reading.battle) : null);
+  // what the picture shows against what was sent (readingAgainst: only a plausible reading showing less counts)
+  const shown = () => ({ score: readNumber(reading?.result?.score), stars: readNumber(reading?.result?.stars) });
+  const judge = () => interlinkVerdict({ flags, misread, agreement, reading: compared(), read: shown(), sent: { score: row.score, stars: row.stars }, cap,
+    wanted: Boolean(reason) || !asked, readable });
   let verdict = judge();
   let needs = null;
   for (let step = 0; step < 3; step += 1) {
@@ -4194,13 +4190,12 @@ async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = 
       if (!decided) await saveRunCheck(env, submissionId, "pending", queued);
       return { outcome: "waiting for a reading", state: "pending", changed: row.verifyState !== "pending", misread: misread.map((flag) => flag.rule), version: row.version, staff: [] };
     }
-    if (needs === "reading") reading = await readRun(env, full);
-    else reading2 = await readRun(env, full, { battle: false });
+    reading = await readRun(env, full);
     readings += 1;
     needs = null;
     verdict = judge();
   }
-  const { first, second } = compared();
+  const first = compared();
   const state = decided ? row.verifyState : verdict.state;
   const detail = {
     rules: { flags, misread, notes },
@@ -4209,17 +4204,18 @@ async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = 
     ...(verdict.staff ? { staff: verdict.staff } : {}),
     ...(reason ? { reason } : {}),
     ...(reading ? { model: VERIFY_MODEL, readings, reading, checked: first.checked, differences: first.differences, ...(first.suspect ? { suspect: first.suspect } : {}) } : {}),
-    ...(reading2 ? { reading2: { ...reading2, checked: second.checked, differences: second.differences } } : {}),
+    ...(verdict.note ? { readingNote: verdict.note } : {}),
     ...(decided && before.review ? { review: before.review } : {}),
   };
-  const outcome = needs ? (needs === "reading" ? "would be read" : "would be read again")
+  const outcome = needs ? "would be read"
     : state === "match" ? (verdict.verifiedBy === "copies" ? "verified by copies" : "verified by the reading")
       : state === "mismatch" ? "staff list"
         : state === "unreadable" ? "no badge (picture unreadable)"
           : misread.length ? "no badge (misread)"
             : agreement.oddOneOut ? "no badge (the other copies' numbers stand)"
-              : reading ? "no badge (the reading differs once, or only on time or Battle Data)" : "no badge (nothing to check it by)";
-  const result = { outcome, state, changed: state !== (row.verifyState ?? null), misread: misread.map((flag) => flag.rule), version: row.version,
+              : verdict.note ? `no badge (${verdict.note})`
+                : reading ? "no badge (the reading differs only on time or Battle Data)" : "no badge (nothing to check it by)";
+  const result = { outcome, state, changed: state !== (row.verifyState ?? null), misread: misread.map((flag) => flag.rule), readingNote: verdict.note || null, version: row.version,
     staff: (verdict.staff || []).map((item) => (item.why === "impossible" ? item.rule : item.why)) };
   if (dryRun || (!result.changed && stableJson(detail) === stableJson((({ reviewOnly: _review, ...rest }) => rest)(before)))) return result;
   try {
@@ -4430,7 +4426,8 @@ async function reviewRunCheck(request, env, submissionId) {
 // again with today's rules (checkRun), max runs a call (default 100, at most 300) in the order they were stored, after
 // the cursor the last call answered. A dry run unless apply is true. Never touches a run a staff member decided, never
 // reads a picture (a run that needs a reading is queued, with apply), and changes nothing but the check's own columns.
-// Counts only: per outcome, per staff reason, and the misreads per rule and app build (for fixing the app's reader).
+// Counts only: per outcome, per staff reason, the misreads per rule and app build (for fixing the app's reader), and
+// the readings whose difference didn't count, per reason (readingAgainst).
 // retryUnreadable: true sets aside a stored reading that read nothing, so the run is read again (queued, with apply) -
 // for once the second reading works again.
 async function recheckRunChecks(request, env) {
@@ -4452,6 +4449,7 @@ async function recheckRunChecks(request, env) {
   const outcomes = {};
   const staff = {};
   const misread = {};
+  const readingNotes = {};
   const was = {};
   let changed = 0;
   for (const row of rows) {
@@ -4465,13 +4463,15 @@ async function recheckRunChecks(request, env) {
       was[move] = (was[move] || 0) + 1;
     }
     for (const reason of checked.staff) staff[reason] = (staff[reason] || 0) + 1;
+    // a reading's difference that didn't count, and why (the reader's own failures and harmless misreads)
+    if (checked.readingNote) readingNotes[checked.readingNote] = (readingNotes[checked.readingNote] || 0) + 1;
     for (const rule of checked.misread) {
       misread[rule] ||= {};
       misread[rule][checked.version || "unknown"] = (misread[rule][checked.version || "unknown"] || 0) + 1;
     }
   }
   const last = rows.at(-1);
-  return json({ dryRun: !apply, rows: rows.length, outcomes, changed, changes: was, staff, misread,
+  return json({ dryRun: !apply, rows: rows.length, outcomes, changed, changes: was, staff, misread, readingNotes,
     next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
 }
 
