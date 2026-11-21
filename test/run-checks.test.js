@@ -31,24 +31,47 @@ test("copies: two senders agreeing verify; three copies keep what most agree on;
   assert.equal(copiesAgree({ ...a, score: null }, { ...b, score: null }), false);
 });
 
-test("verdict: impossible values go to staff; misreads get nothing; one differing reading is not a reason", () => {
-  const agree = { checked: 3, differences: [] };
-  const differs = { checked: 3, differences: [{ field: "score", sent: 1, read: 2 }] };
+test("verdict: impossible values go to staff; misreads get nothing; a reading counts only when plausible and showing less", () => {
   const lone = { senders: 1, agreeing: 1, verified: false, oddOneOut: false, contradicted: false };
+  // made-up numbers: what was sent, what the picture read, the run's star cap
+  const reading = (sent, read, cap = 40) => {
+    const differences = ["score", "stars"].filter((field) => read[field] != null && read[field] !== sent[field]).map((field) => ({ field, sent: sent[field], read: read[field] }));
+    return { agreement: lone, reading: { checked: 3, differences }, read, sent, cap };
+  };
   assert.equal(interlinkVerdict({ flags: [{ rule: "stars above the cap" }] }).state, "mismatch");
-  assert.deepEqual(interlinkVerdict({ misread: [{ rule: "stars track score" }], reading: differs, reading2: differs }), { state: null });
-  assert.deepEqual(interlinkVerdict({ agreement: lone, reading: agree }), { state: "match", verifiedBy: "reading" });
-  assert.deepEqual(interlinkVerdict({ agreement: lone, reading: differs, readable: true }), { state: null, needs: "second reading" });
-  assert.deepEqual(interlinkVerdict({ agreement: lone, reading: differs, reading2: agree }), { state: null });
-  assert.equal(interlinkVerdict({ agreement: lone, reading: differs, reading2: differs }).state, "mismatch");
+  assert.deepEqual(interlinkVerdict({ misread: [{ rule: "stars track score" }], ...reading({ score: 9000, stars: 9 }, { score: 4000, stars: 4 }) }), { state: null });
+  assert.deepEqual(interlinkVerdict(reading({ score: 20000, stars: 20 }, { score: 20000, stars: 20 })), { state: "match", verifiedBy: "reading" });
+  // the five shapes the reader produced by itself: no badge, no staff, and the reason recorded
+  const harmless = [
+    [{ score: 17391, stars: 17 }, { score: 71, stars: 0 }, "reading not plausible: fewer digits"],
+    [{ score: 13258, stars: 13 }, { score: 0, stars: 13 }, "reading not plausible: fewer digits"],
+    [{ score: 11347, stars: 11 }, { score: 615, stars: 3 }, "reading not plausible: fewer digits"],
+    [{ score: 6301, stars: 6 }, { score: 89, stars: 6 }, "reading not plausible: fewer digits"],
+    [{ score: 8215, stars: 8 }, { score: 8275, stars: 8 }, "sent lower than the picture"],
+  ];
+  for (const [sent, read, note] of harmless) assert.deepEqual(interlinkVerdict(reading(sent, read)), { state: null, note }, JSON.stringify(sent));
+  // a reading whose own score and stars don't fit each other, or that read nothing for one of them
+  assert.deepEqual(interlinkVerdict(reading({ score: 30000, stars: 30 }, { score: 21000, stars: 5 })), { state: null, note: "reading not plausible: its score and stars don't fit" });
+  assert.deepEqual(interlinkVerdict(reading({ score: 30000, stars: 30 }, { score: 21000, stars: null })), { state: null, note: "reading not plausible: score or stars not read" });
+  // a real mismatch: sent 99,000 with 40 stars, the picture 34,333 with 20 (on a boss whose cap is 20 those fit)
+  const cheat = interlinkVerdict(reading({ score: 99000, stars: 40 }, { score: 34333, stars: 20 }, 20));
+  assert.equal(cheat.state, "mismatch");
+  assert.deepEqual(cheat.staff, [{ why: "picture shows less", differences: [{ field: "score", sent: 99000, read: 34333 }, { field: "stars", sent: 40, read: 20 }], shown: { score: 34333, stars: 20 } }]);
+  // read once: a differing picture is never read a second time
+  assert.equal(interlinkVerdict({ ...reading({ score: 99000, stars: 40 }, { score: 34333, stars: 20 }, 20), readable: true }).needs, undefined);
   assert.deepEqual(interlinkVerdict({ agreement: lone, reading: { checked: 0, differences: [] } }), { state: "unreadable" });
-  assert.deepEqual(interlinkVerdict({ agreement: lone, reading: { checked: 3, differences: [{ field: "x Avg DPS", sent: 1, read: 2 }] } }), { state: null });
+  assert.deepEqual(interlinkVerdict({ agreement: lone, reading: { checked: 3, differences: [{ field: "x Avg DPS", sent: 1, read: 2 }] }, read: { score: 1, stars: 0 }, sent: { score: 1, stars: 0 }, cap: 20 }), { state: null });
   assert.deepEqual(interlinkVerdict({ agreement: lone, wanted: true, readable: true }), { state: null, needs: "reading" });
   assert.deepEqual(interlinkVerdict({ agreement: lone, wanted: false, readable: true }), { state: null });
+  // copies that contradict: the same test on the copy's own reading
   const contradicted = { ...lone, senders: 2, contradicted: true };
   assert.deepEqual(interlinkVerdict({ agreement: contradicted, readable: true }), { state: null, needs: "reading" });
-  assert.equal(interlinkVerdict({ agreement: contradicted, reading: differs }).state, "mismatch");
-  assert.deepEqual(interlinkVerdict({ agreement: contradicted, reading: agree }), { state: "match", verifiedBy: "reading" });
+  assert.equal(interlinkVerdict({ ...reading({ score: 21000, stars: 21 }, { score: 20000, stars: 20 }), agreement: contradicted }).state, "mismatch");
+  assert.deepEqual(interlinkVerdict({ ...reading({ score: 19000, stars: 19 }, { score: 20000, stars: 20 }), agreement: contradicted }), { state: null, note: "sent lower than the picture" });
+  assert.deepEqual(interlinkVerdict({ ...reading({ score: 19381, stars: 19 }, { score: 81, stars: 0 }), agreement: contradicted }), { state: null, note: "reading not plausible: fewer digits" });
+  assert.deepEqual(interlinkVerdict({ ...reading({ score: 20000, stars: 20 }, { score: 20000, stars: 20 }), agreement: contradicted }), { state: "match", verifiedBy: "reading" });
+  // the staff list's words: the picture against what was sent
+  assert.deepEqual(staffReasons({ staff: cheat.staff }, "mismatch"), ["Its picture shows less than was sent: the picture shows score 34,333 and 20 stars; sent: score 99,000 and 40 stars."]);
 });
 
 test("Egg Heist and screen limits: only from their secrets, any part may be left out, nothing without them", () => {

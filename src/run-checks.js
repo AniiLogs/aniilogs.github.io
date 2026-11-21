@@ -5,7 +5,7 @@
 //
 // An Interlink run's check ends in one of these (verify_state):
 // - "match": verified, shown with the tick. Either two or more players' copies of the run agree (verifiedBy "copies"),
-//   or, for a run no second copy confirms, the second reading of its pictures agrees (verifiedBy "reading").
+//   or, for a run no second copy confirms, the reading of its pictures agrees (verifiedBy "reading").
 // - "pending": its check hasn't run yet (queued for the second reading). The only public "pending".
 // - "mismatch": on the staff list (possibly cheated). No public mark of it.
 // - "unreadable", or none: no tick, no mark (a misread, a picture the reading couldn't make out, or nothing to check).
@@ -146,31 +146,52 @@ export function copyAgreement(me, copies) {
 // ---------------------------------------------------------------- the verdict
 const KEY_FIELDS = new Set(["score", "stars"]);
 const keyDifferences = (comparison) => (comparison?.differences || []).filter((item) => KEY_FIELDS.has(item.field));
+// The free checks' star rule: each star is worth about 1,000, so stars = min(floor(score / 1000), cap), give or take one.
+export function starsFitScore(score, stars, cap) {
+  if (!Number.isFinite(Number(score)) || !Number.isFinite(Number(stars)) || score === null || stars === null) return false;
+  return Math.abs(Number(stars) - Math.min(Math.floor(Number(score) / 1000), Number(cap))) <= 1;
+}
+const digits = (value) => String(Math.trunc(Math.abs(Number(value)))).length;
+// Whether a reading's score / stars differences count against the run (the owner, 22 Nov: a cheat sends more than its
+// picture has; the reader misreads all by itself, and reading a picture twice gives the same answer). Both must hold:
+// (a) the reading is a plausible reading of the same screen - its score has at least as many digits as the one sent,
+//     and its score and stars fit each other by the star rule (starsFitScore, the run's own cap);
+// (b) what was sent is better than what the picture shows: a higher score, or more stars.
+// comparison: compareReading's answer; read: { score, stars } as read; sent: { score, stars }; cap: the run's star cap.
+// -> { against: [differences] } or { against: [], note } (why a difference doesn't count; none when there was none)
+export function readingAgainst(comparison, read, sent, cap) {
+  const differences = keyDifferences(comparison);
+  if (!differences.length) return { against: [] };
+  if (read?.score == null || read?.stars == null) return { against: [], note: "reading not plausible: score or stars not read" };
+  if (sent?.score != null && digits(read.score) < digits(sent.score)) return { against: [], note: "reading not plausible: fewer digits" };
+  if (!starsFitScore(read.score, read.stars, cap)) return { against: [], note: "reading not plausible: its score and stars don't fit" };
+  const higher = sent?.score != null && Number(sent.score) > Number(read.score);
+  const more = sent?.stars != null && Number(sent.stars) > Number(read.stars);
+  if (!higher && !more) return { against: [], note: "sent lower than the picture" };
+  return { against: differences };
+}
 // flags: values the game's rules make impossible (staff); misread: numbers that don't hang together in a way a misread
-// explains (no tick, no staff); agreement: copyAgreement; reading / reading2: compareReading of the first reading and
-// of a second reading of the result screen (null when not read); wanted: the run matters enough to be read; readable:
-// it has a picture to read. Returns { state, verifiedBy?, staff?, needs? } - needs "reading" or "second reading" when a
-// reading would decide it.
-export function interlinkVerdict({ flags = [], misread = [], agreement = null, reading = null, reading2 = null, wanted = false, readable = false }) {
+// explains (no tick, no staff); agreement: copyAgreement; reading: compareReading of the reading of the run's pictures
+// (null when not read), with read / sent / cap for readingAgainst; wanted: the run matters enough to be read; readable:
+// it has a picture to read. Returns { state, verifiedBy?, staff?, needs?, note? } - needs "reading" when a reading would
+// decide it; note: why a reading's difference didn't count. A picture is read once: the model gives the same answer for
+// the same picture, so a second reading of it decides nothing.
+export function interlinkVerdict({ flags = [], misread = [], agreement = null, reading = null, read = null, sent = null, cap = null, wanted = false, readable = false }) {
   if (flags.length) return { state: "mismatch", staff: flags.map((flag) => ({ ...flag, why: "impossible" })) };
   if (misread.length) return { state: null };
+  const judged = reading ? readingAgainst(reading, read, sent, cap) : { against: [] };
+  const shown = () => ({ score: read?.score ?? null, stars: read?.stars ?? null });
   if (agreement?.contradicted) {
     if (!reading) return readable ? { state: null, needs: "reading" } : { state: null };
-    const against = keyDifferences(reading);
-    if (against.length) return { state: "mismatch", staff: [{ why: "copies contradict", differences: against }] };
-    // its own picture is on its side: judged by its reading, like a lone run
+    if (judged.against.length) return { state: "mismatch", staff: [{ why: "copies contradict", differences: judged.against, shown: shown() }] };
+    // its own picture doesn't count against it: judged by its reading, like a lone run
   }
   else if (agreement?.verified) return { state: "match", verifiedBy: "copies" };
   else if (agreement?.oddOneOut) return { state: null };
   if (!reading) return wanted && readable ? { state: null, needs: "reading" } : { state: null };
   if (!reading.checked) return { state: "unreadable" };
-  const against = keyDifferences(reading);
-  if (against.length) {
-    if (!reading2) return readable ? { state: null, needs: "second reading" } : { state: null };
-    const again = keyDifferences(reading2);
-    if (again.length) return { state: "mismatch", staff: [{ why: "read twice", differences: against, again }] };
-    return { state: null };
-  }
+  if (judged.against.length) return { state: "mismatch", staff: [{ why: "picture shows less", differences: judged.against, shown: shown() }] };
+  if (judged.note) return { state: null, note: judged.note };
   if (reading.differences?.length) return { state: null };
   return { state: "match", verifiedBy: "reading" };
 }
@@ -202,12 +223,22 @@ function flagWords(flag) {
   }
 }
 const differenceWords = (items) => items.map((item) => `${item.field} ${n(item.sent)} sent, ${n(item.read)} on the picture`).join("; ");
+// "the picture shows score 34,333 and 20 stars; sent: score 99,000 and 40 stars"
+function pictureWords(item) {
+  const sent = Object.fromEntries((item.differences || []).map((d) => [d.field, d.sent]));
+  const shown = item.shown || Object.fromEntries((item.differences || []).map((d) => [d.field, d.read]));
+  const pair = (values, other) => ["score", "stars"].filter((field) => values[field] != null || other[field] != null)
+    .map((field) => (field === "score" ? `score ${n(values.score ?? other.score)}` : `${n(values.stars ?? other.stars)} stars`)).join(" and ");
+  return `the picture shows ${pair(shown, sent)}; sent: ${pair(sent, shown)}`;
+}
 // The reasons a run is on the staff list, as sentences: check is the stored verify_json, state its verify_state.
 export function staffReasons(check, state) {
   const reasons = [];
   if (state === "mismatch") {
     for (const item of check?.staff || []) {
-      if (item.why === "copies contradict") reasons.push(`Another player's copy of this run shows other numbers, and this copy's own picture disagrees with it: ${differenceWords(item.differences || [])}.`);
+      if (item.why === "copies contradict") reasons.push(`Another player's copy of this run shows other numbers, and this copy's own picture shows less than was sent: ${pictureWords(item)}.`);
+      else if (item.why === "picture shows less") reasons.push(`Its picture shows less than was sent: ${pictureWords(item)}.`);
+      // checks stored on 21 Nov
       else if (item.why === "read twice") reasons.push(`Its picture was read twice and both times showed other numbers: ${differenceWords(item.differences || [])}.`);
       else reasons.push(flagWords(item));
     }
