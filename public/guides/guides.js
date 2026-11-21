@@ -1,5 +1,6 @@
 // game-audit: n/a lists and mounts the guides (damage-guide.js, interlink-guide.js); no game rules of its own
-// The Guides page (/guides/): without ?guide= it lists every guide in window.AniilogsGuides as a card; with
+// The Guides page (/guides/): without ?guide= it lists every guide in window.AniilogsGuides as a card, then the guides
+// hosted elsewhere (window.AniilogsLinkedGuides, linked-guides.js), with ended event guides under Archived; with
 // ?guide=<id> it shows that guide (guide-page.js), with a link back to the list. Section links (#guide-<id>) work as
 // before. The Aniilog data, when it loads, links every Aniimo a guide names to its page.
 (() => {
@@ -42,18 +43,60 @@
     return `/guides/?guide=${encodeURIComponent(id)}`;
   }
 
+  // The end of an event guide as the visitor's local month and day.
+  function endDate(guide) {
+    return new Date(guide.ends).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  function group(heading, line, cards) {
+    const section = el("section", "guides-group");
+    const list = el("div", "guides-list");
+    list.append(...cards);
+    section.append(el("h2", "guides-group-title", heading), el("p", "guides-group-line", line), list);
+    return section;
+  }
+
+  // A guide hosted elsewhere: the card opens that guide itself in a new tab.
+  function linkedCard(guide, archived) {
+    const card = el("a", archived ? "guides-card is-linked is-archived" : "guides-card is-linked");
+    card.href = guide.url;
+    card.target = "_blank";
+    card.rel = "noopener";
+    // The event pill comes first so that, when it wraps, the host line still sits at the bottom like its neighbours'.
+    const foot = el("div", "guides-card-foot");
+    if (guide.ends) {
+      foot.append(el("span", "guides-event", archived ? `Event ended ${endDate(guide)}` : `Event · ends ${endDate(guide)}`));
+    }
+    foot.append(el("span", "guides-card-host", `${guide.host} ↗`));
+    card.append(el("h2", "", guide.title), el("p", "", guide.summary || ""), foot);
+    return card;
+  }
+
   function renderList(guides) {
     title.textContent = "Guides";
-    lead.textContent = "How Aniimo works under the hood, read from the game's own files. Each section says how sure it is.";
+    lead.textContent = "Guides by AniiLogs and by sargeeva.";
     document.title = "Aniimo Guides · AniiLogs";
-    const list = el("div", "guides-list");
-    guides.forEach((guide) => {
+    const own = guides.map((guide) => {
       const card = el("a", "guides-card");
       card.href = guideHref(guide.id);
       card.append(el("h2", "", guide.title), el("p", "", guide.summary || ""));
-      list.append(card);
+      return card;
     });
-    body.replaceChildren(list);
+    const groups = [group("AniiLogs", "How Aniimo works under the hood, read from the game's own files. Each section says how sure it is.", own)];
+    const linked = window.AniilogsLinkedGuides;
+    if (linked && Array.isArray(linked.guides)) {
+      const now = Date.now();
+      const archived = linked.guides.filter((guide) => linked.isArchived(guide, now));
+      const current = linked.guides.filter((guide) => !archived.includes(guide));
+      if (current.length) {
+        groups.push(group("By sargeeva", "Planners, loot tables and event guides on sargeeva.github.io. Each card opens that guide in a new tab.",
+          current.map((guide) => linkedCard(guide, false))));
+      }
+      if (archived.length) {
+        groups.push(group("Archived", "Guides for events that have ended.", archived.map((guide) => linkedCard(guide, true))));
+      }
+    }
+    body.replaceChildren(...groups);
   }
 
   function renderGuide(guide, aniilog) {
