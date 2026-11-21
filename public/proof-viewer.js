@@ -87,7 +87,9 @@
     // a renamed Aniimo: its species (read from the Party picture's portrait), then the player's own name for it
     const nick = (m) => (m.nickname ? `“${m.nickname}”` : "");
     const aniimo = (m) => [m.aniimo, nick(m), facts(m)].filter(Boolean).join(" ");
-    const players = (details.lineup || []).filter((p) => p.name || p.aniimo);
+    // a player only the Battle Data cards had (the API's lineupWithCards) has no Party details; one whose name the site
+    // leaves out shows as "Player"
+    const players = (details.lineup || []).filter((p) => p.name || p.aniimo || p.unnamed);
     const buffs = details.buffs || [];
     const teamDps = Number.isFinite(details.teamDps) && details.teamDps > 0 ? details.teamDps : null;
     if (!players.length && !buffs.length) return null;
@@ -107,7 +109,7 @@
           const team = (p.team || []).filter((m) => m.aniimo && m.aniimo !== p.aniimo).map(aniimo);
           const level = facts(p);
           return el("div", { class: "lb-party-row", role: "row" },
-            cell("Player", el("span", { class: "lb-party-name", text: p.name || "—" }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null),
+            cell("Player", el("span", { class: "lb-party-name", text: p.name || (p.unnamed ? "Player" : "—") }), p.ai ? el("span", { class: "lb-ai", text: "AI" }) : null),
             cell("Main Aniimo", p.aniimo ? el("span", { class: "lb-party-lead" }, el("span", { class: "lb-party-lead-name", text: p.aniimo }),
               p.nickname ? el("span", { class: "lb-party-lead-nick", text: nick(p), title: "The player's own name for this Aniimo" }) : null,
               level ? el("span", { class: "lb-party-lead-facts", text: level }) : null) : el("span", { class: "lb-party-none", text: "—" })),

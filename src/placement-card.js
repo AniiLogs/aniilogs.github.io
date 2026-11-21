@@ -360,7 +360,14 @@ export async function drawPlacementCard(model, letters) {
     const y = listTop + 64 + i * 50;
     const top = i === 0 && player.dps;
     if (player.mark) p.round(PAD - 18, y - 30, 6, 34, 3, COLORS.mint);
-    p.text(player.name, PAD, y, "body", COLORS.ink, { max: 330 });
+    // a bot: a small "AI" pill after its name (the name gives way to it when long)
+    const pill = player.ai ? p.measure("AI", "label", 2) + 22 : 0;
+    const nameWidth = p.text(player.name, PAD, y, "body", player.ai ? COLORS.soft : COLORS.ink, { max: 360 - (pill ? pill + 12 : 0) });
+    if (pill) {
+      const x = PAD + Math.min(nameWidth, 360 - pill - 12) + 12;
+      p.pill(x, y - 29, pill, 32, COLORS.soft, COLORS.paper, 2);
+      p.text("AI", x + pill / 2, y - 6, "label", COLORS.soft, { align: "center", spacing: 2 });
+    }
     p.text(player.dps || "–", PAD + 520, y, "body", top ? COLORS.gold : player.dps ? COLORS.ink : COLORS.soft, { align: "right" });
   });
   // the ladder's figure, the stars and how it ended

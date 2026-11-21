@@ -7,8 +7,8 @@ import { DatabaseSync } from "node:sqlite";
 import { inflateSync } from "node:zlib";
 import test from "node:test";
 
-import worker from "../src/index.js";
-import { realPlayersOf, TEAM_TAGS } from "../src/placement-links.js";
+import worker, { lineupWithCards } from "../src/index.js";
+import { cardPlayers, PLACEMENT_LADDERS, realPlayersOf, TEAM_TAGS } from "../src/placement-links.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
 import { CARD_HEIGHT, CARD_WIDTH, drawPlacementCard } from "../src/placement-card.js";
 
@@ -196,7 +196,7 @@ test("opening a link: a crawler gets the preview tags with the overall place; a 
   assert.equal(tag("og:site_name"), "AniiLogs");
   assert.match(tag("og:title"), /^#2 on Score · Omega Tucking · Week of [A-Z][a-z]{2} \d{1,2} – [A-Z][a-z]{2} \d{1,2}$/u);
   assert.match(html, /<title>#2 on Score · Omega Tucking · .* · AniiLogs<\/title>/u);
-  assert.match(tag("og:description"), /^Cobalt and Briar \(Duo: bots filled the other places\): 25,000 with 30 stars\. Boss Killed: 2:50\. Team DPS 60,000\. Holo-Battle Interlink/u);
+  assert.equal(tag("og:description"), "Cobalt, Briar, Bot One (AI) and Bot Two (AI): 25,000 with 30 stars. Duo: two players and two bots. Boss Killed: 2:50. Team DPS 60,000. Holo-Battle Interlink, Right boss.");
   assert.equal(tag("og:url"), `${API}/${code}`);
   assert.equal(tag("twitter:card"), "summary_large_image");
   assert.equal(tag("theme-color"), "#f5eecb");
@@ -249,6 +249,7 @@ test("the crawler page escapes everything it writes", async () => {
   const odd = await player(env, sqlite, "Tom&Jerry");
   await send(env, odd, "odd", { score: 12000, party: [["Tom&Jerry", false, 5000], ["Bot One", true], ["Bot Two", true], ["Bot Three", true]] });
   sqlite.prepare("UPDATE game_characters SET character_name = ? WHERE character_name = 'Tom&Jerry'").run(`<script>alert("x")</script>'`);
+  sqlite.prepare("UPDATE leaderboard_submissions SET extra_json = json_set(extra_json, '$.lineup[0].name', ?1), players_json = json_set(players_json, '$[0].name', ?1)").run(`<script>alert("x")</script>'`);
   const { code } = await (await createLink(env, { run: idOf(sqlite, "odd"), ladder: "score" })).json();
   const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
   assert.doesNotMatch(html, /<script/iu);
@@ -335,4 +336,58 @@ test("the boards page: the link button and tag script before the boards, the Par
   assert.match(share, /fetch\(`\$\{API_URL\}\/links`, \{ method: "POST", credentials: "omit"/u);
   assert.match(share, /"Link copied"/u);
   assert.doesNotMatch(share, /localStorage|sessionStorage/u);
+});
+test("every player of the run on the card: by Avg DPS, none last, a bot marked AI, a name the site leaves out as Player", () => {
+  // the Party read gave three slots; the Battle Data cards had a fourth player (21 Nov)
+  const lineup = lineupWithCards([
+    { slot: 1, name: "Aster", self: true, avgDps: 30000 }, { slot: 2, name: "Briar", avgDps: 50000 }, { slot: 3, name: "Bot One", ai: true, avgDps: null },
+  ], [{ name: "Aster", self: true, avgDps: 30000 }, { name: "Briar", avgDps: 50000 }, { name: "Bot One", ai: true }, { name: "Cobalt", avgDps: 40000 }]);
+  assert.deepEqual(lineup.map((p) => [p.name, p.avgDps, p.fromBattleData === true]),
+    [["Aster", 30000, false], ["Briar", 50000, false], ["Bot One", null, false], ["Cobalt", 40000, true]]);
+  const team = { ladder: PLACEMENT_LADDERS.score, lead: { player: "Aster" }, members: [] };
+  assert.deepEqual(cardPlayers({ ...team, lineup }).map((p) => [p.name, p.dps, Boolean(p.ai), p.mark]),
+    [["Briar", "50,000", false, false], ["Cobalt", "40,000", false, false], ["Aster", "30,000", false, false], ["Bot One", null, true, false]]);
+  // an unsettled name stays out: the row shows as "Player"; four slots already listed: no fifth; a slot's own card isn't added twice
+  const hidden = lineupWithCards([{ slot: 1, name: "Aster", avgDps: 1000 }], [{ name: "Aster", avgDps: 1000 }, { name: "Dorian", unsettled: true, avgDps: 900 }]);
+  assert.deepEqual(hidden[1], { unnamed: true, ai: false, avgDps: 900, fromBattleData: true });
+  assert.equal(cardPlayers({ ...team, lineup: hidden })[1].name, "Player");
+  const four = [1, 2, 3, 4].map((slot) => ({ slot, name: `P${slot}`, avgDps: slot }));
+  assert.equal(lineupWithCards(four, [{ name: "Extra", avgDps: 99 }]).length, 4);
+  assert.equal(lineupWithCards([{ slot: 1, name: "Aster", avgDps: 7 }], [{ name: "Astor", avgDps: 7 }]).length, 1);
+  // no Party read and no cards: the board row's players, as before
+  assert.deepEqual(cardPlayers({ ...team, lineup: null, members: [{ player: "Aster", avgDps: 5 }] }).map((p) => p.name), ["Aster"]);
+});
+
+test("a one-player ladder's card marks whose placement it is and lists the other three", () => {
+  const lineup = [{ name: "Aster", avgDps: 9000 }, { name: "Briar", avgDps: 12000 }, { name: "Bot One", ai: true, avgDps: null }, { name: "Cobalt", avgDps: 3000 }];
+  const rows = cardPlayers({ ladder: PLACEMENT_LADDERS.dps, lead: { player: "Aster", avgDps: 9000 }, members: [], lineup });
+  assert.deepEqual(rows.map((p) => [p.name, p.mark]), [["Briar", false], ["Aster", true], ["Cobalt", false], ["Bot One", false]]);
+  // a run whose list doesn't name them: they're added, marked
+  const added = cardPlayers({ ladder: PLACEMENT_LADDERS.dps, lead: { player: "Dorian", avgDps: 1 }, members: [], lineup });
+  assert.ok(added.some((p) => p.name === "Dorian" && p.mark));
+  assert.equal(added.length, 4);
+});
+
+test("the run viewer lists a player only the Battle Data cards had, and the link's card and text follow the run's own list", async () => {
+  const { env, sqlite } = await setup();
+  const ash = await player(env, sqlite, "Ashwick");
+  await send(env, ash, "missed", { score: 31000, party: [["Ashwick", false, 20000], ["Fernley", false, 15000], ["Gorse", false, 9000], ["Bot One", true]] });
+  // the Party read missed one player: its lineup has three slots, the Battle Data cards four
+  sqlite.prepare("UPDATE leaderboard_submissions SET extra_json = json_remove(extra_json, '$.lineup[2]') WHERE client_run_id = 'missed'").run();
+  const id = idOf(sqlite, "missed");
+  const list = await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json();
+  assert.deepEqual(list.lineup.map((p) => [p.name, p.avgDps ?? null, Boolean(p.ai)]),
+    [["Ashwick", 20000, false], ["Fernley", 15000, false], ["Bot One", null, true], ["Gorse", 9000, false]]);
+  const { code } = await (await createLink(env, { run: id, ladder: "score" })).json();
+  const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
+  assert.match(html, /<meta property="og:description" content="Ashwick, Fernley, Gorse and Bot One \(AI\): 31,000 with 30 stars\. Trio: three players and a bot\./u);
+  // the card shows the run's list, so a change to it is a new picture under a new key
+  const image = new URL(html.match(/<meta property="og:image" content="([^"]*)">/u)[1].replaceAll("&amp;", "&"));
+  assert.equal((await call(env, image.pathname + image.search)).status, 200);
+  sqlite.prepare("UPDATE leaderboard_submissions SET players_json = json_set(players_json, '$[2].avgDps', 9500) WHERE client_run_id = 'missed'").run();
+  const again = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
+  const fresh = new URL(again.match(/<meta property="og:image" content="([^"]*)">/u)[1].replaceAll("&amp;", "&"));
+  assert.notEqual(fresh.searchParams.get("v"), image.searchParams.get("v"));
+  assert.equal((await call(env, fresh.pathname + fresh.search)).status, 200);
+  assert.equal([...env.EVIDENCE.objects.keys()].filter((key) => key.startsWith(`placement-cards/${code}/`)).length, 2);
 });
