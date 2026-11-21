@@ -2600,7 +2600,7 @@ async function deleteOwnAccount(request, env) {
   const discordId = account.discordId;
   if (env.EVIDENCE) {
     const { results } = await env.DB.prepare(
-      `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions
+      `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt FROM leaderboard_submissions
        WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL)`,
     ).bind(discordId).all();
     for (const row of results || []) {
@@ -3622,7 +3622,7 @@ async function submitLeaderboardRecord(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions
+    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
   // at most DAILY_RUN_LIMIT (default 300) new records an account a UTC day: far above real play (a run is 3 minutes),
@@ -3685,13 +3685,16 @@ async function submitLeaderboardRecord(request, env) {
       httpMetadata: { contentType: parsed.evidence.type },
     });
   }
+  // aLogs 0.1.37 B19-B23 sent an Interlink run's start in local time read as UTC: stored at its true time when clear
+  // (a re-send is judged against when the record first arrived)
+  const played = arrivalPlayedAt(record.kind, record.clientVersion, record.playedAt, Number(existing?.createdAt) || now);
   await env.DB.prepare(
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
       score, rank_tier, rank_subtier, rank_name, stars, clear_time_s, cleared, floors, team_dps, meter_dps, meter_damage, party_size,
       players_json, buffs_json, extra_json, evidence_key, client_version, played_at, created_at, updated_at, server,
-      battle_evidence_key, difficulty, defeats, trial
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      battle_evidence_key, difficulty, defeats, trial, played_at_sent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(discord_id, kind, client_run_id) DO UPDATE SET
       game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
       boss_name = excluded.boss_name, boss_level = excluded.boss_level, score = excluded.score,
@@ -3701,7 +3704,7 @@ async function submitLeaderboardRecord(request, env) {
       meter_damage = excluded.meter_damage, party_size = excluded.party_size,
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
-      played_at = excluded.played_at, played_at_sent = NULL, updated_at = excluded.updated_at, server = excluded.server,
+      played_at = excluded.played_at, played_at_sent = excluded.played_at_sent, updated_at = excluded.updated_at, server = excluded.server,
       battle_evidence_key = excluded.battle_evidence_key, difficulty = excluded.difficulty, defeats = excluded.defeats,
       trial = excluded.trial`,
   ).bind(
@@ -3709,7 +3712,7 @@ async function submitLeaderboardRecord(request, env) {
     record.bossId, record.bossName, record.bossLevel, record.score, record.rankTier, record.rankSubtier, record.rankName, record.stars, record.clearTimeS,
     record.cleared, record.floors, record.teamDps, record.meterDps, record.meterDamage, record.partySize,
     record.playersJson, record.buffsJson, record.extraJson, evidenceKey, record.clientVersion,
-    record.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats, record.trial,
+    played.playedAt, now, now, record.server, battleKey, record.difficulty, record.defeats, record.trial, played.sentPlayedAt,
   ).run();
   // a new run whose Party screen shows another party: hidden (a re-send keeps what staff decided)
   const otherPartyHidden = existing ? false : await hideOtherParty(env, submissionId, account.discordId, record)
@@ -5028,9 +5031,10 @@ async function settleRunNames(request, env) {
   return json({ dryRun: !apply, rows: rows.length, groups, ...totals, next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
 }
 
-// aLogs 0.1.37 betas B19 to B23 (RC26 to RC32, the first Rust builds, and the RCs between them up to RC34) built every
-// record with a test clock that took the PC's local time as UTC: their played_at is off by the sender's UTC offset
-// (west of UTC earlier than the run, east of it later). RC35 and newer, and the Python builds before, are right.
+// aLogs 0.1.37 betas B19 to B23 (RC26 to RC32, the first Rust builds, and the local RC33 and RC34) built an Interlink
+// run's played time (the run's start) from the PC's local wall time read as UTC: its played_at is off by the sender's UTC
+// offset (west of UTC earlier than the run, east of it later). Only interlink_run: those builds' other records use the
+// real clock. RC35 and newer, and the Python builds before, are right.
 const PLAYED_AT_LOCAL_AS_UTC = Object.freeze({ version: "0.1.37", rcFrom: 26, rcTo: 34 });
 export function playedAtLocalAsUtc(version) {
   const match = /^(?:[^-]*-)?(\d+\.\d+\.\d+)\+rc\.(\d+)$/u.exec(String(version || "").trim());
@@ -5038,19 +5042,40 @@ export function playedAtLocalAsUtc(version) {
     && Number(match[2]) >= PLAYED_AT_LOCAL_AS_UTC.rcFrom && Number(match[2]) <= PLAYED_AT_LOCAL_AS_UTC.rcTo;
 }
 const ZONE_STEP_S = 15 * 60;            // time zones are whole quarter hours
-const SEND_DELAY_S = 5 * 60;            // a record normally reaches the site within minutes of its run
+// a normal send: the run's length (its played time is its start; up to 3 minutes, more for two bosses) and the wait for
+// Battle Data (up to 45 s) leave at most this much after the zone
+const SEND_DELAY_S = 10 * 60;
 const MAX_ZONE_S = 14 * 3600;
 const AFTER_SENT_TOLERANCE_S = 120;
-// The correction of each affected record, decided per sender (one PC clock, one time zone): each record's zone error is
-// floor((created_at - played_at) / 15 min) * 15 min when the rest is a few minutes (a normal send); the value most of the
-// sender's records agree on - more than half of their normal sends, and at least half of all their records - is used for
-// every affected record of theirs (a queued send that went out late included). No agreement, nothing to go on, a zone
-// over 14 h: that sender is left alone. Rows: [{ id, sender, version, playedAt, createdAt, sentPlayedAt }]
-// (sentPlayedAt: the value a correction replaced, else null). Returns { shifts: Map id -> seconds to add, senders, rows }.
+function playedAtAffected(kind, version) {
+  return kind === "interlink_run" && playedAtLocalAsUtc(version);
+}
+// One record's zone error: (stored - played) floored to 15 minutes; `normal` when the rest is a normal send's delay.
+function playedAtZone(playedAt, storedAt) {
+  const d = Number(storedAt) - Number(playedAt);
+  const zone = Math.floor(d / ZONE_STEP_S) * ZONE_STEP_S;
+  return { zone: zone || 0, normal: d - zone <= SEND_DELAY_S };
+}
+// On arrival (a new record or a re-send): an affected Interlink run whose own zone is clear (a normal send, not zero,
+// within 14 h) is stored at its true time, the sent value kept; anything else is stored as sent (the administrators'
+// route can settle it later by the sender's other runs). storedAt: when the record first arrived (now, for a new one).
+// Returns { playedAt, sentPlayedAt }.
+export function arrivalPlayedAt(kind, version, playedAt, storedAt) {
+  if (playedAt == null || !playedAtAffected(kind, version)) return { playedAt, sentPlayedAt: null };
+  const { zone, normal } = playedAtZone(playedAt, storedAt);
+  if (!normal || zone === 0 || Math.abs(zone) > MAX_ZONE_S) return { playedAt, sentPlayedAt: null };
+  return { playedAt: playedAt + zone, sentPlayedAt: playedAt };
+}
+// The correction of stored records, decided per sender (one PC clock, one time zone): each affected run's zone error
+// (playedAtZone); the value more than half of the sender's normal sends agree on, and at least half of all their affected
+// runs, is used for every affected run of theirs (a queued send that went out late included). No agreement, nothing to go
+// on, a zone over 14 h: that sender is left alone. Rows: [{ id, sender, kind, version, playedAt, createdAt, sentPlayedAt }]
+// (sentPlayedAt: the value a correction replaced, else null; such a row votes with it and isn't moved again). Returns
+// { shifts: Map id -> seconds to add, senders, rows }.
 export function playedAtShifts(rows) {
   const bySender = new Map();
   for (const row of rows) {
-    if (!playedAtLocalAsUtc(row.version) || !Number.isFinite(Number(row.sentPlayedAt ?? row.playedAt)) || !Number.isFinite(Number(row.createdAt))) continue;
+    if (!playedAtAffected(row.kind, row.version) || !Number.isFinite(Number(row.sentPlayedAt ?? row.playedAt)) || !Number.isFinite(Number(row.createdAt))) continue;
     bySender.set(row.sender, [...(bySender.get(row.sender) || []), row]);
   }
   const shifts = new Map();
@@ -5058,12 +5083,7 @@ export function playedAtShifts(rows) {
   const counts = { affected: 0, alreadyCorrected: 0, change: 0, zero: 0, leftWithSender: 0, laterThanSent: 0 };
   for (const list of bySender.values()) {
     counts.affected += list.length;
-    const zones = list.map((row) => {
-      const d = Number(row.createdAt) - Number(row.sentPlayedAt ?? row.playedAt);     // a corrected row votes with its sent value
-      const zone = Math.floor(d / ZONE_STEP_S) * ZONE_STEP_S;
-      return { row, zone, normal: d - zone <= SEND_DELAY_S };
-    });
-    const normal = zones.filter((item) => item.normal);
+    const normal = list.map((row) => playedAtZone(row.sentPlayedAt ?? row.playedAt, row.createdAt)).filter((item) => item.normal);
     const votes = new Map();
     for (const { zone } of normal) votes.set(zone, (votes.get(zone) || 0) + 1);
     const most = Math.max(0, ...votes.values());
@@ -5080,8 +5100,7 @@ export function playedAtShifts(rows) {
     if (zone === 0) { senders.zero += 1; counts.zero += pending.length; continue; }
     let moved = 0;
     for (const row of pending) {
-      const next = Number(row.playedAt) + zone;
-      if (next > Number(row.createdAt) + AFTER_SENT_TOLERANCE_S) { counts.laterThanSent += 1; continue; }
+      if (Number(row.playedAt) + zone > Number(row.createdAt) + AFTER_SENT_TOLERANCE_S) { counts.laterThanSent += 1; continue; }
       shifts.set(row.id, zone);
       moved += 1;
     }
@@ -5091,11 +5110,12 @@ export function playedAtShifts(rows) {
   return { shifts, senders, rows: counts };
 }
 
-// POST /api/admin/played-times {apply?} (administrators and the owner): corrects the played times of records sent by the
-// aLogs builds that took the PC's local time as UTC (playedAtShifts). A dry run unless apply is true. The value a row had
-// is kept in played_at_sent (put back with played_at = played_at_sent), and a corrected row isn't changed again, so a
-// second run changes nothing. Counts only: no names, UIDs or ids. Nothing but played_at moves: a record's week, boss and
-// board come from what the app sent, and copies of one run are matched by when they were stored.
+// POST /api/admin/played-times {apply?} (administrators and the owner): corrects the played times of Interlink runs sent
+// by the aLogs builds that took the PC's local time as UTC (playedAtShifts). A dry run unless apply is true. The value a
+// row had is kept in played_at_sent (put back with played_at = played_at_sent), and a corrected row (by this route or on
+// arrival) isn't changed again, so a second run changes nothing. Counts only: no names, UIDs or ids. Nothing but
+// played_at moves: a run's week, boss and board come from what the app sent, and copies of one run are matched by when
+// they were stored.
 async function correctPlayedTimes(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
@@ -5104,24 +5124,20 @@ async function correctPlayedTimes(request, env) {
   try { body = (await readJsonBody(request, 512)) || {}; } catch { /* the defaults */ }
   const apply = body.apply === true;
   const { results: builds } = await env.DB.prepare(
-    "SELECT client_version AS version, COUNT(*) AS n FROM leaderboard_submissions GROUP BY client_version ORDER BY client_version",
+    `SELECT client_version AS version, COUNT(*) AS n, SUM(kind = 'interlink_run') AS runs
+     FROM leaderboard_submissions GROUP BY client_version ORDER BY client_version`,
   ).all();
-  const versions = (builds || []).map((row) => ({ version: row.version ?? null, rows: Number(row.n) || 0, affected: playedAtLocalAsUtc(row.version) }));
+  const versions = (builds || []).map((row) => ({ version: row.version ?? null, rows: Number(row.n) || 0, interlinkRuns: Number(row.runs) || 0,
+    affected: playedAtLocalAsUtc(row.version) }));
   const asked = versions.filter((row) => row.affected).map((row) => row.version);
-  const rows = asked.length ? await allIn(env, asked, (list) => `SELECT submission_id AS id, discord_id AS sender, kind, trial, client_version AS version,
+  const rows = asked.length ? await allIn(env, asked, (list) => `SELECT submission_id AS id, discord_id AS sender, kind, client_version AS version,
       played_at AS playedAt, created_at AS createdAt, played_at_sent AS sentPlayedAt
-    FROM leaderboard_submissions WHERE client_version IN (${list}) AND played_at IS NOT NULL`) : [];
+    FROM leaderboard_submissions WHERE kind = 'interlink_run' AND client_version IN (${list}) AND played_at IS NOT NULL`) : [];
   const { shifts, senders, rows: counts } = playedAtShifts(rows);
   const hours = {};
-  const kinds = {};
-  let simSeasonMoves = 0;               // a Sim run's season is read off its played time when it arrives: counted, not moved
-  for (const row of rows) {
-    const shift = shifts.get(row.id);
-    if (!shift) continue;
+  for (const shift of shifts.values()) {
     const label = `${shift > 0 ? "+" : ""}${shift / 3600}`;
     hours[label] = (hours[label] || 0) + 1;
-    kinds[row.kind] = (kinds[row.kind] || 0) + 1;
-    if (row.kind === "sim_run" && row.trial && simSeasonOf(row.trial, Number(row.playedAt))?.season !== simSeasonOf(row.trial, Number(row.playedAt) + shift)?.season) simSeasonMoves += 1;
   }
   let changed = 0;
   if (apply) {
@@ -5133,7 +5149,7 @@ async function correctPlayedTimes(request, env) {
       for (const result of await env.DB.batch(writes.slice(i, i + 50))) changed += Number(result?.meta?.changes) || 0;
     }
   }
-  return json({ dryRun: !apply, versions, rows: counts, ...(apply ? { changed } : {}), shiftsByHours: hours, kinds, senders, simSeasonMoves });
+  return json({ dryRun: !apply, versions, rows: counts, ...(apply ? { changed } : {}), shiftsByHours: hours, senders });
 }
 
 function interlinkStarCaps(cycleId) {
@@ -6224,7 +6240,7 @@ async function deleteSubmission(request, env, submissionId) {
   if (!account) return json({ error: "Authentication required." }, 401);
   if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
   const row = await env.DB.prepare(
-    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
+    "SELECT discord_id AS discordId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt FROM leaderboard_submissions WHERE submission_id = ?",
   ).bind(submissionId).first();
   if (!row) return json({ error: "Submission not found." }, 404);
   // the owner and administrators only (runs.delete), any run; players can't delete theirs (the owner, 13 Nov)
