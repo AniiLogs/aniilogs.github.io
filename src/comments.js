@@ -234,11 +234,14 @@ async function postComment(request, env, deps, runId) {
   // who follows the thread from now on: the run's accounts (all of its comments are news to them) and the author
   // (what comes after their comment); a thread someone turned off stays off
   const accounts = await runAccounts(env, thread.copies);
+  // a sender's entry links to their own copy of the run
+  const ownCopy = (discordId) => thread.copies.find((copy) => String(copy.discordId) === discordId)?.id || thread.runId;
   const writes = [...accounts].map(([discordId, onRun]) => env.DB.prepare(
     `INSERT INTO run_thread_members (discord_id, thread_key, run_id, on_run, since_at) SELECT ?, ?, ?, ?, 0
        WHERE EXISTS (SELECT 1 FROM users WHERE discord_id = ?)
-     ON CONFLICT (discord_id, thread_key) DO UPDATE SET on_run = MAX(on_run, excluded.on_run), since_at = 0`,
-  ).bind(discordId, thread.key, thread.runId, onRun, discordId));
+     ON CONFLICT (discord_id, thread_key) DO UPDATE SET on_run = MAX(on_run, excluded.on_run), since_at = 0,
+       run_id = CASE WHEN excluded.on_run = 2 THEN excluded.run_id ELSE run_thread_members.run_id END`,
+  ).bind(discordId, thread.key, onRun === 2 ? ownCopy(discordId) : thread.runId, onRun, discordId));
   writes.push(env.DB.prepare(
     `INSERT INTO run_thread_members (discord_id, thread_key, run_id, commented, read_at, marked_unread, since_at) VALUES (?, ?, ?, 1, ?, 0, ?)
      ON CONFLICT (discord_id, thread_key) DO UPDATE SET commented = 1, read_at = excluded.read_at, marked_unread = 0,
