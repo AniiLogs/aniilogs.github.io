@@ -1,0 +1,47 @@
+/* Run checks for staff (/run-checks.js): the entry in the account menu with its number, and the list. Colours from the
+   theme (theme-shell.js), the same look as the notifications list. */
+.account-menu-popover .rc-menu-entry { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.account-menu-popover .rc-menu-entry[hidden], .rc-count[hidden] { display: none; }
+.rc-count { display: grid; place-items: center; box-sizing: border-box; min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 999px; background: color-mix(in srgb, #f2c230 30%, var(--panel)); color: var(--text); font-size: 11.5px;
+  font-style: normal; font-weight: 900; line-height: 1; }
+
+.rc-panel { position: fixed; right: 12px; z-index: 120; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;
+  width: min(640px, calc(100vw - 24px)); max-height: calc(100vh - 90px); overflow-y: auto; padding: 8px 10px 12px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: var(--shadow);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; }
+.rc-head { display: flex; align-items: center; gap: 10px; padding: 4px 0 2px 4px; }
+.rc-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 800; }
+.rc-close { width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; }
+.rc-close:hover, .rc-close:focus-visible { background: rgba(var(--accent-rgb), 0.14); outline: none; }
+.rc-intro { margin: 0 4px 4px; color: var(--muted); font-size: 13.5px; line-height: 1.4; }
+.rc-loading { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0; padding: 1.2rem; color: var(--muted); }
+.rc-loader-art { display: block; width: 56px; height: 56px; }
+.rc-loader-art svg { display: block; width: 100%; height: 100%; }
+.rc-empty { margin: 0; padding: 0.8rem 4px 1rem; color: var(--muted); line-height: 1.4; }
+.rc-list { display: flex; flex-direction: column; gap: 8px; }
+.rc-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-2) 55%, var(--panel)); }
+.rc-card.is-done { opacity: 0.75; }
+.rc-card-head { display: flex; flex-direction: column; gap: 2px; }
+.rc-title { font-size: 15px; font-weight: 800; overflow-wrap: anywhere; }
+.rc-meta { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.rc-line { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.rc-label { min-width: 7.5em; color: var(--muted); font-size: 12.5px; font-weight: 700; }
+.rc-reasons { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; padding: 8px 10px 8px 26px; border-radius: 8px;
+  background: color-mix(in srgb, #f2c230 12%, var(--panel)); font-size: 14px; line-height: 1.4; }
+.rc-decides { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.rc-failed { margin: 0; color: #ef5350; font-size: 13px; font-weight: 700; }
+.rc-done { margin: 0; color: var(--muted); font-weight: 700; }
+.rc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.rc-actions button { min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; }
+.rc-actions button:hover, .rc-actions button:focus-visible { background: rgba(var(--accent-rgb), 0.14); outline: none; }
+.rc-actions .rc-pictures { margin-right: auto; }
+.rc-decide.is-confirmed.is-armed { border-color: #3ddc84; background: color-mix(in srgb, #3ddc84 20%, transparent); }
+.rc-decide.is-rejected.is-armed { border-color: #ef5350; background: color-mix(in srgb, #ef5350 20%, transparent); }
+@media (max-width: 560px) {
+  .rc-panel { right: 8px; width: calc(100vw - 16px); max-height: calc(100vh - 150px); }   /* clear of the bottom tabs */
+  .rc-actions button { flex: 1 1 auto; }
+  .rc-actions .rc-pictures { flex-basis: 100%; margin-right: 0; }
+}
