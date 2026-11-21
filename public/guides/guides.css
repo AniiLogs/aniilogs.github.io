@@ -65,6 +65,61 @@
   line-height: 1.5;
 }
 
+/* The list's groups: AniiLogs' own guides, guides hosted elsewhere (linked-guides.js), and ended event guides. */
+.guides-group + .guides-group {
+  margin-top: 2rem;
+}
+
+.guides-group-title {
+  margin: 0 0 0.2rem;
+  font-size: 1.35rem;
+}
+
+.guides-group-line {
+  margin: 0 0 0.9rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.guides-card.is-linked {
+  grid-template-rows: auto 1fr auto;
+}
+
+.guides-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.guides-card-host {
+  overflow-wrap: anywhere;
+}
+
+.guides-event {
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.guides-card.is-archived h2 {
+  color: var(--muted);
+}
+
+.guides-card.is-archived .guides-event {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+
 .guide-page {
   container-type: inline-size;
   font-size: 15px;
