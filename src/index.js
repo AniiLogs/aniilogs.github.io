@@ -1988,6 +1988,43 @@ export function lineupDps(lineup, players) {
   const dps = (card) => (Number.isInteger(card?.avgDps) && card.avgDps > 0 ? card.avgDps : null);
   return lineup.map((entry) => (entry ? { ...entry, avgDps: dps(found.get(entry)) } : entry));
 }
+// A player on the run's Battle Data cards whom no Party-screen slot matched (the Party read missed them: 21 Nov, a
+// four-player run whose Party picture gave three slots) is listed after the slots with what the card says: the name,
+// AI or not, and the Avg DPS. Only while the run has fewer than four players listed, and never a card whose name reads
+// like a slot's (that's the slot's player, read twice). A name the boards keep out (unsettled) is left off: such a row
+// has `unnamed` and shows as "Player". Cards in their own order.
+export function lineupWithCards(lineup, players) {
+  if (!Array.isArray(lineup)) return lineup;
+  const cards = (Array.isArray(players) ? players : []).filter((card) => card && typeof card === "object");
+  const key = (name) => (typeof name === "string" && name.trim() ? nameSkeleton(name) : null);
+  const slotKeys = new Set(lineup.map((entry) => key(entry?.name)).filter(Boolean));
+  const dpsOf = (card) => (Number.isInteger(card?.avgDps) && card.avgDps > 0 ? card.avgDps : null);
+  const shown = lineup.filter((entry) => entry && (entry.name || entry.aniimo));
+  const taken = new Set(shown.map((entry) => entry.avgDps).filter((dps) => dps != null));
+  const out = [...lineup];
+  let count = shown.length;
+  for (const card of cards) {
+    if (count >= 4) break;
+    if (key(card.name) && slotKeys.has(key(card.name))) continue;
+    if (!key(card.name) && card.ai !== true && dpsOf(card) === null) continue;      // nothing to show
+    if (dpsOf(card) !== null && taken.has(dpsOf(card))) continue;                     // its card is already on a slot
+    const named = typeof card.name === "string" && card.name.trim() && !card.unsettled;
+    out.push({ ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }), ai: card.ai === true, avgDps: dpsOf(card), fromBattleData: true });
+    count += 1;
+  }
+  return out;
+}
+// The run's players as the run viewer lists them (and the placement card): the Party screen's lineup filled in from every
+// copy (mergedLineup), each with their Avg DPS (lineupDps), and players only the Battle Data cards had (lineupWithCards).
+// extra: the copy's parsed extra_json; playersJson its players_json. Null when the copy has no Party read.
+async function runLineup(env, submissionId, extra, playersJson) {
+  const copies = extra?.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
+  const players = parseJsonColumn(playersJson);
+  // each player's Average DPS off this copy's Battle Data card (on the boards already), where the card is surely theirs
+  return lineupWithCards(lineupDps(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
+    players), players);
+}
+
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
 // rank's name), Result (score, then the fastest time) and Party (its size). Rows without the value go last either
 // way; ties stay newest first.
@@ -6638,10 +6675,7 @@ async function submissionEvidence(request, env, submissionId) {
     }
   }
   if (shot === "list") {
-    const copies = extra.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
-    // each player's Average DPS off this copy's Battle Data card (on the boards already), where the card is surely theirs
-    const lineup = lineupDps(mergedLineup(publicLineup(extra.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
-      parseJsonColumn(row.playersJson));
+    const lineup = await runLineup(env, submissionId, extra, row.playersJson);
     const teamDps = Number.isInteger(row.teamDps) && row.teamDps > 0 ? row.teamDps : null;
     const buffs = (parseJsonColumn(row.buffsJson) || []).slice(0, 12).filter((buff) => buff?.name)
       .map((buff) => ({ name: String(buff.name).slice(0, 60), ...(Number.isInteger(buff.level) ? { level: buff.level } : {}),
@@ -7421,6 +7455,15 @@ const placementLinks = createPlacementLinks({
   boardData: (env, params) => interlinkBoards(new Request(`https://placement.invalid/api/leaderboard/interlink?${params}`), env, true),
   copyGroupSql: COPY_GROUP, json, browserWriteAllowed, readJsonBody, siteOrigin: configuredPublicSiteOrigin,
   drawCard: (card) => drawPlacementCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS }),
+  // the run's players as its viewer lists them; null when the copy has no Party read (then the board row's players)
+  runPlayers: async (env, submissionId) => {
+    const row = await env.DB.prepare("SELECT extra_json AS extraJson, players_json AS playersJson FROM leaderboard_submissions WHERE submission_id = ?")
+      .bind(submissionId).first();
+    if (!row) return null;
+    // a run with no Party read: its Battle Data cards alone
+    return await runLineup(env, submissionId, parseJsonColumn(row.extraJson) || {}, row.playersJson)
+      ?? lineupWithCards([], parseJsonColumn(row.playersJson));
+  },
 });
 
 async function handleRequest(request, env) {

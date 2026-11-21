@@ -67,9 +67,28 @@ function weekText(week) {
   return `Week of ${day(week.start)} – ${day(week.end)}`;
 }
 const nameOf = (entry) => entry.discordName || entry.player || "Pathfinder";
+// The preview's sentence for a run with bots (the tag itself counts real players)
+const TAG_SENTENCES = Object.freeze({ 1: "Solo: one player and three bots.", 2: "Duo: two players and two bots.", 3: "Trio: three players and a bot." });
+// The card's players: every player of the run as its viewer lists them (the run's lineup: bots marked AI, a player whose
+// name the site leaves out as "Player"), highest Avg DPS first, no Avg DPS last. On a one-player ladder the placement's
+// player is marked (added if the run's list doesn't name them). A run with no list: the board row's players.
+const dpsOf = (entry) => (entry.avgDps == null || !Number.isFinite(Number(entry.avgDps)) ? null : Number(entry.avgDps));
+const byDps = (a, b) => (dpsOf(a) === null ? (dpsOf(b) === null ? 0 : 1) : dpsOf(b) === null ? -1 : dpsOf(b) - dpsOf(a));
+export function cardPlayers({ ladder, lead, members, lineup }) {
+  const listed = Array.isArray(lineup) ? lineup.filter((entry) => entry && (entry.name || entry.aniimo || entry.unnamed)) : [];
+  if (!listed.length) return [...members].sort(byDps).map((entry) => ({ name: nameOf(entry), dps: number(dpsOf(entry)), mark: Boolean(ladder.one) }));
+  const who = String(lead.player || "").toLowerCase();
+  const rows = listed.map((entry) => ({ name: entry.name ? String(entry.name) : "Player", avgDps: dpsOf(entry), ai: entry.ai === true,
+    mark: Boolean(ladder.one) && Boolean(entry.name) && String(entry.name).toLowerCase() === who }));
+  if (ladder.one && !rows.some((row) => row.mark)) rows.unshift({ name: nameOf(lead), avgDps: dpsOf(lead), ai: false, mark: true });
+  rows.sort(byDps);
+  const shown = rows.slice(0, 4);
+  if (ladder.one && !shown.some((row) => row.mark)) shown[3] = rows.find((row) => row.mark);   // the placement's player always shows
+  return shown.map(({ name, avgDps, ai, mark }) => ({ name, dps: number(avgDps), ...(ai ? { ai: true } : {}), mark }));
+}
 const listNames = (names) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
-export function createPlacementLinks({ boardData, copyGroupSql, json, browserWriteAllowed, readJsonBody, siteOrigin, drawCard }) {
+export function createPlacementLinks({ boardData, copyGroupSql, json, browserWriteAllowed, readJsonBody, siteOrigin, drawCard, runPlayers = null }) {
   // the run a link was made for, and every copy of it (one Interlink run sent by each of its players)
   async function runOf(env, submissionId) {
     const run = await env.DB.prepare(
@@ -111,8 +130,11 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     const bossName = listed?.second?.name ? `${listed.name || boss.name} + ${listed.second.name}` : boss.name;
     // where the row is on "View all" (25 a page: team rows on team ladders, players on the others)
     const index = ladder.one ? boss.entries.indexOf(lead) : lead.team - 1;
-    return { ladder, ladderId: link.ladder, run, boss, bossName, twoBosses: Boolean(listed?.second), week: data.cycle, lead, members,
-      place: lead.rank, offset: Math.max(0, Math.floor(index / FULL_ROWS) * FULL_ROWS), proofId: lead.proofIds?.[ladder.proof] || link.submissionId };
+    const proofId = lead.proofIds?.[ladder.proof] || link.submissionId;
+    // every player of the run, as its viewer lists them (bots too): not only the board row's credited players
+    const lineup = runPlayers ? await runPlayers(env, proofId) : null;
+    return { ladder, ladderId: link.ladder, run, boss, bossName, twoBosses: Boolean(listed?.second), week: data.cycle, lead, members, lineup,
+      place: lead.rank, offset: Math.max(0, Math.floor(index / FULL_ROWS) * FULL_ROWS), proofId };
   }
 
   // What the card and the preview say
@@ -136,15 +158,13 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
       figure = score; extra = number(lead.teamDps) ? `Team DPS ${number(lead.teamDps)}` : null;
       sentence = `${score}${stars !== null ? ` with ${stars} stars` : ""}`;
     }
-    const dps = (entry) => (entry.avgDps == null || !Number.isFinite(Number(entry.avgDps)) ? null : Number(entry.avgDps));
-    const players = [...members].sort((a, b) => (dps(a) === null ? (dps(b) === null ? 0 : 1) : dps(b) === null ? -1 : dps(b) - dps(a)))
-      .map((entry) => ({ name: nameOf(entry), dps: number(dps(entry)), mark: Boolean(ladder.one) }));
+    const players = cardPlayers(found);
     const week = weekText(found.week);
     const slot = found.boss.slot || null;
     const result = resultText(lead, found.twoBosses);
     const title = [`#${found.place} on ${ladder.label}`, found.bossName, week].filter(Boolean).join(" · ");
-    const names = listNames(players.map((player) => player.name));
-    const description = [`${names}${tag ? ` (${tag}: bots filled the other places)` : ""}: ${sentence || figure || "on the board"}.`,
+    const names = listNames(players.map((player) => `${player.name}${player.ai ? " (AI)" : ""}`));
+    const description = [`${names}: ${sentence || figure || "on the board"}.`, tag ? TAG_SENTENCES[realPlayers] : null,
       result ? `${result}.` : null, extra ? `${extra}.` : null, `Holo-Battle Interlink${slot ? `, ${slot} boss` : ""}.`].filter(Boolean).join(" ");
     const card = { place: found.place, ladder: ladder.label, figure: figure || "–", boss: found.bossName, slot, week, stars,
       result, extra, tag, players };
