@@ -43,8 +43,8 @@
     const badge = CHECK_BADGES[check];
     return badge ? el("span", { class: `lb-check is-${check}`, title: badge.title, "aria-label": badge.label, text: badge.text }) : null;
   }
-  // A picture icon next to a name when the run has proof pictures, for anyone: hover it to see them side by side (the
-  // result screen, Battle Data, Holo-Battle Sim's Gizmo screen), click (or tap) to keep them open, one per tab.
+  // A picture icon next to a name when the run has proof pictures, for anyone: a click (or tap) opens them (the
+  // result screen, Battle Data, Holo-Battle Sim's Gizmo screen), one per tab. Never on hover.
   const proofImages = new Map();                       // submission id|shot -> object URL, loaded once per page
   // shot: "summary" (the result screen), "battle" (Battle Data), "gizmo1"... (Holo-Battle Sim's Gizmo screen, a view
   // per part of its list) or "party" (the Party screen the run started from)
@@ -152,22 +152,14 @@
     if (shot.startsWith("gizmo")) return shots.filter((s) => s.startsWith("gizmo")).length > 1 ? `Gizmos ${shot.slice(5)}` : "Gizmos";
     return "Summary";
   }
-  const HOVER_OPEN_MS = 350;                           // a hover this long opens the viewer; passing over the icon doesn't
   function proofButton(submissionId, check = null, menuId = null, options = {}) {
     if (!submissionId) return null;
-    const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots (they stay open until you click outside)",
-      "aria-label": "View this run's screenshots", onclick: () => { clearTimeout(hoverTimer); openProof(submissionId, check, menuId, options); } });
+    const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots",
+      "aria-label": "View this run's screenshots", onclick: () => openProof(submissionId, check, menuId, options) });
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v9.6l3.3-3.3a1 1 0 0 1 1.4 0l2.8 2.8 4.3-4.3a1 1 0 0 1 1.4 0L19 11.6V6H5Zm3.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
-    // hover (mouse or pen only: a tap goes straight to the click) opens the same viewer as a click
-    button.addEventListener("pointerenter", (event) => {
-      if (event.pointerType === "touch") return;
-      clearTimeout(hoverTimer);
-      hoverTimer = setTimeout(() => openProof(submissionId, check, menuId, options), HOVER_OPEN_MS);
-    });
-    button.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
+    // opened by a click only (the owner, 21 Nov: a viewer that pops up when the pointer passes over the icon is in the way)
     return button;
   }
-  let hoverTimer = null;
   // Deleting a run from the viewer: only the owner and administrators (the API's canDeleteRuns; the page passes it to
   // allowDelete). The API checks again.
   let deleter = null;

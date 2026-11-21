@@ -8,6 +8,7 @@ const home = read("public/index.html");
 const boards = read("public/leaderboard/index.html");
 const app = read("public/app.js");
 const viewer = read("public/proof-viewer.js");
+const viewerStyles = read("public/proof-viewer.css");
 const leaderboard = read("public/leaderboard/leaderboard.js");
 
 test("My runs: one proof viewer, shared by the leaderboards and the profile, loaded before either page's script", () => {
@@ -17,15 +18,18 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
     assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=/u);
   }
   assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete \}\)/u);
+  // the viewer opens on a click only, never when the pointer passes over the icon; its check badge sits after the tabs
+  assert.doesNotMatch(viewer, /pointerenter|HOVER_OPEN_MS|hoverTimer/u);
+  assert.match(viewerStyles, /\.lb-proof-tabs \.lb-check \{[^}]*margin-left: 2px;/u);
   // the menu picture beside the run's, and a menu best's run beside it
   assert.match(viewer, /label: "Menu"/u);
   assert.match(viewer, /details\.runProof/u);
   // which fight the run is, over the pictures, from the API's fight; every page loads this version of the viewer
   assert.match(viewer, /const fight = fightLine\(details\.fight \|\| run\?\.fight\);/u);
   for (const page of [home, boards]) {
-    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.3-leads">/u);
+    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.4-badge-by-tabs">/u);
     // its Comments tab (comments.js) loads just before it
-    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.5-place-links" defer><\/script>/u);
+    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.6-click-only" defer><\/script>/u);
   }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);
