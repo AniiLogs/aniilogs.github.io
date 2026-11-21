@@ -1,5 +1,8 @@
 // game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
 import { commentsApi, commentsPath } from "./comments.js";
+import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
+import { drawPlacementCard } from "./placement-card.js";
+import { createPlacementLinks, PLACEMENT_CARD_PATH, PLACEMENT_PATH, realPlayersOf } from "./placement-links.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -5844,9 +5847,11 @@ async function profileBoards(env, discordId) {
   return { leaderboards, trophies };
 }
 
-async function interlinkBoards(request, env) {
+// internal: the week's answer as an object, not a response (placement links read the board through it); null when the
+// boards aren't open to everyone
+async function interlinkBoards(request, env, internal = false) {
   const account = await leaderboardAccount(request, env);
-  if (!leaderboardAllowed(account, env)) return gatedResponse(account);
+  if (!leaderboardAllowed(account, env)) return internal ? null : gatedResponse(account);
   const params = new URL(request.url).searchParams;
   const own = (discordId) => Boolean(account && discordId === account.discordId);
   const list = await interlinkCycles(env);
@@ -5906,19 +5911,27 @@ async function interlinkBoards(request, env) {
   // each best's check badge, from the run behind it: { score: "verified", dps: "pending", ... }
   const proofRunIds = [...new Set(rows.flatMap((row) => Object.values(row.proofIds)))];
   const badges = new Map();
+  const realPlayers = new Map();                             // Solo / Duo / Trio (realPlayersOf): the run had bots
   try {
     for (let i = 0; i < proofRunIds.length; i += 90) {
       const chunk = proofRunIds.slice(i, i + 90);
       const { results } = await env.DB.prepare(
-        `SELECT submission_id AS id, verify_state AS state FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
+        `SELECT submission_id AS id, verify_state AS state, players_json AS playersJson FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
       ).bind(...chunk).all();
-      for (const result of results || []) badges.set(result.id, runCheckBadge(result.state));
+      for (const result of results || []) {
+        badges.set(result.id, runCheckBadge(result.state));
+        realPlayers.set(result.id, realPlayersOf(result.playersJson));
+      }
     }
   } catch (error) {
     console.error("Run check badges need migration 0032", error);
   }
+  // the run a row shows on the asked ladder (stars and the default order: the score's)
+  const labelProof = ROW_FIGURES[asked] && asked !== "taken" ? asked : "score";
   for (const row of rows) {
     row.checks = Object.fromEntries(Object.entries(row.proofIds).map(([metric, id]) => [metric, badges.get(id) || null]).filter(([, badge]) => badge));
+    const real = realPlayers.get(row.proofIds[labelProof] || row.proofIds.score);
+    if (real) row.realPlayers = real;
   }
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
@@ -5941,6 +5954,10 @@ async function interlinkBoards(request, env) {
   // otherwise by players
   const byTeams = params.get("rows") === "teams";
   const pooled = !ONE_PLAYER_LADDERS.includes(ladder);
+  // ?players=4|3|2|1 lists only runs with that many real players (1-3: Solo, Duo, Trio, the rest bots); every row
+  // keeps its place on the whole ladder, and limit/offset page what's left
+  const playersParam = Number(params.get("players"));
+  const players = [1, 2, 3, 4].includes(playersParam) ? playersParam : null;
   const caps = interlinkStarCaps(cycle.id);
   const bosses = bossIds.filter((id) => !onlyBoss || id === onlyBoss).map((id) => {
     const listed = cycle.bosses.find((boss) => boss.id === id);
@@ -5971,10 +5988,11 @@ async function interlinkBoards(request, env) {
           ...(row.discordName ? { discordName: row.discordName } : {}) })) : []);
       }
     }
-    const all = ranked.map(({ discordId, cycle: _c, bossId, bossName, firstAt, runGroup, runFirst, figureGroup, figureFirst, ...row }, index) => ({
+    const everyone = ranked.map(({ discordId, cycle: _c, bossId, bossName, firstAt, runGroup, runFirst, figureGroup, figureFirst, ...row }, index) => ({
       ...row, player: row.player || "Pathfinder", updatedAt: firstAt, own: own(discordId),   // updatedAt: when this best run reached the site
       ...((index === 0 || ranked[index - 1].team !== row.team) && also.get(row.team)?.length ? { also: also.get(row.team) } : {}) }));
-    const teams = all.length ? all[all.length - 1].team : 0;
+    const all = players ? everyone.filter((row) => (row.realPlayers || 4) === players) : everyone;
+    const teams = players ? new Set(all.map((row) => row.team)).size : all.length ? all[all.length - 1].team : 0;
     const teamRows = [];                                     // the entries of each team row, in rank order
     for (const entry of all) {
       if (teamRows.length && teamRows[teamRows.length - 1][0].team === entry.team) teamRows[teamRows.length - 1].push(entry);
@@ -6012,14 +6030,15 @@ async function interlinkBoards(request, env) {
     totals.set(row.discordId, player);
   }
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
-  return json({
+  const payload = {
     cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers,
     ladder: ladder || "stars", order: ladder ? (Boolean(INTERLINK_LADDERS[ladder].ascending) !== reversed ? "asc" : "desc") : null,
-    offset, limit, rows: byTeams ? "teams" : "players", updatedAt: await interlinkUpdatedAt(env, [cycle.id]),
+    offset, limit, rows: byTeams ? "teams" : "players", players, updatedAt: internal ? null : await interlinkUpdatedAt(env, [cycle.id]),
     seasons: interlinkSeasons(list),
     rules: { slots: INTERLINK_RULES.slots, slotsConfirmed: INTERLINK_RULES.slotsConfirmed, starCaps: caps,
       clearStars: interlinkStarRule(cycle.id).clear, ladders: Object.keys(INTERLINK_LADDERS) },
-  });
+  };
+  return internal ? payload : json(payload);
 }
 
 async function leaderboardEntries(request, env) {
@@ -6997,6 +7016,9 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/status" && request.method === "GET") return leaderboardStatus(request, env);
   if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return leaderboardEntries(request, env);
   if (url.pathname === "/api/leaderboard/interlink" && request.method === "GET") return interlinkBoards(request, env);
+  if (url.pathname === "/api/links" && request.method === "POST") return placementLinks.create(request, env);
+  const placementCard = url.pathname.match(PLACEMENT_CARD_PATH);
+  if (placementCard && (request.method === "GET" || request.method === "HEAD")) return placementLinks.cardImage(request, env, placementCard[1]);
   if (url.pathname === "/api/leaderboard/interlink/cycles" && request.method === "POST") return uploadInterlinkCycles(request, env);
   if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
   if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
@@ -7065,10 +7087,20 @@ async function api(request, env) {
   return json({ error: "Not found" }, 404);
 }
 
+// Placement links (src/placement-links.js): the boards' own ranking, read as the boards page reads it
+const placementLinks = createPlacementLinks({
+  boardData: (env, params) => interlinkBoards(new Request(`https://placement.invalid/api/leaderboard/interlink?${params}`), env, true),
+  copyGroupSql: COPY_GROUP, json, browserWriteAllowed, readJsonBody, siteOrigin: configuredPublicSiteOrigin,
+  drawCard: (card) => drawPlacementCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS }),
+});
+
 async function handleRequest(request, env) {
   const url = new URL(request.url);
-  if (url.pathname.startsWith("/api/")) {
+  const placement = url.pathname.match(PLACEMENT_PATH);
+  if (url.pathname.startsWith("/api/") || placement) {
     try { await fillRunOutcomes(env); } catch (error) { if (env.DB) OUTCOMES_FILLED.add(env.DB); console.error("Run outcomes need migration 0033", error); }
+    // a short link at the root: https://aniilogs-api.pages.dev/<code> (nothing else is served there but index.html)
+    if (placement) return request.method === "GET" || request.method === "HEAD" ? placementLinks.open(request, env, placement[1]) : json({ error: "Not found" }, 404);
     return corsResponse(request, env, await api(request, env));
   }
   const asset = await env.ASSETS.fetch(request);

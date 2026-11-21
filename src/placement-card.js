@@ -2,7 +2,9 @@
 // A placement's share card: a 1200x630 PNG drawn without a canvas library, so it fits the API's small CPU budget.
 // Flat rectangles and pre-rasterised letters (src/card-glyphs.js) on an indexed-colour image (one byte a pixel, at
 // most 256 colours), deflated by the runtime's own CompressionStream.
-import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
+// The letters (src/card-glyphs.js) come in with each call, from src/index.js: the API build inlines modules that import
+// nothing themselves.
+let CARD_FONTS = null;
 
 export const CARD_WIDTH = 1200;
 export const CARD_HEIGHT = 630;
@@ -14,7 +16,8 @@ const COLORS = Object.freeze({
 });
 
 let atlasPromise = null;
-async function atlas() {
+async function atlas({ atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts }) {
+  CARD_FONTS = fonts;
   if (!atlasPromise) {
     atlasPromise = (async () => {
       const text = atob(CARD_ATLAS);
@@ -325,8 +328,8 @@ function background(letters) {
   return p;
 }
 
-export async function drawPlacementCard(model) {
-  const p = background(await atlas());
+export async function drawPlacementCard(model, letters) {
+  const p = background(await atlas(letters));
   const W = CARD_WIDTH;
   const PAD = 64;
   // top: brand and mode
