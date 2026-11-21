@@ -3701,7 +3701,7 @@ async function submitLeaderboardRecord(request, env) {
       meter_damage = excluded.meter_damage, party_size = excluded.party_size,
       players_json = excluded.players_json, buffs_json = excluded.buffs_json, extra_json = excluded.extra_json,
       evidence_key = excluded.evidence_key, client_version = excluded.client_version,
-      played_at = excluded.played_at, updated_at = excluded.updated_at, server = excluded.server,
+      played_at = excluded.played_at, played_at_sent = NULL, updated_at = excluded.updated_at, server = excluded.server,
       battle_evidence_key = excluded.battle_evidence_key, difficulty = excluded.difficulty, defeats = excluded.defeats,
       trial = excluded.trial`,
   ).bind(
@@ -5026,6 +5026,114 @@ async function settleRunNames(request, env) {
   }
   const last = rows.at(-1);
   return json({ dryRun: !apply, rows: rows.length, groups, ...totals, next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
+}
+
+// aLogs 0.1.37 betas B19 to B23 (RC26 to RC32, the first Rust builds, and the RCs between them up to RC34) built every
+// record with a test clock that took the PC's local time as UTC: their played_at is off by the sender's UTC offset
+// (west of UTC earlier than the run, east of it later). RC35 and newer, and the Python builds before, are right.
+const PLAYED_AT_LOCAL_AS_UTC = Object.freeze({ version: "0.1.37", rcFrom: 26, rcTo: 34 });
+export function playedAtLocalAsUtc(version) {
+  const match = /^(?:[^-]*-)?(\d+\.\d+\.\d+)\+rc\.(\d+)$/u.exec(String(version || "").trim());
+  return Boolean(match) && match[1] === PLAYED_AT_LOCAL_AS_UTC.version
+    && Number(match[2]) >= PLAYED_AT_LOCAL_AS_UTC.rcFrom && Number(match[2]) <= PLAYED_AT_LOCAL_AS_UTC.rcTo;
+}
+const ZONE_STEP_S = 15 * 60;            // time zones are whole quarter hours
+const SEND_DELAY_S = 5 * 60;            // a record normally reaches the site within minutes of its run
+const MAX_ZONE_S = 14 * 3600;
+const AFTER_SENT_TOLERANCE_S = 120;
+// The correction of each affected record, decided per sender (one PC clock, one time zone): each record's zone error is
+// floor((created_at - played_at) / 15 min) * 15 min when the rest is a few minutes (a normal send); the value most of the
+// sender's records agree on - more than half of their normal sends, and at least half of all their records - is used for
+// every affected record of theirs (a queued send that went out late included). No agreement, nothing to go on, a zone
+// over 14 h: that sender is left alone. Rows: [{ id, sender, version, playedAt, createdAt, sentPlayedAt }]
+// (sentPlayedAt: the value a correction replaced, else null). Returns { shifts: Map id -> seconds to add, senders, rows }.
+export function playedAtShifts(rows) {
+  const bySender = new Map();
+  for (const row of rows) {
+    if (!playedAtLocalAsUtc(row.version) || !Number.isFinite(Number(row.sentPlayedAt ?? row.playedAt)) || !Number.isFinite(Number(row.createdAt))) continue;
+    bySender.set(row.sender, [...(bySender.get(row.sender) || []), row]);
+  }
+  const shifts = new Map();
+  const senders = { total: bySender.size, shifted: 0, zero: 0, left: { noNormalSend: 0, noAgreement: 0, tooFew: 0, over14h: 0 } };
+  const counts = { affected: 0, alreadyCorrected: 0, change: 0, zero: 0, leftWithSender: 0, laterThanSent: 0 };
+  for (const list of bySender.values()) {
+    counts.affected += list.length;
+    const zones = list.map((row) => {
+      const d = Number(row.createdAt) - Number(row.sentPlayedAt ?? row.playedAt);     // a corrected row votes with its sent value
+      const zone = Math.floor(d / ZONE_STEP_S) * ZONE_STEP_S;
+      return { row, zone, normal: d - zone <= SEND_DELAY_S };
+    });
+    const normal = zones.filter((item) => item.normal);
+    const votes = new Map();
+    for (const { zone } of normal) votes.set(zone, (votes.get(zone) || 0) + 1);
+    const most = Math.max(0, ...votes.values());
+    const top = [...votes].filter(([, n]) => n === most).map(([zone]) => zone);
+    let reason = null;
+    if (!normal.length) reason = "noNormalSend";
+    else if (top.length !== 1 || most * 2 <= normal.length) reason = "noAgreement";
+    else if (most * 2 < list.length) reason = "tooFew";
+    else if (Math.abs(top[0]) > MAX_ZONE_S) reason = "over14h";
+    const pending = list.filter((row) => row.sentPlayedAt == null);
+    counts.alreadyCorrected += list.length - pending.length;
+    if (reason) { senders.left[reason] += 1; counts.leftWithSender += pending.length; continue; }
+    const zone = top[0];
+    if (zone === 0) { senders.zero += 1; counts.zero += pending.length; continue; }
+    let moved = 0;
+    for (const row of pending) {
+      const next = Number(row.playedAt) + zone;
+      if (next > Number(row.createdAt) + AFTER_SENT_TOLERANCE_S) { counts.laterThanSent += 1; continue; }
+      shifts.set(row.id, zone);
+      moved += 1;
+    }
+    counts.change += moved;
+    if (moved) senders.shifted += 1;
+  }
+  return { shifts, senders, rows: counts };
+}
+
+// POST /api/admin/played-times {apply?} (administrators and the owner): corrects the played times of records sent by the
+// aLogs builds that took the PC's local time as UTC (playedAtShifts). A dry run unless apply is true. The value a row had
+// is kept in played_at_sent (put back with played_at = played_at_sent), and a corrected row isn't changed again, so a
+// second run changes nothing. Counts only: no names, UIDs or ids. Nothing but played_at moves: a record's week, boss and
+// board come from what the app sent, and copies of one run are matched by when they were stored.
+async function correctPlayedTimes(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try { body = (await readJsonBody(request, 512)) || {}; } catch { /* the defaults */ }
+  const apply = body.apply === true;
+  const { results: builds } = await env.DB.prepare(
+    "SELECT client_version AS version, COUNT(*) AS n FROM leaderboard_submissions GROUP BY client_version ORDER BY client_version",
+  ).all();
+  const versions = (builds || []).map((row) => ({ version: row.version ?? null, rows: Number(row.n) || 0, affected: playedAtLocalAsUtc(row.version) }));
+  const asked = versions.filter((row) => row.affected).map((row) => row.version);
+  const rows = asked.length ? await allIn(env, asked, (list) => `SELECT submission_id AS id, discord_id AS sender, kind, trial, client_version AS version,
+      played_at AS playedAt, created_at AS createdAt, played_at_sent AS sentPlayedAt
+    FROM leaderboard_submissions WHERE client_version IN (${list}) AND played_at IS NOT NULL`) : [];
+  const { shifts, senders, rows: counts } = playedAtShifts(rows);
+  const hours = {};
+  const kinds = {};
+  let simSeasonMoves = 0;               // a Sim run's season is read off its played time when it arrives: counted, not moved
+  for (const row of rows) {
+    const shift = shifts.get(row.id);
+    if (!shift) continue;
+    const label = `${shift > 0 ? "+" : ""}${shift / 3600}`;
+    hours[label] = (hours[label] || 0) + 1;
+    kinds[row.kind] = (kinds[row.kind] || 0) + 1;
+    if (row.kind === "sim_run" && row.trial && simSeasonOf(row.trial, Number(row.playedAt))?.season !== simSeasonOf(row.trial, Number(row.playedAt) + shift)?.season) simSeasonMoves += 1;
+  }
+  let changed = 0;
+  if (apply) {
+    const writes = rows.filter((row) => shifts.has(row.id)).map((row) => env.DB.prepare(
+      `UPDATE leaderboard_submissions SET played_at_sent = played_at, played_at = played_at + ?
+       WHERE submission_id = ? AND played_at = ? AND played_at_sent IS NULL`,
+    ).bind(shifts.get(row.id), row.id, row.playedAt));
+    for (let i = 0; i < writes.length; i += 50) {
+      for (const result of await env.DB.batch(writes.slice(i, i + 50))) changed += Number(result?.meta?.changes) || 0;
+    }
+  }
+  return json({ dryRun: !apply, versions, rows: counts, ...(apply ? { changed } : {}), shiftsByHours: hours, kinds, senders, simSeasonMoves });
 }
 
 function interlinkStarCaps(cycleId) {
@@ -6839,6 +6947,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
   if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
   if (url.pathname === "/api/admin/run-names" && request.method === "POST") return settleRunNames(request, env);
+  if (url.pathname === "/api/admin/played-times" && request.method === "POST") return correctPlayedTimes(request, env);
   // a profile id or a game UID (resolveProfileId)
   const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})\/history$/u);
   if (historyMatch && request.method === "GET") return publicBattleHistory(request, env, historyMatch[1]);
