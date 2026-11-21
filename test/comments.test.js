@@ -1,4 +1,4 @@
-// Comments on runs and their notifications (src/comments.js, migrations/0035_run_comments.sql). Every account, name,
+// Comments on runs and their notifications (src/comments.js, migrations/0036_run_comments.sql). Every account, name,
 // UID and run here is made up.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";

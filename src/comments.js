@@ -1,4 +1,4 @@
-// Comments on runs and the notifications about them (the owner, 20 Nov; tables in migrations/0035_run_comments.sql).
+// Comments on runs and the notifications about them (the owner, 20 Nov; tables in migrations/0036_run_comments.sql).
 //
 // - One thread per run: the key is the run's shared-run group (extra.sharedRun, set when copies of a team run are
 //   linked) else the submission id, so every copy of a team run opens the same thread (threadOf).
