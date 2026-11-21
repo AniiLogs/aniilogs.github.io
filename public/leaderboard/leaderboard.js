@@ -761,10 +761,12 @@
   }
   // Shown only where it changes something: a Per Boss page (or View all) with at least one board on a team ladder
   // (Score, Stars, Fastest clear, Team DPS) that has team rows. Boards mark that with data-teams; View all with
-  // state.fullTeams. Called after every draw of a board.
+  // state.fullTeams. Only boards on screen count: a phone shows one boss at a time (the Left / Center / Right tabs).
+  // Called after every draw of a board, when the boss tab changes and when the page crosses the phone width.
   function showRowsPick() {
     const interlink = board().custom === "boss" && !els.interlink.hidden;
-    const applies = interlink && (state.viewBoss ? Boolean(state.fullTeams) : Boolean(els.interlink.querySelector(".lb-boss[data-teams]")));
+    const shown = [...els.interlink.querySelectorAll(".lb-boss[data-teams]")].some((node) => node.offsetParent !== null);
+    const applies = interlink && (state.viewBoss ? Boolean(state.fullTeams) : shown);
     els.rowsPick.hidden = !applies;
     for (const button of els.rowsPick.querySelectorAll("[data-rows-choice]")) button.setAttribute("aria-pressed", String(button.dataset.rowsChoice === state.rows));
   }
@@ -835,7 +837,10 @@
     for (const button of els.interlink.querySelectorAll("[data-slot-index]")) {
       button.setAttribute("aria-selected", String(Number(button.dataset.slotIndex) === state.slot));
     }
+    showRowsPick();
   }
+  // the phone width (leaderboard.css: one boss at a time from 900px down): which boards are on screen changes
+  window.matchMedia?.("(max-width: 900px)").addEventListener?.("change", () => showRowsPick());
   function weekNav(data) {
     const now = Date.now() / 1000;
     const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id);   // in time order
