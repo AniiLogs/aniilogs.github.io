@@ -1465,8 +1465,8 @@ function historyNumbers(run) {
 function historyChips(run) {
   const chips = [];
   const chip = (cls, text, title = "") => { const node = element("span", `history-chip ${cls}`, text); if (title) node.title = title; chips.push(node); };
-  if (run.check === "verified") chip("is-verified", "Verified", "Checked: the site read this run's full screenshots again and they agree.");
-  if (run.check === "pending") chip("is-pending", "Pending", "Waiting for a check against this run's full screenshots.");
+  if (run.check === "verified") chip("is-verified", "Verified", "Confirmed: another player's copy of this run matches it, or the site read its pictures again and they agree.");
+  if (run.check === "pending") chip("is-pending", "Pending", "Its check hasn't run yet: the site will read its pictures again soon.");
   if (run.newBests?.length) chip("is-best", "New best", "This run beat one of the player's bests when it was captured.");
   if (run.outcome === "ended-early") chip("is-early", "Ended early", "The team had every star and the leader ended the run: it counts.");
   if (run.outcome === "invalid") chip("is-invalid", "Invalid", "Quit before the run could count (under the clock without every star): it's on no board.");

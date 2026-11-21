@@ -480,21 +480,32 @@ test("second reading (shadow mode): Workers AI re-reads the whole screens; a mis
     return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
   };
   assert.equal((await send("same")).status, 201);                                  // the run() defaults: 20000, 20 stars
-  assert.equal((await send("differs", { score: 23456, cycle: "3003", boss: { id: "80000099", name: "Alpha Irisal", level: 60 } })).status, 201);
-  assert.equal(AI.calls, 4);                                                       // two screens per run
+  assert.equal((await send("differs", { score: 15500, stars: 15, boss: { id: "80000109", name: "Omega Sherro", level: 60 } })).status, 201);
+  // two screens per run, and the run whose score differs has its result screen read a second time
+  assert.equal(AI.calls, 5);
   const list = async (state, session = SESSIONS.dev) => call(env, `/api/admin/run-checks?state=${state}`, { session });
   assert.equal((await list("mismatch", SESSIONS.user)).status, 403);               // administrators and the owner only
   const mismatches = (await (await list("mismatch")).json()).runs;
-  assert.deepEqual(mismatches.map((r) => [r.score, r.check.differences]), [[23456, [{ field: "score", sent: 23456, read: 20000 }]]]);
+  const twice = [{ field: "score", sent: 15500, read: 20000 }, { field: "stars", sent: 15, read: 20 }];
+  assert.deepEqual(mismatches.map((r) => [r.score, r.check.differences]), [[15500, twice]]);
+  assert.deepEqual(mismatches[0].check.reading2.differences, twice);
   assert.match(mismatches[0].proof.full, /\?shot=full$/u);
-  assert.equal((await (await list("match")).json()).runs.length, 1);
-  // public badges: the agreeing run is Verified, the disagreeing one only Pending (never "mismatch" in public)
-  const boardCheck = async (cycle) => (await (await call(env, `/api/leaderboard/interlink?cycle=${cycle}`)).json())
-    .bosses.flatMap((b) => b.entries).find((e) => e.proofId)?.checks;
-  assert.deepEqual(await boardCheck("3005"), { score: "verified", teamDps: "verified" });
-  assert.equal((await boardCheck("3003")).score, "pending");
+  const matched = (await (await list("match")).json()).runs;
+  assert.deepEqual(matched.map((r) => [r.check.verifiedBy, r.check.reading.via]), [["reading", "prompt"]]);
+  // the staff list: read twice with another score, in words, with what Confirm does
+  assert.equal((await call(env, "/api/admin/run-checks/staff", { session: SESSIONS.user })).status, 403);
+  const staff = await (await call(env, "/api/admin/run-checks/staff", { session: SESSIONS.dev })).json();
+  assert.equal(staff.count, 1);
+  assert.equal(staff.runs[0].decides, "badge");
+  assert.match(staff.runs[0].reasons[0], /read twice .*score 15,500 sent, 20,000 on the picture; stars 15 sent, 20 on the picture/u);
+  assert.deepEqual((await (await call(env, "/api/admin/run-checks/staff?count=1", { session: SESSIONS.dev })).json()), { count: 1 });
+  // public badges: the agreeing run is Verified; the one on the staff list shows nothing (never "mismatch" in public)
+  const boardCheck = async (bossId) => (await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json())
+    .bosses.find((b) => String(b.id) === bossId).entries.find((e) => e.proofId)?.checks;
+  assert.deepEqual(await boardCheck("80000107"), { score: "verified", teamDps: "verified" });
+  assert.equal((await boardCheck("80000109")).score ?? null, null);
   const publicList = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
-  assert.deepEqual(publicList.map((e) => e.check).sort(), ["pending", "verified"]);
+  assert.deepEqual(publicList.map((e) => e.check ?? "none").sort(), ["none", "verified"]);
   assert.equal(JSON.stringify(publicList).includes("mismatch"), false);
   // shadow mode: the mismatching run still stands on the boards
   assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).total, 2);
@@ -574,18 +585,23 @@ test("free checks on every run; the AI reading only for runs that matter, and at
   await send("ordinary", { score: 19000, stars: 19 });
   assert.equal(AI.calls, 2);
   assert.deepEqual([state("ordinary").state, JSON.parse(state("ordinary").json).rules.flags], [null, []]);
-  // 36,230 with 6 stars: stars don't track score; Avg DPS far above the team's: listed for review even without screens
+  // 36,230 with 6 stars: stars don't track score; Avg DPS far above the team's: misreads - no tick, no mark, not staff's
   await send("odd", { score: 36230, stars: 6, cycle: "4000", boss: { id: "80000098", name: "Alpha Scorchhowl", level: 60 },
     players: [{ name: "MinMax", avgDps: 1371292, self: true }] }, false);
-  const odd = JSON.parse(state("odd").json).rules.flags.map((flag) => flag.rule);
-  assert.equal(state("odd").state, "mismatch");
-  assert.ok(odd.includes("stars track score") && odd.includes("Avg DPS plausible") && odd.includes("Avg DPS add up to team DPS"));
+  const odd = JSON.parse(state("odd").json).rules;
+  assert.equal(state("odd").state, null);
+  assert.deepEqual(odd.flags, []);
+  assert.ok(["stars track score", "Avg DPS plausible", "Avg DPS add up to team DPS"].every((rule) => odd.misread.some((flag) => flag.rule === rule)));
+  // more stars than the boss gives: impossible, so the staff list
+  await send("over", { score: 45000, stars: 45, cycle: "4000", boss: { id: "80000098", name: "Alpha Scorchhowl", level: 60 }, players: [] }, false);
+  assert.equal(state("over").state, "mismatch");
+  assert.deepEqual(JSON.parse(state("over").json).staff.map((item) => item.rule), ["stars above the cap"]);
   // the daily cap (2 readings): a third run that matters waits in the queue ("pending", still on the boards)
   await send("pb2", { score: 15500, stars: 15, cycle: "3003", boss: { id: "80000099", name: "Alpha Irisal", level: 60 }, players: [] });
   await send("pb3", { score: 25500, stars: 25, cycle: "3003", boss: { id: "80000102", name: "Alpha Panpanta", level: 60 }, players: [] });
   assert.equal(AI.calls, 4);
   assert.deepEqual([state("pb3").state, JSON.parse(state("pb3").json).queued], ["pending", true]);
-  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).total, 5);   // shadow mode
+  assert.equal((await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).total, 6);   // shadow mode: the staff-listed run too
   // the cap raised: the next run that comes in also reads the oldest queued one
   env.VERIFY_DAILY_LIMIT = "10";
   await send("ordinary2", { score: 18000, stars: 18 });
@@ -1519,14 +1535,16 @@ test("Interlink from week 4000: a clear is 20 stars, and a two-boss middle fight
   assert.equal((await send(SESSIONS.dev, run("m4000", { cycle: "4000", boss: boss("80000119") }))).status, 400);
   assert.equal((await send(SESSIONS.dev, run("m4003b", { cycle: "4003", boss: boss("80000121") }))).status, 400);
   // the game's own cap, read by aLogs (extra.starCap): if a patch raised a side boss to 25, a kill is 25 stars, and the
-  // run is flagged so the rules get updated
+  // run gets a note so the rules get updated (a note is never a reason for staff or a badge)
   assert.equal((await send(SESSIONS.dev, run("cap1", { cycle: "4005", boss: boss("80000110"), stars: 22, score: 23000, clearTimeS: 100, cleared: true, extra: { starCap: 25 } }))).status, 201);
   assert.equal((await send(SESSIONS.user, run("cap2", { cycle: "4005", boss: boss("80000110"), stars: 25, score: 26000, clearTimeS: 140, cleared: true, extra: { starCap: 25 } }))).status, 201);
   const raised = await (await call(env, "/api/leaderboard/interlink?cycle=4005")).json();
   assert.deepEqual(raised.bosses[0].entries.map((e) => [e.stars, e.clearTimeS]), [[25, 140]]);   // 22 at 1:40: quit
-  const checked = (id) => JSON.parse(sqlite.prepare("SELECT verify_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).verify_json).rules.flags;
-  assert.deepEqual(checked("cap2").map((flag) => [flag.rule, flag.sent, flag.expected]), [["star cap matches the rules", 25, 20]]);
-  assert.ok(checked("cap1").some((flag) => flag.rule === "cleared needs full stars" && flag.expected === 25));
+  const rules = (id) => JSON.parse(sqlite.prepare("SELECT verify_json FROM leaderboard_submissions WHERE client_run_id = ?").get(id).verify_json).rules;
+  const checked = (id) => [...rules(id).flags, ...rules(id).misread, ...rules(id).notes];
+  assert.deepEqual(rules("cap2").notes.map((flag) => [flag.rule, flag.sent, flag.expected]), [["star cap matches the rules", 25, 20]]);
+  assert.deepEqual(rules("cap2").flags, []);                                         // 25 stars under the game's own cap of 25
+  assert.ok(rules("cap1").misread.some((flag) => flag.rule === "cleared needs full stars" && flag.expected === 25));
   // a cap that agrees with the rules, or none, or a silly one: judged by the rules, nothing about the cap
   assert.equal((await send(SESSIONS.dev, run("cap3", { cycle: "4005", boss: boss("80000112"), stars: 20, score: 21000, clearTimeS: 90, cleared: true, extra: { starCap: 20 } }))).status, 201);
   assert.equal((await send(SESSIONS.user, run("cap4", { cycle: "4005", boss: boss("80000112"), stars: 20, score: 21000, clearTimeS: 95, cleared: true, extra: { starCap: 5000 } }))).status, 201);
@@ -3575,4 +3593,221 @@ test("POST /api/admin/played-times: administrators only, a dry run by default, a
   const twice = await (await times({ apply: true })).json();
   assert.deepEqual([twice.changed, twice.rows.change, twice.rows.alreadyCorrected], [0, 0, 6]);
   assert.deepEqual(stored(), after);
+});
+
+// ---------------------------------------------------------------- run checks decide by themselves (21 Nov)
+const shot = () => new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" });
+function sendWithScreens(env, token, body, parts = ["evidence", "evidence_full", "battle", "battle_full"]) {
+  const form = new FormData();
+  form.set("submission", JSON.stringify(body));
+  for (const part of parts) form.set(part, shot(), `${part}.jpg`);
+  return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+}
+const stateOf = (sqlite, id) => {
+  const row = sqlite.prepare("SELECT verify_state AS state, verify_json AS json FROM leaderboard_submissions WHERE client_run_id = ?").get(id);
+  return { state: row.state, check: JSON.parse(row.json || "{}") };
+};
+const idOf = (sqlite, id) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(id).id;
+const CARDS = [{ name: "UserOne", avgDps: 20000, breakValue: 300, damageTaken: 900, heal: 10 }, { name: "DevTwo", avgDps: 19000, breakValue: 200, damageTaken: 800, heal: 0 }];
+
+test("run checks: two players' copies that agree verify each other with no reading", async () => {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const one = await namedToken(env, SESSIONS.user);
+  const two = await namedToken(env, SESSIONS.dev2);
+  assert.equal((await sendWithScreens(env, one, run("c1", { gameUid: "301000000003", players: CARDS, teamDps: 39000 }))).status, 201);
+  // alone, with no AI binding: no tick and no mark
+  assert.equal(stateOf(sqlite, "c1").state, null);
+  assert.equal((await sendWithScreens(env, two, run("c2", { gameUid: "301000000002", players: CARDS, teamDps: 39000 }))).status, 201);
+  for (const id of ["c1", "c2"]) {
+    const { state, check } = stateOf(sqlite, id);
+    assert.deepEqual([state, check.verifiedBy, check.copies], ["match", "copies", { senders: 2, agreeing: 2 }]);
+  }
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
+  assert.ok(entries.length && entries.every((entry) => entry.check === "verified"));
+  assert.equal((await (await call(env, "/api/admin/run-checks/staff", { session: SESSIONS.dev })).json()).count, 0);
+});
+
+test("run checks: copies that contradict go to staff only when the copy's own picture sides against it", async () => {
+  // the result screen always reads 20000 / 20 stars: the copy that sent 19000 is contradicted by its own picture
+  const AI = { async run(model, input) {
+    return { response: String(input.prompt || "").includes("Battle Data") ? '{"cards": []}' : '{"score": 20000, "stars": 20, "time": "3:00"}' };
+  } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev, VERIFY_TOP_RANK: "0" });
+  const one = await namedToken(env, SESSIONS.user);
+  const two = await namedToken(env, SESSIONS.dev2);
+  // two Battle Data cards in common: one fight, whatever the scores say
+  await sendWithScreens(env, one, run("k1", { gameUid: "301000000003", players: CARDS, teamDps: 39000 }));
+  await sendWithScreens(env, two, run("k2", { gameUid: "301000000002", players: CARDS, teamDps: 39000, score: 19000, stars: 19 }));
+  const wrong = stateOf(sqlite, "k2");
+  assert.equal(wrong.state, "mismatch");
+  assert.equal(wrong.check.staff[0].why, "copies contradict");
+  assert.equal(stateOf(sqlite, "k1").state, "match");                 // its own picture agrees with it
+  const staff = await (await call(env, "/api/admin/run-checks/staff", { session: SESSIONS.dev })).json();
+  assert.deepEqual(staff.runs.map((r) => [r.score, r.copies]), [[19000, 2]]);
+  assert.match(staff.runs[0].reasons[0], /Another player's copy/u);
+  // the staff-listed copy shows no mark in public
+  const entries = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json()).entries;
+  assert.equal(JSON.stringify(entries).includes("pending"), false);
+});
+
+test("run checks: re-checking stored runs moves old misread flags off the staff list and leaves staff decisions alone", async () => {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev, VERIFY_TOP_RANK: "0" });
+  const token = await namedToken(env, SESSIONS.user);
+  for (const [id, score] of [["decided", 20000], ["old-stars", 19000], ["old-meter", 18000]]) {
+    assert.equal((await sendWithScreens(env, token, run(id, { score, stars: score / 1000 }), ["evidence"])).status, 201);
+  }
+  // as stored before 21 Nov: the meter rule and stars-against-score made a run "mismatch"
+  const old = (rule) => JSON.stringify({ rules: { flags: [{ rule, sent: 1, expected: 2 }] } });
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch', verify_json = ? WHERE client_run_id = 'old-meter'").run(old("Avg DPS add up to the meter's DPS"));
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch', verify_json = ? WHERE client_run_id = 'old-stars'").run(old("stars track score"));
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'confirmed', verify_json = ? WHERE client_run_id = 'decided'")
+    .run(JSON.stringify({ rules: { flags: [] }, review: { by: IDS.dev, decision: "confirmed", at: 1 } }));
+  const columns = () => sqlite.prepare("SELECT client_run_id, score, stars, status, players_json, extra_json FROM leaderboard_submissions ORDER BY client_run_id").all();
+  const beforeColumns = columns();
+  assert.equal((await (await call(env, "/api/admin/run-checks/staff?count=1", { session: SESSIONS.dev })).json()).count, 2);
+  const recheck = (body, session = SESSIONS.dev) => call(env, "/api/admin/run-checks/recheck", { session, method: "POST", body });
+  assert.equal((await recheck({}, SESSIONS.user)).status, 403);
+  const dry = await (await recheck({})).json();
+  assert.equal(dry.dryRun, true);
+  assert.deepEqual(dry.outcomes, { "no badge (nothing to check it by)": 2, "staff decided (left alone)": 1 });
+  assert.deepEqual(dry.changes, { "mismatch -> none": 2 });
+  assert.equal(stateOf(sqlite, "old-meter").state, "mismatch");            // a dry run writes nothing
+  const applied = await (await recheck({ apply: true })).json();
+  assert.equal(applied.changed, 2);
+  assert.deepEqual(["old-meter", "old-stars", "decided"].map((id) => stateOf(sqlite, id).state), [null, null, "confirmed"]);
+  assert.equal(stateOf(sqlite, "decided").check.review.decision, "confirmed");
+  assert.deepEqual(stateOf(sqlite, "old-meter").check.rules.flags, []);
+  assert.deepEqual(columns(), beforeColumns);                                // only the check's own columns change
+  assert.equal((await (await call(env, "/api/admin/run-checks/staff?count=1", { session: SESSIONS.dev })).json()).count, 0);
+  // misreads are counted per rule and app build
+  sqlite.prepare("UPDATE leaderboard_submissions SET stars = 5, client_version = '0.1.37+rc.36' WHERE client_run_id = 'old-stars'").run();
+  const counted = await (await recheck({})).json();
+  assert.deepEqual(counted.misread, { "stars track score": { "0.1.37+rc.36": 1 } });
+});
+
+test("run checks: an unreadable reading records why, and one run can be read again on request", async () => {
+  // the model answers in words when asked the old way, and with the JSON in the chat form
+  const AI = { forms: [], async run(model, input) {
+    this.forms.push(input.messages ? "messages" : "prompt");
+    if (!input.messages) return { response: "I cannot see an image in this request." };
+    assert.match(input.messages[0].content[1].image_url.url, /^data:image\/jpeg;base64,/u);
+    return { response: input.messages[0].content[0].text.includes("Battle Data") ? '{"cards": []}' : '{"score": 20000, "stars": 20, "time": "3:00"}' };
+  } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  await sendWithScreens(env, token, run("r1"));
+  const read = stateOf(sqlite, "r1");
+  assert.deepEqual([read.state, read.check.verifiedBy, read.check.reading.via], ["match", "reading", "messages"]);
+  assert.deepEqual(AI.forms, ["prompt", "messages", "prompt", "messages"]);
+  // nothing usable either way: unreadable, with the reasons
+  AI.run = async (model, input) => ({ response: input.messages ? "" : "Sure! The score is high." });
+  const id = idOf(sqlite, "r1");
+  const again = await call(env, `/api/admin/run-checks/${id}/read`, { session: SESSIONS.dev, method: "POST", body: {} });
+  assert.equal(again.status, 200);
+  const answer = await again.json();
+  assert.equal(answer.state, "unreadable");
+  assert.deepEqual(answer.reading.why.result, { why: "no JSON in the answer", answer: "Sure! The score is high.", messages: { why: "the model's answer was empty" } });
+  assert.deepEqual(answer.reading.why.battle, { why: "no JSON in the answer", messages: { why: "the model's answer was empty" } });
+  // a picture missing from storage says so
+  sqlite.prepare("UPDATE leaderboard_submissions SET extra_json = json_set(extra_json, '$.proofFull.evidence', 'evidence/none.jpg') WHERE client_run_id = 'r1'").run();
+  const missing = await (await call(env, `/api/admin/run-checks/${id}/read`, { session: SESSIONS.dev, method: "POST", body: {} })).json();
+  assert.deepEqual(missing.reading.why.result, { why: "no picture stored under its key" });
+  assert.equal((await call(env, `/api/admin/run-checks/${id}/read`, { session: SESSIONS.user, method: "POST", body: {} })).status, 403);
+  // inside the day's cap
+  env.VERIFY_DAILY_LIMIT = "1";
+  assert.equal((await call(env, `/api/admin/run-checks/${id}/read`, { session: SESSIONS.dev, method: "POST", body: {} })).status, 429);
+});
+
+// made-up limits (the real ones are secrets)
+const EGG_LIMITS = JSON.stringify({ maxLoot: { Normal: 50000 }, minTimeS: { Normal: 60 }, maxDefeats: 30, maxPointsPerMatch: 100, minMatchS: 120 });
+const SCREEN_LIMITS = JSON.stringify({ maxOver40: 10, copyFailed: true });
+// the public answers, without what differs between two databases by chance (random ids, clocks)
+function publicView(value) {
+  return JSON.parse(JSON.stringify(value, (key, item) => (/^(id|at|runProof)$|(Id|Ids|At)$/u.test(key) ? undefined : item)));
+}
+async function reviewOnlyWorld(extraEnv) {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev, ...extraEnv });
+  const token = await namedToken(env, SESSIONS.user);
+  const send = (body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const now = Math.floor(Date.now() / 1000);
+  // a match over every made-up limit, and a normal one
+  assert.equal((await send({ kind: "eggheist_match", clientRunId: "egg-big", cycle: "S1", score: 90000, clearTimeS: 30, cleared: true, difficulty: "Normal", defeats: 99, playedAt: now })).status, 201);
+  assert.equal((await send({ kind: "eggheist_match", clientRunId: "egg-ok", cycle: "S1", score: 20000, clearTimeS: 224, cleared: true, difficulty: "Normal", defeats: 1, playedAt: now })).status, 201);
+  // a standing, then the same standing 400 points higher a moment later (no match can give that)
+  const standing = (score) => ({ kind: "eggheist_season", clientRunId: "eggheist-S1", cycle: "S1", rank: { tier: 3, subtier: 2, name: "Pro Egg Snatcher II" }, score, playedAt: now });
+  assert.ok([200, 201].includes((await send(standing(1500))).status));
+  assert.ok([200, 201].includes((await send(standing(1900))).status));
+  // an Interlink run whose result screen came from the screen and differs from the game window
+  assert.equal((await sendWithScreens(env, token, run("screen", { extra: { screenCheck: { result: { source: "screen", copy: "ok", worst: 90, over25: 60, over40: 50 } } } }), ["evidence"])).status, 201);
+  const answers = async () => publicView({
+    matches: await (await call(env, "/api/leaderboard/entries?kind=eggheist_match&best=0")).json(),
+    matchBoard: await (await call(env, "/api/leaderboard/entries?kind=eggheist_match")).json(),
+    standings: await (await call(env, "/api/leaderboard/entries?kind=eggheist_season")).json(),
+    interlink: await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json(),
+    runs: await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json(),
+    profile: await (await call(env, "/api/profile/overview", { session: SESSIONS.user })).json(),
+  });
+  return { env, sqlite, answers };
+}
+
+test("review-only checks: a flagged Egg Heist or screen-read run is listed for staff, and nothing public changes", async () => {
+  const plain = await reviewOnlyWorld({});
+  const flagged = await reviewOnlyWorld({ EGG_CHECK_LIMITS: EGG_LIMITS, SCREEN_CHECK_LIMITS: SCREEN_LIMITS });
+  const staff = async (world) => (await call(world.env, "/api/admin/run-checks/staff", { session: SESSIONS.dev })).json();
+  // without the secrets nothing is checked
+  assert.equal((await staff(plain)).count, 0);
+  const listed = await staff(flagged);
+  assert.equal(listed.count, 3);
+  assert.deepEqual(listed.runs.map((r) => r.decides), ["nothing", "nothing", "nothing"]);
+  const rules = (id) => stateOf(flagged.sqlite, id).check.reviewOnly.flags.map((flag) => flag.rule);
+  assert.deepEqual(rules("egg-big"), ["egg loot", "egg time", "egg defeats"]);
+  assert.deepEqual(rules("eggheist-S1"), ["egg points"]);
+  assert.deepEqual(rules("screen"), ["screen differs"]);
+  assert.equal(stateOf(flagged.sqlite, "egg-ok").check.reviewOnly, undefined);
+  // the state the badge reads is untouched
+  for (const id of ["egg-big", "eggheist-S1"]) assert.equal(stateOf(flagged.sqlite, id).state, null);
+  assert.equal(stateOf(flagged.sqlite, "screen").state, stateOf(plain.sqlite, "screen").state);
+  // every public answer is the same with and without the review flags ...
+  assert.deepEqual(await flagged.answers(), await plain.answers());
+  // ... and after staff decide them (the decision is recorded; nothing else moves)
+  for (const item of listed.runs) {
+    const decided = await call(flagged.env, `/api/admin/run-checks/${item.submissionId}`, { session: SESSIONS.dev, method: "POST", body: { decision: "rejected" } });
+    assert.equal(decided.status, 200);
+    assert.equal((await decided.json()).reviewOnly, true);
+  }
+  assert.equal((await staff(flagged)).count, 0);
+  assert.equal(stateOf(flagged.sqlite, "egg-big").check.reviewOnly.decision.decision, "rejected");
+  assert.deepEqual(await flagged.answers(), await plain.answers());
+  // a secret that doesn't parse turns the checks off
+  const broken = await reviewOnlyWorld({ EGG_CHECK_LIMITS: "{not json", SCREEN_CHECK_LIMITS: "[]" });
+  assert.equal((await staff(broken)).count, 0);
+});
+
+test("limit previews: counts and distributions only, for candidate limits sent in the request", async () => {
+  const world = await reviewOnlyWorld({});
+  const preview = (body, session = SESSIONS.dev) => call(world.env, "/api/admin/run-checks/limits", { session, method: "POST", body });
+  assert.equal((await preview({}, SESSIONS.user)).status, 403);
+  const none = await (await preview({})).json();
+  assert.deepEqual([none.egg.limits, none.egg.matchesFlagged, none.screen.limits, none.screen.rowsFlagged], [null, 0, null, 0]);
+  assert.equal(none.egg.matches, 2);
+  assert.deepEqual(none.egg.byDifficulty.Normal.loot, { rows: 2, min: 20000, p10: 20000, p50: 20000, p90: 20000, p99: 20000, max: 90000 });
+  assert.deepEqual(none.screen.bySource, { "screen, copy ok": 1 });
+  const some = await (await preview({ egg: JSON.parse(EGG_LIMITS), screen: { maxOver40: 100 } })).json();
+  assert.deepEqual(some.egg.flagged, { "egg loot": 1, "egg time": 1, "egg defeats": 1 });
+  assert.equal(some.screen.rowsFlagged, 0);                                     // 50 is under 100
+  assert.equal(JSON.stringify(some).includes("UserOne"), false);
+});
+
+test("run checks: a re-check can set aside readings that read nothing, so those runs are read again", async () => {
+  const AI = { async run() { return { response: "" }; } };
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  await sendWithScreens(env, token, run("blank"));
+  assert.equal(stateOf(sqlite, "blank").state, "unreadable");
+  const recheck = async (body) => (await call(env, "/api/admin/run-checks/recheck", { session: SESSIONS.dev, method: "POST", body })).json();
+  assert.deepEqual((await recheck({})).outcomes, { "no badge (picture unreadable)": 1 });
+  assert.deepEqual((await recheck({ retryUnreadable: true })).outcomes, { "would be read": 1 });
+  const applied = await recheck({ retryUnreadable: true, apply: true });
+  assert.deepEqual(applied.outcomes, { "waiting for a reading": 1 });
+  assert.deepEqual([stateOf(sqlite, "blank").state, stateOf(sqlite, "blank").check.queued], ["pending", true]);
 });

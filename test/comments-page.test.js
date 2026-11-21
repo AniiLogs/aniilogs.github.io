@@ -53,3 +53,22 @@ test("a run link opens the viewer on the tab it names; the Comments tab can be p
   assert.match(viewer, /options\?\.tab === "comments"/u);
   assert.match(viewer, /window\.AniilogsComments\.mount\(commentsRun\)/u);
 });
+
+test("run checks for staff: on every page with the account menu, text only, the aLogs loader, the server decides who sees it", () => {
+  for (const page of PAGES) {
+    const html = read(page);
+    assert.equal(html.match(/<script [^>]*src="\/run-checks\.js\?v=0\.1\.0"/gu)?.length, 1, page);
+    assert.equal(html.match(/href="\/run-checks\.css\?v=0\.1\.0"/gu)?.length, 1, page);
+  }
+  const source = read("run-checks.js");
+  assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/u);
+  assert.match(source, /AlogsLoader\?\.create\(/u);
+  // the entry shows only once the API answered the count (403 for anyone but staff)
+  assert.match(source, /response\.status === 403\) \{ staff = false; stop\(\); return; \}/u);
+  assert.match(source, /hidden: true, "data-run-checks-open": ""/u);
+  // what each decision does is said in the list
+  assert.match(source, /Either way it stays on the boards\./u);
+  assert.match(source, /nothing on the boards changes\./u);
+  // the boards' legend says what the badges mean now
+  assert.match(read("leaderboard/leaderboard.js"), /no badge: not confirmed by either/u);
+});

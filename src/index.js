@@ -3,6 +3,7 @@ import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard } from "./placement-card.js";
 import { createPlacementLinks, PLACEMENT_CARD_PATH, PLACEMENT_PATH, realPlayersOf } from "./placement-links.js";
+import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -2226,7 +2227,9 @@ const NOBODYS_BEST = `(
     AND EXISTS (SELECT 1 FROM leaderboard_submissions b WHERE b.discord_id = c.discord_id AND b.kind = 'sim_run' AND b.cycle IS c.cycle AND b.trial IS c.trial
       AND b.difficulty IS c.difficulty AND b.status = 'visible' AND COALESCE(b.outcome, '') <> 'invalid' AND b.submission_id <> c.submission_id AND b.cleared = 1
       AND (COALESCE(c.cleared, 0) = 0 OR b.clear_time_s < c.clear_time_s OR (b.clear_time_s = c.clear_time_s AND b.created_at < c.created_at))))
-) AND COALESCE(c.verify_state, '') NOT IN ('pending', 'mismatch')`;
+) AND COALESCE(c.verify_state, '') NOT IN ('pending', 'mismatch')
+  AND NOT (json_valid(c.verify_json) AND json_extract(c.verify_json, '$.reviewOnly.flags[0]') IS NOT NULL
+    AND json_extract(c.verify_json, '$.reviewOnly.decision') IS NULL)`;     // a run waiting for staff keeps its pictures
 
 const REPLACED_AT_ONCE = "c.kind IN ('interlink_run', 'interlink_best')";
 async function pruneProofs(env, max) {
@@ -3626,7 +3629,8 @@ async function submitLeaderboardRecord(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
-    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt FROM leaderboard_submissions
+    `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt,
+       score, updated_at AS updatedAt FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
   // at most DAILY_RUN_LIMIT (default 300) new records an account a UTC day: far above real play (a run is 3 minutes),
@@ -3728,6 +3732,8 @@ async function submitLeaderboardRecord(request, env) {
     ? await checkSimRun(env, submissionId).catch((error) => { console.error("Sim run checks failed", error); return false; })
     : false;
   await corroborateRun(env, submissionId).catch((error) => { console.error("Settling the run's copies failed", error); });
+  // the review-only checks (Egg Heist's figures, a result read off the screen): listed for staff, nothing else changes
+  await reviewOnlyCheck(env, submissionId, record, existing).catch((error) => { console.error("Review-only checks failed", error); });
   try {
     await storeRunOutcome(env, submissionId);
   } catch (error) {
@@ -3737,7 +3743,8 @@ async function submitLeaderboardRecord(request, env) {
   if (record.kind === "interlink_run") {
     // ... and while today's cap has room, up to 2 of the oldest queued runs (so a raised cap or the daily reset
     // works through the queue by itself)
-    const checking = checkRun(env, submissionId).then(() => drainRunChecks(env, 2))
+    // ... and the run's other copies again (an agreeing copy verifies them all)
+    const checking = checkRun(env, submissionId, { fresh: true }).then(() => checkRunCopies(env, submissionId)).then(() => drainRunChecks(env, 2))
       .catch((error) => console.error("Run checks failed", error));
     if (env.waitUntil) env.waitUntil(checking);
     else await checking;
@@ -3756,11 +3763,12 @@ async function submitLeaderboardRecord(request, env) {
 }
 
 
-// ---------------------------------------------------------------- second reading (shadow mode)
-// aLogs reads a run off the screen; for the runs that matter (checkRun) the server reads the same whole screens again
-// with Workers AI (env.AI) and compares: score, stars and time from the result screen, each Battle Data card's Avg DPS,
-// BREAK, Damage Taken and Healing. Shadow mode: the outcome (verify_state, migration 0032) is recorded for an
-// administrator to review and never holds a run off the boards. Without the AI binding nothing is read.
+// ---------------------------------------------------------------- run checks (automatic; staff see possible cheats only)
+// Every Interlink run is checked as it arrives, and the checks decide by themselves (src/run-checks.js has the rules):
+// a run that hangs together passes with nobody looking; only a run that looks possibly cheated goes on the staff list
+// (GET /api/admin/run-checks/staff). The tick ("verified") comes from two or more players' copies of the run agreeing,
+// or, for a run no second copy confirms, from the second reading: Workers AI (env.AI) reads the run's whole screens
+// again and they agree with what the app sent. Shadow mode: a check never holds an Interlink run off the boards.
 const VERIFY_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 const VERIFY_PROMPTS = Object.freeze({
   // measured on five real runs (stars were missed beside their icon; the time is shown in seconds, "180s")
@@ -3775,6 +3783,7 @@ const VERIFY_PROMPTS = Object.freeze({
     + '"<text>", "avgDps": <integer>, "break": <integer>, "taken": <integer>, "heal": <integer>}]}. Use null for anything '
     + "you cannot read clearly.",
 });
+const VERIFY_FIELDS = Object.freeze({ result: ["score", "stars", "time"], battle: ["cards"] });
 
 function firstJson(text) {
   const start = String(text || "").indexOf("{");
@@ -3800,15 +3809,69 @@ const readSeconds = (value) => {
   return match[3] !== undefined ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : Number(match[1]) * 60 + Number(match[2]);
 };
 
-async function readScreen(env, key, prompt) {
-  const object = await env.EVIDENCE.get(key);
-  if (!object) return null;
+// The model is asked the way it was from the start (prompt, and the picture as an array of bytes, an input its docs now
+// call deprecated); when that gives nothing usable, once more in the chat form its docs show (messages, the picture as
+// a data URL). From 13 Nov every reading came back empty with no error, and nothing on the site's side had changed
+// (the same JPEG pictures, the same prompts): the second form is a guess at the cause, and each reading records which
+// form answered (via) and, when neither did, why.
+const PICTURE_TYPES = Object.freeze({ jpg: "image/jpeg", png: "image/png", webp: "image/webp" });
+function base64(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+function modelInput(form, prompt, bytes, type) {
+  if (form === "prompt") return { prompt, image: [...bytes], max_tokens: 400 };
+  return { messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:${type};base64,${base64(bytes)}` } }] }], max_tokens: 400 };
+}
+// What one answer gives: { value } (the JSON with at least one of the asked fields) or { why, answer? } - answer is the
+// start of the model's text (at most 300 characters) when it had no usable JSON
+function modelAnswer(out, fields) {
+  const raw = typeof out === "string" ? out : out?.response ?? out?.result?.response ?? null;
+  const has = (value) => Boolean(value) && typeof value === "object" && fields.some((field) => Object.hasOwn(value, field));
+  if (raw && typeof raw === "object") return has(raw) ? { value: raw } : { why: "the JSON had none of the asked fields", answer: JSON.stringify(raw).slice(0, 300) };
+  const text = String(raw ?? "").trim();
+  if (!text) return { why: "the model's answer was empty" };
+  const value = firstJson(text);
+  if (!value) return { why: "no JSON in the answer", answer: text.slice(0, 300) };
+  if (!has(value)) return { why: "the JSON had none of the asked fields", answer: text.slice(0, 300) };
+  return { value };
+}
+async function askModel(env, form, prompt, bytes, type, fields) {
+  try {
+    return modelAnswer(await env.AI.run(VERIFY_MODEL, modelInput(form, prompt, bytes, type)), fields);
+  } catch (error) {
+    return { why: `the model answered with an error: ${String(error?.message || error).slice(0, 200)}` };
+  }
+}
+// One screen read: { value, via } or { value: null, why, answer?, messages: { why, answer? } }
+async function readScreen(env, key, screen) {
+  const object = key ? await env.EVIDENCE.get(key) : null;
+  if (!object) return { value: null, why: "no picture stored under its key" };
   const bytes = new Uint8Array(await new Response(object.body).arrayBuffer());
-  const out = await env.AI.run(VERIFY_MODEL, { prompt, image: [...bytes], max_tokens: 400 });
-  return firstJson(out?.response ?? out?.result?.response ?? out);
+  if (!bytes.length) return { value: null, why: "the stored picture is empty" };
+  const type = object.httpMetadata?.contentType || PICTURE_TYPES[String(key).split(".").pop()] || "image/jpeg";
+  const first = await askModel(env, "prompt", VERIFY_PROMPTS[screen], bytes, type, VERIFY_FIELDS[screen]);
+  if (first.value) return { value: first.value, via: "prompt" };
+  const second = await askModel(env, "messages", VERIFY_PROMPTS[screen], bytes, type, VERIFY_FIELDS[screen]);
+  if (second.value) return { value: second.value, via: "messages", prompt: first.why };
+  const part = ({ why, answer }) => ({ why, ...(answer ? { answer } : {}) });
+  return { value: null, ...part(first), messages: part(second) };
+}
+// A reading of a run's pictures as stored in its check: { result, battle?, at, via?, why? } (why: per screen not read)
+async function readRun(env, full, { battle = true } = {}) {
+  const result = await readScreen(env, full.evidence, "result");
+  const cards = battle && full.battle ? await readScreen(env, full.battle, "battle") : null;
+  const why = {};
+  for (const [name, read] of [["result", result], ["battle", cards]]) {
+    if (read && !read.value) why[name] = (({ value: _value, ...rest }) => rest)(read);
+  }
+  const via = [...new Set([result.via, cards?.via].filter(Boolean))];
+  return { result: result.value ?? null, ...(battle ? { battle: cards?.value ?? null } : {}), at: Math.floor(Date.now() / 1000),
+    ...(via.length ? { via: via.join(", ") } : {}), ...(Object.keys(why).length ? { why } : {}) };
 }
 
-// What the second reading found against what the app sent: { checked, differences: [{ field, sent, read }] }.
+// What a reading found against what the app sent: { checked, differences: [{ field, sent, read }] }.
 // A value the reading couldn't make out isn't a difference; Battle Data cards are matched by name, else by order.
 function compareReading(row, result, battle) {
   const differences = [];
@@ -3845,48 +3908,53 @@ function compareReading(row, result, battle) {
   return { checked, differences, ...(suspect.length ? { suspect } : {}) };
 }
 
-// Every Interlink run gets the free checks (no AI): the numbers the app read must hang together. Each flag names the
-// rule; a run with flags is listed for review (verify_state "mismatch"). Shadow mode: nothing is held.
-// - stars track score: each star is worth about 1,000, so stars = min(floor(score / 1000), the slot's cap), give or
-//   take one (36,230 with 6 stars fails);
-// - the players' Avg DPS add up to about the team DPS, and to about the meter's DPS when it measured one (within 35%);
-// - no player's Avg DPS is above the whole team's, nor above 3x an even share in a full party (a BREAK-sized number
-//   in a DPS field shows up here);
-// - "cleared" only with the slot's full kill stars;
-// - the star cap aLogs read from the game (extra.starCap) is the rules' for that boss (else the game changed).
+// The free checks (no AI) on every Interlink run, in three kinds (the owner, 21 Nov: staff look only at possible cheats):
+// - flags: a value the game's rules make impossible - more stars than the boss gives ("stars above the cap"). Staff list.
+// - misread: numbers that don't hang together in a way a misread explains. No tick, no mark, no staff; counted for the
+//   app's reader (POST /api/admin/run-checks/recheck):
+//   - stars track score: each star is worth about 1,000, so stars = min(floor(score / 1000), the slot's cap), give or
+//     take one (36,230 with 6 stars fails);
+//   - the players' Avg DPS add up to about the team DPS (within 35%);
+//   - no player's Avg DPS is above the whole team's, nor above 3x an even share in a full party;
+//   - "cleared" only with the slot's full kill stars.
+// - notes: kept for staff, never a reason for anything - the players' Avg DPS against the meter's DPS (aLogs' own
+//   estimate, often far off), and the star cap aLogs read from the game against the rules' (else the game changed).
 // The run's own cap, when sent, is the one the stars and the clear are judged by.
 const RUN_CHECK_TOLERANCE = 0.35;
 function freeRunChecks(row, cycle) {
   const flags = [];
+  const misread = [];
+  const notes = [];
   const slot = cycle ? cycle.bosses.findIndex((boss) => String(boss.id) === String(row.bossId)) : -1;
   const sent = sentStarCap(row.extraJson);
   const { cap, clear, ruleCap } = runStarRule(row.cycle, slot, sent);
   // the game's cap for this boss isn't what the site's rules say: the game changed (INTERLINK_RULES needs updating)
   if (sent != null && slot >= 0 && sent !== ruleCap) {
-    flags.push({ rule: "star cap matches the rules", sent, expected: ruleCap });
+    notes.push({ rule: "star cap matches the rules", sent, expected: ruleCap });
     console.warn(`Interlink star cap: week ${row.cycle} boss ${row.bossId} sent ${sent}, the rules say ${ruleCap}`);
   }
+  if (row.stars != null && Number(row.stars) > cap) flags.push({ rule: "stars above the cap", sent: row.stars, expected: cap });
   if (row.score != null && row.stars != null) {
     const expected = Math.min(Math.floor(Number(row.score) / 1000), cap);
-    if (Math.abs(Number(row.stars) - expected) > 1) flags.push({ rule: "stars track score", sent: row.stars, expected });
+    if (Math.abs(Number(row.stars) - expected) > 1) misread.push({ rule: "stars track score", sent: row.stars, expected });
   }
   const players = (parseJsonColumn(row.playersJson) || []).filter((player) => Number.isFinite(Number(player?.avgDps)) && player.avgDps !== null);
   const sum = players.reduce((total, player) => total + Number(player.avgDps), 0);
   const near = (a, b) => Math.abs(a - b) <= RUN_CHECK_TOLERANCE * Math.max(a, b);
   if (players.length && Number(row.teamDps) > 0 && !near(sum, Number(row.teamDps))) {
-    flags.push({ rule: "Avg DPS add up to team DPS", sent: row.teamDps, expected: sum });
+    misread.push({ rule: "Avg DPS add up to team DPS", sent: row.teamDps, expected: sum });
   }
   if (players.length && Number(row.meterDps) > 0 && !near(sum, Number(row.meterDps))) {
-    flags.push({ rule: "Avg DPS add up to the meter's DPS", sent: row.meterDps, expected: sum });
+    notes.push({ rule: "Avg DPS add up to the meter's DPS", sent: row.meterDps, expected: sum });
   }
   const team = Number(row.teamDps) || 0;
   const share = players.length >= 4 && team > 0 ? (3 * team) / players.length : Infinity;
   for (const player of players) {
     const dps = Number(player.avgDps);
-    if (team > 0 && (dps > team * 1.1 || dps > share)) flags.push({ rule: "Avg DPS plausible", player: player.name || null, sent: dps, teamDps: team });
+    if (team > 0 && (dps > team * 1.1 || dps > share)) misread.push({ rule: "Avg DPS plausible", player: player.name || null, sent: dps, teamDps: team });
   }
-  if (row.cleared === 1 && row.stars != null && Number(row.stars) < clear) flags.push({ rule: "cleared needs full stars", sent: row.stars, expected: clear });
-  return flags;
+  if (row.cleared === 1 && row.stars != null && Number(row.stars) < clear) misread.push({ rule: "cleared needs full stars", sent: row.stars, expected: clear });
+  return { flags, misread, notes };
 }
 
 // Holo-Battle Sim runs get their own free checks as they arrive: the numbers aLogs read off the Victory screen (the
@@ -3977,12 +4045,11 @@ async function checkSimRun(env, submissionId) {
   return held;
 }
 
-// The AI reading is for runs that matter: a new personal best for that player, boss and week (a Season Ladder total
-// only changes through those), a run in the top VERIFY_TOP_RANK (default 25) of its boss board, or a run the free
-// checks flagged.
-async function runMatters(env, row, submissionId, flags) {
-  if (flags.length) return "flagged";
-  if (row.score == null) return "no score sent";              // the reading supplies it (aiReadRun)
+// The second reading is for runs that matter and that no second copy confirms: a new personal best for that player,
+// boss and week (a Season Ladder total only changes through those), a run in the top VERIFY_TOP_RANK (default 25) of
+// its boss board, a run sent without its score - or copies of one run that disagree (interlinkVerdict).
+async function runMatters(env, row, submissionId) {
+  if (row.score == null) return "no score sent";              // the reading supplies it (checkRun)
   const best = await env.DB.prepare(
     `SELECT MAX(score) AS best FROM leaderboard_submissions
      WHERE discord_id = ? AND cycle = ? AND boss_id = ? AND kind IN ('interlink_run', 'interlink_best') AND submission_id != ?`,
@@ -3997,69 +4064,147 @@ async function runMatters(env, row, submissionId, flags) {
   return Number(above?.players || 0) < top ? "top of its board" : null;
 }
 
-// At most VERIFY_DAILY_LIMIT AI readings a UTC day (default 500, the owner's cap: two screens a run is about 80
-// neurons, so at most ~40,000 neurons a day, ~$0.33 above Workers AI's free 10,000), counted from the runs read today.
+// At most VERIFY_DAILY_LIMIT readings a UTC day (default 500, the owner's cap: two screens a run is about 80
+// neurons, so at most ~40,000 neurons a day, ~$0.33 above Workers AI's free 10,000), counted from the readings made
+// today (a run's first reading and a second reading each count; re-checking a run doesn't).
 async function aiReadingsLeft(env) {
   const limit = Math.max(0, Number.parseInt(env.VERIFY_DAILY_LIMIT || "500", 10) || 0);
   const day = Math.floor(Date.now() / 86400000) * 86400;
   const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS used FROM leaderboard_submissions WHERE verify_at >= ? AND json_extract(verify_json, '$.model') IS NOT NULL",
+    `SELECT COALESCE(SUM(COALESCE(json_extract(verify_json, '$.reading.at'), 0) >= ?1), 0)
+       + COALESCE(SUM(COALESCE(json_extract(verify_json, '$.reading2.at'), 0) >= ?1), 0) AS used
+     FROM leaderboard_submissions WHERE verify_at >= ?1`,
   ).bind(day).first();
   return limit - Number(row?.used || 0);
 }
 
 const RUN_CHECK_COLUMNS = `SELECT discord_id AS discordId, kind, cycle, boss_id AS bossId, score, stars, cleared,
   clear_time_s AS clearTimeS, team_dps AS teamDps, meter_dps AS meterDps, players_json AS playersJson, extra_json AS extraJson,
-  verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?`;
-const saveRunCheck = (env, submissionId, state, detail) => env.DB.prepare(
-  "UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ?, verify_at = ? WHERE submission_id = ?",
-).bind(state, JSON.stringify(detail), Math.floor(Date.now() / 1000), submissionId).run();
+  client_version AS version, verify_state AS verifyState, verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?`;
+// Writes a run's check. The review-only checks' part ($.reviewOnly, reviewOnlyCheck) is kept as it is.
+const saveRunCheck = (env, submissionId, state, detail) => {
+  const text = JSON.stringify(detail);
+  return env.DB.prepare(
+    `UPDATE leaderboard_submissions SET verify_state = ?, verify_at = ?, verify_json = CASE
+       WHEN json_valid(verify_json) AND json_extract(verify_json, '$.reviewOnly') IS NOT NULL
+         THEN json_set(?, '$.reviewOnly', json(json_extract(verify_json, '$.reviewOnly'))) ELSE ? END
+     WHERE submission_id = ?`,
+  ).bind(state, Math.floor(Date.now() / 1000), text, text, submissionId).run();
+};
 
-async function checkRun(env, submissionId) {
-  const row = await env.DB.prepare(RUN_CHECK_COLUMNS).bind(submissionId).first();
-  if (!row || row.kind !== "interlink_run") return;
-  const flags = freeRunChecks(row, interlinkCycle(await interlinkCycles(env), row.cycle));
-  const rules = { flags };
-  try {
-    await saveRunCheck(env, submissionId, flags.length ? "mismatch" : null, { rules });
-  } catch (error) {
-    console.error("Run checks need migration 0032", error);
-    return;
-  }
-  const full = (parseJsonColumn(row.extraJson) || {}).proofFull || {};
-  if (!env.AI || !env.EVIDENCE || !full.evidence) return;
-  const reason = await runMatters(env, row, submissionId, flags);
-  if (!reason) return;
-  if (await aiReadingsLeft(env) <= 0) {
-    // over today's cap: queued (still ranked, "not checked yet"); read when there's room - after the 00:00 UTC
-    // reset or a higher VERIFY_DAILY_LIMIT, by the next runs that come in or an administrator's drain
-    await saveRunCheck(env, submissionId, flags.length ? "mismatch" : "pending", { rules, reason, queued: true });
-    return;
-  }
-  await aiReadRun(env, submissionId, row, rules, reason);
+// The run's copies (the rows linked as one shared run by corroborateRun, extra.sharedRun): this one first.
+async function runCopyRows(env, submissionId, row) {
+  const me = { id: submissionId, sender: row.discordId, score: row.score, stars: row.stars, clearTimeS: row.clearTimeS, players: parseJsonColumn(row.playersJson) || [] };
+  const shared = (parseJsonColumn(row.extraJson) || {}).sharedRun;
+  if (typeof shared !== "string") return { me, copies: [me] };
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS id, discord_id AS sender, score, stars, clear_time_s AS clearTimeS, players_json AS playersJson
+     FROM leaderboard_submissions WHERE kind = 'interlink_run' AND submission_id <> ? AND json_extract(extra_json, '$.sharedRun') = ?
+     ORDER BY created_at LIMIT 12`,
+  ).bind(submissionId, shared).all();
+  return { me, copies: [me, ...(results || []).map(({ playersJson, ...copy }) => ({ ...copy, players: parseJsonColumn(playersJson) || [] }))] };
 }
 
-async function aiReadRun(env, submissionId, row, rules, reason) {
-  const flags = rules.flags || [];
+// Checks one stored Interlink run and saves the outcome (interlinkVerdict). A run a staff member decided is left alone.
+// fresh: a new or re-sent run (readings made before are of other pictures). ai: read now while today's cap has room,
+// else queue the run ("pending" until it is read). dryRun: nothing is read or written. force: read its pictures again
+// (POST /api/admin/run-checks/<id>/read; a staff decision still stands). Returns what happened, counts-friendly:
+// { outcome, state, changed, misread: [rule], version, staff: [reason] } - or null for a run that isn't an Interlink run.
+async function checkRun(env, submissionId, { fresh = false, ai = true, dryRun = false, force = false, cycles = null, retryUnreadable = false } = {}) {
+  const row = await env.DB.prepare(RUN_CHECK_COLUMNS).bind(submissionId).first();
+  if (!row || row.kind !== "interlink_run") return null;
+  const before = parseJsonColumn(row.verifyJson) || {};
+  const decided = row.verifyState === "confirmed" || row.verifyState === "rejected" || Boolean(before.review);
+  if (decided && !force) return { outcome: "staff decided (left alone)", state: row.verifyState, changed: false, misread: [], version: row.version, staff: [] };
+  const { flags, misread, notes } = freeRunChecks(row, interlinkCycle(cycles || await interlinkCycles(env), row.cycle));
+  const { me, copies } = await runCopyRows(env, submissionId, row);
+  const agreement = copyAgreement(me, copies);
   const full = (parseJsonColumn(row.extraJson) || {}).proofFull || {};
-  try {
-    await saveRunCheck(env, submissionId, "pending", { rules, model: VERIFY_MODEL, reason });
-    const result = await readScreen(env, full.evidence, VERIFY_PROMPTS.result);
-    const battle = full.battle ? await readScreen(env, full.battle, VERIFY_PROMPTS.battle) : null;
-    const { checked, differences, suspect } = compareReading(row, result, battle);
-    const state = flags.length || differences.length ? "mismatch" : checked ? "match" : "unreadable";
-    await saveRunCheck(env, submissionId, state, { rules, model: VERIFY_MODEL, reason, reading: { result, battle }, checked, differences, ...(suspect ? { suspect } : {}) });
-    // a run that came in without its score takes the one on its picture, when the reading agrees with the rest and
-    // has the same stars (the boards read it the same way for runs checked before this: RUN_SCORE)
-    const score = readNumber(result?.score);
-    if (state === "match" && row.score == null && Number.isInteger(score) && score > 0 && readNumber(result?.stars) === Number(row.stars)) {
-      await env.DB.prepare("UPDATE leaderboard_submissions SET score = ? WHERE submission_id = ? AND score IS NULL").bind(score, submissionId).run();
-    }
-  } catch (error) {
-    console.error("Second reading failed", error);
-    await saveRunCheck(env, submissionId, flags.length ? "mismatch" : "unreadable",
-      { rules, model: VERIFY_MODEL, reason, error: String(error?.message || error).slice(0, 300) });
+  const readable = Boolean(full.evidence) && (dryRun || Boolean(env.AI && env.EVIDENCE));
+  const earlier = !fresh && !force;
+  let reading = earlier ? before.reading || null : null;
+  let reading2 = earlier ? before.reading2 || null : null;
+  // a reading that read nothing, set aside to be read again (POST /api/admin/run-checks/recheck {retryUnreadable})
+  if (retryUnreadable && reading && !compareReading(row, reading.result, reading.battle).checked) {
+    reading = null;
+    reading2 = null;
   }
+  let readings = earlier ? Number(before.readings) || (reading ? 1 : 0) + (reading2 ? 1 : 0) : 0;
+  let reason = force ? "read on request" : agreement.contradicted ? "copies disagree" : earlier ? before.reason || null : null;
+  let asked = Boolean(reason);
+  const compared = () => ({ first: reading ? compareReading(row, reading.result, reading.battle) : null, second: reading2 ? compareReading(row, reading2.result, null) : null });
+  const judge = () => {
+    const { first, second } = compared();
+    return interlinkVerdict({ flags, misread, agreement, reading: first, reading2: second, wanted: Boolean(reason) || !asked, readable });
+  };
+  let verdict = judge();
+  let needs = null;
+  for (let step = 0; step < 3; step += 1) {
+    if (verdict.needs === "reading" && !asked) {
+      asked = true;
+      reason = await runMatters(env, row, submissionId);
+      verdict = judge();
+    }
+    needs = verdict.needs || (force && !reading && readable ? "reading" : null);
+    if (!needs || dryRun) break;
+    if (!ai || await aiReadingsLeft(env) <= 0) {
+      // over today's cap: queued ("pending", still ranked); read when there's room - after the 00:00 UTC reset or a
+      // higher VERIFY_DAILY_LIMIT, by the next runs that come in or an administrator's drain
+      const queued = { rules: { flags, misread, notes }, ...(agreement.senders > 1 ? { copies: { senders: agreement.senders, agreeing: agreement.agreeing } } : {}),
+        reason, queued: true, ...(reading ? { model: VERIFY_MODEL, readings, reading } : {}) };
+      if (!decided) await saveRunCheck(env, submissionId, "pending", queued);
+      return { outcome: "waiting for a reading", state: "pending", changed: row.verifyState !== "pending", misread: misread.map((flag) => flag.rule), version: row.version, staff: [] };
+    }
+    if (needs === "reading") reading = await readRun(env, full);
+    else reading2 = await readRun(env, full, { battle: false });
+    readings += 1;
+    needs = null;
+    verdict = judge();
+  }
+  const { first, second } = compared();
+  const state = decided ? row.verifyState : verdict.state;
+  const detail = {
+    rules: { flags, misread, notes },
+    ...(agreement.senders > 1 ? { copies: { senders: agreement.senders, agreeing: agreement.agreeing } } : {}),
+    ...(verdict.verifiedBy ? { verifiedBy: verdict.verifiedBy } : {}),
+    ...(verdict.staff ? { staff: verdict.staff } : {}),
+    ...(reason ? { reason } : {}),
+    ...(reading ? { model: VERIFY_MODEL, readings, reading, checked: first.checked, differences: first.differences, ...(first.suspect ? { suspect: first.suspect } : {}) } : {}),
+    ...(reading2 ? { reading2: { ...reading2, checked: second.checked, differences: second.differences } } : {}),
+    ...(decided && before.review ? { review: before.review } : {}),
+  };
+  const outcome = needs ? (needs === "reading" ? "would be read" : "would be read again")
+    : state === "match" ? (verdict.verifiedBy === "copies" ? "verified by copies" : "verified by the reading")
+      : state === "mismatch" ? "staff list"
+        : state === "unreadable" ? "no badge (picture unreadable)"
+          : misread.length ? "no badge (misread)"
+            : agreement.oddOneOut ? "no badge (the other copies' numbers stand)"
+              : reading ? "no badge (the reading differs once, or only on time or Battle Data)" : "no badge (nothing to check it by)";
+  const result = { outcome, state, changed: state !== (row.verifyState ?? null), misread: misread.map((flag) => flag.rule), version: row.version,
+    staff: (verdict.staff || []).map((item) => (item.why === "impossible" ? item.rule : item.why)) };
+  if (dryRun || (!result.changed && stableJson(detail) === stableJson((({ reviewOnly: _review, ...rest }) => rest)(before)))) return result;
+  try {
+    await saveRunCheck(env, submissionId, state, detail);
+  } catch (error) {
+    console.error("Run checks need migration 0032", error);
+    return result;
+  }
+  // a run that came in without its score takes the one on its picture, when the reading agrees with the rest and
+  // has the same stars (the boards read it the same way for runs checked before this: RUN_SCORE)
+  const score = readNumber(reading?.result?.score);
+  if (state === "match" && verdict.verifiedBy === "reading" && row.score == null && Number.isInteger(score) && score > 0 && readNumber(reading.result.stars) === Number(row.stars)) {
+    await env.DB.prepare("UPDATE leaderboard_submissions SET score = ? WHERE submission_id = ? AND score IS NULL").bind(score, submissionId).run();
+  }
+  return result;
+}
+// After a copy arrives, the run's other copies are checked again: an agreeing copy verifies them all.
+async function checkRunCopies(env, submissionId) {
+  const { results } = await env.DB.prepare(
+    `SELECT o.submission_id AS id FROM leaderboard_submissions me JOIN leaderboard_submissions o
+       ON json_extract(o.extra_json, '$.sharedRun') = json_extract(me.extra_json, '$.sharedRun') AND o.submission_id <> me.submission_id
+     WHERE me.submission_id = ? AND json_extract(me.extra_json, '$.sharedRun') IS NOT NULL AND o.kind = 'interlink_run' LIMIT 12`,
+  ).bind(submissionId).all();
+  for (const { id } of results || []) await checkRun(env, id);
 }
 
 // Reads the oldest queued runs while today's cap has room: up to max of them. Returns how many were read.
@@ -4072,11 +4217,8 @@ async function drainRunChecks(env, max) {
   let read = 0;
   for (const { submissionId } of results || []) {
     if (await aiReadingsLeft(env) <= 0) break;
-    const row = await env.DB.prepare(RUN_CHECK_COLUMNS).bind(submissionId).first();
-    const queued = parseJsonColumn(row?.verifyJson) || {};
-    if (!row || !queued.queued) continue;
-    await aiReadRun(env, submissionId, row, queued.rules || { flags: [] }, queued.reason || "queued");
-    read += 1;
+    const checked = await checkRun(env, submissionId);
+    if (checked && checked.outcome !== "waiting for a reading") read += 1;
   }
   return read;
 }
@@ -4099,14 +4241,48 @@ async function drainRunChecksNow(request, env) {
   return json({ read, queued: Number(left?.queued || 0), readingsLeftToday: Math.max(0, await aiReadingsLeft(env)) });
 }
 
-// The public badge for a run's check (shadow mode): "verified" when the AI reading agreed or an administrator
-// confirmed it, "pending" while it waits for a check or is under review (a disagreement is never shown publicly),
-// none for a run that didn't need the AI reading or was rejected (left to the administrators).
+// The public badge for a run's check: "verified" when copies of the run agreed, the second reading agreed or staff
+// confirmed it; "pending" only while its check hasn't run yet (queued for the second reading). A run on the staff list,
+// one the checks couldn't confirm, and one staff rejected show nothing.
 function runCheckBadge(state) {
-  return state === "match" || state === "confirmed" ? "verified" : state === "pending" || state === "mismatch" ? "pending" : null;
+  return state === "match" || state === "confirmed" ? "verified" : state === "pending" ? "pending" : null;
 }
 
-// The review list (administrators and the owner, like log reports): runs whose second reading disagreed (?state=,
+// Review-only checks (Egg Heist's figures, a result read off the screen): a run that fails one is listed for staff and
+// nothing else changes - not its place, its visibility, or any badge. Their flags live in the check's JSON alone
+// ($.reviewOnly: { flags, decision? }); verify_state and the badge never see them. Run as a record is stored: a re-send
+// with the same flags keeps what staff decided; new flags replace the old (and the decision); none left removes them.
+// previous: the stored record before this send ({ score, updatedAt }), for a season standing's points.
+async function reviewOnlyCheck(env, submissionId, record, previous) {
+  const flags = [];
+  if (record.kind === "interlink_run" || record.kind === "eggheist_match") flags.push(...screenChecks(parseJsonColumn(record.extraJson) || {}, screenCheckLimits(env)));
+  const egg = record.kind.startsWith("eggheist_") ? eggCheckLimits(env) : null;
+  if (record.kind === "eggheist_match") {
+    flags.push(...eggMatchChecks({ score: record.score, clearTimeS: record.clearTimeS, cleared: record.cleared == null ? null : Number(record.cleared),
+      difficulty: record.difficulty, defeats: record.defeats }, egg));
+  }
+  if (record.kind === "eggheist_season" && egg?.maxPointsPerMatch && previous?.score != null && previous.updatedAt) {
+    const since = await env.DB.prepare(
+      "SELECT COUNT(*) AS matches FROM leaderboard_submissions WHERE discord_id = (SELECT discord_id FROM leaderboard_submissions WHERE submission_id = ?) AND kind = 'eggheist_match' AND created_at > ?",
+    ).bind(submissionId, previous.updatedAt).first();
+    flags.push(...eggStandingChecks({ score: record.score, at: Math.floor(Date.now() / 1000) }, { score: previous.score, at: previous.updatedAt }, since?.matches, egg));
+  }
+  const stored = await env.DB.prepare("SELECT verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).first();
+  const before = (parseJsonColumn(stored?.verifyJson) || {}).reviewOnly || null;
+  if (!flags.length && !before) return;
+  if (before && stableJson(before.flags) === stableJson(flags)) return;
+  if (!flags.length) {
+    await env.DB.prepare("UPDATE leaderboard_submissions SET verify_json = json_remove(verify_json, '$.reviewOnly') WHERE submission_id = ? AND json_valid(verify_json)")
+      .bind(submissionId).run();
+    return;
+  }
+  await env.DB.prepare(
+    `UPDATE leaderboard_submissions SET verify_json = json_set(COALESCE(CASE WHEN json_valid(verify_json) THEN verify_json END, '{}'), '$.reviewOnly', json(?))
+     WHERE submission_id = ?`,
+  ).bind(JSON.stringify({ flags, at: Math.floor(Date.now() / 1000) }), submissionId).run();
+}
+
+// The review list by state (administrators and the owner, like log reports): runs in one check state (?state=,
 // default mismatch), newest first, with what was sent, what was read and the differences. POST
 // /api/admin/run-checks/<id> {decision: "confirmed" | "rejected"} records the review (shadow mode: the run's place on
 // the boards doesn't change). A Holo-Battle Sim run's checks (check.rules.sim) aren't shadow mode: confirmed puts a
@@ -4120,18 +4296,62 @@ async function listRunChecks(request, env) {
   const { results } = await env.DB.prepare(
     `SELECT submission_id AS submissionId, kind, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS,
        trial, difficulty, status, players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, verify_at AS checkedAt, created_at AS sentAt,
-       COALESCE((SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.game_uid = s.game_uid),
-         (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
-          ORDER BY gc.last_seen_at DESC LIMIT 1)) AS player
+       ${RUN_PLAYER_NAME} AS player
      FROM leaderboard_submissions s WHERE verify_state = ? ORDER BY verify_at DESC LIMIT 100`,
   ).bind(state).all();
   return json({
     state,
     runs: (results || []).map(({ playersJson, verifyJson, ...row }) => ({
-      ...row, players: parseJsonColumn(playersJson) || [], check: parseJsonColumn(verifyJson) || {},
-      proof: { crop: `/api/leaderboard/submissions/${row.submissionId}/evidence`, full: `/api/leaderboard/submissions/${row.submissionId}/evidence?shot=full`,
-        battleFull: `/api/leaderboard/submissions/${row.submissionId}/evidence?shot=battle_full` },
+      ...row, players: parseJsonColumn(playersJson) || [], check: parseJsonColumn(verifyJson) || {}, proof: proofLinks(row.submissionId),
     })),
+  });
+}
+const RUN_PLAYER_NAME = `COALESCE((SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.game_uid = s.game_uid),
+  (SELECT character_name FROM game_characters gc WHERE gc.discord_id = s.discord_id AND gc.character_name IS NOT NULL
+   ORDER BY gc.last_seen_at DESC LIMIT 1))`;
+const proofLinks = (submissionId) => ({ crop: `/api/leaderboard/submissions/${submissionId}/evidence`, full: `/api/leaderboard/submissions/${submissionId}/evidence?shot=full`,
+  battleFull: `/api/leaderboard/submissions/${submissionId}/evidence?shot=battle_full` });
+
+// The runs waiting for a staff decision: possible cheats only - an Interlink run the checks put on the staff list, a
+// Holo-Battle Sim run they hold off the boards, and any run a review-only check flagged - with no decision yet.
+const STAFF_LISTED = `((s.verify_state = 'mismatch' AND json_extract(s.verify_json, '$.review') IS NULL
+    AND (s.kind = 'interlink_run' OR (s.kind = 'sim_run' AND json_extract(s.verify_json, '$.held') = 1)))
+  OR (json_valid(s.verify_json) AND json_extract(s.verify_json, '$.reviewOnly.flags[0]') IS NOT NULL
+    AND json_extract(s.verify_json, '$.reviewOnly.decision') IS NULL))`;
+// GET /api/admin/run-checks/staff[?count=1] (administrators and the owner): the list (newest first, at most 100), each
+// run with its reasons in words, what the reading read where it differs, and what a decision does; ?count=1 the number.
+async function staffRunChecks(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  const counted = await env.DB.prepare(`SELECT COUNT(*) AS n FROM leaderboard_submissions s WHERE ${STAFF_LISTED}`).first();
+  const count = Number(counted?.n || 0);
+  if (new URL(request.url).searchParams.get("count") === "1") return json({ count });
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS submissionId, kind, mode, cycle, boss_name AS bossName, score, stars, clear_time_s AS clearTimeS, cleared,
+       trial, difficulty, defeats, team_dps AS teamDps, rank_name AS rankName, status, client_version AS version,
+       players_json AS playersJson, verify_state AS state, verify_json AS verifyJson, created_at AS sentAt, ${RUN_PLAYER_NAME} AS player
+     FROM leaderboard_submissions s WHERE ${STAFF_LISTED} ORDER BY created_at DESC LIMIT 100`,
+  ).all();
+  return json({
+    count,
+    runs: (results || []).map(({ playersJson, verifyJson, state, ...row }) => {
+      const check = parseJsonColumn(verifyJson) || {};
+      const listed = state === "mismatch" && !check.review;
+      const read = check.reading?.result || null;
+      return {
+        ...row,
+        trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
+        players: (parseJsonColumn(playersJson) || []).slice(0, 4).map((player) => ({ name: player?.name ?? null, avgDps: player?.avgDps ?? null, ai: Boolean(player?.ai) })),
+        reasons: staffReasons(check, state),
+        // what the reading read, where it was read
+        read: read ? { score: readNumber(read.score), stars: readNumber(read.stars), time: read.time ?? null } : null,
+        copies: check.copies?.senders || 1,
+        // what Confirm / Reject do: "boards" (a held Sim run goes on the boards or stays off), "badge" (an Interlink run's
+        // badge: Confirm shows verified), "nothing" (a review-only check: the decision is recorded, nothing changes)
+        decides: listed ? (row.kind === "sim_run" ? "boards" : "badge") : "nothing",
+        proof: proofLinks(row.submissionId),
+      };
+    }),
   });
 }
 
@@ -4146,15 +4366,119 @@ async function reviewRunCheck(request, env, submissionId) {
     return json({ error: error.message }, error instanceof RangeError ? 413 : 400);
   }
   if (!["confirmed", "rejected"].includes(body.decision)) return json({ error: "decision must be confirmed or rejected." }, 400);
-  const row = await env.DB.prepare("SELECT verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ? AND verify_state IS NOT NULL")
-    .bind(submissionId).first();
-  if (!row) return json({ error: "No second reading for this run." }, 404);
-  const check = { ...(parseJsonColumn(row.verifyJson) || {}), review: { by: account.discordId, decision: body.decision, at: Math.floor(Date.now() / 1000) } };
+  const row = await env.DB.prepare(
+    `SELECT verify_state AS state, verify_json AS verifyJson FROM leaderboard_submissions
+     WHERE submission_id = ? AND (verify_state IS NOT NULL OR (json_valid(verify_json) AND json_extract(verify_json, '$.reviewOnly') IS NOT NULL))`,
+  ).bind(submissionId).first();
+  if (!row) return json({ error: "No check for this run." }, 404);
+  const decision = { by: account.discordId, decision: body.decision, at: Math.floor(Date.now() / 1000) };
+  const check = parseJsonColumn(row.verifyJson) || {};
+  if (check.reviewOnly) check.reviewOnly = { ...check.reviewOnly, decision };
+  // a review-only flag alone: the decision is recorded there and nothing else changes (not the state, so not the badge)
+  if (check.reviewOnly && row.state !== "mismatch") {
+    await env.DB.prepare("UPDATE leaderboard_submissions SET verify_json = ? WHERE submission_id = ?").bind(JSON.stringify(check), submissionId).run();
+    return json({ ok: true, submissionId, state: row.state ?? null, reviewOnly: true });
+  }
+  check.review = decision;
   if (check.rules?.sim && body.decision === "rejected") check.held = true;
   await env.DB.prepare("UPDATE leaderboard_submissions SET verify_state = ?, verify_json = ? WHERE submission_id = ?")
     .bind(body.decision, JSON.stringify(check), submissionId).run();
   if (check.rules?.sim) await env.DB.prepare(body.decision === "confirmed" ? FREED_BY_CHECK : HELD_BY_CHECK).bind(submissionId).run();
   return json({ ok: true, submissionId, state: body.decision });
+}
+
+// POST /api/admin/run-checks/recheck {apply?, max?, after?} (administrators and the owner): checks stored Interlink runs
+// again with today's rules (checkRun), max runs a call (default 100, at most 300) in the order they were stored, after
+// the cursor the last call answered. A dry run unless apply is true. Never touches a run a staff member decided, never
+// reads a picture (a run that needs a reading is queued, with apply), and changes nothing but the check's own columns.
+// Counts only: per outcome, per staff reason, and the misreads per rule and app build (for fixing the app's reader).
+// retryUnreadable: true sets aside a stored reading that read nothing, so the run is read again (queued, with apply) -
+// for once the second reading works again.
+async function recheckRunChecks(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try { body = (await readJsonBody(request, 512)) || {}; } catch { /* the defaults */ }
+  const apply = body.apply === true;
+  const max = Math.min(300, Math.max(1, Number.parseInt(body.max ?? "100", 10) || 100));
+  const after = String(body.after || "").match(/^(\d{1,12})\.([A-Za-z0-9_-]{1,40})$/u);
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS id, created_at AS at FROM leaderboard_submissions
+     WHERE kind = 'interlink_run' AND (? IS NULL OR created_at > ? OR (created_at = ? AND submission_id > ?))
+     ORDER BY created_at, submission_id LIMIT ?`,
+  ).bind(after ? 1 : null, after ? Number(after[1]) : 0, after ? Number(after[1]) : 0, after ? after[2] : "", max + 1).all();
+  const rows = (results || []).slice(0, max);
+  const cycles = await interlinkCycles(env);
+  const outcomes = {};
+  const staff = {};
+  const misread = {};
+  const was = {};
+  let changed = 0;
+  for (const row of rows) {
+    const before = await env.DB.prepare("SELECT verify_state AS state FROM leaderboard_submissions WHERE submission_id = ?").bind(row.id).first();
+    const checked = await checkRun(env, row.id, { dryRun: !apply, ai: false, cycles, retryUnreadable: body.retryUnreadable === true });
+    if (!checked) continue;
+    outcomes[checked.outcome] = (outcomes[checked.outcome] || 0) + 1;
+    if (checked.changed) {
+      changed += 1;
+      const move = `${before?.state || "none"} -> ${checked.state || "none"}`;
+      was[move] = (was[move] || 0) + 1;
+    }
+    for (const reason of checked.staff) staff[reason] = (staff[reason] || 0) + 1;
+    for (const rule of checked.misread) {
+      misread[rule] ||= {};
+      misread[rule][checked.version || "unknown"] = (misread[rule][checked.version || "unknown"] || 0) + 1;
+    }
+  }
+  const last = rows.at(-1);
+  return json({ dryRun: !apply, rows: rows.length, outcomes, changed, changes: was, staff, misread,
+    next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
+}
+
+// POST /api/admin/run-checks/limits {egg?, screen?} (administrators and the owner): for candidate limits (the JSON the
+// EGG_CHECK_LIMITS and SCREEN_CHECK_LIMITS secrets would hold), how many stored rows each rule would flag, and the
+// distributions to pick them by (limitPreview). Reads only; counts and numbers only.
+async function previewRunCheckLimits(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try { body = (await readJsonBody(request, 4096)) || {}; } catch (error) { return json({ error: error.message }, 400); }
+  const { results } = await env.DB.prepare(
+    `SELECT kind, score, clear_time_s AS clearTimeS, cleared, difficulty, defeats, extra_json AS extraJson FROM leaderboard_submissions
+     WHERE kind IN ('eggheist_match', 'eggheist_season') OR (json_valid(extra_json) AND json_extract(extra_json, '$.screenCheck') IS NOT NULL)`,
+  ).all();
+  const rows = (results || []).map(({ extraJson, ...row }) => ({ ...row, extra: parseJsonColumn(extraJson) || {} }));
+  return json(limitPreview(rows, { egg: body.egg ?? null, screen: body.screen ?? null }));
+}
+
+// POST /api/admin/run-checks/<id>/read (administrators and the owner): reads one Interlink run's pictures again now,
+// inside today's cap, and checks it with that reading (a staff decision stands). -> the state and what the reading
+// recorded: which form of asking answered, or why nothing was read.
+async function readRunCheckNow(request, env, submissionId) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  if (!env.AI || !env.EVIDENCE) return json({ error: "The second reading isn't available here." }, 503);
+  if (await aiReadingsLeft(env) <= 0) return json({ error: "Today's readings are used up; try again after 00:00 UTC." }, 429);
+  const checked = await checkRun(env, submissionId, { force: true });
+  if (!checked) return json({ error: "No Interlink run with that id." }, 404);
+  const row = await env.DB.prepare("SELECT verify_state AS state, verify_json AS verifyJson FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).first();
+  const check = parseJsonColumn(row?.verifyJson) || {};
+  const reading = check.reading || {};
+  const key = (check.differences || []).filter((item) => ["score", "stars", "time"].includes(item.field));
+  return json({
+    submissionId, state: row?.state ?? null, outcome: checked.outcome,
+    reading: reading.at ? {
+      via: reading.via || null, read: { result: Boolean(reading.result), battle: Boolean(reading.battle) }, checked: check.checked ?? 0,
+      differences: (check.differences || []).length, keyDifferences: key,
+      // why a screen gave nothing (for the result screen, the start of the model's answer too)
+      why: Object.fromEntries(Object.entries(reading.why || {}).map(([screen, item]) => [screen, screen === "result" ? item
+        : { why: item.why, ...(item.messages ? { messages: { why: item.messages.why } } : {}) }])),
+    } : null,
+    readingsLeftToday: Math.max(0, await aiReadingsLeft(env)),
+  });
 }
 
 // ---------------------------------------------------------------- linked game characters
@@ -7063,6 +7387,11 @@ async function api(request, env) {
   if (url.pathname === "/api/admin/log-reports" && request.method === "GET") return listLogReports(request, env);
   if (url.pathname === "/api/admin/run-checks" && request.method === "GET") return listRunChecks(request, env);
   if (url.pathname === "/api/admin/run-checks/drain" && request.method === "POST") return drainRunChecksNow(request, env);
+  if (url.pathname === "/api/admin/run-checks/staff" && request.method === "GET") return staffRunChecks(request, env);
+  if (url.pathname === "/api/admin/run-checks/recheck" && request.method === "POST") return recheckRunChecks(request, env);
+  if (url.pathname === "/api/admin/run-checks/limits" && request.method === "POST") return previewRunCheckLimits(request, env);
+  const runReadMatch = url.pathname.match(/^\/api\/admin\/run-checks\/([A-Za-z0-9_-]{8,40})\/read$/u);
+  if (runReadMatch && request.method === "POST") return readRunCheckNow(request, env, runReadMatch[1]);
   const runCheckMatch = url.pathname.match(/^\/api\/admin\/run-checks\/([A-Za-z0-9_-]{8,40})$/u);
   if (runCheckMatch && request.method === "POST") return reviewRunCheck(request, env, runCheckMatch[1]);
   if (url.pathname === "/api/admin/log-reports" && request.method === "DELETE") return clearLogReports(request, env, null);

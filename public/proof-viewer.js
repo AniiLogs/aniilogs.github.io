@@ -33,10 +33,11 @@
   function number(value) {
     return value === null || value === undefined ? "—" : Number(value).toLocaleString();
   }
-  // The run check's badge (shadow mode: nothing is held either way)
+  // The run check's badge (shadow mode: nothing is held either way). Verified: copies of the run agree, or its pictures
+  // do; Pending: its check hasn't run yet. A run that waits for staff shows nothing.
   const CHECK_BADGES = Object.freeze({
-    verified: { text: "✓", label: "Verified", title: "Verified" },
-    pending: { text: "i", label: "Pending", title: "Pending" },
+    verified: { text: "✓", label: "Verified", title: "Verified: another player's copy of the run or its pictures confirm it" },
+    pending: { text: "i", label: "Pending", title: "Pending: its check hasn't run yet" },
     invalid: { text: "✕", label: "Invalid", title: "Invalid" },
   });
   function checkBadge(check) {

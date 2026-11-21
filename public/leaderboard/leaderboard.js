@@ -897,8 +897,8 @@
       el("div", { class: "lb-bosses" }, data.bosses.map((boss) => bossBoard(boss, data.cycle.id))),
       ...(last ? [weekHead(last), el("div", { class: "lb-bosses" }, last.bosses.map((boss) => bossBoard(boss, last.cycle.id)))] : []),
       el("p", { class: "lb-note", text: "Only what the result screens show: score, stars, clear time, team DPS and each player's Avg DPS, BREAK damage and healing." }),
-      el("p", { class: "lb-note lb-check-legend" }, checkBadge("verified"), " checked against the run's full screenshots · ",
-        checkBadge("pending"), " waiting for that check · ", checkBadge("invalid"), " sent without proof pictures · no badge: not checked"));
+      el("p", { class: "lb-note lb-check-legend" }, checkBadge("verified"), " confirmed by another player's copy of the run or by its pictures · ",
+        checkBadge("pending"), " its check hasn't run yet · ", checkBadge("invalid"), " sent without proof pictures · no badge: not confirmed by either"));
     els.tableWrap.hidden = true;
     els.summary.textContent = "";
     showRowsPick();
