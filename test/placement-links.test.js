@@ -290,6 +290,14 @@ test("the card drawing: every model shape draws, names in letters the card lacks
   }
 });
 
+test("the card's name and text letter sets draw every printable ASCII character", () => {
+  for (const font of ["title", "body", "small"]) {
+    const missing = [];
+    for (let code = 0x20; code <= 0x7e; code += 1) if (!CARD_FONTS[font].glyphs[String.fromCharCode(code)]) missing.push(String.fromCharCode(code));
+    assert.deepEqual(missing, [], font);
+  }
+});
+
 // a PNG's header, palette and inflated scanlines; throws on a bad signature or CRC
 function pngInfo(png) {
   assert.deepEqual([...png.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);

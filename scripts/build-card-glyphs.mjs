@@ -206,6 +206,36 @@ function glyphs() {
     }
     return { strokes: [], fill: points };
   });
+  // the rest of printable ASCII, so any name the boards show draws (the owner, 21 Nov: names with * and <)
+  g['"'] = box(130, (m) => ({ strokes: [line([m.x0, m.T], [m.x0, m.T - 190]), line([m.x1, m.T], [m.x1, m.T - 190])] }));
+  g.$ = box(440, (m) => ({ strokes: [ess(m.cx, m.iw / 2, m.T - 60, m.B + 60), line([m.cx, m.T + 50], [m.cx, m.B - 50])] }));
+  g["%"] = box(540, (m) => ({ strokes: [arc(m.x0 + 95, m.T - 120, 95, 120, 0, 360), arc(m.x1 - 95, m.B + 120, 95, 120, 0, 360), line([m.x1, m.T], [m.x0, m.B])] }));
+  g["&"] = box(500, (m) => ({ strokes: [join(bezier([m.x1, m.B], [m.x0 + 40, m.M + 80], [m.x0 + 60, m.T], [m.x0 + 210, m.T]),
+    bezier([m.x0 + 210, m.T], [m.x0 + 380, m.T], [m.x0 + 330, m.M + 60], [m.x0 + 130, m.M - 20]),
+    bezier([m.x0 + 130, m.M - 20], [m.x0 - 60, m.B + 140], [m.x0 + 200, m.B - 40], [m.x1, m.M - 30]))] }));
+  g["*"] = box(300, (m) => {
+    const cy = m.T - 150; const r = 140;
+    return { strokes: [90, 30, 150].map((a) => line([m.cx + r * Math.cos(a * deg), cy + r * Math.sin(a * deg)], [m.cx - r * Math.cos(a * deg), cy - r * Math.sin(a * deg)])) };
+  });
+  g[";"] = box(0, (m) => ({ strokes: [dot(m.x0, m.X - 40), line([m.x0, m.B], [m.x0 - 40, m.B - 140])] }));
+  g["<"] = box(380, (m) => ({ strokes: [line([m.x1, m.XM + 210], [m.x0, m.XM + 20], [m.x1, m.XM - 170])] }));
+  g[">"] = box(380, (m) => ({ strokes: [line([m.x0, m.XM + 210], [m.x1, m.XM + 20], [m.x0, m.XM - 170])] }));
+  g["="] = box(380, (m) => ({ strokes: [line([m.x0, m.XM + 110], [m.x1, m.XM + 110]), line([m.x0, m.XM - 70], [m.x1, m.XM - 70])] }));
+  g["@"] = box(660, (m) => {
+    const ry = (m.T - m.D) / 2 - 40; const cy = (m.T + m.D) / 2 + 40; const stem = m.cx + 120;
+    return { strokes: [arc(m.cx, m.XM + 10, 120, 150, 0, 360),
+      join(line([stem, m.XM + 160], [stem, m.XM - 60]), bezier([stem, m.XM - 60], [stem, m.XM - 170], [m.x1, m.XM - 170], [m.x1, cy - 20]),
+        arc(m.cx, cy, m.iw / 2, ry, 0, 300))] };
+  });
+  g["["] = box(160, (m) => ({ strokes: [line([m.x1, m.T + 40], [m.x0, m.T + 40], [m.x0, m.B - 130], [m.x1, m.B - 130])] }));
+  g["]"] = box(160, (m) => ({ strokes: [line([m.x0, m.T + 40], [m.x1, m.T + 40], [m.x1, m.B - 130], [m.x0, m.B - 130])] }));
+  g["\\"] = box(320, (m) => ({ strokes: [line([m.x0, m.T + 20], [m.x1, m.B - 60])] }));
+  g["^"] = box(380, (m) => ({ strokes: [line([m.x0, m.M + 60], [m.cx, m.T], [m.x1, m.M + 60])] }));
+  g["`"] = box(100, (m) => ({ strokes: [line([m.x0, m.T + 10], [m.x1, m.T - 130])] }));
+  g["{"] = box(220, (m) => ({ strokes: [line([m.x1, m.T + 40], [m.x0 + 90, m.T - 20], [m.x0 + 90, m.M + 60], [m.x0, m.M], [m.x0 + 90, m.M - 60], [m.x0 + 90, m.B - 70], [m.x1, m.B - 130])] }));
+  g["}"] = box(220, (m) => ({ strokes: [line([m.x0, m.T + 40], [m.x1 - 90, m.T - 20], [m.x1 - 90, m.M + 60], [m.x1, m.M], [m.x1 - 90, m.M - 60], [m.x1 - 90, m.B - 70], [m.x0, m.B - 130])] }));
+  g["|"] = box(0, (m) => ({ strokes: [line([m.x0, m.T + 40], [m.x0, m.B - 150])] }));
+  g["~"] = box(440, (m) => ({ strokes: [bezier([m.x0, m.XM], [m.x0 + 130, m.XM + 160], [m.x1 - 130, m.XM - 120], [m.x1, m.XM + 40])] }));
   // accents, drawn over a letter (".l" over small letters, ".u" over capitals); no advance of their own
   const accents = {
     acute: (x, y) => [line([x - 40, y], [x + 70, y + 130])],
@@ -275,7 +305,7 @@ function rasterise(shape, size, h) {
 }
 
 // ---------------------------------------------------------------- the sizes the card uses
-const ALL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-–·+/()'_!?#★";
+const ALL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-–·+/()'_!?#★\"$%&*;<=>@[\\]^`{|}~";
 const ACCENTS = ["acute", "grave", "circumflex", "diaeresis", "tilde", "ring"].flatMap((name) => [`${name}.l`, `${name}.u`]);
 // weight: the stroke's half width in units (bold 68, regular 44); letters: what that size needs
 export const CARD_FONT_SPECS = Object.freeze({
