@@ -24,7 +24,8 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   assert.match(viewer, /const fight = fightLine\(details\.fight \|\| run\?\.fight\);/u);
   for (const page of [home, boards]) {
     assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.3-leads">/u);
-    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.3-leads" defer><\/script>/u);
+    // its Comments tab (comments.js) loads just before it
+    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.4-comments" defer><\/script>/u);
   }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);

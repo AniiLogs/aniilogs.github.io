@@ -315,6 +315,21 @@ test("delete own, report others', staff hide/delete/ban; deleted and hidden comm
   assert.ok(!actors.includes("Mossback"));
 });
 
+test("deleting an account takes its comments, reports and notification settings with it", async () => {
+  const { env, sqlite } = await setup();
+  teamRun(sqlite);
+  await post(env, "RunAAAA0001", "outsider", "hello");
+  const [comment] = (await thread(env, "RunAAAA0001", null)).comments;
+  await call(env, `/api/comments/${comment.id}/report`, { as: "mate", method: "POST", body: {} });
+  await call(env, "/api/notifications/seen", { as: "outsider", method: "POST" });
+  assert.equal((await call(env, "/api/account", { as: "outsider", method: "DELETE", body: { confirmation: "DELETE" } })).status, 200);
+  for (const table of ["run_comments", "run_comment_reports", "notification_seen"]) {
+    assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table);
+  }
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM run_thread_members WHERE discord_id = ?").get(IDS.outsider).n, 0);
+  assert.equal(await count(env, "sender"), 0);
+});
+
 test("a thread for each run kind that is a run, and a short title for each", async () => {
   const { env, sqlite } = await setup();
   addRun(sqlite, "SimAAAA00001", "sender", { kind: "sim_run", score: null });

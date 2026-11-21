@@ -2,7 +2,8 @@
 // screen, Battle Data, Holo-Battle Sim's Gizmo screen, the Party screen), a menu best's picture beside its run's, and
 // what each player went in with, under a line saying which fight it is. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
 // partyPanel, allowDelete({ any, onDeleted }). options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
-// pictures (Battle Data shows the whole party: the note says whose row the trophy is).
+// pictures (Battle Data shows the whole party: the note says whose row the trophy is). options.tab "comments": open on
+// the run's Comments tab (comments.js; also when the viewer already shows that run).
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
   const API_URL = String(siteConfig.apiUrl || siteConfig.shareApiUrl || "").replace(/\/+$/u, "");
@@ -64,6 +65,7 @@
     if (!proofLists.has(submissionId)) {
       proofLists.set(submissionId, (async () => {
         const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(submissionId)}/evidence?shot=list`);
+        if (response.status === 404) return { shots: [], missing: true };    // no such run, or no pictures left
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const details = await response.json();
         return { ...details, shots: Array.isArray(details.shots) && details.shots.length ? details.shots : ["summary"] };
@@ -183,6 +185,8 @@
     dialog.append(el("div", { class: "lb-proof-actions" }, button));
   }
   let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
+  let openComments = null;                             // its Comments tab (comments.js), and what picks that tab
+  let showCommentsTab = null;
   async function openProof(submissionId, check = null, menuId = null, options = {}) {
     let dialog = document.querySelector("dialog.lb-proof-dialog");
     if (!dialog) {
@@ -195,8 +199,14 @@
     const body = dialog.querySelector(".lb-proof-body");
     let tabs = dialog.querySelector(".lb-proof-tabs");
     if (!tabs) { tabs = el("div", { class: "lb-proof-tabs", role: "tablist" }); dialog.insertBefore(tabs, body); }
-    if (dialog.open && proofOpenFor === submissionId) return;
+    if (dialog.open && proofOpenFor === submissionId) {
+      if (options?.tab === "comments") showCommentsTab?.();
+      return;
+    }
     proofOpenFor = submissionId;
+    openComments?.detach();
+    openComments = null;
+    showCommentsTab = null;
     tabs.replaceChildren();
     dialog.querySelector(".lb-proof-party")?.remove();
     dialog.querySelector(".lb-proof-note")?.remove();
@@ -241,9 +251,24 @@
         });
     }
     deleteAction(dialog, submissionId, details);
+    // the run's comments (comments.js): a tab after the pictures; a menu best's go to its run
+    const commentsRun = details.menu ? details.runProof : submissionId;
+    const comments = commentsRun && window.AniilogsComments ? window.AniilogsComments.mount(commentsRun) : null;
+    dialog.classList.remove("is-comments");
+    const showComments = () => {
+      for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", "false");
+      comments.tab.setAttribute("aria-selected", "true");
+      dialog.classList.add("is-comments");
+      return comments.show(body);
+    };
+    openComments = comments;
+    showCommentsTab = comments ? showComments : null;
     // a tab for each picture
     const show = async (index) => {
       const picture = pictures[index];
+      dialog.classList.remove("is-comments");
+      comments?.tab.setAttribute("aria-selected", "false");
+      if (!picture) { body.replaceChildren(el("p", { class: "lb-empty", text: "This run isn't available." })); return; }
       for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(Number(tab.dataset.proofShot) === index));
       body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
       try {
@@ -256,9 +281,18 @@
     };
     tabs.append(...pictures.map((picture, index) => el("button", { type: "button", role: "tab", "data-proof-shot": String(index),
       text: picture.label, onclick: () => show(index) })));
+    if (comments) {
+      comments.tab.addEventListener("click", showComments);
+      tabs.append(comments.tab);
+    }
     // the run check's badge beside the tabs
     const badge = checkBadge(check);
     if (badge) tabs.append(badge);
+    // options.tab "comments" opens on the Comments tab (a link to a run's comments); a run with no pictures left too
+    if (comments && (options?.tab === "comments" || (!pictures.length && await comments.ready))) {
+      if (proofOpenFor === submissionId) await showComments();
+      return;
+    }
     // the picture asked for (a trophy read off Battle Data opens on it), else the first
     const start = options?.shot ? pictures.findIndex((picture) => picture.id === submissionId && picture.shot === options.shot) : -1;
     await show(Math.max(0, start));

@@ -1248,10 +1248,27 @@
     els.gateTitle.textContent = title;
     els.gateDetail.replaceChildren(detail, link ? el("a", { href: link.href, text: link.text }) : "");
   }
+  // A link to one run (/leaderboard/?run=<submission id>&tab=comments, as notifications send): its viewer opens on
+  // load, on the tab named by `tab`; closing it takes run and tab out of the address. A run that isn't there shows
+  // "This run isn't available" in the viewer. (A stand-in: the shareable-links work replaces this function.)
+  function openRunFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("run") || "";
+    if (!/^[A-Za-z0-9_-]{8,40}$/u.test(runId)) return;
+    const tab = params.get("tab") || "";
+    void proofViewer.open(runId, null, null, tab ? { tab } : {});
+    document.querySelector("dialog.lb-proof-dialog")?.addEventListener("close", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("run");
+      url.searchParams.delete("tab");
+      window.history.replaceState(window.history.state, "", url);
+    }, { once: true });
+  }
   async function start() {
     if (!API_URL) return gate("Leaderboards are unavailable.", "The AniiLogs API is not configured for this page.");
     // the top bar (site-chrome.js) finishes a returning Discord sign-in and shows the account first
     await window.AniilogsChrome?.ready;
+    openRunFromUrl();
     let status;
     try {
       status = await (await apiFetch("/leaderboard/status")).json();
