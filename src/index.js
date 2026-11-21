@@ -1,4 +1,5 @@
 // game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
+import { commentsApi, commentsPath } from "./comments.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -7050,6 +7051,14 @@ async function api(request, env) {
   const logReportMatch = url.pathname.match(/^\/api\/admin\/log-reports\/([A-Za-z0-9_-]{8,40})$/u);
   if (logReportMatch && request.method === "GET") return logReportZip(request, env, logReportMatch[1]);
   if (logReportMatch && request.method === "DELETE") return clearLogReports(request, env, logReportMatch[1]);
+  // comments on runs and their notifications (src/comments.js)
+  if (commentsPath(url.pathname)) {
+    return commentsApi(request, env, {
+      currentAccount, json, readJsonBody, browserWriteAllowed,
+      roleOf: async (discordId, scopedEnv) => (await accountRoleFields(discordId, scopedEnv)).role,
+      simTrialName: (trial, difficulty, cycle) => simStageName(trial, difficulty, cycle),
+    });
+  }
   if (url.pathname === "/api/v1/shares" && request.method === "POST") return createMapShare(request, env);
   const shareMatch = url.pathname.match(/^\/api\/v1\/shares\/([^/]+)$/u);
   if (shareMatch && request.method === "GET") return getMapShare(shareMatch[1], env);
