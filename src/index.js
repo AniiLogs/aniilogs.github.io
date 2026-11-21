@@ -3685,9 +3685,10 @@ async function submitLeaderboardRecord(request, env) {
       httpMetadata: { contentType: parsed.evidence.type },
     });
   }
-  // aLogs 0.1.37 B19-B23 sent an Interlink run's start in local time read as UTC: stored at its true time when clear
-  // (a re-send is judged against when the record first arrived)
-  const played = arrivalPlayedAt(record.kind, record.clientVersion, record.playedAt, Number(existing?.createdAt) || now);
+  // aLogs 0.1.37 B19-B23 sent an Interlink run's start in local time read as UTC: stored at its true time by the zone
+  // its sender's corrected runs carry (a re-send is judged against when the record first arrived)
+  const zone = record.playedAt != null && playedAtAffected(record.kind, record.clientVersion) ? await senderZone(env, account.discordId) : null;
+  const played = arrivalPlayedAt(record.kind, record.clientVersion, record.playedAt, Number(existing?.createdAt) || now, zone);
   await env.DB.prepare(
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
@@ -5056,15 +5057,26 @@ function playedAtZone(playedAt, storedAt) {
   const zone = Math.floor(d / ZONE_STEP_S) * ZONE_STEP_S;
   return { zone: zone || 0, normal: d - zone <= SEND_DELAY_S };
 }
-// On arrival (a new record or a re-send): an affected Interlink run whose own zone is clear (a normal send, not zero,
-// within 14 h) is stored at its true time, the sent value kept; anything else is stored as sent (the administrators'
-// route can settle it later by the sender's other runs). storedAt: when the record first arrived (now, for a new one).
-// Returns { playedAt, sentPlayedAt }.
-export function arrivalPlayedAt(kind, version, playedAt, storedAt) {
-  if (playedAt == null || !playedAtAffected(kind, version)) return { playedAt, sentPlayedAt: null };
-  const { zone, normal } = playedAtZone(playedAt, storedAt);
-  if (!normal || zone === 0 || Math.abs(zone) > MAX_ZONE_S) return { playedAt, sentPlayedAt: null };
+// On arrival (a new record or a re-send) an affected Interlink run takes the zone its sender is already known by
+// (senderZone: what most of their corrected runs were shifted by), never one worked out from the arriving record alone:
+// a send that went out late would give a wrong one. Stored at its true time with the sent value kept, unless that puts
+// the run after the record first arrived (storedAt: now for a new record). A sender with no corrected run yet: as sent,
+// for the administrators' route to settle by the sender's vote. Returns { playedAt, sentPlayedAt }.
+export function arrivalPlayedAt(kind, version, playedAt, storedAt, zone) {
+  if (playedAt == null || !playedAtAffected(kind, version) || !zone || Math.abs(zone) > MAX_ZONE_S) return { playedAt, sentPlayedAt: null };
+  if (playedAt + zone > Number(storedAt) + AFTER_SENT_TOLERANCE_S) return { playedAt, sentPlayedAt: null };
   return { playedAt: playedAt + zone, sentPlayedAt: playedAt };
+}
+// The zone a sender's affected runs were corrected by: the shift most of their corrected Interlink runs carry (a tie:
+// none). Null when they have none (never corrected, or their zone is zero).
+async function senderZone(env, discordId) {
+  const { results } = await env.DB.prepare(
+    `SELECT played_at - played_at_sent AS zone, COUNT(*) AS n FROM leaderboard_submissions
+     WHERE discord_id = ? AND kind = 'interlink_run' AND played_at_sent IS NOT NULL AND played_at IS NOT NULL
+     GROUP BY zone ORDER BY n DESC LIMIT 2`,
+  ).bind(discordId).all();
+  const [top, next] = results || [];
+  return top && (!next || Number(next.n) < Number(top.n)) ? Number(top.zone) : null;
 }
 // The correction of stored records, decided per sender (one PC clock, one time zone): each affected run's zone error
 // (playedAtZone); the value more than half of the sender's normal sends agree on, and at least half of all their affected

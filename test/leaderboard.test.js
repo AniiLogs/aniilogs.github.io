@@ -3484,30 +3484,44 @@ test("played times: a shift that would put the run after it was stored is skippe
 // the stored played time and the kept sent value of one record
 const playedRow = (sqlite, id) => ({ ...sqlite.prepare("SELECT played_at AS playedAt, played_at_sent AS sent, created_at AS createdAt FROM leaderboard_submissions WHERE client_run_id = ?").get(id) });
 
-test("played times on arrival: an affected Interlink run with a clear zone is stored at its true start; a late send, other builds and other kinds as sent", async () => {
+test("played times on arrival: an affected Interlink run takes its sender's known zone, late or not; no history, other builds and other kinds as sent", async () => {
   const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
-  const token = await namedToken(env, SESSIONS.dev);
-  const start = Math.floor(Date.now() / 1000) - 150;                                        // the run started 2.5 min ago
-  const send = (id, zone, clientVersion, more = {}) => sendRun(env, token, run(id, { playedAt: start + zone * H, clientVersion, ...more }));
-  assert.equal((await send("west", -5, "aLogs-0.1.37+rc.32")).status, 201);
-  assert.equal((await send("east", 2, "aLogs-0.1.37+rc.26")).status, 201);
-  assert.deepEqual(playedRow(sqlite, "west"), { ...playedRow(sqlite, "west"), playedAt: start, sent: start - 5 * H });
-  assert.deepEqual(playedRow(sqlite, "east"), { ...playedRow(sqlite, "east"), playedAt: start, sent: start + 2 * H });
-  // queued: sent 3 h 12 min after its start, so its own zone is unclear: stored as sent (the route settles it by the sender)
-  assert.equal((await sendRun(env, token, run("late", { playedAt: start - 3 * H - 12 * 60 + 150 - 5 * H, clientVersion: "aLogs-0.1.37+rc.30" }))).status, 201);
-  assert.deepEqual([playedRow(sqlite, "late").playedAt, playedRow(sqlite, "late").sent], [start - 3 * H - 12 * 60 + 150 - 5 * H, null]);
-  // a fixed build, an old Python build and another kind of the same build: as sent
-  for (const [id, clientVersion] of [["fixed", "aLogs-0.1.37+rc.35"], ["python", "aLogs-0.1.36"]]) {
-    assert.equal((await send(id, -5, clientVersion)).status, 201);
-    assert.deepEqual([playedRow(sqlite, id).playedAt, playedRow(sqlite, id).sent], [start - 5 * H, null], id);
+  const tokens = { west: await namedToken(env, SESSIONS.dev), east: await namedToken(env, SESSIONS.dev2), fresh: await namedToken(env, SESSIONS.user) };
+  const now = Math.floor(Date.now() / 1000);
+  const send = (who, id, playedAt, clientVersion = "aLogs-0.1.37+rc.30", more = {}) => sendRun(env, tokens[who], run(id, { playedAt, clientVersion, ...more }));
+  // history: two runs each already corrected (by the route), west of UTC by +5 h, east of UTC by -2 h
+  for (const [who, shift] of [["west", 5 * H], ["east", -2 * H]]) {
+    for (const n of [1, 2]) {
+      const sent = now - n * 86400;
+      assert.equal((await send(who, `hist-${who}-${n}`, sent)).status, 201);
+      sqlite.prepare("UPDATE leaderboard_submissions SET played_at = ?, played_at_sent = ? WHERE client_run_id = ?").run(sent + shift, sent, `hist-${who}-${n}`);
+    }
   }
-  assert.equal((await sendRun(env, token, { kind: "sim_run", clientRunId: "sim", trial: "Training of Water", difficulty: "Hard", cleared: true, clearTimeS: 400,
-    playedAt: start - 5 * H, clientVersion: "aLogs-0.1.37+rc.30" })).status, 201);
-  assert.deepEqual([playedRow(sqlite, "sim").playedAt, playedRow(sqlite, "sim").sent], [start - 5 * H, null]);
-  // a re-send (Battle Data following) of the corrected run: the same correction, judged against its first arrival
-  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 30 WHERE client_run_id = 'west'").run();
-  assert.equal((await send("west", -5, "aLogs-0.1.37+rc.32", { score: 20500 })).status, 200);
-  assert.deepEqual([playedRow(sqlite, "west").playedAt, playedRow(sqlite, "west").sent], [start, start - 5 * H]);
+  const normal = now - 150;                       // a run that started 2.5 min ago
+  const late = now - 3 * H - 12 * 60;             // queued: sent 3 h 12 min after its start
+  const cases = [
+    ["west", "w-normal", normal, -5, true], ["west", "w-late", late, -5, true],
+    ["east", "e-normal", normal, 2, true], ["east", "e-late", late, 2, true],
+    ["fresh", "f-normal", normal, -5, false], ["fresh", "f-late", late, -5, false],
+    ["fresh", "utc-late", late, 0, false],         // a PC on UTC, sent late: its own numbers would have said 3 h
+  ];
+  for (const [who, id, start, zone, corrected] of cases) {
+    assert.equal((await send(who, id, start + zone * H)).status, 201, id);
+    const row = playedRow(sqlite, id);
+    assert.deepEqual([row.playedAt, row.sent], corrected ? [start, start + zone * H] : [start + zone * H, null], id);
+  }
+  // a re-send (Battle Data following) of a corrected run: the same correction, judged against its first arrival
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 30 WHERE client_run_id = 'w-normal'").run();
+  assert.equal((await send("west", "w-normal", normal - 5 * H, "aLogs-0.1.37+rc.30", { score: 20500 })).status, 200);
+  assert.deepEqual([playedRow(sqlite, "w-normal").playedAt, playedRow(sqlite, "w-normal").sent], [normal, normal - 5 * H]);
+  // a fixed build, an old Python build and another kind of an affected build, from a sender with a known zone: as sent
+  for (const [id, clientVersion] of [["fixed", "aLogs-0.1.37+rc.35"], ["python", "aLogs-0.1.36"]]) {
+    assert.equal((await send("west", id, normal, clientVersion)).status, 201);
+    assert.deepEqual([playedRow(sqlite, id).playedAt, playedRow(sqlite, id).sent], [normal, null], id);
+  }
+  assert.equal((await sendRun(env, tokens.west, { kind: "sim_run", clientRunId: "sim", trial: "Training of Water", difficulty: "Hard", cleared: true, clearTimeS: 400,
+    playedAt: normal, clientVersion: "aLogs-0.1.37+rc.30" })).status, 201);
+  assert.deepEqual([playedRow(sqlite, "sim").playedAt, playedRow(sqlite, "sim").sent], [normal, null]);
 });
 
 test("POST /api/admin/played-times: administrators only, a dry run by default, apply keeps the value it replaced, a second run changes nothing", async () => {
