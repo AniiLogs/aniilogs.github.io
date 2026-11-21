@@ -172,6 +172,10 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-server, .lb-ladders { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; }
 .lb-server[hidden] { display: none; }
 .lb-unlinked { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0; color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; cursor: pointer; }
+/* Show: Teams / Players, one switch for every team board on the page (and View all), beside the other pickers */
+.lb-show { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; color: var(--ink-soft); font-size: 0.85rem; font-weight: 700; }
+.lb-show[hidden] { display: none; }
+.lb-show .lb-seg { flex: none; }
 
 
 
@@ -200,6 +204,8 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   /* Server and Ladders stack like the other pickers: label above, full width */
   .lb-server, .lb-ladders { display: grid; width: 100%; gap: 0.3rem; margin: 0; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
   .lb-server[hidden], .lb-ladders[hidden] { display: none; }
+  .lb-show { display: grid; width: 100%; gap: 0.3rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
+  .lb-show[hidden] { display: none; }
   .lb-table-wrap { margin: 0 -0.85rem; padding: 0 0.85rem; }
   .lb-table { font-size: 0.8rem; }
   .lb-table th, .lb-table td { padding: 0.45rem 0.4rem; }
@@ -242,14 +248,11 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-unconfirmed-note { flex-basis: 100%; }
 .lb-ladder { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
 .lb-interlink .lb-ladder select { flex: 1 1 0; width: 100%; min-width: 0; }
-/* Show: Teams / Players, under the Ladder menu: its label as wide as "Ladder" so both controls line up */
-.lb-ladder > span:first-child, .lb-show > span:first-child { flex: none; width: 2.75rem; }
-.lb-show { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; font-weight: 750; }
-.lb-full-head + .lb-show { max-width: 22rem; }
+.lb-ladder > span:first-child { flex: none; }
 .lb-seg { display: flex; flex: 1 1 0; gap: 3px; box-sizing: border-box; min-width: 0; min-height: 2.35rem; padding: 3px; border: 1px solid var(--line);
   border-radius: 12px; background-color: var(--panel-2); }
 .lb-seg button { flex: 1 1 0; min-width: 0; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit;
-  font-size: 0.85rem; font-weight: 700; padding: 0.25rem 0.5rem; cursor: pointer; transition: background-color 0.15s, color 0.15s, box-shadow 0.15s; }
+  font-size: 0.85rem; font-weight: 700; padding: 0.25rem 0.75rem; cursor: pointer; transition: background-color 0.15s, color 0.15s, box-shadow 0.15s; }
 .lb-seg button:hover { color: var(--text); }
 .lb-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-primary); font-weight: 850; }
 .lb-seg button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22), inset 0 0 0 1px var(--accent); }

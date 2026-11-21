@@ -76,7 +76,7 @@
     boardTabs: $("[data-board-tabs]"), summary: $("[data-summary]"),
     head: $("[data-head]"), rows: $("[data-rows]"), prev: $("[data-prev]"), next: $("[data-next]"), page: $("[data-page]"),
     login: $("[data-login]"),
-    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), unlinked: $("[data-unlinked]"),
+    serverPick: $("[data-server-pick]"), serverSelect: $("[data-server-select]"), unlinked: $("[data-unlinked]"), rowsPick: $("[data-rows-pick]"),
     interlink: $("[data-interlink]"), tableWrap: $("[data-table-wrap]"),
   };
   const state = {
@@ -309,6 +309,7 @@
     els.interlink.hidden = !custom;
     els.tableWrap.hidden = false;
     for (const node of [els.prev, els.next, els.page]) node.hidden = Boolean(custom);
+    if (custom !== "boss") showRowsPick();          // Season Ladder and the other modes: no Show switch
     if (custom) return;
     const sorts = board().sorts;
     if (!sorts.includes(state.sort)) { state.sort = sorts[0]; state.order = ""; }
@@ -680,6 +681,8 @@
     els.summary.textContent = "The leaderboard could not be loaded.";
     els.interlink.replaceChildren();
     els.tableWrap.hidden = true;
+    state.fullTeams = false;
+    showRowsPick();
   }
 
   // Per Boss: the week's three boards, each with its own ladder menu. A row: the player and how the run ended on the
@@ -713,37 +716,59 @@
     if (!entry?.also?.length) return null;
     return el("small", { class: "lb-also", text: `Also on this run: ${entry.also.map((other) => `${other.discordName || other.player} (place ${other.rank})`).join(", ")}` });
   }
-  // a team row's players, each with their "you" and marks, joined by a muted dot
-  function teamNames(members) {
+  // Every copy of a team row's run that came with pictures: the lead's is on the row's result line; a player whose
+  // pictures are another copy (their own app's) gets that copy's button by their name. A copy is shown once (a
+  // teammate credited from someone's copy has that copy's pictures). entry -> proof id, or null
+  function copyProofs(members, ladder) {
+    const proofOf = (entry) => entry.proofIds?.[ladder.proof] || entry.proofId || null;
+    const seen = new Set([proofOf(members[0])].filter(Boolean));
+    return new Map(members.map((entry) => {
+      const id = proofOf(entry);
+      if (!id || seen.has(id)) return [entry, null];
+      seen.add(id);
+      return [entry, id];
+    }));
+  }
+  function memberProof(entry, proofs, ladder) {
+    return proofs.get(entry) ? proofButton(proofs.get(entry), rowCheck(entry, ladder)) : null;
+  }
+  // a team row's players, each with their "you", marks and own copy's pictures, joined by a muted dot
+  function teamNames(members, ladder) {
+    const proofs = copyProofs(members, ladder);
     return el("span", { class: "lb-who-name lb-team-names" }, ...members.flatMap((entry, index) => [
       index ? el("span", { class: "lb-sep", "aria-hidden": "true", text: "·" }) : null,
-      rowName(entry), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry)]));
+      rowName(entry), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), memberProof(entry, proofs, ladder)]));
   }
   // a team row's result: how the run ended, its one check badge and its proof pictures
   function teamResult(lead, ladder, boss) {
     const [text, proof] = resultLine(lead, ladder, boss);
     return [text, checkBadge(rowCheck(lead, ladder)), proof];
   }
-  function setRows(value, focusBoard = null) {
+  // The page's one Teams / Players switch (beside Server and Show unlinked): it changes every board on the page, or
+  // View all's table. The control stays in place while the boards reload, so keyboard focus stays on the pressed button.
+  function setRows(value) {
     if (state.rows === value) return;
     state.rows = value;
     storeRows(value);
+    showRowsPick();
     if (state.viewBoss) { state.offset = 0; void loadEntries(); return; }
     writeUrl();
     // every board on the page in the new view, each with its own ladder
     for (const node of els.interlink.querySelectorAll(".lb-boss[data-board-id]")) {
       const { boardId, week } = node.dataset;
-      void loadBoard(boardId, state.ladders[`${week}:${boardId}`], week).then(() => {
-        if (focusBoard !== `${week}:${boardId}`) return;
-        els.interlink.querySelector(`[data-week="${CSS.escape(week)}"][data-board-id="${CSS.escape(boardId)}"] .lb-seg [aria-pressed="true"]`)?.focus();
-      });
+      void loadBoard(boardId, state.ladders[`${week}:${boardId}`], week);
     }
   }
-  function rowsSwitch(focusBoard = null) {
-    const choice = (value, label) => el("button", { type: "button", "aria-pressed": String(state.rows === value), text: label,
-      onclick: () => setRows(value, focusBoard) });
-    return el("div", { class: "lb-show", role: "group", "aria-label": "Show" }, el("span", { text: "Show" }),
-      el("div", { class: "lb-seg" }, choice("teams", "Teams"), choice("players", "Players")));
+  // Shown only where it changes something: a Per Boss page (or View all) with at least one board on a team ladder
+  // (Score, Stars, Fastest clear, Team DPS) that has team rows. Boards mark that with data-teams; View all with
+  // state.fullTeams. Only boards on screen count: a phone shows one boss at a time (the Left / Center / Right tabs).
+  // Called after every draw of a board, when the boss tab changes and when the page crosses the phone width.
+  function showRowsPick() {
+    const interlink = board().custom === "boss" && !els.interlink.hidden;
+    const shown = [...els.interlink.querySelectorAll(".lb-boss[data-teams]")].some((node) => node.offsetParent !== null);
+    const applies = interlink && (state.viewBoss ? Boolean(state.fullTeams) : shown);
+    els.rowsPick.hidden = !applies;
+    for (const button of els.rowsPick.querySelectorAll("[data-rows-choice]")) button.setAttribute("aria-pressed", String(button.dataset.rowsChoice === state.rows));
   }
 
   function bossBoard(boss, cycleId = state.week) {
@@ -762,7 +787,7 @@
       const lead = members[0];
       return el("li", { class: members.some((entry) => entry.own) ? "lb-row lb-team is-own" : "lb-row lb-team", "data-place": String(lead.rank) },
         el("span", { class: "lb-rk", text: String(lead.rank) }),
-        el("span", { class: "lb-who" }, teamNames(members), el("small", { class: "lb-result" }, ...teamResult(lead, ladder, boss)), alsoLine(lead)),
+        el("span", { class: "lb-who" }, teamNames(members, ladder), el("small", { class: "lb-result" }, ...teamResult(lead, ladder, boss)), alsoLine(lead)),
         updatedIcon(teamUpdated(members)),
         el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(lead, boss) }), stars(lead.stars)));
     };
@@ -773,10 +798,10 @@
     const count = teams ? boss.teams : boss.total;
     const noun = boss.teams === undefined ? "" : ` ${teams ? "team" : "player"}${count === 1 ? "" : "s"}`;
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
-      "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot) },
+      "data-shown": String(boss.slotIndex == null || boss.slotIndex === state.slot),
+      "data-teams": hasTeams(boss, ladder) && boss.total ? "" : null },      // the page's Show switch applies (nothing to switch on an empty board)
     bossHead(boss, "lb-boss-head"),
     el("label", { class: "lb-ladder" }, el("span", { text: "Ladder" }), select),
-    hasTeams(boss, ladder) && boss.total ? rowsSwitch(`${cycleId}:${boss.id}`) : null,   // nothing to switch on an empty board
     rows.length ? head : null,
     rows.length ? el("ol", { class: "lb-rows" }, rows)
       : el("p", { class: "lb-empty", text: ladder.id === "score" ? "No runs on this boss yet." : `No ${ladder.label.replace(/ \(one player\)$/u, "").toLowerCase()} on this boss yet.` }),
@@ -798,7 +823,12 @@
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
     const boss = response.ok ? markPairs(await response.json()).bosses?.[0] : null;
     const old = els.interlink.querySelector(`[data-week="${CSS.escape(cycleId)}"][data-board-id="${CSS.escape(bossId)}"]`);
-    if (boss && old) old.replaceWith(bossBoard(boss, cycleId));
+    if (!boss || !old) return;
+    const menuFocused = old.querySelector(".lb-ladder select") === document.activeElement;
+    const fresh = bossBoard(boss, cycleId);
+    old.replaceWith(fresh);
+    if (menuFocused) fresh.querySelector(".lb-ladder select")?.focus();      // the Ladder menu just used keeps the focus
+    showRowsPick();
   }
   function showSlot() {
     for (const node of els.interlink.querySelectorAll(".lb-boss")) {
@@ -807,7 +837,10 @@
     for (const button of els.interlink.querySelectorAll("[data-slot-index]")) {
       button.setAttribute("aria-selected", String(Number(button.dataset.slotIndex) === state.slot));
     }
+    showRowsPick();
   }
+  // the phone width (leaderboard.css: one boss at a time from 900px down): which boards are on screen changes
+  window.matchMedia?.("(max-width: 900px)").addEventListener?.("change", () => showRowsPick());
   function weekNav(data) {
     const now = Date.now() / 1000;
     const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id);   // in time order
@@ -854,6 +887,7 @@
         checkBadge("pending"), " waiting for that check · ", checkBadge("invalid"), " sent without proof pictures · no badge: not checked"));
     els.tableWrap.hidden = true;
     els.summary.textContent = "";
+    showRowsPick();
   }
 
   // "View all": one board, every player, paged, with every figure; a figure's column header ranks the board by it
@@ -888,8 +922,9 @@
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
           el("span", { text: `${boss.slot ? `${boss.slot} boss` : boss.name} · ${weekRange(data.cycle)}` })),
         updatedLine(data.updatedAt)),
-      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`),
-      hasTeams(boss, ladder) && boss.total ? rowsSwitch() : null);
+      bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`));
+    state.fullTeams = hasTeams(boss, ladder) && Boolean(boss.total);       // the page's Show switch applies
+    showRowsPick();
     const teams = teamView(boss, ladder);
     els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" }),
       columns.map((column) => headCell(column.label, {
@@ -914,10 +949,11 @@
       const span = members.length > 1 ? String(members.length) : null;
       const shared = { ...lead, updatedAt: teamUpdated(members) };
       const own = members.some((entry) => entry.own);
+      const proofs = copyProofs(members, ladder);
       return members.map((entry, index) => el("tr", { class: [index ? "" : "lb-team-first", own ? "is-own" : ""].join(" ").trim() || null },
         index ? null : el("td", { class: "lb-rank", rowspan: span, text: String(lead.rank) }),
         el("td", { class: "lb-player" }, el("span", { class: "lb-who-name" }, rowName(entry),
-          entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry)),
+          entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), memberProof(entry, proofs, ladder)),
         index === members.length - 1 ? alsoLine(lead) : null),
         columns.map((column) => {
           if (ONE_PLAYER_COLUMNS.includes(column.id)) return el("td", { class: ranked(column) }, column.value(entry, boss));
@@ -1177,6 +1213,7 @@
   els.filters.addEventListener("submit", (event) => event.preventDefault());
   els.serverSelect.addEventListener("change", () => { state.server = els.serverSelect.value; state.offset = 0; void loadEntries(); });
   els.unlinked.addEventListener("change", () => { state.unlinked = els.unlinked.checked; state.offset = 0; void loadEntries(); });
+  for (const button of els.rowsPick.querySelectorAll("[data-rows-choice]")) button.addEventListener("click", () => setRows(button.dataset.rowsChoice));
   // a board opened with "View all" pages by FULL_ROWS, the record boards by PAGE_SIZE
   const pageSize = () => (board().custom ? FULL_ROWS : PAGE_SIZE);
   els.prev.addEventListener("click", () => {

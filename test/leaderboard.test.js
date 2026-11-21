@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, playedAtLocalAsUtc, playedAtShifts, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -2929,6 +2929,105 @@ test("team rows: by Avg DPS, also stays on the row's first entry and the reverse
   assert.deepEqual(names((await interlinkBoard(env, "ladder=score&rows=teams&limit=1&offset=1")).boss), ["Kestrel", "Lumen", "Morrow"]);
 });
 
+test("team rows, View all paging: 25 team rows a page, a team never split over two pages, both views counted right", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const a = await namedToken(env, SESSIONS.dev);
+  const letters = "abcdefghijklmnopqrstuvwxyz";
+  const mate = (prefix, i) => `${prefix}${letters[i % 26]}${letters[Math.floor(i / 26)]}`;
+  // 30 runs, one an hour: DevOne's best (the first) with two team-mates, then 29 runs of two team-mates each
+  for (let i = 0; i < 30; i += 1) {
+    const players = [...(i === 0 ? [{ name: "DevOne", ai: false, self: true }] : []), { name: mate("Ward", i), ai: false }, { name: mate("Vale", i), ai: false }];
+    assert.equal((await sendRun(env, a, run(`page-${i}`, { gameUid: "301000000001", boss: tuckingBoss, score: 20000 - i * 10, stars: 15,
+      clearTimeS: 150, cleared: true, playedAt: 1792700000 + i * 3600, players }))).status, 201);
+    sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - ? WHERE client_run_id = ?").run((30 - i) * 3600, `page-${i}`);
+  }
+  const teamsOn = (boss) => [...new Set(boss.entries.map((e) => e.team))];
+  const first = (await interlinkBoard(env, "ladder=score&rows=teams&limit=25")).boss;
+  const second = (await interlinkBoard(env, "ladder=score&rows=teams&limit=25&offset=25")).boss;
+  assert.deepEqual([first.teams, first.total, second.teams, second.total], [30, 61, 30, 61]);
+  assert.deepEqual([teamsOn(first).length, first.entries.length, teamsOn(second).length, second.entries.length], [25, 51, 5, 10]);
+  assert.equal(teamsOn(first).some((team) => teamsOn(second).includes(team)), false, "no team row on both pages");
+  for (const team of teamsOn(second)) assert.equal(second.entries.filter((e) => e.team === team).length, 2, "every player of a team row on its page");
+  assert.deepEqual(second.entries.map((e) => e.rank).filter((rank, i, all) => all.indexOf(rank) === i), [26, 27, 28, 29, 30]);
+  // past the end: nothing
+  assert.equal((await interlinkBoard(env, "ladder=score&rows=teams&limit=25&offset=50")).boss.entries.length, 0);
+  // Players: by players
+  const players = (await interlinkBoard(env, "ladder=score&limit=25&offset=50")).boss;
+  assert.deepEqual([players.entries.length, players.total], [11, 61]);
+  // reversed in Teams view: the last five team rows first, whole
+  const reversed = (await interlinkBoard(env, "ladder=score&rows=teams&order=asc&limit=25&offset=25")).boss;
+  assert.deepEqual([teamsOn(reversed).length, reversed.entries.length], [5, 11]);
+  assert.equal(reversed.entries.filter((e) => e.player === "DevOne").length, 1);
+});
+
+test("team rows, proofs: each sender's entry points at their own copy of the run; a team-mate's at one of those copies; each opens that run", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE: evidenceStore() });
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const players = (me) => [["DevOne", 0], ["UserOne", 1], ["Rook", 2]].map(([name, n]) => ({ name, ai: false, ...(name === me ? { self: true } : {}), ...copyCard(n) }));
+  const body = (id, gameUid, me) => run(id, { gameUid, boss: tuckingBoss, score: 21000, stars: 21, clearTimeS: 170, playedAt: at, players: players(me) });
+  const devId = (await (await sendRun(env, dev, body("proof-dev", "301000000001", "DevOne"), ["evidence"])).json()).submissionId;
+  const userId = (await (await sendRun(env, user, body("proof-user", "301000000003", "UserOne"), ["evidence"])).json()).submissionId;
+  // another run of DevOne's an hour before, lower: not this row's pictures
+  await sendRun(env, dev, run("proof-old", { gameUid: "301000000001", boss: tuckingBoss, score: 15000, stars: 15, playedAt: at - 3600,
+    players: [{ name: "DevOne", ai: false, self: true }, { name: "Larkspur", ai: false }] }), ["evidence"]);
+  const { boss } = await interlinkBoard(env, "ladder=score&rows=teams");
+  const row = (player) => boss.entries.find((e) => e.player === player);
+  assert.deepEqual([row("DevOne").team, row("UserOne").team, row("Rook").team], [1, 1, 1]);
+  assert.equal(row("DevOne").proofIds.score, devId);
+  assert.equal(row("UserOne").proofIds.score, userId);
+  assert.ok([devId, userId].includes(row("Rook").proofIds.score));
+  for (const id of [devId, userId]) {
+    const details = await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json();
+    assert.deepEqual([details.fight?.score, details.fight?.stars], [21000, 21], "the row's run");
+  }
+});
+
+test("team rows with the server filter: a run's copy from an app that sends no server still credits its players; another server's run is left out", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const dev2 = await namedToken(env, SESSIONS.dev2);
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const players = (me) => [["DevOne", 0], ["UserOne", 1], ["Rook", 2]].map(([name, n]) => ({ name, ai: false, ...(name === me ? { self: true } : {}), ...copyCard(n) }));
+  const body = (id, gameUid, me, server) => run(id, { gameUid, boss: tuckingBoss, score: 21000, stars: 21, clearTimeS: 170, playedAt: at, players: players(me),
+    ...(server ? { server } : {}) });
+  await sendRun(env, dev, body("srv-dev", "301000000001", "DevOne", "Aniimo-Americas"));
+  await sendRun(env, user, body("srv-user", "301000000003", "UserOne", null));           // an older app: no server
+  await sendRun(env, dev2, run("srv-eu", { gameUid: "301000000002", boss: tuckingBoss, score: 22000, stars: 21, clearTimeS: 160, playedAt: at,
+    server: "Aniimo-Europe", players: [{ name: "DevTwo", ai: false, self: true }, { name: "Saffron", ai: false }] }));
+  const shape = (boss) => boss.entries.map((e) => [e.player, e.rank, e.team]).sort((x, y) => x[2] - y[2] || x[0].localeCompare(y[0]));
+  const americas = (await interlinkBoard(env, "ladder=score&rows=teams&server=Aniimo-Americas")).boss;
+  assert.deepEqual(shape(americas), [["DevOne", 1, 1], ["Rook", 1, 1], ["UserOne", 1, 1]]);
+  assert.deepEqual([americas.teams, americas.total], [1, 3]);
+  const europe = (await interlinkBoard(env, "ladder=score&rows=teams&server=Aniimo-Europe")).boss;
+  assert.deepEqual(shape(europe), [["DevTwo", 1, 1], ["Saffron", 1, 1]]);
+  assert.equal(europe.entries.some((e) => "also" in e), false);
+  const all = (await interlinkBoard(env, "ladder=score&rows=teams")).boss;
+  assert.deepEqual([all.teams, all.total], [2, 5]);
+});
+
+test("team rows on a two-boss week: copies sent under the first and the second boss are one run on the middle board, one team row", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const week = { id: "4003", season: 2, start: Math.floor(Date.now() / 1000) - 86400, end: Math.floor(Date.now() / 1000) + 86400 * 5,
+    bosses: [{ id: "80000109", name: "Omega Sherro" }, { id: "80000120", name: "Alpha Blazen", second: { id: "80000121", name: "Omega Tucking" } }, { id: "80000101", name: "Alpha Bouldus" }] };
+  sqlite.prepare("INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(week.id, week.season, week.start, week.end, JSON.stringify(week.bosses), IDS.dev, week.start);
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const players = (me) => [["DevOne", 0], ["UserOne", 1], ["Rook", 2]].map(([name, n]) => ({ name, ai: false, ...(name === me ? { self: true } : {}), ...copyCard(n) }));
+  const body = (id, gameUid, me, boss) => run(id, { cycle: "4003", gameUid, boss: { ...boss, level: 60 }, score: 125120, stars: 40, clearTimeS: 300, playedAt: at, players: players(me) });
+  assert.equal((await sendRun(env, dev, body("pair-dev", "301000000001", "DevOne", { id: "80000120", name: "Alpha Blazen" }))).status, 201);
+  assert.equal((await sendRun(env, user, body("pair-user", "301000000003", "UserOne", { id: "80000121", name: "Omega Tucking" }))).status, 201);
+  const data = await (await call(env, "/api/leaderboard/interlink?cycle=4003&unlinked=1&ladder=score&rows=teams")).json();
+  const middle = data.bosses.find((boss) => boss.id === "80000120");
+  assert.equal(data.bosses.some((boss) => boss.id === "80000121"), false, "no board of its own for the second boss");
+  assert.deepEqual(middle.entries.map((e) => [e.player, e.rank, e.team]).sort((x, y) => x[0].localeCompare(y[0])), [["DevOne", 1, 1], ["Rook", 1, 1], ["UserOne", 1, 1]]);
+  assert.deepEqual([middle.teams, middle.total], [1, 3]);
+});
+
 // ---------------------------------------------------------------- copies of one run: marks and names
 // Three senders (the test accounts' characters) and a team-mate without the app.
 const SENDERS = { DevOne: ["301000000001", SESSIONS.dev], DevTwo: ["301000000002", SESSIONS.dev2], UserOne: ["301000000003", SESSIONS.user] };
@@ -3317,4 +3416,163 @@ test("same run by the site's clock: equal score, stars and time stored 20 minute
   const rows = storedCopies(sqlite);
   assert.deepEqual(rows.map((row) => row.extra.sharedRun ?? null), [null, null]);
   assert.equal(rows.some((row) => row.players.some((p) => p.confirmed)), false);
+});
+
+// ---------------------------------------------------------------- played times sent by the builds that took local time as UTC
+const H = 3600;
+const T0 = 1795000000;                       // a run's true start (UTC)
+// one Interlink run: played_at as the buggy build stored it (true start + the sender's UTC offset), stored `delay` s later
+const timed = (id, sender, offsetH, delay = 200, version = "aLogs-0.1.37+rc.30", t = T0, kind = "interlink_run") => ({ id, sender, kind, version,
+  playedAt: t + offsetH * H, createdAt: t + delay, sentPlayedAt: null });
+
+test("played times: the builds that took local time as UTC are 0.1.37 RC26 to RC34; older and fixed builds aren't", () => {
+  for (const version of ["aLogs-0.1.37+rc.26", "aLogs-0.1.37+rc.30", "aLogs-0.1.37+rc.32", "0.1.37+rc.34"]) assert.equal(playedAtLocalAsUtc(version), true, version);
+  for (const version of ["aLogs-0.1.37+rc.25", "aLogs-0.1.37+rc.35", "aLogs-0.1.37+rc.36", "aLogs-0.1.37", "aLogs-0.1.36+rc.30", "0.1.38+rc.30", "", null]) {
+    assert.equal(playedAtLocalAsUtc(version), false, String(version));
+  }
+});
+
+test("played times: each side of UTC and a half-hour zone get their zone back; a late send follows its sender", () => {
+  const rows = [
+    // UTC-5: stored 5 h early; one of four went out 3 h 12 min after its start (queued)
+    timed("w1", "west", -5), timed("w2", "west", -5, 540, "aLogs-0.1.37+rc.26", T0 + 2 * H), timed("w3", "west", -5, 60, "aLogs-0.1.37+rc.32", T0 + 5 * H),
+    timed("w4", "west", -5, 3 * H + 12 * 60, "aLogs-0.1.37+rc.30", T0 + 9 * H),
+    // UTC+2: stored 2 h late
+    timed("e1", "east", 2), timed("e2", "east", 2, 30, "aLogs-0.1.37+rc.30", T0 + H),
+    // UTC+5:30
+    timed("i1", "india", 5.5), timed("i2", "india", 5.5, 400),
+  ];
+  const { shifts, senders, rows: counts } = playedAtShifts(rows);
+  assert.deepEqual(Object.fromEntries(shifts), { w1: 5 * H, w2: 5 * H, w3: 5 * H, w4: 5 * H, e1: -2 * H, e2: -2 * H, i1: -5.5 * H, i2: -5.5 * H });
+  const zoneOf = { w: -5, e: 2, i: 5.5 };
+  for (const row of rows) assert.equal(row.playedAt + shifts.get(row.id), row.playedAt - zoneOf[row.id[0]] * H, `${row.id}: its true start`);
+  assert.deepEqual([senders.total, senders.shifted, counts.change], [3, 3, 8]);
+});
+
+test("played times: only Interlink runs vote and move; the same builds' other records were on the real clock", () => {
+  // UTC+2: three Egg Heist and Sim records sent at once (zone 0) must not outvote the two Interlink runs
+  const other = (id, kind) => timed(id, "east", 0, 20, "aLogs-0.1.37+rc.30", T0, kind);
+  const rows = [timed("r1", "east", 2), timed("r2", "east", 2, 100), other("g1", "eggheist_match"), other("g2", "eggheist_season"), other("s1", "sim_run"),
+    other("b1", "interlink_best"), other("k1", "interlink_week")];
+  const { shifts, rows: counts } = playedAtShifts(rows);
+  assert.deepEqual(Object.fromEntries(shifts), { r1: -2 * H, r2: -2 * H });
+  assert.equal(counts.affected, 2);
+});
+
+test("played times: a sender with nothing to go on, a split vote, too few agreeing or a zero zone is left alone; old and fixed builds never move", () => {
+  const rows = [
+    timed("d1", "doubtful", -6, 2 * H + 43 * 60),                                             // one run, stored 2 h 43 min after its start
+    timed("s1", "split", -5), timed("s2", "split", -6),                                       // one run each of two zones
+    timed("f1", "few", -5), timed("f2", "few", -5, 57 * 60, "aLogs-0.1.37+rc.30", T0 + H), timed("f3", "few", -5, 87 * 60, "aLogs-0.1.37+rc.30", T0 + 2 * H),
+    timed("u1", "utc", 0), timed("u2", "utc", 0, 300),
+    timed("far", "far", -15),                                                                 // no zone is 15 h off
+    timed("old", "west", -5, 40, "aLogs-0.1.37+rc.25"), timed("new", "west", -5, 40, "aLogs-0.1.37+rc.35"), timed("py", "west", -5, 40, "aLogs-0.1.36"),
+  ];
+  const { shifts, senders, rows: counts } = playedAtShifts(rows);
+  assert.equal(shifts.size, 0);
+  assert.deepEqual(senders.left, { noNormalSend: 1, noAgreement: 1, tooFew: 1, over14h: 1 });
+  assert.deepEqual([senders.total, senders.zero, counts.zero, counts.affected], [5, 1, 2, 9]);
+});
+
+test("played times: a shift that would put the run after it was stored is skipped", () => {
+  // the vote says +5 h, but this run was stored before its own correction would land (a PC clock that moved)
+  const rows = [timed("a", "west", -5), timed("b", "west", -5), timed("c", "west", -5), { ...timed("x", "west", -5), createdAt: T0 - 3 * H }];
+  const { shifts, rows: counts } = playedAtShifts(rows);
+  assert.deepEqual([shifts.size, shifts.has("x"), counts.laterThanSent], [3, false, 1]);
+});
+
+// the stored played time and the kept sent value of one record
+const playedRow = (sqlite, id) => ({ ...sqlite.prepare("SELECT played_at AS playedAt, played_at_sent AS sent, created_at AS createdAt FROM leaderboard_submissions WHERE client_run_id = ?").get(id) });
+
+test("played times on arrival: an affected Interlink run takes its sender's known zone, late or not; no history, other builds and other kinds as sent", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const tokens = { west: await namedToken(env, SESSIONS.dev), east: await namedToken(env, SESSIONS.dev2), fresh: await namedToken(env, SESSIONS.user) };
+  const now = Math.floor(Date.now() / 1000);
+  const send = (who, id, playedAt, clientVersion = "aLogs-0.1.37+rc.30", more = {}) => sendRun(env, tokens[who], run(id, { playedAt, clientVersion, ...more }));
+  // history: two runs each already corrected (by the route), west of UTC by +5 h, east of UTC by -2 h
+  for (const [who, shift] of [["west", 5 * H], ["east", -2 * H]]) {
+    for (const n of [1, 2]) {
+      const sent = now - n * 86400;
+      assert.equal((await send(who, `hist-${who}-${n}`, sent)).status, 201);
+      sqlite.prepare("UPDATE leaderboard_submissions SET played_at = ?, played_at_sent = ? WHERE client_run_id = ?").run(sent + shift, sent, `hist-${who}-${n}`);
+    }
+  }
+  const normal = now - 150;                       // a run that started 2.5 min ago
+  const late = now - 3 * H - 12 * 60;             // queued: sent 3 h 12 min after its start
+  const cases = [
+    ["west", "w-normal", normal, -5, true], ["west", "w-late", late, -5, true],
+    ["east", "e-normal", normal, 2, true], ["east", "e-late", late, 2, true],
+    ["fresh", "f-normal", normal, -5, false], ["fresh", "f-late", late, -5, false],
+    ["fresh", "utc-late", late, 0, false],         // a PC on UTC, sent late: its own numbers would have said 3 h
+  ];
+  for (const [who, id, start, zone, corrected] of cases) {
+    assert.equal((await send(who, id, start + zone * H)).status, 201, id);
+    const row = playedRow(sqlite, id);
+    assert.deepEqual([row.playedAt, row.sent], corrected ? [start, start + zone * H] : [start + zone * H, null], id);
+  }
+  // a re-send (Battle Data following) of a corrected run: the same correction, judged against its first arrival
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 30 WHERE client_run_id = 'w-normal'").run();
+  assert.equal((await send("west", "w-normal", normal - 5 * H, "aLogs-0.1.37+rc.30", { score: 20500 })).status, 200);
+  assert.deepEqual([playedRow(sqlite, "w-normal").playedAt, playedRow(sqlite, "w-normal").sent], [normal, normal - 5 * H]);
+  // a fixed build, an old Python build and another kind of an affected build, from a sender with a known zone: as sent
+  for (const [id, clientVersion] of [["fixed", "aLogs-0.1.37+rc.35"], ["python", "aLogs-0.1.36"]]) {
+    assert.equal((await send("west", id, normal, clientVersion)).status, 201);
+    assert.deepEqual([playedRow(sqlite, id).playedAt, playedRow(sqlite, id).sent], [normal, null], id);
+  }
+  assert.equal((await sendRun(env, tokens.west, { kind: "sim_run", clientRunId: "sim", trial: "Training of Water", difficulty: "Hard", cleared: true, clearTimeS: 400,
+    playedAt: normal, clientVersion: "aLogs-0.1.37+rc.30" })).status, 201);
+  assert.deepEqual([playedRow(sqlite, "sim").playedAt, playedRow(sqlite, "sim").sent], [normal, null]);
+});
+
+test("POST /api/admin/played-times: administrators only, a dry run by default, apply keeps the value it replaced, a second run changes nothing", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const tokens = { west: await namedToken(env, SESSIONS.dev), east: await namedToken(env, SESSIONS.dev2), india: await namedToken(env, SESSIONS.user) };
+  const t = Math.floor(Date.now() / 1000) - 10 * H;
+  // id, sender, zone (h), delay (s), build, kind
+  const records = [
+    ["w-run", "west", -5, 200, "aLogs-0.1.37+rc.30", "interlink_run"], ["w-sim", "west", -5, 60, "aLogs-0.1.37+rc.30", "sim_run"],
+    ["w-late", "west", -5, 3 * H + 12 * 60, "aLogs-0.1.37+rc.32", "interlink_run"], ["w-run2", "west", -5, 240, "aLogs-0.1.37+rc.26", "interlink_run"],
+    ["e-run", "east", 2, 230, "aLogs-0.1.37+rc.28", "interlink_run"], ["e-run2", "east", 2, 250, "aLogs-0.1.37+rc.31", "interlink_run"],
+    ["i-run", "india", 5.5, 245, "aLogs-0.1.37+rc.32", "interlink_run"],
+    ["i-old", "india", 5.5, 245, "aLogs-0.1.37+rc.25", "interlink_run"], ["i-fixed", "india", 0, 245, "aLogs-0.1.37+rc.36", "interlink_run"],
+  ];
+  for (const [index, [id, sender, zone, delay, clientVersion, kind]] of records.entries()) {
+    const at = t + index * 600;
+    const body = kind === "sim_run"
+      ? { kind, clientRunId: id, trial: "Training of Water", difficulty: "Hard", cleared: true, clearTimeS: 400, playedAt: at + zone * H, clientVersion }
+      : run(id, { score: 10000 + index, playedAt: at + zone * H, clientVersion });
+    assert.equal((await sendRun(env, tokens[sender], body)).status, 201, id);
+    // stored as the builds stored them before the site corrected anything
+    sqlite.prepare("UPDATE leaderboard_submissions SET created_at = ?, played_at = ?, played_at_sent = NULL WHERE client_run_id = ?").run(at + delay, at + zone * H, id);
+  }
+  const stored = () => Object.fromEntries(sqlite.prepare("SELECT client_run_id AS id, played_at AS playedAt, played_at_sent AS sent, created_at AS createdAt FROM leaderboard_submissions").all()
+    .map((row) => [row.id, { ...row }]));
+  const before = stored();
+  const times = (body, session = SESSIONS.dev) => call(env, "/api/admin/played-times", { session, method: "POST", body });
+  assert.equal((await times({}, SESSIONS.user)).status, 403);
+  assert.equal((await times({}, SESSIONS.dev2)).status, 403);                     // a developer isn't an administrator
+  const dry = await (await times({})).json();
+  assert.equal(dry.dryRun, true);
+  assert.deepEqual(stored(), before, "a dry run writes nothing");
+  assert.deepEqual(dry.versions.filter((row) => row.affected).map((row) => [row.version, row.rows, row.interlinkRuns]),
+    [["aLogs-0.1.37+rc.26", 1, 1], ["aLogs-0.1.37+rc.28", 1, 1], ["aLogs-0.1.37+rc.30", 2, 1], ["aLogs-0.1.37+rc.31", 1, 1], ["aLogs-0.1.37+rc.32", 2, 2]]);
+  assert.deepEqual(dry.versions.filter((row) => !row.affected).map((row) => row.version), ["aLogs-0.1.37+rc.25", "aLogs-0.1.37+rc.36"]);
+  assert.deepEqual([dry.rows.affected, dry.rows.change], [6, 6]);
+  assert.deepEqual(dry.shiftsByHours, { "+5": 3, "-2": 2, "-5.5": 1 });
+  assert.deepEqual([dry.senders.total, dry.senders.shifted], [3, 3]);
+  const text = JSON.stringify(dry);
+  for (const secret of ["DevOne", "301000000", "w-run", IDS.dev]) assert.equal(text.includes(secret), false);
+  const applied = await (await times({ apply: true })).json();
+  assert.deepEqual([applied.dryRun, applied.changed], [false, 6]);
+  const after = stored();
+  for (const [index, [id, , zone]] of records.entries()) {
+    const at = t + index * 600;
+    if (["i-old", "i-fixed", "w-sim"].includes(id)) { assert.deepEqual(after[id], before[id], `${id} untouched`); continue; }
+    assert.equal(after[id].playedAt, at, `${id}: its true start`);
+    assert.equal(after[id].sent, at + zone * H, `${id}: the value it replaced, kept`);
+    assert.ok(after[id].playedAt <= after[id].createdAt);
+  }
+  const twice = await (await times({ apply: true })).json();
+  assert.deepEqual([twice.changed, twice.rows.change, twice.rows.alreadyCorrected], [0, 0, 6]);
+  assert.deepEqual(stored(), after);
 });
