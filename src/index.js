@@ -1,9 +1,9 @@
 // game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
-import { drawPlacementCard } from "./placement-card.js";
+import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
 import { botSql, realPlayersOf, slotIsBot } from "./bots.js";
-import { createPlacementLinks, PLACEMENT_CARD_PATH, PLACEMENT_PATH } from "./placement-links.js";
+import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
@@ -7408,6 +7408,8 @@ async function api(request, env) {
   if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return leaderboardEntries(request, env);
   if (url.pathname === "/api/leaderboard/interlink" && request.method === "GET") return interlinkBoards(request, env);
   if (url.pathname === "/api/links" && request.method === "POST") return placementLinks.create(request, env);
+  const glyphPackMatch = url.pathname.match(/^\/api\/admin\/card-glyphs\/([0-9a-f]{4})$/u);
+  if (glyphPackMatch && request.method === "PUT") return putGlyphPack(request, env, glyphPackMatch[1]);
   const placementCard = url.pathname.match(PLACEMENT_CARD_PATH);
   if (placementCard && (request.method === "GET" || request.method === "HEAD")) return placementLinks.cardImage(request, env, placementCard[1]);
   if (url.pathname === "/api/leaderboard/interlink/cycles" && request.method === "POST") return uploadInterlinkCycles(request, env);
@@ -7483,11 +7485,31 @@ async function api(request, env) {
   return json({ error: "Not found" }, 404);
 }
 
+// PUT /api/admin/card-glyphs/<block>: an administrator stores one of the cards' letter packs (scripts/
+// build-card-script-packs.mjs, tools/upload-card-glyphs.mjs) in R2. The body is the pack as built; it must read back as
+// one, for that block, and be under 512 KB. Same permission as the other administrators' routes (logs.read).
+const GLYPH_PACK_MAX_BYTES = 512 * 1024;
+async function putGlyphPack(request, env, block) {
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!GLYPH_PACK_BLOCK.test(block)) return json({ error: "A pack is named by its first code point: 4 hex digits ending in 00." }, 400);
+  if (Number(request.headers.get("content-length") || 0) > GLYPH_PACK_MAX_BYTES) return json({ error: "A pack is at most 512 KB." }, 413);
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (!bytes.length || bytes.length > GLYPH_PACK_MAX_BYTES) return json({ error: "A pack is at most 512 KB." }, 413);
+  const letters = await readGlyphPack(block, bytes).catch(() => null);
+  if (!letters?.size) return json({ error: "That isn't a letter pack." }, 400);
+  if (!env.EVIDENCE) return json({ error: "Storage is unavailable." }, 503);
+  await env.EVIDENCE.put(glyphPackKey(block), bytes, { httpMetadata: { contentType: "application/octet-stream" } });
+  return json({ ok: true, block, letters: letters.size, bytes: bytes.length });
+}
+
 // Placement links (src/placement-links.js): the boards' own ranking, read as the boards page reads it
 const placementLinks = createPlacementLinks({
   boardData: (env, params) => interlinkBoards(new Request(`https://placement.invalid/api/leaderboard/interlink?${params}`), env, true),
   copyGroupSql: COPY_GROUP, json, browserWriteAllowed, readJsonBody, siteOrigin: configuredPublicSiteOrigin,
-  drawCard: (card) => drawPlacementCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS }),
+  drawCard: (card, extra) => drawPlacementCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS, extra }),
+  packBlocks: (texts) => packBlocksFor(texts, CARD_FONTS),
   // the run's players as its viewer lists them; null when the copy has no Party read (then the board row's players)
   runPlayers: async (env, submissionId) => {
     const row = await env.DB.prepare("SELECT extra_json AS extraJson, players_json AS playersJson FROM leaderboard_submissions WHERE submission_id = ?")

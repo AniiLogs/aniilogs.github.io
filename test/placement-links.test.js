@@ -4,14 +4,14 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { inflateSync } from "node:zlib";
+import { deflateRawSync, inflateSync } from "node:zlib";
 import test from "node:test";
 
 import worker, { lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
 import { realPlayersOf, slotIsBot } from "../src/bots.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
-import { CARD_HEIGHT, CARD_WIDTH, drawPlacementCard } from "../src/placement-card.js";
+import { CARD_HEIGHT, CARD_WIDTH, drawPlacementCard, packBlocksFor } from "../src/placement-card.js";
 
 const LETTERS = { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS };
 
@@ -86,7 +86,7 @@ async function player(env, sqlite, name) {
   const { token } = await made.json();
   const gameUid = String(302000000000 + nextId);
   assert.equal((await call(env, "/api/leaderboard/characters", { token, method: "POST", body: { gameUid, name } })).status < 300, true);
-  return { name, token, gameUid };
+  return { name, token, gameUid, discordId };
 }
 
 // one run's copy, sent with its proof picture. party: [name, ai?, avgDps]; the sender is marked self
@@ -427,4 +427,79 @@ test("the bot rule in every answer: the viewer, the card's text, the boards' cre
   assert.ok(unlinked.entries.every((e) => e.realPlayers === 3));
   assert.deepEqual((await interlink(env, "ladder=score&unlinked=1&players=3")).entries.length, 3);
   assert.deepEqual((await interlink(env, "ladder=score&unlinked=1&players=4")).entries.length, 0);
+});
+// A made-up letter pack in the build's format (scripts/build-card-script-packs.mjs): each letter a solid block, so
+// the test can tell it was drawn
+function madePack(codePoints) {
+  const head = Buffer.alloc(8 + codePoints.length * 12);
+  head.write("ACP1", 0, "latin1"); head[4] = 1; head[5] = 32; head.writeUInt16LE(codePoints.length, 6);
+  const pictures = [];
+  codePoints.forEach((cp, i) => {
+    const at = 8 + i * 12;
+    head[at] = cp & 0xff; head.writeUInt16LE(32 * 16, at + 2); head.writeInt8(2, at + 4); head.writeInt8(-24, at + 5);
+    head[at + 6] = 26; head[at + 7] = 26; head.writeUInt32LE(i * 338, at + 8);
+    pictures.push(Buffer.alloc(338, 0xff));
+  });
+  return deflateRawSync(Buffer.concat([head, ...pictures]));
+}
+
+test("which packs a name needs: none for the card's own letters and accents, one block per other script's letter", () => {
+  assert.deepEqual(packBlocksFor(["Ålvarö", "Zoë Ñuñez", "Kestrel"], CARD_FONTS), []);
+  assert.deepEqual(packBlocksFor(["Łukasz"], CARD_FONTS), ["0100"]);
+  assert.deepEqual(packBlocksFor(["ミカ", "Ника", "하나", "Δέλτα", "王小明", "ＡＢ"], CARD_FONTS), ["0300", "0400", "3000", "5c00", "6600", "7300", "b000", "d500", "ff00"]);
+});
+
+test("the card without packs is as before (boxes, no error); with packs it draws the letters, and the picture is new", async () => {
+  const { env, sqlite } = await setup();
+  const ren = await player(env, sqlite, "Renwick");
+  await send(env, ren, "cjk", { score: 21000, party: [["Renwick", false, 9000], ["一二", false, 7000], ["アイ", false, 5000], ["Flora", true]] });
+  const { code } = await (await createLink(env, { run: idOf(sqlite, "cjk"), ladder: "score" })).json();
+  const imageOf = async () => new URL((await (await call(env, `/${code}`, { ua: DISCORD_UA })).text())
+    .match(/<meta property="og:image" content="([^"]*)">/u)[1].replaceAll("&amp;", "&"));
+  const before = await imageOf();
+  const boxes = await call(env, before.pathname + before.search);
+  assert.equal(boxes.status, 200);
+  const boxed = pngInfo(new Uint8Array(await boxes.arrayBuffer()));
+  // a pack that isn't a pack is ignored too
+  await env.EVIDENCE.put("card-glyphs/v1/3000.bin", new Uint8Array([1, 2, 3]));
+  assert.equal((await imageOf()).searchParams.get("v"), before.searchParams.get("v"));
+  // the packs arrive: a pack found missing is asked again after 5 minutes
+  await env.EVIDENCE.put("card-glyphs/v1/4e00.bin", madePack([0x4e00, 0x4e8c]));
+  assert.equal((await imageOf()).searchParams.get("v"), before.searchParams.get("v"));
+  const realNow = Date.now;
+  Date.now = () => realNow() + 6 * 60 * 1000;
+  let after;
+  try { after = await imageOf(); } finally { Date.now = realNow; }
+  assert.notEqual(after.searchParams.get("v"), before.searchParams.get("v"));
+  const drawn = pngInfo(new Uint8Array(await (await call(env, after.pathname + after.search)).arrayBuffer()));
+  assert.notDeepEqual(drawn.pixels, boxed.pixels);
+});
+
+test("mixed names line up and are cut with ... ; the AI pill and the placement mark still draw", async () => {
+  const extra = new Map([[0x4e00, [32 * 16, 2, -24, 26, 26, 0, new Uint8Array(338).fill(0xff)]], [0x30a2, [32 * 16, 2, -24, 26, 26, 0, new Uint8Array(338).fill(0xff)]]]);
+  const card = (players) => drawPlacementCard({ place: 4, ladder: "Score", figure: "1,000", boss: "Omega Tucking", slot: "Left", week: "Week of Nov 18 – Nov 25",
+    stars: 30, result: "Timed Out: 3:00", extra: "Team DPS 1,000", tag: null, players }, { ...LETTERS, extra });
+  for (const players of [[{ name: "Ren一", dps: "1" }, { name: "Zoëア", dps: "2", mark: true }, { name: `${"一".repeat(30)}x`, dps: "3" }, { name: "Mario", dps: null, ai: true }]]) {
+    const info = pngInfo(await card(players));
+    assert.deepEqual([info.width, info.height], [CARD_WIDTH, CARD_HEIGHT]);
+  }
+});
+
+test("storing a letter pack: administrators only, a strict name, a size cap, and only a real pack", async () => {
+  const { env, sqlite } = await setup();
+  const plain = await player(env, sqlite, "Plainly");
+  const admin = await player(env, sqlite, "Adminly");
+  sqlite.prepare("INSERT INTO developer_roles (discord_id, granted_by_discord_id, created_at) VALUES (?, ?, ?)").run(admin.discordId, plain.discordId, 1);
+  sqlite.prepare("UPDATE developer_roles SET role = 'administrator' WHERE discord_id = ?").run(admin.discordId);
+  const put = (token, block, body) => worker.fetch(new Request(`${API}/api/admin/card-glyphs/${block}`, {
+    method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/octet-stream" }, body }), env);
+  assert.equal((await put(plain.token, "4e00", madePack([0x4e00]))).status, 403);
+  assert.equal((await put(admin.token, "4e01", madePack([0x4e00]))).status, 400);          // not a pack's name
+  assert.equal((await put(admin.token, "../x", madePack([0x4e00]))).status, 404);
+  assert.equal((await put(admin.token, "4e00", new Uint8Array([1, 2, 3]))).status, 400);
+  assert.equal((await put(admin.token, "4e00", new Uint8Array(600 * 1024))).status, 413);
+  const stored = await put(admin.token, "4e00", madePack([0x4e00, 0x4e8c]));
+  assert.equal(stored.status, 200);
+  assert.deepEqual((await stored.json()).letters, 2);
+  assert.ok(env.EVIDENCE.objects.has("card-glyphs/v1/4e00.bin"));
 });
