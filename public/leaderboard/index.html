@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="/styles.css?v=0.17.3-profile-polish">
     <link rel="stylesheet" href="/proof-viewer.css?v=0.2.3-leads">
     <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.14-one-switch">
+    <link rel="stylesheet" href="/leaderboard/share.css?v=0.1.0">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
     <link rel="stylesheet" href="/comments.css?v=0.1.0">
     <link rel="stylesheet" href="/notifications.css?v=0.1.0">
@@ -37,9 +38,10 @@
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
     <script src="/party-portraits.js?v=0.1.0" defer></script>
     <script src="/comments.js?v=0.1.0" defer></script>
-    <script src="/proof-viewer.js?v=0.2.4-comments" defer></script>
+    <script src="/proof-viewer.js?v=0.2.5-place-links" defer></script>
     <script src="/table-sort.js?v=0.1.0" defer></script>
-    <script src="/leaderboard/leaderboard.js?v=0.3.27-run-link" defer></script>
+    <script src="/leaderboard/share.js?v=0.1.0" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.3.28-place-links" defer></script>
   </head>
   <body class="site-chrome-page" data-site-sidebar="always">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -136,6 +138,9 @@
           <div class="lb-show" role="group" aria-label="Show teams or players" title="Teams: one row per run, its players together. Players: one row each." data-rows-pick hidden><span>Show</span>
             <div class="lb-seg"><button type="button" data-rows-choice="teams" aria-pressed="true">Teams</button><button type="button" data-rows-choice="players" aria-pressed="false">Players</button></div>
           </div>
+          <label class="lb-server lb-party-pick" title="Solo, Duo and Trio runs had bots in the team. This only hides rows: every run keeps its place on the whole board." data-party-pick hidden><span>Party</span>
+            <select data-party-select aria-label="Show runs by party size"><option value="">All</option><option value="4">Four players</option><option value="3">Trio</option><option value="2">Duo</option><option value="1">Solo</option></select>
+          </label>
           <div class="lb-tabs lb-board-tabs" role="tablist" aria-label="Board" data-board-tabs></div>
         </div>
         <div class="lb-interlink" data-interlink hidden></div>

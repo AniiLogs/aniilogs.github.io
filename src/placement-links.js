@@ -1,5 +1,5 @@
 // game-audit: n/a share links to board placements; the figures come from the boards (src/index.js)
-// Short links to a placement on an Interlink boss board (migration 0035): https://aniilogs-api.pages.dev/<code>.
+// Short links to a placement on an Interlink boss board (migration 0037): https://aniilogs-api.pages.dev/<code>.
 // - POST /api/links { run, ladder, player? } gives the placement's link, making it the first time (no sign-in; only a
 //   run on a board gets one, and the same placement always gets the same code).
 // - GET /<code>: a link-preview crawler (Discord, Reddit, X, iMessage...) gets a small page of Open Graph tags with the
@@ -171,7 +171,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     return `${siteOrigin(env)}${BOARDS_PATH}?${params}`;
   }
 
-  function page(status, { title, description = "", url = null, image = null, imageAlt = "", body }) {
+  function page(status, { title, description = "", url = null, image = null, imageAlt = "", body, tabTitle = title }) {
     const meta = [
       ["name", "description", description], ["name", "theme-color", "#f5eecb"], ["name", "robots", "noindex"],
       ["property", "og:site_name", "AniiLogs"], ["property", "og:type", "website"], ["property", "og:title", title],
@@ -182,7 +182,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
       ["name", "twitter:title", title], ["name", "twitter:description", description], image && ["name", "twitter:image", image],
     ].filter(Boolean).filter(([, , value]) => value !== "");
     const html = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n`
-      + `<title>${escapeHtml(title)}</title>\n`
+      + `<title>${escapeHtml(tabTitle)}</title>\n`
       + meta.map(([attr, name, value]) => `<meta ${attr}="${escapeHtml(name)}" content="${escapeHtml(value)}">`).join("\n")
       + `\n<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1215;color:#f4f4e9;font:16px/1.5 Inter,system-ui,sans-serif}`
       + `main{max-width:32rem;padding:24px 16px}a{color:#62d9b3}p{color:#9bb5b2}</style>\n</head>\n<body>\n<main>\n${body}\n</main>\n</body>\n</html>\n`;
@@ -214,7 +214,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     const { title, description, card } = describe(found);
     const { hash } = await cardKey(link.code, card);
     const image = `${origin}/api/links/${link.code}.png?p=${found.place}&v=${hash}`;
-    return page(200, { title: `${title} · AniiLogs`, description, url: `${origin}/${link.code}`, image,
+    return page(200, { title, tabTitle: `${title} · AniiLogs`, description, url: `${origin}/${link.code}`, image,
       imageAlt: `${title}: ${description}`,
       body: `<h1>${escapeHtml(title)}</h1>\n<p>${escapeHtml(description)}</p>\n<p><a href="${escapeHtml(target)}">Open it on AniiLogs</a></p>` });
   }

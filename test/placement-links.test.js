@@ -1,4 +1,4 @@
-// Placement links (src/placement-links.js, migration 0035), the Solo / Duo / Trio label and the ?players= filter on
+// Placement links (src/placement-links.js, migration 0037), the Solo / Duo / Trio label and the ?players= filter on
 // the Interlink boards, and the share card (src/placement-card.js). Every player here is made up.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -194,7 +194,8 @@ test("opening a link: a crawler gets the preview tags with the overall place; a 
   const html = await page.text();
   const tag = (property) => html.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)">`, "u"))?.[1];
   assert.equal(tag("og:site_name"), "AniiLogs");
-  assert.match(tag("og:title"), /^#2 on Score · Omega Tucking · Week of [A-Z][a-z]{2} \d{1,2} – [A-Z][a-z]{2} \d{1,2} · AniiLogs$/u);
+  assert.match(tag("og:title"), /^#2 on Score · Omega Tucking · Week of [A-Z][a-z]{2} \d{1,2} – [A-Z][a-z]{2} \d{1,2}$/u);
+  assert.match(html, /<title>#2 on Score · Omega Tucking · .* · AniiLogs<\/title>/u);
   assert.match(tag("og:description"), /^Cobalt and Briar \(Duo: bots filled the other places\): 25,000 with 30 stars\. Boss Killed: 2:50\. Team DPS 60,000\. Holo-Battle Interlink/u);
   assert.equal(tag("og:url"), `${API}/${code}`);
   assert.equal(tag("twitter:card"), "summary_large_image");
@@ -311,3 +312,19 @@ function pngInfo(png) {
   for (let row = 0; row < info.height; row += 1) assert.equal(info.pixels[row * (info.width + 1)], 0, "filter byte");
   return info;
 }
+
+test("the boards page: the link button and tag script before the boards, the Party filter, and run links that tidy up", () => {
+  const read = (path) => readFileSync(resolve(import.meta.dirname, "..", "public", path), "utf8");
+  const page = read("leaderboard/index.html");
+  assert.ok(page.indexOf('<script src="/leaderboard/share.js') > 0 && page.indexOf('<script src="/leaderboard/share.js') < page.indexOf('<script src="/leaderboard/leaderboard.js'));
+  assert.match(page, /<select data-party-select[^>]*><option value="">All<\/option><option value="4">Four players<\/option><option value="3">Trio<\/option><option value="2">Duo<\/option><option value="1">Solo<\/option><\/select>/u);
+  const boards = read("leaderboard/leaderboard.js");
+  assert.match(boards, /function openRunFromUrl\(\)/u);
+  assert.match(boards, /\["comments"\]\.includes\(params\.get\("tab"\)\)/u);              // an unknown tab is ignored
+  assert.match(boards, /for \(const key of \["run", "tab", "link"\]\) url\.searchParams\.delete\(key\)/u);
+  assert.match(boards, /if \(state\.players\) ask\.set\("players", state\.players\)/u);
+  const share = read("leaderboard/share.js");
+  assert.match(share, /fetch\(`\$\{API_URL\}\/links`, \{ method: "POST", credentials: "omit"/u);
+  assert.match(share, /"Link copied"/u);
+  assert.doesNotMatch(share, /localStorage|sessionStorage/u);
+});
