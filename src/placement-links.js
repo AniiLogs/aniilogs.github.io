@@ -214,8 +214,10 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     const names = listNames(players.map((player) => `${player.name}${player.ai ? " (AI)" : ""}`));
     const description = [`${names}: ${sentence || figure || "on the board"}.`, tag ? TAG_SENTENCES[realPlayers] : null,
       result ? `${result}.` : null, extra ? `${extra}.` : null, `Holo-Battle Interlink${slot ? `, ${slot} boss` : ""}.`].filter(Boolean).join(" ");
+    // twoBosses: since 21 Nov a two-boss title is drawn in full (smaller); being part of the card's hash (cardKey), it
+    // makes the cards kept with the cut title be drawn again. Single-boss cards keep their hash and their kept picture.
     const card = { place: found.place, ladder: ladder.label, figure: figure || "–", boss: found.bossName, slot, week, stars,
-      result, extra, tag, players };
+      result, extra, tag, players, ...(found.twoBosses ? { twoBosses: true } : {}) };
     return { title, description, card };
   }
 

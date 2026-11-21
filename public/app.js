@@ -332,8 +332,9 @@ function interlinkStars(value) {
 function interlinkEnding(boss) {
   const time = boss.runTimeS ?? boss.clearTimeS;
   if (boss.outcome === "unconfirmed") return time != null ? clockTime(time) : "";
-  const ending = boss.outcome === "ended-early" ? "Early Exit" : boss.outcome === "cleared" ? "Boss Killed"
-    : boss.outcome === "time-up" ? "Timed Out" : boss.clearTimeS != null ? "Boss Killed" : time != null ? "Timed Out" : "Menu best";
+  const killed = boss.second ? "Both Killed" : "Boss Killed";     // a two-boss fight (the API sends its second boss)
+  const ending = boss.outcome === "ended-early" ? "Early Exit" : boss.outcome === "cleared" ? killed
+    : boss.outcome === "time-up" ? "Timed Out" : boss.clearTimeS != null ? killed : time != null ? "Timed Out" : "Menu best";
   return time != null && ending !== "Timed Out" && ending !== "Menu best" ? `${ending} ${clockTime(time)}` : ending;
 }
 function interlinkPartLine(part, { current = false, publicId = null, runsOpen = false } = {}) {

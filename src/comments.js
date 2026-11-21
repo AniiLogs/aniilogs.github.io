@@ -449,11 +449,12 @@ async function getCount(request, env, deps) {
 }
 
 // A run's short title for an entry: its mode, boss (training, difficulty) and score or time.
-function runTitle(row, deps) {
+// bossName: index.js's way of naming an Interlink boss (a two-boss fight by both bosses), when it has one.
+function runTitle(row, deps, bossName = null) {
   if (!row) return "A run";
   const parts = [MODE_LABELS[row.kind] || "Run"];
   const name = row.kind === "sim_run" ? (row.trial ? deps.simTrialName?.(row.trial, row.difficulty, row.cycle) || row.trial : null)
-    : row.kind === "eggheist_match" ? row.difficulty : row.bossName;
+    : row.kind === "eggheist_match" ? row.difficulty : bossName ? bossName(row.bossId, row.bossName, row.cycle) : row.bossName;
   if (name) parts.push(String(name));
   if (row.kind === "sim_run" && Number.isFinite(Number(row.clearTimeS)) && row.clearTimeS !== null) {
     const seconds = Math.round(Number(row.clearTimeS));
@@ -490,10 +491,12 @@ async function listNotifications(request, env, deps) {
     ).bind(...keys, me).all();
     const runIds = [...new Set(list.map((thread) => thread.runId))];
     const { results: runs } = await env.DB.prepare(
-      `SELECT submission_id AS id, kind, boss_name AS bossName, trial, difficulty, cycle, score, clear_time_s AS clearTimeS
+      `SELECT submission_id AS id, kind, boss_id AS bossId, boss_name AS bossName, trial, difficulty, cycle, score, clear_time_s AS clearTimeS
        FROM leaderboard_submissions WHERE submission_id IN (${placeholders(runIds)})`,
     ).bind(...runIds).all();
     const runOf = new Map((runs || []).map((row) => [row.id, row]));
+    const bossName = (runs || []).some((row) => row.kind === "interlink_run" || row.kind === "interlink_best")
+      ? await deps.interlinkBossNames?.(env) : null;
     for (const thread of list) {
       const latestAt = Number(thread.latestAt);
       const readAfter = Math.max(Number(thread.sinceAt || 0), Number(thread.readAt || 0));
@@ -507,7 +510,7 @@ async function listNotifications(request, env, deps) {
         // "A", "A and B", "A and 2 others"
         actors: people.slice(0, people.length > 2 ? 1 : 2).map(shownName),
         others: people.length > 2 ? people.length - 1 : 0,
-        title: runTitle(runOf.get(thread.runId), deps),
+        title: runTitle(runOf.get(thread.runId), deps, bossName),
         at: latestAt,
         unread: news || Number(thread.markedUnread) === 1,
       });
@@ -545,8 +548,9 @@ export function commentsPath(pathname) {
     || pathname.startsWith("/api/admin/comments/");
 }
 
-// deps: index.js's own currentAccount, json, readJsonBody, browserWriteAllowed, roleOf(discordId, env) and
-// simTrialName(trial, difficulty, cycle).
+// deps: index.js's own currentAccount, json, readJsonBody, browserWriteAllowed, roleOf(discordId, env),
+// simTrialName(trial, difficulty, cycle) and interlinkBossNames(env), which gives (bossId, name, cycle) => the boss's
+// name as the boards give it.
 export async function commentsApi(request, env, deps) {
   if (!env.DB) return deps.json({ error: "Comments are unavailable." }, 503);
   const { pathname } = new URL(request.url);

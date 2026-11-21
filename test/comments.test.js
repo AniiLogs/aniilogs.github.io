@@ -341,3 +341,19 @@ test("a thread for each run kind that is a run, and a short title for each", asy
   const titles = (await list(env, "sender")).entries.map((entry) => entry.title).sort();
   assert.deepEqual(titles, ["Egg Heist · Hard · 1,200", "Holo-Battle Sim · 2:05"]);
 });
+
+test("a notification names a two-boss fight by both bosses (its run is stored under the first)", async () => {
+  const { env, sqlite } = await setup();
+  const t = Math.floor(realNow() / 1000);
+  const bosses = [{ id: "b0", name: "Left Boss" }, { id: "b1", name: "First Boss", second: { id: "b9", name: "Second Boss" } }, { id: "b2", name: "Right Boss" }];
+  sqlite.prepare("INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES ('4003', 1, ?, ?, ?, ?, ?)")
+    .run(t - 86400, t + 86400 * 5, JSON.stringify(bosses), IDS.dev, t);
+  addRun(sqlite, "RunPAIR00001", "sender");
+  sqlite.prepare("UPDATE leaderboard_submissions SET cycle = '4003', boss_name = 'First Boss' WHERE submission_id = 'RunPAIR00001'").run();
+  addRun(sqlite, "RunLEFT00001", "sender", { score: 21000 });
+  sqlite.prepare("UPDATE leaderboard_submissions SET cycle = '4003', boss_id = 'b0', boss_name = 'Left Boss' WHERE submission_id = 'RunLEFT00001'").run();
+  await post(env, "RunPAIR00001", "outsider", "two at once");
+  await post(env, "RunLEFT00001", "outsider", "nice");
+  const titles = (await list(env, "sender")).entries.map((entry) => entry.title).sort();
+  assert.deepEqual(titles, ["Interlink · First Boss + Second Boss · 98,450", "Interlink · Left Boss · 21,000"]);
+});

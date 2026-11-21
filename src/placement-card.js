@@ -372,6 +372,14 @@ function background(letters) {
   return p;
 }
 
+// The boss's name in full: the title's size (54) when it fits its room, else the next smaller (48, 42, 36) that does; a
+// name too long even at 36 is cut there. A two-boss fight ("Alpha Glameep + Alpha Jabster") needs the smaller sizes.
+export const CARD_TITLE_FONTS = Object.freeze(["title", "title48", "title42", "title36"]);
+// measure(fontName): the name's width in that size (Picture.measure)
+export function cardTitleFont(measure, room) {
+  return CARD_TITLE_FONTS.find((name) => measure(name) <= room) || CARD_TITLE_FONTS.at(-1);
+}
+
 export async function drawPlacementCard(model, letters) {
   const p = background(await atlas(letters));
   p.extra = letters.extra || null;                       // letters from the script packs: code point -> glyph
@@ -393,7 +401,9 @@ export async function drawPlacementCard(model, letters) {
   const placeColor = model.place === 1 ? COLORS.gold : model.place === 2 ? COLORS.silver : model.place === 3 ? COLORS.bronze : COLORS.soft;
   const placeWidth = p.text(`#${model.place}`, PAD - 6, 278, "place", placeColor);
   const textLeft = PAD + placeWidth + 34;
-  p.text(model.boss || "Interlink boss", textLeft, 214, "title", COLORS.ink, { max: W - PAD - textLeft });
+  const title = model.boss || "Interlink boss";
+  const titleFont = cardTitleFont((name) => p.measure(title, name), W - PAD - textLeft);
+  p.text(title, textLeft, 214, titleFont, COLORS.ink, { max: W - PAD - textLeft });
   p.text([model.slot, model.week].filter(Boolean).join(" · "), textLeft, 260, "small", COLORS.soft, { max: W - PAD - textLeft });
   p.text(`ranked by ${model.ladder}`, textLeft, 296, "small", COLORS.soft, { max: W - PAD - textLeft });
   // the players and their Avg DPS

@@ -636,13 +636,25 @@
     const short = (name) => String(name).replace(/^(Alpha|Omega) /u, "");
     return boss.second ? `${short(boss.name)} + ${short(boss.second.name)}` : short(boss.name);
   }
-  // How a two-boss fight's stars add up is only known from a live run (the API says when: rules.twoBossStarsConfirmed);
-  // until then its max stars and a kill's stars are marked unconfirmed.
-  function markPairs(data) {
-    for (const boss of data?.bosses || []) boss.unconfirmed = Boolean(boss.second) && data.rules?.twoBossStarsConfirmed !== true;
-    return data;
+  // The rules line over a week's boards. Live runs on the two-boss Center (week 4003) confirmed its cap (40) and earned
+  // all 40 stars with the second boss still up at the clock's end, so a kill's stars are only said for the other
+  // fights; the two-boss fight gets one sentence of its own. slots: rules.slots; bosses: the week's boards.
+  function rulesLine(caps, clear, slots, bosses) {
+    const pairs = bosses.filter((boss) => boss.second && boss.slotIndex != null);
+    const paired = (slot) => pairs.some((boss) => boss.slotIndex === slot);
+    const slotName = (slot) => slots[slot] || `boss ${slot + 1}`;
+    const parts = [];
+    if (caps.length) parts.push({ label: "Max stars ", text: caps.join(" / ") });
+    const kills = clear.map((value, slot) => ({ value, slot })).filter(({ slot }) => !paired(slot));
+    if (kills.length && !pairs.length) parts.push({ text: `A kill is ${new Set(clear).size === 1 ? clear[0] : clear.join(" / ")} stars` });
+    else if (kills.length && new Set(kills.map((kill) => kill.value)).size === 1) {
+      parts.push({ text: `A kill is ${kills[0].value} stars on the ${kills.map((kill) => slotName(kill.slot)).join(" and ")}` });
+    } else if (kills.length) parts.push({ text: `A kill is ${kills.map((kill) => `${kill.value} stars on the ${slotName(kill.slot)}`).join(", ")}` });
+    for (const boss of pairs) {
+      parts.push({ pair: true, text: `The ${boss.slot || slotName(boss.slotIndex)} is two bosses in one run: ${boss.name}, then ${boss.second.name}.` });
+    }
+    return parts;
   }
-  const UNCONFIRMED = "Two bosses in one run: how their stars add up isn't confirmed yet";
   function weekRange(week) {
     return `Week of ${shortDate(week.start)} – ${shortDate(week.end)}`;
   }
@@ -687,8 +699,7 @@
     return el("div", { class: className },
       el("div", {}, el("div", { class: "lb-slot", text: [boss.slot || "Boss", detail].filter(Boolean).join(" · ") }),
         el("h3", {}, bossName(boss), boss.level ? el("small", { text: ` · Lv ${boss.level}` }) : null)),
-      boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap),
-        boss.unconfirmed ? el("small", { class: "lb-unconfirmed", title: UNCONFIRMED, text: "unconfirmed" }) : null) : null);
+      boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap)) : null);
   }
   function failed() {
     els.summary.textContent = "The leaderboard could not be loaded.";
@@ -835,7 +846,7 @@
     if (state.server) ask.set("server", state.server);
     if (state.unlinked) ask.set("unlinked", "1");
     const response = await apiFetch(`/leaderboard/interlink?${ask}`);
-    const boss = response.ok ? markPairs(await response.json()).bosses?.[0] : null;
+    const boss = response.ok ? (await response.json()).bosses?.[0] : null;
     const old = els.interlink.querySelector(`[data-week="${CSS.escape(cycleId)}"][data-board-id="${CSS.escape(bossId)}"]`);
     if (!boss || !old) return;
     const menuFocused = old.querySelector(".lb-ladder select") === document.activeElement;
@@ -877,18 +888,16 @@
     const caps = data.rules?.starCaps || [];
     const clear = data.rules?.clearStars || [];
     const slotted = data.bosses.filter((boss) => boss.slotIndex != null);
-    // a two-boss fight's slot: its max stars and kill stars aren't confirmed yet
-    const pairs = slotted.filter((boss) => boss.unconfirmed);
-    const mark = (values) => values.map((value, slot) => (pairs.some((boss) => boss.slotIndex === slot) ? `${value} (unconfirmed)` : value)).join(" / ");
+    const rules = rulesLine(caps, clear, data.rules?.slots || [], slotted);
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" }, weekNav(data), last ? null : updatedLine(data.updatedAt)),
       el("p", { class: "lb-rules" },
-        caps.length ? el("span", {}, el("b", { text: "Max stars " }), mark(caps)) : null,
-        clear.length ? el("span", { text: `A kill is ${new Set(clear).size === 1 && !pairs.length ? clear[0] : mark(clear)} stars` }) : null,
-        ...pairs.map((boss) => el("span", { class: "lb-unconfirmed-note",
-          text: `${boss.slot || "This"} fight: ${boss.name}, then ${boss.second.name}, in one run. How its stars add up isn't confirmed yet.` })),
+        ...rules.filter((part) => !part.pair).map((part) => (part.label
+          ? el("span", {}, el("b", { text: part.label }), part.text) : el("span", { text: part.text }))),
         el("span", { text: "Best run per player per boss" }),
-        el("span", { text: "Ranked by score; pick another ladder in each board's menu" })),
+        el("span", { text: "Ranked by score; pick another ladder in each board's menu" }),
+        // a two-boss fight's sentence, on a line of its own
+        ...rules.filter((part) => part.pair).map((part) => el("span", { class: "lb-pair-note", text: part.text }))),
       el("div", { class: "lb-slot-switch", role: "tablist", "aria-label": "Boss" }, ...slotted.map((boss) => el("button", {
         type: "button", role: "tab", "data-slot-index": boss.slotIndex, "aria-selected": String(boss.slotIndex === state.slot),
         class: SLOT_CLASSES[boss.slotIndex], onclick: () => { state.slot = boss.slotIndex; showSlot(); },
@@ -934,7 +943,7 @@
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" },
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
-          el("span", { text: `${boss.slot ? `${boss.slot} boss` : boss.name} · ${weekRange(data.cycle)}` })),
+          el("span", { text: `${boss.slot ? `${boss.slot} ${boss.second ? "bosses" : "boss"}` : bossName(boss)} · ${weekRange(data.cycle)}` })),
         updatedLine(data.updatedAt)),
       bossHead(boss, `lb-full-head ${SLOT_CLASSES[boss.slotIndex] || ""}`));
     state.fullTeams = hasTeams(boss, ladder) && Boolean(boss.total);       // the page's Show switch applies
@@ -1070,7 +1079,7 @@
     if (state.unlinked) ask.set("unlinked", "1");
     const get = async (params) => {
       const response = await apiFetch(`/leaderboard/interlink?${params}`);
-      return response.ok ? markPairs(await response.json()) : null;
+      return response.ok ? response.json() : null;
     };
     if (board().custom === "season") {
       if (!state.season) {                                   // nothing picked: the current week's season and split

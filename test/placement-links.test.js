@@ -11,7 +11,7 @@ import worker, { lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
 import { realPlayersOf, slotIsBot } from "../src/bots.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
-import { CARD_HEIGHT, CARD_WIDTH, drawPlacementCard, packBlocksFor } from "../src/placement-card.js";
+import { CARD_HEIGHT, CARD_TITLE_FONTS, CARD_WIDTH, cardTitleFont, drawPlacementCard, packBlocksFor } from "../src/placement-card.js";
 
 const LETTERS = { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS };
 
@@ -186,6 +186,35 @@ test("links: the same placement gives one code, from either copy of the run; a r
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM placement_links").get().n, 4);
 });
 
+test("a link on a two-boss Center: the preview and the card name both bosses; a run that timed out at 3:00 says so", async () => {
+  const { env, sqlite } = await setup();
+  const now = Math.floor(Date.now() / 1000);
+  const bosses = [{ id: "80000109", name: "Omega Sherro" }, { id: "80000120", name: "Alpha Blazen", second: { id: "80000119", name: "Omega Tucking" } }, { id: "80000101", name: "Alpha Bouldus" }];
+  sqlite.prepare("INSERT INTO interlink_cycles (id, season, start_at, end_at, bosses_json, updated_by, updated_at) VALUES ('4003', 1, ?, ?, ?, 'x', ?)")
+    .run(now - 86400, now + 86400 * 5, JSON.stringify(bosses), now);
+  const who = await player(env, sqlite, "Larkspur");
+  const party = [["Larkspur", false, 30000], ["Flora", true], ["Mario", true], ["Tammy", true]];
+  const body = { kind: "interlink_run", clientRunId: "pair", cycle: "4003", boss: { id: "80000120", name: "Alpha Blazen", level: 60 }, score: 52000, stars: 40,
+    clearTimeS: 180, cleared: false, teamDps: 60000, gameUid: who.gameUid, playedAt: now - 600,
+    players: party.map(([name, ai, avgDps]) => ({ name, ai, ...(name === who.name ? { self: true } : {}), ...(avgDps ? { avgDps } : {}) })),
+    extra: { lineup: party.map(([name, ai], slot) => ({ slot: slot + 1, name, ai, ...(name === who.name ? { self: true } : {}) })) } };
+  const form = new FormData();
+  form.set("submission", JSON.stringify(body));
+  form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token: who.token, method: "POST", form })).status, 201);
+  const { code } = await (await createLink(env, { run: idOf(sqlite, "pair"), ladder: "score" })).json();
+  const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
+  const tag = (property) => html.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)">`, "u"))?.[1];
+  assert.match(tag("og:title"), /^#1 on Score · Alpha Blazen \+ Omega Tucking · Week of /u);
+  assert.match(tag("og:description"), /Timed Out: 3:00\. .*Holo-Battle Interlink, Center boss\.$/u);
+  // a person lands on that board, which names both bosses too
+  const person = await call(env, `/${code}`, { ua: BROWSER_UA });
+  const to = new URL(person.headers.get("location"));
+  assert.deepEqual([to.searchParams.get("week"), to.searchParams.get("boss")], ["4003", "80000120"]);
+  const landed = (await (await call(env, `/api/leaderboard/interlink?cycle=4003&boss=80000120`)).json()).bosses[0];
+  assert.deepEqual([landed.name, landed.second?.name], ["Alpha Blazen", "Omega Tucking"]);
+});
+
 test("opening a link: a crawler gets the preview tags with the overall place; a person goes to the boards with the run open", async () => {
   const { env, sqlite } = await board();
   const duo = idOf(sqlite, "duo-c");
@@ -293,8 +322,26 @@ test("the card drawing: every model shape draws, names in letters the card lacks
   }
 });
 
+test("the card's title: a boss name keeps the full size when it fits; a two-boss name steps down to fit, never cut", () => {
+  const width = (text, font) => [...text].reduce((sum, char) => sum + CARD_FONTS[font].glyphs[char][0] / 16, 0);
+  const room = (place) => CARD_WIDTH - 64 - (64 + width(`#${place}`, "place") + 34);      // drawPlacementCard's layout
+  const pick = (name, place) => cardTitleFont((font) => width(name, font), room(place));
+  // every single name the weeks have had fits at 54 even beside a three-digit place: those cards are unchanged
+  for (const name of ["Alpha Scorchhowl", "Alpha Luminelle", "Alpha Sugartini", "Omega Infergon", "Alpha Magmarex"]) {
+    for (const place of [1, 88, 125]) assert.equal(pick(name, place), "title", `${name} #${place}`);
+  }
+  // the stored two-boss weeks (4003-4005): 48 beside #1, 42 beside #88, 36 beside #125, and always in full
+  for (const name of ["Alpha Blazen + Omega Tucking", "Alpha Glameep + Alpha Jabster", "Alpha Grizbo + Omega Jeburst"]) {
+    assert.deepEqual([1, 88, 125].map((place) => pick(name, place)), ["title48", "title42", "title36"], name);
+    for (const place of [1, 88, 125]) assert.ok(width(name, pick(name, place)) <= room(place), `${name} #${place} fits`);
+  }
+  // past the smallest size it stays at 36 (and is cut there)
+  assert.equal(pick("Alpha Glameep + Alpha Jabster", 12345), "title36");
+  assert.deepEqual(CARD_TITLE_FONTS.map((font) => CARD_FONTS[font].size), [54, 48, 42, 36]);
+});
+
 test("the card's name and text letter sets draw every printable ASCII character", () => {
-  for (const font of ["title", "body", "small"]) {
+  for (const font of ["title", "body", "small", "title48", "title42", "title36"]) {
     const missing = [];
     for (let code = 0x20; code <= 0x7e; code += 1) if (!CARD_FONTS[font].glyphs[String.fromCharCode(code)]) missing.push(String.fromCharCode(code));
     assert.deepEqual(missing, [], font);
