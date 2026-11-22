@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { copiesAgree, copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "../src/run-checks.js";
-import { slotIsBot } from "../src/bots.js";
+import { partyBySeat, slotIsBot } from "../src/bots.js";
 
 // made-up rows and limits only
 const copy = (id, sender, score, stars = 20, extra = {}) => ({ id, sender, score, stars, clearTimeS: 180, players: [], ...extra });
@@ -241,4 +241,22 @@ test("Interlink limit preview: each run once across its copies, runs without Avg
   // without candidate limits: the distributions, nothing flagged
   const none = limitPreview(rows, {}, slotIsBot).interlink;
   assert.deepEqual([none.limits, none.runsFlagged, none.flagged, none.runs, none.runsChecked], [null, 0, {}, 4, 3]);
+});
+
+test("Interlink Avg DPS per CP: on a four-card run, each card's CP is its own seat's (partyBySeat), whatever name the entry carries", () => {
+  // rotated names: the Party data is right for each seat, the names one seat along
+  const players = [{ name: "Ansel", avgDps: 3000 }, { name: "Bodie", avgDps: 5600 }, { name: "Corin", avgDps: 3802 }, { name: "Delph", avgDps: 6000 }];
+  const lineup = [{ slot: 0, name: "Ansel", cp: 3971 }, { slot: 1, name: "Delph", cp: 3686 }, { slot: 2, name: "Bodie", cp: 3802 }, { slot: 3, name: "Corin", cp: 4088 }];
+  const row = { players, lineup, teamDps: 18402, meterDps: null };
+  const limits = secret({ maxAvgDpsPerCp: 1.5 });
+  // by seat: Bodie's 5,600 on seat 2's CP 3,686 is over; Delph's 6,000 on seat 4's CP 4,088 isn't
+  assert.deepEqual(interlinkDpsChecks(row, limits, slotIsBot, partyBySeat).map((flag) => [flag.card, flag.cp]), [[2, 3686]]);
+  // by name (no partyOf, as before): the other way round
+  assert.deepEqual(interlinkDpsChecks(row, limits, slotIsBot).map((flag) => [flag.card, flag.cp]), [[4, 3686]]);
+  // fewer than four cards: by name, as before
+  assert.deepEqual(interlinkDpsChecks({ ...row, players: players.slice(1) }, limits, slotIsBot, partyBySeat).map((flag) => [flag.card, flag.cp]), [[3, 3686]]);
+  // the limit preview counts the same way
+  const preview = limitPreview([{ kind: "interlink_run", submissionId: "r1", createdAt: 1, players, extra: { lineup }, teamDps: 18402, meterDps: null }],
+    { interlink: { maxAvgDpsPerCp: 1.5 } }, slotIsBot, partyBySeat);
+  assert.equal(preview.interlink.avgDpsPerCp.max, 1.5);                     // by name it would be 1.6 (6,000 / 3,686)
 });

@@ -178,8 +178,10 @@ const aiFlag = (card) => Boolean(card.ai);
 // cards, sum }: read, whether any card's Avg DPS was read (an unread card is left out; with none read there is nothing
 // to check); sum, the read cards' Avg DPS (bots included; a lower bound when a card is unread, so "above the limit"
 // still holds); cards, the real players' { card, avgDps, cp }. A card is named by its 1-based position in the full
-// players list (card), never by its name or UID.
-function interlinkDps(row, limits, isBot = aiFlag) {
+// players list (card), never by its name or UID. A card's CP: from partyOf(players, lineup) -> [entry | null] per card
+// when it gives an answer (the site passes bots.js partyBySeat: on a four-card run, the Party entry of the card's own
+// seat, whatever name it carries); else the one lineup entry of the card's name.
+function interlinkDps(row, limits, isBot = aiFlag, partyOf = null) {
   const players = Array.isArray(row?.players) ? row.players : [];
   const readCards = players.map((card, index) => ({ card, index, avgDps: cardDps(card) })).filter((item) => item.avgDps !== null);
   if (!readCards.length) return { flags: [], read: false, meterFarOff: false, cards: [], sum: null };
@@ -187,8 +189,10 @@ function interlinkDps(row, limits, isBot = aiFlag) {
   const meter = Number(row.meterDps);
   const meterFarOff = row.meterDps != null && Number.isFinite(meter) && meter > 0 && (sum > meter * MISREAD_FACTOR || sum * MISREAD_FACTOR < meter);
   const lineup = (Array.isArray(row.lineup) ? row.lineup : []).filter(objectOf);
+  const seated = typeof partyOf === "function" ? partyOf(players, lineup) : null;
   const cards = readCards.filter(({ card }) => !isBot(card, lineup)).map(({ card, index, avgDps }) => {
-    const entries = fold(card.name) ? lineup.filter((entry) => fold(entry.name) === fold(card.name)) : [];
+    const entries = Array.isArray(seated) ? (seated[index] ? [seated[index]] : [])
+      : fold(card.name) ? lineup.filter((entry) => fold(entry.name) === fold(card.name)) : [];
     const cp = entries.length === 1 && entries[0].cp != null ? Number(entries[0].cp) : NaN;
     return { card: index + 1, avgDps, cp: Number.isFinite(cp) && cp > 0 ? cp : null };
   });
@@ -204,8 +208,8 @@ function interlinkDps(row, limits, isBot = aiFlag) {
   }
   return { flags: meterFarOff ? flags.map((flag) => ({ ...flag, meterDps: meter, cardsSum: sum })) : flags, read: true, meterFarOff, cards, sum };
 }
-export function interlinkDpsChecks(row, limits, isBot = aiFlag) {
-  return limits ? interlinkDps(row, limits, isBot).flags : [];
+export function interlinkDpsChecks(row, limits, isBot = aiFlag, partyOf = null) {
+  return limits ? interlinkDps(row, limits, isBot, partyOf).flags : [];
 }
 
 // ---------------------------------------------------------------- players' copies of one Interlink run
@@ -418,14 +422,14 @@ function oneCopyEach(rows) {
 }
 // rows: stored rows ({ kind, score, clearTimeS, cleared, difficulty, defeats, extra }; an Interlink run also
 // { submissionId, createdAt, players, teamDps, meterDps }); limits: candidate limits as the secrets would hold them
-// ({ egg, screen, interlink }); isBot: as for interlinkDpsChecks. Counts and distributions only.
-export function limitPreview(rows, limits = {}, isBot = aiFlag) {
+// ({ egg, screen, interlink }); isBot, partyOf: as for interlinkDpsChecks. Counts and distributions only.
+export function limitPreview(rows, limits = {}, isBot = aiFlag, partyOf = null) {
   const egg = eggCheckLimits({ EGG_CHECK_LIMITS: JSON.stringify(limits.egg ?? null) });
   const screen = screenCheckLimits({ SCREEN_CHECK_LIMITS: JSON.stringify(limits.screen ?? null) });
   const interlink = interlinkCheckLimits({ INTERLINK_CHECK_LIMITS: JSON.stringify(limits.interlink ?? null) });
   const interlinkRows = rows.filter((row) => row.kind === "interlink_run");
   const runs = oneCopyEach(interlinkRows);
-  const checked = runs.map((row) => interlinkDps({ players: row.players, lineup: objectOf(row.extra)?.lineup, teamDps: row.teamDps, meterDps: row.meterDps }, interlink, isBot));
+  const checked = runs.map((row) => interlinkDps({ players: row.players, lineup: objectOf(row.extra)?.lineup, teamDps: row.teamDps, meterDps: row.meterDps }, interlink, isBot, partyOf));
   const kept = checked.filter((result) => result.read);
   const cards = kept.flatMap((result) => result.cards);
   const matches = rows.filter((row) => row.kind === "eggheist_match");

@@ -2,7 +2,7 @@
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
-import { botSql, botsOf, cardSeats, lineupSeats, nameSkeleton, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
+import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, partyBySeat, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
@@ -2049,15 +2049,28 @@ export function lineupSlots(lineup, players, made = new Map()) {
     return { ...entry, slot: seat - 1 };
   });
 }
+// A run's lineup as it is shown with its cards at hand (merged: the lineup after mergedLineup; null: no Party read). A
+// four-card run: rebuilt by seat (lineupBySeat: card s's player with seat s's Party data), withDps adding each card's
+// own Average DPS. Fewer cards: as before (withDps: lineupDps then lineupWithCards; else lineupSlots).
+function seatedLineup(merged, players, withDps = false) {
+  if (!Array.isArray(merged)) return merged;
+  const bySeat = lineupBySeat(players, merged);
+  if (bySeat) {
+    if (!withDps) return bySeat;
+    const dps = (card) => (Number.isInteger(card?.avgDps) && card.avgDps > 0 ? card.avgDps : null);
+    return bySeat.map((entry, index) => ({ ...entry, avgDps: dps(players[index]) }));
+  }
+  return withDps ? lineupWithCards(lineupDps(merged, players), players) : lineupSlots(merged, players);
+}
 // The run's players as the run viewer lists them (and the placement card): the Party screen's lineup filled in from every
-// copy (mergedLineup), each with their Avg DPS (lineupDps), and players only the Battle Data cards had (lineupWithCards).
-// extra: the copy's parsed extra_json; playersJson its players_json. Null when the copy has no Party read.
+// copy (mergedLineup), then seatedLineup (by seat on a four-card run; else each with their Avg DPS (lineupDps), and
+// players only the Battle Data cards had (lineupWithCards)). extra: the copy's parsed extra_json; playersJson its
+// players_json. Null when the copy has no Party read.
 async function runLineup(env, submissionId, extra, playersJson) {
   const copies = extra?.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
   const players = parseJsonColumn(playersJson);
-  // each player's Average DPS off this copy's Battle Data card (on the boards already), where the card is surely theirs
-  return lineupWithCards(lineupDps(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
-    players), players);
+  return seatedLineup(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
+    players, true);
 }
 
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
@@ -2215,7 +2228,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles, extra.lineup) || [],
-        lineup: lineupSlots(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)),
+        lineup: seatedLineup(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)),
         // the buffs the party went in with (the leader picks them on the Party screen)
         buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
@@ -4442,7 +4455,7 @@ async function reviewOnlyCheck(env, submissionId, record, previous) {
     const extra = parseJsonColumn(record.extraJson) || {};
     const limits = interlinkCheckLimits(env);
     flags.push(...interlinkDpsChecks({ players: parseJsonColumn(record.playersJson) || [], lineup: extra.lineup, teamDps: record.teamDps, meterDps: record.meterDps },
-      limits, slotIsBot));
+      limits, slotIsBot, partyBySeat));
     // the fight log's figures (stored with this send, or kept from an earlier one)
     flags.push(...fightLogChecks(extra.fightStats, limits));
   }
@@ -4649,7 +4662,7 @@ async function previewRunCheckLimits(request, env) {
      WHERE kind IN ('eggheist_match', 'eggheist_season', 'interlink_run') OR (json_valid(extra_json) AND json_extract(extra_json, '$.screenCheck') IS NOT NULL)`,
   ).all();
   const rows = (results || []).map(({ extraJson, playersJson, ...row }) => ({ ...row, extra: parseJsonColumn(extraJson) || {}, players: parseJsonColumn(playersJson) || [] }));
-  return json(limitPreview(rows, { egg: body.egg ?? null, screen: body.screen ?? null, interlink: body.interlink ?? null }, slotIsBot));
+  return json(limitPreview(rows, { egg: body.egg ?? null, screen: body.screen ?? null, interlink: body.interlink ?? null }, slotIsBot, partyBySeat));
 }
 
 // POST /api/admin/run-checks/<id>/read (administrators and the owner): reads one Interlink run's pictures again now,
@@ -6804,7 +6817,7 @@ async function leaderboardEntries(request, env) {
   const profiles = await partyProfiles(env, results || []);
   // a shared run's lineup from every copy of it (mergedLineup), as the history and the proof viewer show it
   const copiesOf = await sharedCopies(env, (results || []).map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
-  const lineupOf = (row, lineup) => lineupSlots(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
+  const lineupOf = (row, lineup) => seatedLineup(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
     .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup)), parseJsonColumn(row.players_json));
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
   const weeks = kind === "interlink_run" || kind === "interlink_best" ? await interlinkCycles(env) : [];
@@ -7845,7 +7858,7 @@ const placementLinks = createPlacementLinks({
     if (!row) return null;
     // a run with no Party read: its Battle Data cards alone
     return await runLineup(env, submissionId, parseJsonColumn(row.extraJson) || {}, row.playersJson)
-      ?? lineupWithCards([], parseJsonColumn(row.playersJson));
+      ?? seatedLineup([], parseJsonColumn(row.playersJson), true);
   },
 });
 
