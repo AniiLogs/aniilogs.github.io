@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { deflateRawSync, inflateSync } from "node:zlib";
 import test from "node:test";
 
-import worker, { lineupWithCards } from "../src/index.js";
+import worker, { lineupSlots, lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
 import { botsOf, cardSeats, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, realPlayersOf, slotIsBot } from "../src/bots.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
@@ -663,6 +663,32 @@ test("every player of the run on the card: by Avg DPS, none last, a bot marked A
   assert.deepEqual(cardPlayers({ ...team, lineup: null, members: [{ player: "Aster", avgDps: 5 }] }).map((p) => p.name), ["Aster"]);
 });
 
+test("the viewer's lineup: an entry without a slot takes its card's seat, only when no entry holds it; a slot is never moved", () => {
+  const cards = (...names) => names.map((name) => ({ name, avgDps: 1000 + name.length }));
+  const slots = (lineup) => lineup.map((p) => [p.name, p.slot ?? null]);
+  // the real shape: Party entries for slots 0-2, the fourth player only on the cards (4th column): slot 3, nothing else moves
+  const party = [{ slot: 0, name: "Aster" }, { slot: 1, name: "Briar" }, { slot: 2, name: "Cobalt" }];
+  assert.deepEqual(slots(lineupWithCards(party, cards("Aster", "Briar", "Cobalt", "Dorian"))),
+    [["Aster", 0], ["Briar", 1], ["Cobalt", 2], ["Dorian", 3]]);
+  // its column is the 2nd: slot 1, the entries' own slots kept even where the columns disagree
+  assert.deepEqual(slots(lineupWithCards([{ slot: 0, name: "Aster" }, { slot: 2, name: "Briar" }, { slot: 3, name: "Cobalt" }],
+    cards("Aster", "Dorian", "Briar", "Cobalt"))), [["Aster", 0], ["Briar", 2], ["Cobalt", 3], ["Dorian", 1]]);
+  // the lineup already holds that seat's slot: the card's entry stays without one
+  assert.deepEqual(slots(lineupWithCards([{ slot: 0, name: "Aster" }, { slot: 1, name: "Briar" }, { slot: 3, name: "Cobalt" }],
+    cards("Aster", "Briar", "Cobalt", "Dorian"))), [["Aster", 0], ["Briar", 1], ["Cobalt", 3], ["Dorian", null]]);
+  // a Party entry without a slot: its card by name
+  assert.deepEqual(slots(lineupSlots([{ name: "Aster" }, { slot: 1, name: "Briar" }], cards("Aster", "Briar", "Cobalt", "Dorian"))),
+    [["Aster", 0], ["Briar", 1]]);
+  // three cards: the Party screen's steps; here no seat is left, and a near name's slot is its entry's already
+  assert.deepEqual(slots(lineupWithCards([{ slot: 0, name: "Aster" }, { slot: 1, name: "Briar" }], cards("Aster", "Briar", "Quill"))),
+    [["Aster", 0], ["Briar", 1], ["Quill", null]]);
+  assert.deepEqual(slots(lineupWithCards([{ slot: 0, name: "Aster" }, { slot: 2, name: "Marigoxd" }], cards("Aster", "Marigold"))),
+    [["Aster", 0], ["Marigoxd", 2], ["Marigold", null]]);
+  // no cards, or no lineup: as it was
+  assert.deepEqual(lineupSlots([{ name: "Aster" }], null), [{ name: "Aster" }]);
+  assert.equal(lineupSlots(null, cards("Aster")), null);
+});
+
 test("a one-player ladder's card marks whose placement it is and lists the other three", () => {
   const lineup = [{ name: "Aster", avgDps: 9000 }, { name: "Briar", avgDps: 12000 }, { name: "Flora", ai: true, avgDps: null }, { name: "Cobalt", avgDps: 3000 }];
   const rows = cardPlayers({ ladder: PLACEMENT_LADDERS.dps, lead: { player: "Aster", avgDps: 9000 }, members: [], lineup });
@@ -683,6 +709,8 @@ test("the run viewer lists a player only the Battle Data cards had, and the link
   const list = await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json();
   assert.deepEqual(list.lineup.map((p) => [p.name, p.avgDps ?? null, Boolean(p.ai)]),
     [["Ashwick", 20000, false], ["Fernley", 15000, false], ["Flora", null, true], ["Gorse", 9000, false]]);
+  // Gorse's entry, made from the third card, takes that card's slot: the Party picture's lead is Gorse's own
+  assert.deepEqual(list.lineup.map((p) => p.slot ?? null), [0, 1, 3, 2]);
   const { code } = await (await createLink(env, { run: id, ladder: "score" })).json();
   const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
   assert.match(html, /<meta property="og:description" content="Ashwick, Fernley, Gorse and Flora \(AI\): 31,000 with 30 stars\. Trio: three players and a bot\./u);

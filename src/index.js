@@ -2010,6 +2010,7 @@ export function lineupWithCards(lineup, players) {
   const shown = lineup.filter((entry) => entry && (entry.name || entry.aniimo));
   const taken = new Set(shown.map((entry) => entry.avgDps).filter((dps) => dps != null));
   const out = [...lineup];
+  const made = new Map();                                                // an entry made from a card -> that card
   let count = shown.length;
   for (const card of cards) {
     if (count >= 4) break;
@@ -2019,9 +2020,34 @@ export function lineupWithCards(lineup, players) {
     if (dpsOf(card) !== null && taken.has(dpsOf(card))) continue;                     // its card is already on a slot
     const named = typeof card.name === "string" && card.name.trim() && !card.unsettled;
     out.push({ ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }), ai: bot, avgDps: dpsOf(card), fromBattleData: true });
+    made.set(out[out.length - 1], card);
     count += 1;
   }
-  return out;
+  return lineupSlots(out, players, made);
+}
+// The Party picture's card for every viewer entry: an entry with no slot 0-3 (one made from a Battle Data card, or a
+// Party read without one) takes its card's seat (cardSeats) as slot = seat - 1, only while no other entry holds that
+// slot. Its card: the card it was made from (made: entry -> card), else the one card whose name reads the same
+// (nameSkeleton). A slot an entry has is never changed, and the order stays. Without one the viewer shows no lead.
+export function lineupSlots(lineup, players, made = new Map()) {
+  if (!Array.isArray(lineup)) return lineup;
+  const list = Array.isArray(players) ? players : [];
+  const seats = cardSeats(list, lineup);
+  const usable = (slot) => Number.isInteger(slot) && slot >= 0 && slot <= 3;
+  const held = new Set(lineup.map((entry) => entry?.slot).filter(usable));
+  const key = (name) => (typeof name === "string" && name.trim() ? nameSkeleton(name) : null);
+  return lineup.map((entry) => {
+    if (!entry || typeof entry !== "object" || usable(entry.slot)) return entry;
+    let index = made.has(entry) ? list.indexOf(made.get(entry)) : -1;
+    if (index < 0 && key(entry.name)) {
+      const same = list.map((card, at) => ({ card, at })).filter(({ card }) => card && typeof card === "object" && key(card.name) === key(entry.name));
+      if (same.length === 1) index = same[0].at;
+    }
+    const seat = index >= 0 ? seats[index] : null;
+    if (!seat || held.has(seat - 1)) return entry;
+    held.add(seat - 1);
+    return { ...entry, slot: seat - 1 };
+  });
 }
 // The run's players as the run viewer lists them (and the placement card): the Party screen's lineup filled in from every
 // copy (mergedLineup), each with their Avg DPS (lineupDps), and players only the Battle Data cards had (lineupWithCards).
@@ -2189,7 +2215,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles, extra.lineup) || [],
-        lineup: mergedLineup(publicLineup(extra.lineup), copies),
+        lineup: lineupSlots(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)),
         // the buffs the party went in with (the leader picks them on the Party screen)
         buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
@@ -6778,8 +6804,8 @@ async function leaderboardEntries(request, env) {
   const profiles = await partyProfiles(env, results || []);
   // a shared run's lineup from every copy of it (mergedLineup), as the history and the proof viewer show it
   const copiesOf = await sharedCopies(env, (results || []).map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
-  const lineupOf = (row, lineup) => mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
-    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup));
+  const lineupOf = (row, lineup) => lineupSlots(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
+    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup)), parseJsonColumn(row.players_json));
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
   const weeks = kind === "interlink_run" || kind === "interlink_best" ? await interlinkCycles(env) : [];
   return json({
