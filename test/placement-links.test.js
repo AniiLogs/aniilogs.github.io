@@ -9,7 +9,9 @@ import test from "node:test";
 
 import worker, { lineupSlots, lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
-import { botsOf, cardSeats, lineupBySeat, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, partyBySeat, realPlayersOf, slotIsBot } from "../src/bots.js";
+import { botsOf, cardSeats, LINEUP_MIN_MATCHES, lineupBelongs, lineupBySeat, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, partyBySeat, realPlayersOf, slotIsBot } from "../src/bots.js";
+import { interlinkCheckLimits, interlinkDpsChecks } from "../src/run-checks.js";
+const interlinkCheckLimitsOf = (value) => interlinkCheckLimits({ INTERLINK_CHECK_LIMITS: JSON.stringify(value) });
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
 import { CARD_HEIGHT, CARD_TITLE_FONTS, CARD_WIDTH, cardTitleFont, drawPlacementCard, packBlocksFor } from "../src/placement-card.js";
 
@@ -755,6 +757,38 @@ test("the viewer and the boards' run list show a four-card run by seat; a three-
     lineup: [{ slot: 0, name: "Ansel", self: true, aniimo: "Hollow", cp: 3971 }, { slot: 1, name: "Corin", aniimo: "Wisp", cp: 3686 }, { slot: 2, name: "Bodie", aniimo: "Lumen", cp: 3802 }] });
   const three = await (await call(env, `/api/leaderboard/submissions/${idOf(sqlite, "three")}/evidence?shot=list`)).json();
   assert.deepEqual(three.lineup.map((p) => [p.slot, p.aniimo ?? null]), [[0, "Hollow"], [1, "Wisp"], [2, "Lumen"]]);
+});
+
+test("a lineup that is another lobby's (fewer than two of its names on the cards) gives no Party data and no slots", () => {
+  const card = (name, more = {}) => ({ name, ...more });
+  assert.equal(LINEUP_MIN_MATCHES, 2);
+  // the stale shape: none of its names on the cards, CP on every entry (three of them on bot cards' seats)
+  const cards = [card("Ansel", { self: true }), card("Flora", { ai: true }), card("Mario", { ai: true }), card("Tammy", { ai: true })];
+  const stale = ["Wexley", "Xylo", "Yarrow", "Zinnia"].map((name, slot) => ({ slot, name, aniimo: "Gale", cp: 3000 + slot }));
+  assert.equal(lineupBelongs(cards, stale), false);
+  assert.deepEqual(partyBySeat(cards, stale), [null, null, null, null]);
+  assert.deepEqual(lineupBySeat(cards, stale), [{ name: "Ansel", ai: false, self: true }, { name: "Flora", ai: true }, { name: "Mario", ai: true }, { name: "Tammy", ai: true }]);
+  // the per-CP check finds no CP for it
+  const limits = interlinkCheckLimitsOf({ maxAvgDpsPerCp: 0.1 });
+  const row = { players: cards.map((c) => ({ ...c, avgDps: 9000 })), lineup: stale, teamDps: 36000, meterDps: null };
+  assert.deepEqual(interlinkDpsChecks(row, limits, slotIsBot, partyBySeat), []);
+  // one name of four on the cards: still not this run's; two: this run's, by seat
+  const four = [card("Ansel"), card("Bodie"), card("Corin"), card("Delph")];
+  const one = [{ slot: 0, name: "Ansel", cp: 1 }, { slot: 1, name: "Xylo", cp: 2 }, { slot: 2, name: "Yarrow", cp: 3 }, { slot: 3, name: "Zinnia", cp: 4 }];
+  assert.equal(lineupBelongs(four, one), false);
+  assert.deepEqual(lineupBySeat(four, one).map((entry) => [entry.slot ?? null, entry.cp ?? null]), [[null, null], [null, null], [null, null], [null, null]]);
+  const two = [{ slot: 0, name: "Ansel", cp: 1 }, { slot: 1, name: "Xylo", cp: 2 }, { slot: 2, name: "C0rin", cp: 3 }, { slot: 3, name: "Zinnia", cp: 4 }];
+  assert.equal(lineupBelongs(four, two), true);                              // a look-alike spelling counts (skeleton)
+  assert.deepEqual(lineupBySeat(four, two).map((entry) => [entry.slot, entry.cp]), [[0, 1], [1, 2], [2, 3], [3, 4]]);
+  // the shapes found before all vouch for their run: rotated (4 names), bots swapped (4), misspelt and missing (2)
+  assert.equal(lineupBelongs(four, [{ slot: 0, name: "Ansel" }, { slot: 1, name: "Delph" }, { slot: 2, name: "Bodie" }, { slot: 3, name: "Corin" }]), true);
+  assert.equal(lineupBelongs([card("Pell"), card("Mario"), card("Tammy"), card("Flora")],
+    [{ slot: 0, name: "Pell" }, { slot: 1, name: "Flora" }, { slot: 2, name: "Tammy" }, { slot: 3, name: "Mario" }]), true);
+  assert.equal(lineupBelongs([card("Ansel"), card("Z"), card("Corin"), card("Delph")],
+    [{ slot: 0, name: "Ansel" }, { slot: 2, name: "Cx" }, { slot: 3, name: "Delph" }]), true);
+  // no named entry at all: nothing to judge (null), slots kept and no Party data
+  assert.equal(lineupBelongs(four, []), null);
+  assert.deepEqual(lineupBySeat(four, null).map((entry) => entry.slot), [0, 1, 2, 3]);
 });
 
 test("a one-player ladder's card marks whose placement it is and lists the other three", () => {
