@@ -1,7 +1,7 @@
 /* Leaderboards page. Colors come from the shared theme variables set by theme-shell.js. */
 /* one column that never grows past the screen: a wide table scrolls inside its panel instead of widening the page.
    Wider than the site's other pages (styles.css: min(1180px, 92vw)), so three boards side by side get room on a wide
-   screen; 900px and under (one board at a time) keeps the site's width. From 1644px the site's sidebar docks in the
+   screen; 900px and under keeps the site's width (one board at a time starts at 1200px). From 1644px the site's sidebar docks in the
    margin left of the page (site-sidebar.js): the page leaves that margin room for a 200px column (+ 16px either side),
    and the sidebar is told the margin it really has (--site-margin, site-sidebar.css), so the two never overlap. */
 :root { --lb-page-width: min(1560px, 94vw); }
@@ -367,9 +367,11 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-bar { display: block; height: 4px; margin-top: 4px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--line) 70%, transparent); }
 .lb-bar i { display: block; height: 100%; background: linear-gradient(90deg, #e8b923, #ffd98a); }
 
-/* Below 900px (phones, small windows and aLogs' narrower sizes): one boss at a time, picked with Left / Center / Right */
+/* From 1200px down (phones, tablets, small windows and aLogs' narrower sizes): one boss at a time, picked with Left /
+   Center / Right. Three boards side by side are under about 370px each there, too narrow for a line per seat (names
+   were cut to a few letters); View all switches to its stacked layout at the same width. */
 .lb-slot-switch { display: none; }
-@media (max-width: 900px) {
+@media (max-width: 1200px) {
   .lb-bosses { grid-template-columns: minmax(0, 1fr); }
   .lb-boss[data-shown="false"] { display: none; }
   .lb-slot-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; }
@@ -377,6 +379,9 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
     font-weight: 900; padding: 0.45rem 0.25rem; cursor: pointer; }
   .lb-slot-switch button small { display: block; overflow: hidden; font-size: 0.7rem; font-weight: 700; opacity: 0.85; text-overflow: ellipsis; white-space: nowrap; }
   .lb-slot-switch button[aria-selected="true"] { background: var(--slot, var(--accent)); color: #10181b; }
+}
+/* Narrow screens: the bars above the boards stack, and the tables fold their extra columns */
+@media (max-width: 900px) {
   .lb-subbar { flex-direction: column; align-items: stretch; }
   .lb-week-nav { justify-content: space-between; }
   .lb-split { display: grid; }
