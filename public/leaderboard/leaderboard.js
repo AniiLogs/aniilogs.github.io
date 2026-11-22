@@ -973,8 +973,8 @@
     }
     showRowsPick();
   }
-  // the phone width (leaderboard.css: one boss at a time from 900px down): which boards are on screen changes
-  window.matchMedia?.("(max-width: 900px)").addEventListener?.("change", () => showRowsPick());
+  // the one-board width (leaderboard.css: one boss at a time from 1200px down): which boards are on screen changes
+  window.matchMedia?.("(max-width: 1200px)").addEventListener?.("change", () => showRowsPick());
   function weekNav(data) {
     const now = Date.now() / 1000;
     const weeks = data.weeks.filter((week) => week.start <= now || week.id === data.cycle.id);   // in time order

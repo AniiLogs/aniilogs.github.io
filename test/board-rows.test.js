@@ -94,8 +94,8 @@ test("the boards page is wider on a wide screen and leaves the docked sidebar it
   assert.match(css, /:root \{ --lb-page-width: min\(1560px, 94vw\); \}/u);
   assert.match(css, /@media \(min-width: 1644px\) \{\s*:root \{ --lb-page-width: max\(1180px, min\(1560px, 100vw - 464px\)\); \}\s*body \.site-sidebar\.is-docked \{ --site-margin: calc\(\(100vw - var\(--lb-page-width\)\) \/ 2\); \}/u);
   const page = read("leaderboard/index.html");
-  assert.match(page, /leaderboard\.css\?v=0\.3\.18-seats-from-0/u);
-  assert.match(page, /leaderboard\.js\?v=0\.3\.33-seats-from-0/u);
+  assert.match(page, /leaderboard\.css\?v=0\.3\.19-one-board-1200/u);
+  assert.match(page, /leaderboard\.js\?v=0\.3\.34-one-board-1200/u);
 });
 
 test("View all, Teams: one block per team, a row per seat; the place and the run's figures merged after a divider; lines end there", () => {
@@ -154,4 +154,13 @@ test("View all on a phone: a block per team, the run's values stacked on the rig
   // thumb-sized buttons on phones
   assert.match(css, /\.lb-stack-icons > \.lb-proof, \.lb-stack-icons > \.lb-link \{ width: 28px; height: 28px;/u);
   assert.match(css, /\.lb-row-icons > \.lb-proof, \.lb-row-icons > \.lb-link, \.lb-row-icons > \.lb-row-when \{ width: 30px; height: 30px; \}/u);
+});
+
+test("the boards are one at a time from 1200px down, the same width at which View all stacks", () => {
+  // three boards side by side below that are too narrow for a line per seat (names were cut to a few letters)
+  assert.match(css, /@media \(max-width: 1200px\) \{\s*\.lb-bosses \{ grid-template-columns: minmax\(0, 1fr\); \}\s*\.lb-boss\[data-shown="false"\] \{ display: none; \}\s*\.lb-slot-switch \{ display: grid;/u);
+  assert.match(boards, /window\.matchMedia\?\.\("\(max-width: 1200px\)"\)\.addEventListener\?\.\("change", \(\) => showRowsPick\(\)\);/u);
+  // the bars above the boards and the tables' folded columns still change at 900px
+  assert.match(css, /@media \(max-width: 900px\) \{\s*\.lb-subbar \{ flex-direction: column; align-items: stretch; \}/u);
+  assert.doesNotMatch(css, /@media \(max-width: 900px\) \{\s*\.lb-bosses/u);
 });
