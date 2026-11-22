@@ -203,6 +203,22 @@ test("also on this run: a player whose best is another run gets their seat on th
   assert.deepEqual(briar.bots, [{ name: "Mario", seat: 2 }, { name: "Flora", seat: 4 }]);
 });
 
+test("?order=submitted lists rows newest first (a team row by its first copy), places kept; submitted_asc oldest first; pages that order", async () => {
+  const { env, sqlite } = await board();
+  sqlite.exec("UPDATE leaderboard_submissions SET created_at = played_at");     // each copy reached the site when it was played
+  const newest = await interlink(env, "ladder=score&rows=teams&order=submitted");
+  assert.deepEqual(newest.entries.map((e) => [e.player, e.rank]),
+    [["Fenwick", 5], ["Ember", 4], ["Dorian", 3], ["Cobalt", 2], ["Briar", 2], ["Aster", 1]]);
+  const oldest = await interlink(env, "ladder=score&rows=teams&order=submitted_asc");
+  assert.deepEqual(oldest.entries.map((e) => e.player), ["Aster", "Cobalt", "Briar", "Dorian", "Ember", "Fenwick"]);
+  const page = await interlink(env, "ladder=score&rows=teams&order=submitted&limit=2&offset=1");
+  assert.deepEqual(page.entries.map((e) => [e.player, e.rank]), [["Ember", 4], ["Dorian", 3]]);
+  const players = await interlink(env, "ladder=score&order=submitted&limit=2");
+  assert.deepEqual(players.entries.map((e) => [e.player, e.rank]), [["Fenwick", 5], ["Ember", 4]]);
+  const answer = await (await call(env, `/api/leaderboard/interlink?cycle=3005&boss=${BOSS.id}&ladder=score&order=submitted`)).json();
+  assert.equal(answer.order, "submitted");
+});
+
 test("board rows carry the label; ?players= hides rows but every row keeps its overall place, and pages what's left", async () => {
   const { env } = await board();
   const all = await interlink(env, "ladder=score&rows=teams");

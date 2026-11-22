@@ -27,7 +27,7 @@ test("ordinal: 1st, 2nd, 3rd, 4th, and the teens with th", () => {
 });
 
 test("a team row: the players ranked with another run are lines in their seats, \"Name (1st)\" in italics; no \"place N\"", () => {
-  assert.match(boards, /el\("span", \{ class: "lb-who-name lb-also-line", title: `Ranked \$\{place\} with another run\.` \}, mark, name,\s*el\("span", \{ class: "lb-also-place", text: `\(\$\{place\}\)` \}\)\)/u);
+  assert.match(boards, /el\("span", \{ class: "lb-who-name lb-also-line", title: `Ranked \$\{place\} with another run\.` \}, mark, fullTitle\(name\),\s*el\("span", \{ class: "lb-also-place", text: `\(\$\{place\}\)` \}\)\)/u);
   assert.match(boards, /const place = ordinal\(other\.rank\);/u);
   assert.match(boards, /el\("span", \{ class: "lb-who" \}, \.\.\.teamNames\(members, ladder\)\),/u);     // no "Also on this run" under the boards' names
   assert.doesNotMatch(boards, /\(place \$\{/u);
@@ -52,7 +52,7 @@ test("a claimed player gets the blue badge after the name; an unclaimed one no p
   assert.match(boards, /el\("span", \{ class: "lb-claimed", role: "img", title: CLAIMED_TEXT, "aria-label": CLAIMED_TEXT \}\)/u);
   assert.match(boards, /entry\.unclaimed \? null : claimedBadge\(\),\s*entry\.own \? el\("span", \{ class: "lb-you", text: "you" \}\) : null,/u);
   assert.doesNotMatch(boards, /text: "unclaimed"/u);                         // the old grey pill is gone
-  assert.match(boards, /class: entry\.unclaimed \? "lb-who-name is-unclaimed" : "lb-who-name", title: entry\.unclaimed \? UNCLAIMED_TEXT : null/u);
+  assert.match(boards, /class: \["lb-who-name", entry\.unclaimed \? "is-unclaimed" : "", entry\.own \? "is-own-name" : ""\]\.filter\(Boolean\)\.join\(" "\),\s*title: entry\.unclaimed \? UNCLAIMED_TEXT : null/u);
   assert.match(boards, /const UNCLAIMED_TEXT = "From a teammate's run\. Not claimed: no UID was recorded for this player with the run\.";/u);
   // the tables use the same marks: the claimed badge and the softer unclaimed name there too
   assert.match(boards, /class: entry\.unclaimed \? "lb-player is-unclaimed" : "lb-player", title: entry\.unclaimed \? UNCLAIMED_TEXT : null/u);
@@ -79,7 +79,7 @@ test("a row has three columns: the updated calendar moved into the result's icon
 
 test("a team row lists its run's bots in their seats: the Ai mark, plain softer text, never a link, never claimed or you", () => {
   assert.match(boards, /const BOT_TEXT = "A bot the game added to fill the team\.";/u);
-  assert.match(boards, /if \(item\.kind === "bot"\) return el\("span", \{ class: "lb-who-name lb-bot", title: BOT_TEXT \}, mark, el\("span", \{ class: "lb-name", text: item\.entry\.name \}\)\);/u);
+  assert.match(boards, /if \(item\.kind === "bot"\) return el\("span", \{ class: "lb-who-name lb-bot", title: BOT_TEXT \}, mark, fullTitle\(el\("span", \{ class: "lb-name", text: item\.entry\.name \}\)\)\);/u);
   assert.match(boards, /const mark = seatMark\(item\.seat, item\.kind === "bot"\);/u);
   assert.match(boards, /el\("span", \{ class: "lb-ai", title: BOT_TEXT, text: "AI" \}\)/u);           // the text in the Ai picture's place
   assert.match(boards, /\.\.\.\(Array\.isArray\(lead\?\.bots\) \? lead\.bots : \[\]\)/u);             // an older answer without bots: as before
@@ -94,6 +94,64 @@ test("the boards page is wider on a wide screen and leaves the docked sidebar it
   assert.match(css, /:root \{ --lb-page-width: min\(1560px, 94vw\); \}/u);
   assert.match(css, /@media \(min-width: 1644px\) \{\s*:root \{ --lb-page-width: max\(1180px, min\(1560px, 100vw - 464px\)\); \}\s*body \.site-sidebar\.is-docked \{ --site-margin: calc\(\(100vw - var\(--lb-page-width\)\) \/ 2\); \}/u);
   const page = read("leaderboard/index.html");
-  assert.match(page, /leaderboard\.css\?v=0\.3\.16-board-rows/u);
-  assert.match(page, /leaderboard\.js\?v=0\.3\.31-board-rows/u);
+  assert.match(page, /leaderboard\.css\?v=0\.3\.17-view-all-teams/u);
+  assert.match(page, /leaderboard\.js\?v=0\.3\.32-view-all-teams/u);
+});
+
+test("View all, Teams: one block per team, a row per seat; the place and the run's figures merged after a divider; lines end there", () => {
+  // the columns: each player's own figures beside the name, then the run's shared ones from the divider on
+  const columns = boards.slice(boards.indexOf("const FULL_COLUMNS = ["), boards.indexOf("function renderFull(data)"));
+  assert.deepEqual([...columns.matchAll(/\{ id: "(\w+)"/gu)].map((m) => m[1]), ["dps", "break", "heal", "score", "stars", "clear", "teamDps", "date"]);
+  assert.match(columns, /\{ id: "score", label: "Score", shared: "start",/u);
+  assert.match(boards, /column\.shared === "start" \? "lb-shared-start" : ""/u);
+  // a row per seat, marks and bots included ("—" for a bot's figures); the shared cells only in the block's first row
+  const rows = boards.slice(boards.indexOf("const teamRows = (members) => {"), boards.indexOf("const shown = teams ? teamsOf(boss.entries) : boss.entries;"));
+  assert.match(rows, /const items = teamSeats\(members\);/u);
+  assert.match(rows, /seatLine\(item, item\.kind === "player" \? \[memberProof\(item\.entry, proofs, ladder\)\] : \[\]\)/u);
+  assert.match(rows, /if \(!column\.shared\) return el\("td", \{ class: ranked\(column\) \}, item\.kind === "bot" \? "—" : column\.value\(item\.entry, boss\)\);/u);
+  assert.match(rows, /if \(index\) return null;\s*return el\("td", \{ class: ranked\(column\), rowspan: span \},/u);
+  // the block's classes and its hover covering every row of it
+  assert.match(rows, /\["lb-team-row", index \? "" : "lb-team-first", index === items\.length - 1 \? "lb-team-last" : "", own \? "is-own" : ""\]/u);
+  assert.match(rows, /for \(const row of block\) row\.classList\.toggle\("is-hover", on\);/u);
+  assert.doesNotMatch(boards, /Also on this run|alsoLine/u);                  // the also-players are seat lines now
+  assert.match(css, /\.lb-table \.lb-shared-start \{ border-left: 1px solid/u);
+  assert.match(css, /\.lb-table tr\.lb-team-row\.lb-team-last td, \.lb-table tr\.lb-team-row td\[rowspan\] \{ border-bottom: 2px solid var\(--line\); \}/u);
+  assert.match(css, /\.lb-table tr\.lb-team-row td\[rowspan\] \{ vertical-align: middle; \}/u);
+  assert.match(css, /\.lb-table tbody tr\.lb-team-row\.is-hover \{ background:/u);
+  assert.match(css, /\.lb-table \.lb-result \{ flex-wrap: nowrap; \}/u);
+  assert.doesNotMatch(css, /\.lb-also \{|\.lb-table \.lb-also/u);
+});
+
+test("Submitted: the column and the calendar's tip are named so; it sorts newest first, again oldest first, places kept", () => {
+  assert.match(boards, /\{ id: "date", label: "Submitted", shared: true,/u);
+  assert.match(boards, /const tip = `Submitted \$\{at\.toLocaleString/u);
+  assert.match(boards, /if \(id === "date"\) state\.viewOrder = flip && state\.viewOrder === "submitted" \? "submitted_asc" : "submitted";/u);
+  assert.match(boards, /sortable: column\.id === "date" \|\| LADDERS\.some\(\(item\) => item\.id === column\.id\),/u);
+  // the request: View all asks the API for that order (ask.set("order", state.viewOrder)), and a link keeps it
+  assert.match(boards, /\["asc", "desc", "submitted", "submitted_asc"\]\.includes\(state\.order\)/u);
+  assert.match(boards, /if \(state\.viewOrder\) ask\.set\("order", state\.viewOrder\);/u);
+  // the Sim and Egg Heist tables keep their own "Last updated" (when the run was played)
+  assert.equal(boards.match(/label: "Last updated", sort: "played_at"/gu)?.length, 3);
+});
+
+test("View all on a phone: a block per team, the run's values stacked on the right, a Sort by menu doing what the headers do", () => {
+  assert.match(boards, /showStack\(fullStack\(\{ boss, ladder, teams, shown, submitted, order, sortBy \}\)\);/u);
+  assert.match(boards, /const SORT_CHOICES = \[\["score", "Score"\], \["stars", "Stars"\], \["clear", "Time"\], \["teamDps", "Team DPS"\], \["date", "Submitted"\],\s*\["dps", "Avg DPS"\], \["break", "BREAK"\], \["heal", "Healing"\]\];/u);
+  assert.match(boards, /el\("select", \{ "aria-label": "Sort by", onchange: \(event\) => sortBy\(event\.target\.value, false\) \}/u);
+  // top to bottom: score and stars on one line, team DPS, the outcome, when it was submitted, then the tag and icons
+  assert.match(boards, /el\("span", \{ class: "lb-stack-score" \}, el\("b", \{ text: number\(lead\.score\) \}\), stars\(lead\.stars\)\),\s*el\("span", \{ class: "lb-stack-teamdps" \}[^\n]*\n\s*el\("span", \{ class: "lb-stack-outcome", text \}\),\s*el\("span", \{ class: "lb-stack-when" \}[^\n]*\n\s*el\("span", \{ class: "lb-stack-icons" \}, tag, checkBadge\(rowCheck\(lead, ladder\)\), proof, link\)\)/u);
+  // the table hides for the stack from 900px down; the visitor's name in the pill's colour there; names keep their full
+  // text on hover; a 360px screen scrolls a little rather than cutting names further
+  assert.match(css, /@media \(max-width: 900px\) \{\s*\.lb-table-wrap\.has-stack \.lb-table \{ display: none; \}/u);
+  assert.match(css, /\.lb-stack \.lb-you \{ display: none; \}\s*\.lb-stack \.is-own-name > \.lb-name \{ color: var\(--accent-2\); \}/u);
+  assert.match(boards, /function fullTitle\(node\)/u);
+  assert.match(css, /min-width: 366px;/u);
+  // the column lines: before Avg DPS, BREAK, Healing and the run, the same strength, through the labels
+  assert.match(css, /--stack-line: 1px solid color-mix\(in srgb, var\(--line\) 68%, transparent\);/u);
+  assert.match(css, /\.lb-stack-runhead \{ padding-right: 0\.1rem; border-left: var\(--stack-line\);/u);
+  assert.match(css, /\.lb-stack-run \{[^}]*border-left: var\(--stack-line\);/u);
+  assert.match(css, /\.lb-table \.lb-own-fig \{ border-left: 1px solid color-mix\(in srgb, var\(--line\) 68%, transparent\);/u);
+  // thumb-sized buttons on phones
+  assert.match(css, /\.lb-stack-icons > \.lb-proof, \.lb-stack-icons > \.lb-link \{ width: 28px; height: 28px;/u);
+  assert.match(css, /\.lb-row-icons > \.lb-proof, \.lb-row-icons > \.lb-link, \.lb-row-icons > \.lb-row-when \{ width: 30px; height: 30px; \}/u);
 });

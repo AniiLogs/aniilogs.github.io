@@ -6416,6 +6416,9 @@ async function interlinkBoards(request, env, internal = false) {
   const orderParam = params.get("order");
   const reversed = Boolean(ladder) && (orderParam === "asc" || orderParam === "desc")
     && orderParam !== (INTERLINK_LADDERS[ladder].ascending ? "asc" : "desc");
+  // ?order=submitted (newest first) or submitted_asc lists the rows by when they reached the site (a team row: its
+  // first copy's time), places still on the ladder; limit/offset page that order
+  const bySubmitted = orderParam === "submitted" ? -1 : orderParam === "submitted_asc" ? 1 : 0;
   // ?rows=teams: limit/offset page by team rows (one per run, rankedTeams), each page every player of its team rows;
   // otherwise by players
   const byTeams = params.get("rows") === "teams";
@@ -6469,11 +6472,14 @@ async function interlinkBoards(request, env, internal = false) {
       else teamRows.push([entry]);
     }
     let entries;
+    const submittedAt = (list) => Math.min(...list.map((entry) => Number(entry.updatedAt) || Infinity));
     if (byTeams) {
       if (reversed) teamRows.reverse();                      // a team row's players keep their order
+      if (bySubmitted) teamRows.sort((a, b) => bySubmitted * (submittedAt(a) - submittedAt(b)) || 0);
       entries = (limit ? teamRows.slice(offset, offset + limit) : teamRows).flat();
     } else {
       if (reversed) all.reverse();
+      if (bySubmitted) all.sort((a, b) => bySubmitted * (submittedAt([a]) - submittedAt([b])) || 0);
       entries = limit ? all.slice(offset, offset + limit) : all;
     }
     return {
@@ -6504,7 +6510,8 @@ async function interlinkBoards(request, env, internal = false) {
   const week = ranked([...totals.values()], "total").map(({ discordId, firstAt, ...row }) => ({ ...row, own: own(discordId) }));
   const payload = {
     cycle: publicCycle(cycle), current: currentInterlinkCycle(list).id, weeks, bosses, week, server, servers,
-    ladder: ladder || "stars", order: ladder ? (Boolean(INTERLINK_LADDERS[ladder].ascending) !== reversed ? "asc" : "desc") : null,
+    ladder: ladder || "stars", order: bySubmitted ? (bySubmitted < 0 ? "submitted" : "submitted_asc")
+      : ladder ? (Boolean(INTERLINK_LADDERS[ladder].ascending) !== reversed ? "asc" : "desc") : null,
     offset, limit, rows: byTeams ? "teams" : "players", players, updatedAt: internal ? null : await interlinkUpdatedAt(env, [cycle.id]),
     seasons: interlinkSeasons(list),
     rules: { slots: INTERLINK_RULES.slots, slotsConfirmed: INTERLINK_RULES.slotsConfirmed, starCaps: caps,

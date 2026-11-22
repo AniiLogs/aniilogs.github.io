@@ -172,8 +172,15 @@
   // One player's line: the name (cut with "…" only when it alone is too long), then its marks and `extra` (their own
   // copy's pictures), which never wrap away from it. An unclaimed player's line is marked is-unclaimed.
   function nameLine(entry, ...extra) {
-    return el("span", { class: entry.unclaimed ? "lb-who-name is-unclaimed" : "lb-who-name", title: entry.unclaimed ? UNCLAIMED_TEXT : null },
-      rowName(entry, { class: "lb-name" }), ...nameMarks(entry), ...extra);
+    return el("span", { class: ["lb-who-name", entry.unclaimed ? "is-unclaimed" : "", entry.own ? "is-own-name" : ""].filter(Boolean).join(" "),
+      title: entry.unclaimed ? UNCLAIMED_TEXT : null },
+      fullTitle(rowName(entry, { class: "lb-name" })), ...nameMarks(entry), ...extra);
+  }
+  // a name that may be cut with "…" keeps all of it on hover: the shown name first in its title
+  function fullTitle(node) {
+    const shown = node.textContent.trim();
+    if (shown && !String(node.title || "").startsWith(shown)) node.title = [shown, node.title].filter(Boolean).join(" · ");
+    return node;
   }
   // 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, 101st, 111th, ...: a place said in running text
   function ordinal(n) {
@@ -211,7 +218,8 @@
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
-    state.viewOrder = state.viewBoss && ["asc", "desc"].includes(state.order) ? state.order : "";   // "View all": its ladder flipped
+    // "View all": its ladder flipped, or listed by when the rows were submitted (newest or oldest first)
+    state.viewOrder = state.viewBoss && ["asc", "desc", "submitted", "submitted_asc"].includes(state.order) ? state.order : "";
     state.season = params.get("season") || ""; state.split = params.get("split") || "";
     state.rows = ["teams", "players"].includes(params.get("rows")) ? params.get("rows") : storedRows();
     state.players = ["1", "2", "3", "4"].includes(params.get("players")) ? params.get("players") : "";   // the Party filter
@@ -525,7 +533,14 @@
     if (!parts.length) parts.push(el("p", { class: "lb-facts", text: "No further details were recorded for this entry." }));
     return el("tr", { class: "lb-detail" }, el("td", { colspan: span }, parts));
   }
+  // View all's phone layout (leaderboard.css shows it, not the table, from 900px down): put in, or taken out
+  function showStack(node = null) {
+    els.tableWrap.querySelector(".lb-stack")?.remove();
+    els.tableWrap.classList.toggle("has-stack", Boolean(node));
+    if (node) els.tableWrap.append(node);
+  }
   function renderRows(entries) {
+    showStack();
     const columns = COLUMNS[state.kind];
     const span = columns.length + 2;
     const rows = [];
@@ -568,12 +583,12 @@
     svg.innerHTML = '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></g>';
     return svg;
   }
-  // A Per Boss row's "last updated": a calendar icon, last in the row's icons; hover or tap shows when that player's
+  // A Per Boss row's "Submitted": a calendar icon, last in the row's icons; hover or tap shows when that player's
   // best run reached AniiLogs.
   function updatedIcon(unix) {
     if (!unix) return el("span", { class: "lb-row-when" });
     const at = new Date(unix * 1000);
-    const tip = `Updated ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (${agoText(unix)})`;
+    const tip = `Submitted ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (${agoText(unix)})`;
     const button = el("button", { type: "button", class: "lb-row-when", title: tip, "aria-label": tip, "data-tip": tip,
       onclick: (event) => {
         event.stopPropagation();
@@ -732,6 +747,7 @@
       boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap)) : null);
   }
   function failed() {
+    showStack();
     els.summary.textContent = "The leaderboard could not be loaded.";
     els.interlink.replaceChildren();
     els.tableWrap.hidden = true;
@@ -764,12 +780,6 @@
   function teamUpdated(members) {
     const times = members.map((entry) => entry.updatedAt).filter(Boolean);
     return times.length ? Math.min(...times) : null;
-  }
-  // View all's line under a team: players on the run it shows whose own best is another run, so they're ranked in
-  // another row: "Also on this run: Name (1st), Other (12th)"
-  function alsoLine(entry) {
-    if (!entry?.also?.length) return null;
-    return el("small", { class: "lb-also", text: `Also on this run: ${entry.also.map((other) => `${other.discordName || other.player} (${ordinal(other.rank)})`).join(", ")}` });
   }
   // Every copy of a team row's run that came with pictures: the lead's is on the row's result line; a player whose
   // pictures are another copy (their own app's) gets that copy's button by their name. A copy is shown once (a
@@ -836,13 +846,13 @@
   }
   function seatLine(item, extra = []) {
     const mark = seatMark(item.seat, item.kind === "bot");
-    if (item.kind === "bot") return el("span", { class: "lb-who-name lb-bot", title: BOT_TEXT }, mark, el("span", { class: "lb-name", text: item.entry.name }));
+    if (item.kind === "bot") return el("span", { class: "lb-who-name lb-bot", title: BOT_TEXT }, mark, fullTitle(el("span", { class: "lb-name", text: item.entry.name })));
     if (item.kind === "also") {
       const other = item.entry;
       const place = ordinal(other.rank);
       const name = other.discordName ? profileName(other.discordName, other.profileId, { class: "lb-name" }, null, other.player)
         : profileName(other.player || "Pathfinder", other.profileId, { class: "lb-name" });
-      return el("span", { class: "lb-who-name lb-also-line", title: `Ranked ${place} with another run.` }, mark, name,
+      return el("span", { class: "lb-who-name lb-also-line", title: `Ranked ${place} with another run.` }, mark, fullTitle(name),
         el("span", { class: "lb-also-place", text: `(${place})` }));
     }
     const line = nameLine(item.entry, ...extra);
@@ -901,7 +911,7 @@
     ...LADDERS.map((item) => el("option", { value: item.id, text: item.label })));
     select.value = ladder.id;
     const teams = teamView(boss, ladder);
-    // A row, both views: three columns, top-aligned: the place | one line per player (and "Also on this run") | the
+    // A row, both views: three columns, top-aligned: the place | one line per seat (Teams: players, players ranked with another run, bots) | the
     // ladder's figure, stars, outcome and icons (rowFigures).
     const playerRow = (entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row", "data-place": String(entry.rank) },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
@@ -1020,16 +1030,19 @@
   }
 
   // "View all": one board, every player, paged, with every figure; a figure's column header ranks the board by it
-  // (the API's ?ladder=, clicked again ?order= the other way round). Who sent it and when only show.
+  // (the API's ?ladder=, clicked again ?order= the other way round). Who sent it and when only show. The columns come
+  // in two groups: each player's own figures (Avg DPS, BREAK, healing) beside their name, then the run's shared figures
+  // (score, stars, time, team DPS, when it was sent) after a soft divider. Both views use this order, so the columns
+  // don't move when Teams / Players is switched.
   const FULL_COLUMNS = [
-    { id: "score", label: "Score", value: (e) => number(e.score) },
-    { id: "stars", label: "Stars", value: (e) => stars(e.stars) },
-    { id: "clear", label: "Time", value: (e, boss) => clearText(e, boss) },
-    { id: "teamDps", label: "Team DPS", value: (e) => number(e.teamDps) },
     { id: "dps", label: "Avg DPS", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK", value: (e) => number(e.breakValue) },
     { id: "heal", label: "Healing", value: (e) => number(e.heal) },
-    { id: "date", label: "Last updated", value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best was sent
+    { id: "score", label: "Score", shared: "start", value: (e) => number(e.score) },
+    { id: "stars", label: "Stars", shared: true, value: (e) => stars(e.stars) },
+    { id: "clear", label: "Time", shared: true, value: (e, boss) => clearText(e, boss) },
+    { id: "teamDps", label: "Team DPS", shared: true, value: (e) => number(e.teamDps) },
+    { id: "date", label: "Submitted", shared: true, value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best reached the site
   ];
   function renderFull(data) {
     const boss = data.bosses[0];
@@ -1044,8 +1057,22 @@
     // score, stars and time fold away
     const columns = FULL_COLUMNS;
     const natural = ladder.id === "clear" ? "asc" : "desc";
-    const order = state.viewOrder || natural;
-    const ranked = (column) => [column.id === ladder.id ? "is-ranked" : "", fold(column, ladder)].join(" ").trim() || null;
+    // sorted by Submitted: the rows by when they reached the site (the API's order=submitted / submitted_asc), each
+    // keeping its place on the ladder (the # column)
+    const submitted = state.viewOrder.startsWith("submitted");
+    const order = submitted ? natural : state.viewOrder || natural;
+    // what a column header does (and the phone's Sort by): a ladder ranks by it, again the other way round; Submitted
+    // lists newest first, again oldest first
+    const sortBy = (id, flip = true) => {
+      if (id === "date") state.viewOrder = flip && state.viewOrder === "submitted" ? "submitted_asc" : "submitted";
+      else if (flip && id === ladder.id && !submitted) state.viewOrder = order === "asc" ? "desc" : "asc";
+      else { state.viewLadder = id; state.viewOrder = ""; }
+      if (state.viewOrder === (state.viewLadder === "clear" ? "asc" : "desc")) state.viewOrder = "";
+      state.offset = 0;
+      void loadEntries();
+    };
+    const ranked = (column) => [column.id === ladder.id ? "is-ranked" : "", fold(column, ladder), column.shared === "start" ? "lb-shared-start" : "", column.shared ? "" : "lb-own-fig"]
+      .join(" ").trim() || null;
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" },
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
@@ -1057,42 +1084,49 @@
     const teams = teamView(boss, ladder);
     els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" }),
       columns.map((column) => headCell(column.label, {
-        sortable: LADDERS.some((item) => item.id === column.id), active: column.id === ladder.id, order, className: ranked(column),
-        onSort: () => {
-          if (column.id === ladder.id) state.viewOrder = order === "asc" ? "desc" : "asc";
-          else { state.viewLadder = column.id; state.viewOrder = ""; }
-          if (state.viewOrder === (state.viewLadder === "clear" ? "asc" : "desc")) state.viewOrder = "";
-          state.offset = 0;
-          void loadEntries();
-        },
+        sortable: column.id === "date" || LADDERS.some((item) => item.id === column.id),
+        active: column.id === "date" ? submitted : column.id === ladder.id && !submitted,
+        order: column.id === "date" ? (state.viewOrder === "submitted_asc" ? "asc" : "desc") : order, className: ranked(column),
+        onSort: () => sortBy(column.id),
       }))));
     const playerRow = (entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
       el("td", { class: "lb-player" }, playerName(entry, rowCheck(entry, ladder))),
       columns.map((column) => el("td", { class: ranked(column) },
         column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder, boss)) : column.value(entry, boss))));
-    // Teams: one group of rows per team row, one row per player. The run's figures (and its place, result and when it
-    // was sent) span the group; each player's row has their name and their own Avg DPS, BREAK and healing.
+    // Teams: one block of rows per team row, one row per seat (teamSeats: its players, the players ranked with another
+    // run as "Name (1st)", its bots), each with its mark and that player's own Avg DPS, BREAK and healing ("—" for a bot:
+    // the API sends no bot figures; an also-player's are this run's, when the API passes them). The place and the run's
+    // shared figures are one cell each for the block (rowspan), after the divider, so the faint lines between its
+    // players stop at the divider and a stronger line closes the block. Hover and the own-team colour light the block.
     const teamRows = (members) => {
       const lead = members[0];
-      const span = members.length > 1 ? String(members.length) : null;
+      const items = teamSeats(members);
+      const span = items.length > 1 ? String(items.length) : null;
       const shared = { ...lead, updatedAt: teamUpdated(members) };
       const own = members.some((entry) => entry.own);
       const proofs = copyProofs(members, ladder);
-      return members.map((entry, index) => el("tr", { class: [index ? "" : "lb-team-first", own ? "is-own" : ""].join(" ").trim() || null },
+      const block = [];
+      const hover = (on) => () => { for (const row of block) row.classList.toggle("is-hover", on); };
+      items.forEach((item, index) => {
+        const row = el("tr", { class: ["lb-team-row", index ? "" : "lb-team-first", index === items.length - 1 ? "lb-team-last" : "", own ? "is-own" : ""]
+          .filter(Boolean).join(" "), onmouseenter: hover(true), onmouseleave: hover(false) },
         index ? null : el("td", { class: "lb-rank", rowspan: span, text: String(lead.rank) }),
-        el("td", { class: "lb-player" }, nameLine(entry, memberProof(entry, proofs, ladder)),
-        index === members.length - 1 ? alsoLine(lead) : null),
+        el("td", { class: "lb-player" }, seatLine(item, item.kind === "player" ? [memberProof(item.entry, proofs, ladder)] : [])),
         columns.map((column) => {
-          if (ONE_PLAYER_COLUMNS.includes(column.id)) return el("td", { class: ranked(column) }, column.value(entry, boss));
+          if (!column.shared) return el("td", { class: ranked(column) }, item.kind === "bot" ? "—" : column.value(item.entry, boss));
           if (index) return null;
           return el("td", { class: ranked(column), rowspan: span },
             column.id === "clear" ? el("span", { class: "lb-result" }, ...teamResult(lead, ladder, boss)) : column.value(shared, boss));
-        })));
+        }));
+        block.push(row);
+      });
+      return block;
     };
     const shown = teams ? teamsOf(boss.entries) : boss.entries;
     els.rows.replaceChildren(...(shown.length ? shown.flatMap((item) => (teams ? teamRows(item) : [playerRow(item)]))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
+    showStack(fullStack({ boss, ladder, teams, shown, submitted, order, sortBy }));
     els.tableWrap.hidden = false;
     // Teams pages by team rows
     const count = teams ? boss.teams : boss.total;
@@ -1103,8 +1137,52 @@
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= count;
     const players = `${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
-    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"} · ${
+    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"}${
+      submitted ? ` · ${state.viewOrder === "submitted" ? "newest" : "oldest"} submitted first` : ""} · ${
       teams ? `${number(boss.teams)} team${boss.teams === 1 ? "" : "s"} · ${players}` : players}`;
+  }
+  // View all on a phone (900px and under, where the regrouped table no longer fits): a block per team (or per player
+  // in the Players view), no sideways scrolling. Left: the place, then one line per seat (mark, name, claimed check)
+  // with that player's Avg DPS, BREAK and healing in three narrow columns, named once above the first block. Right,
+  // after the same column line: the run's score and stars on one line, its team DPS, how it ended, when it was submitted,
+  // then its icons (the Solo / Duo / Trio tag first, so the outcome never wraps). The visitor's own name takes the
+  // "you" pill's colour (no room for the pill). A Sort by menu and a direction button do what the headers do.
+  const SORT_CHOICES = [["score", "Score"], ["stars", "Stars"], ["clear", "Time"], ["teamDps", "Team DPS"], ["date", "Submitted"],
+    ["dps", "Avg DPS"], ["break", "BREAK"], ["heal", "Healing"]];
+  function fullStack({ boss, ladder, teams, shown, submitted, order, sortBy }) {
+    const figure = (id, entry) => el("span", { class: "lb-stack-num" }, entry ? FULL_COLUMNS.find((column) => column.id === id).value(entry, boss) : "—");
+    const line = (name, entry) => el("div", { class: "lb-stack-line" }, name, ...["dps", "break", "heal"].map((id) => figure(id, entry)));
+    const run = (lead, updatedAt) => {
+      const [tag, text, proof, link] = resultLine(lead, ladder, boss);
+      return el("div", { class: "lb-stack-run" },
+        el("span", { class: "lb-stack-score" }, el("b", { text: number(lead.score) }), stars(lead.stars)),
+        el("span", { class: "lb-stack-teamdps" }, el("small", { text: "Team DPS " }), number(lead.teamDps)),
+        el("span", { class: "lb-stack-outcome", text }),
+        el("span", { class: "lb-stack-when" }, playerUpdated(updatedAt, "") || "—"),
+        el("span", { class: "lb-stack-icons" }, tag, checkBadge(rowCheck(lead, ladder)), proof, link));
+    };
+    const block = (rank, own, lines, lead, updatedAt) => el("li", { class: own ? "lb-stack-team is-own" : "lb-stack-team", "data-place": String(rank) },
+      el("span", { class: "lb-stack-rank", text: String(rank) }), el("div", { class: "lb-stack-players" }, lines), run(lead, updatedAt));
+    const blocks = shown.map((item) => {
+      if (!teams) return block(item.rank, item.own, [line(nameLine(item), item)], item, item.updatedAt);
+      // a line is only the mark, the name and its check here: a teammate's own copy's pictures are in the table's view
+      return block(item[0].rank, item.some((entry) => entry.own), teamSeats(item).map((seat) => line(seatLine(seat), seat.kind === "bot" ? null : seat.entry)),
+      item[0], teamUpdated(item));
+    });
+    const current = submitted ? "date" : ladder.id;
+    const ascending = submitted ? state.viewOrder === "submitted_asc" : order === "asc";
+    const now = current === "date" ? (ascending ? "oldest first" : "newest first") : ascending ? "lowest first" : "highest first";
+    const pick = el("select", { "aria-label": "Sort by", onchange: (event) => sortBy(event.target.value, false) },
+      ...SORT_CHOICES.map(([id, label]) => el("option", { value: id, text: label })));
+    pick.value = current;
+    return el("div", { class: "lb-stack" },
+      el("div", { class: "lb-stack-sort" }, el("label", {}, el("span", { text: "Sort by" }), pick),
+        el("button", { type: "button", class: "lb-stack-dir", title: `Now ${now}; press to reverse`, "aria-label": `Reverse the order (now ${now})`,
+          text: ascending ? "▲" : "▼", onclick: () => sortBy(current) })),
+      blocks.length ? el("div", { class: "lb-stack-head", "aria-hidden": "true" }, el("span", { text: "#" }),
+        el("div", { class: "lb-stack-line" }, el("span", { text: teams ? "Team" : "Player" }), el("span", { text: "Avg DPS" }), el("span", { text: "Break" }), el("span", { text: "Heal" })),
+        el("span", { class: "lb-stack-runhead", text: "Run" })) : null,
+      blocks.length ? el("ol", { class: "lb-stack-list" }, blocks) : el("p", { class: "lb-empty", text: "No runs on this ladder yet." }));
   }
   const ONE_PLAYER_COLUMNS = ["dps", "break", "heal"];     // a player's own figures: one cell each in a team's rows
   function fold(column, ladder) {
@@ -1129,6 +1207,7 @@
     return state.rankOrder || SEASON_SORTS[state.rank].natural;
   }
   function renderSeason(data) {
+    showStack();
     state.seasonData = data;
     const pick = el("select", { "aria-label": "Season or split", onchange: (event) => {
       [state.season, state.split] = event.target.value.split("|");
