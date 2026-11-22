@@ -1,4 +1,4 @@
-// "I was in this run" notes (kind interlink_presence, migration 0038).
+// "I was in this run" notes (kind interlink_presence, migration 0038) and the staff seat link (/api/admin/run-seat).
 // Every player here is made up.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -154,4 +154,49 @@ test("a note is never a record: no board row, count, My runs or public answer; a
   // a note needs its instance
   assert.equal((await note(env, p.Ansel, {})).status, 400);
   assert.equal((await note(env, p.Ansel, { instanceId: "inst-9", slot: 7 })).status, 400);
+});
+
+test("staff link a seat by hand (the name check, force) and undo it; a non-staff account is refused like the other admin routes", async () => {
+  const { env, sqlite } = await setup();
+  const p = {};
+  for (const name of ["Briar", "Ansel", "Staffy"]) p[name] = await player(env, sqlite, name);
+  env.ADMIN_DISCORD_IDS = p.Staffy.discordId;                                // the owner
+  await send(env, p.Briar, "briar", { cards: [["Briar", 9000], ["Ansel", 8000], ["Quill", 7000], ["Delph", 6000]] });
+  const id = sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = 'briar'").get().id;
+  const seat = (body, session = p.Staffy.session, method = "POST") => call(env, "/api/admin/run-seat", { session, method, body });
+  // permissions: a player gets what the other admin routes answer
+  const denied = await seat({ submissionId: id, seat: 2, profileId: p.Ansel.profileId }, p.Ansel.session);
+  assert.equal(denied.status, 403);
+  assert.deepEqual(await denied.json(), { error: "Access denied." });
+  assert.equal((await call(env, "/api/admin/run-checks/staff", { session: p.Ansel.session })).status, 403);
+  // the name check: seat 3 is Quill's card, not one of Ansel's characters
+  assert.equal((await seat({ submissionId: id, seat: 3, profileId: p.Ansel.profileId })).status, 409);
+  assert.equal(seatOf(stored(sqlite, "briar"), p.Ansel.gameUid), -1);
+  // seat 2: linked
+  const linked = await seat({ submissionId: id, seat: 2, profileId: p.Ansel.profileId });
+  assert.equal(linked.status, 200);
+  assert.deepEqual(await linked.json(), { ok: true, seat: 2, copies: 1 });
+  assert.equal(seatOf(stored(sqlite, "briar"), p.Ansel.gameUid), 1);
+  assert.equal(sqlite.prepare("SELECT added_by AS by FROM interlink_presence").get().by, p.Staffy.discordId);
+  // undo: the UID and confirmed it gave are taken back
+  const undone = await seat({ submissionId: id, seat: 2, profileId: p.Ansel.profileId }, p.Staffy.session, "DELETE");
+  assert.deepEqual(await undone.json(), { ok: true, undone: true, seat: 2, copies: 1 });
+  const after = stored(sqlite, "briar");
+  assert.equal(after.some((slot) => slot?.uid === p.Ansel.gameUid || slot?.noted), false);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM interlink_presence").get().n, 0);
+  // force: seat 3 for the staff account itself ("me"), past the name check
+  const forced = await seat({ submissionId: id, seat: 3, profileId: "me", force: true });
+  assert.deepEqual(await forced.json(), { ok: true, seat: 3, copies: 1 });
+  assert.equal(seatOf(stored(sqlite, "briar"), p.Staffy.gameUid), 2);
+  assert.equal((await seat({ submissionId: id, seat: 3, profileId: "me", undo: true })).status, 200);
+  assert.equal(seatOf(stored(sqlite, "briar"), p.Staffy.gameUid), -1);
+  // a UID that came from a real copy stays when a note on it is undone
+  const own = await player(env, sqlite, "Delph");
+  assert.equal((await seat({ submissionId: id, seat: 4, profileId: own.profileId })).status, 200);
+  await send(env, own, "delph", { cards: [["Briar", 9000], ["Ansel", 8000], ["Quill", 7000], ["Delph", 6000]], at: 5 });
+  assert.equal(seatOf(stored(sqlite, "briar"), own.gameUid), 3);
+  assert.equal((await seat({ submissionId: id, seat: 4, profileId: own.profileId, undo: true })).status, 200);
+  assert.equal(seatOf(stored(sqlite, "briar"), own.gameUid), 3);
+  // the answers carry no names
+  assert.equal(/Ansel|Briar|Delph|Quill/u.test(JSON.stringify(await (await seat({ submissionId: id, seat: 2, profileId: p.Ansel.profileId })).json())), false);
 });

@@ -3865,6 +3865,86 @@ async function submitPresenceNote(env, account, body) {
   await settleNoteCopies(env, note.instanceId, note.cycle, note.bossId).catch((error) => { console.error("Applying a presence note failed", error); });
   return json({ ok: true }, 201);
 }
+// Staff (logs.read: administrators and the owner, as the run-check decisions): link one seat of a run to an account by
+// hand (a note marked as added by them, applied at once), or take it back.
+// POST /api/admin/run-seat { submissionId, seat: 1-4, profileId | "me", force? } -> { ok, seat, copies } (copies: how many
+// copies of the run now carry the account's UID by a note); { ..., undo: true } or DELETE -> { ok, undone, seat, copies }
+// (copies: how many the UID was taken off). No names in either.
+async function adminRunSeat(request, env, method) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try { body = (await readJsonBody(request, 1024)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
+  const submissionId = String(body.submissionId || "");
+  const seat = Number(body.seat);
+  const undo = method === "DELETE" || body.undo === true;
+  if (!/^[A-Za-z0-9_-]{8,40}$/u.test(submissionId)) return json({ error: "submissionId is invalid." }, 400);
+  if (![1, 2, 3, 4].includes(seat)) return json({ error: "seat must be 1-4." }, 400);
+  const profileId = String(body.profileId || "");
+  let target = null;
+  if (profileId === "me") target = account.discordId;
+  else if (/^[A-Za-z0-9_-]{1,64}$/u.test(profileId)) {
+    target = (await env.DB.prepare("SELECT discord_id AS discordId FROM profiles WHERE public_id = ?").bind(profileId).first())?.discordId || null;
+  }
+  if (!target) return json({ error: "No such profile." }, 404);
+  const run = await env.DB.prepare(
+    "SELECT submission_id AS id, kind, cycle, boss_id AS bossId, players_json AS playersJson, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!run || run.kind !== "interlink_run") return json({ error: "No such Interlink run." }, 404);
+  const extra = parseJsonColumn(run.extraJson) || {};
+  const instanceId = typeof extra.instanceId === "string" && extra.instanceId ? extra.instanceId
+    : `run:${typeof extra.sharedRun === "string" ? extra.sharedRun : run.id}`;
+  const characters = (await env.DB.prepare("SELECT game_uid AS gameUid, character_name AS name FROM game_characters WHERE discord_id = ? ORDER BY game_uid")
+    .bind(target).all()).results || [];
+  const uids = new Set(characters.map((row) => String(row.gameUid)));
+  const notedCopies = async (ids) => {
+    if (!ids.length) return 0;
+    const { results } = await env.DB.prepare(`SELECT players_json AS p FROM leaderboard_submissions WHERE submission_id IN (${ids.map(() => "?").join(", ")})`).bind(...ids).all();
+    return (results || []).filter((row) => (parseJsonColumn(row.p) || []).some((slot) => slot?.noted === true && uids.has(String(slot.uid)))).length;
+  };
+  try {
+    if (undo) {
+      const held = await env.DB.prepare("SELECT added_by AS addedBy FROM interlink_presence WHERE discord_id = ? AND instance_id = ?").bind(target, instanceId).first();
+      if (!held) return json({ ok: true, undone: false, seat, copies: 0 });
+      if (!held.addedBy) return json({ error: "That seat was linked by the player's own app, not by hand." }, 409);
+      const before = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
+      const had = await notedCopies(before);
+      await env.DB.prepare("DELETE FROM interlink_presence WHERE discord_id = ? AND instance_id = ?").bind(target, instanceId).run();
+      const ids = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
+      return json({ ok: true, undone: true, seat, copies: had - await notedCopies(ids) });
+    }
+    if (!characters.length) return json({ error: "That account has no linked character." }, 409);
+    const players = parseJsonColumn(run.playersJson) || [];
+    const at = cardSeats(players, extra.lineup).indexOf(seat);
+    if (at < 0) return json({ error: "This run has no card at that seat." }, 409);
+    const card = players[at];
+    if (card?.uid && !uids.has(String(card.uid))) return json({ error: "That seat is already linked to another account." }, 409);
+    const fitting = characters.filter((row) => (card?.uid ? String(card.uid) === String(row.gameUid)
+      : typeof row.name === "string" && row.name && presenceAlike(card, [row.name])));
+    const force = body.force === true;
+    const chosen = fitting.length === 1 ? fitting[0] : !fitting.length && force && characters.length === 1 ? characters[0] : null;
+    if (!chosen) {
+      return json({ error: fitting.length > 1 ? "Several of that account's characters fit that seat."
+        : force ? "That account has several characters and none fits that seat."
+          : "The card at that seat isn't one of that account's characters (force: true links it anyway)." }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO interlink_presence (discord_id, instance_id, game_uid, cycle, boss_id, slot, name, added_by, forced, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (discord_id, instance_id) DO UPDATE SET game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
+         slot = excluded.slot, name = excluded.name, added_by = excluded.added_by, forced = excluded.forced, updated_at = excluded.updated_at`,
+    ).bind(target, instanceId, String(chosen.gameUid), run.cycle, run.bossId, seat - 1, chosen.name || null, account.discordId,
+      force && !fitting.length ? 1 : 0, now, now).run();
+    const ids = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
+    return json({ ok: true, seat, copies: await notedCopies(ids) });
+  } catch (error) {
+    if (/no such table/iu.test(String(error?.message || error))) return json({ error: "Seat links need migration 0038." }, 503);
+    throw error;
+  }
+}
+
 // A player's Battle Data card in a run: the same four numbers in two copies of a run are the same player.
 const BATTLE_DATA_FIELDS = Object.freeze(["avgDps", "breakValue", "damageTaken", "heal"]);
 function hasBattleData(player) {
@@ -7929,6 +8009,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
   if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
   if (url.pathname === "/api/admin/run-names" && request.method === "POST") return settleRunNames(request, env);
+  if (url.pathname === "/api/admin/run-seat" && (request.method === "POST" || request.method === "DELETE")) return adminRunSeat(request, env, request.method);
   if (url.pathname === "/api/admin/played-times" && request.method === "POST") return correctPlayedTimes(request, env);
   // a profile id or a game UID (resolveProfileId)
   const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})\/history$/u);
