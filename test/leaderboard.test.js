@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
@@ -570,6 +571,172 @@ test("the fight's pictures go with the whole screens after 14 days; a current be
   sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 100 * 86400 WHERE client_run_id = 'slow'").run();
   await sendRun(env, token, run("trigger-x"));
   assert.deepEqual(pictures("slow"), []);
+});
+
+// A synthetic fight log (invented numbers): a look every 0.5 s, 1,000 damage a look, the game's countdown falling
+// `rate` seconds a real second
+function fightCsv(rows, rate = 1) {
+  const lines = ["wall_s,timer_s,team_damage,note,break_phase"];
+  for (let i = 0; i < rows; i += 1) lines.push(`${i * 0.5},${300 - rate * i * 0.5},${i * 1000},,`);
+  return `${lines.join("\r\n")}\r\n`;
+}
+const gzipped = (text, type = "application/gzip") => new Blob([gzipSync(Buffer.from(text))], { type });
+
+test("the fight log: kept for staff with its figures, flagged against the limits, replaced or kept on a re-send, never public", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev,
+    INTERLINK_CHECK_LIMITS: JSON.stringify({ fight: { clockRate: { max: 1.1 } } }) });
+  const token = await namedToken(env, SESSIONS.user);
+  const jpeg = () => new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" });
+  const send = (extra, log) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run("log-run", { extra })));
+    form.set("evidence", jpeg(), "result.jpg");
+    if (log) form.set("fightlog", log, "fight.csv.gz");
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  const first = await send({ proofBoxes: { evidence: [0.1, 0.1, 0.9, 0.9] } });
+  assert.equal(first.status, 201);
+  const { submissionId } = await first.json();
+  const base = `/api/leaderboard/submissions/${submissionId}/evidence`;
+  const entries = async () => (await call(env, "/api/leaderboard/entries?kind=interlink_run")).text();
+  const lists = async () => Promise.all([SESSIONS.user, SESSIONS.dev2, undefined].map(async (session) => (await call(env, `${base}?shot=list`, { session })).text()));
+  const publicBefore = [await entries(), ...await lists()];
+
+  // the log, with an app that tries to name its storage, figures and note itself
+  const fastLog = gzipped(fightCsv(200, 1.5));
+  const fastBytes = new Uint8Array(await fastLog.arrayBuffer());
+  assert.equal((await send({ proofBoxes: { evidence: [0.1, 0.1, 0.9, 0.9] }, proofFightLog: "evidence/someone-else.gz", fightStats: { dps: 1 }, fightLogNote: "x" }, fastLog)).status, 200);
+  const key = `evidence/${IDS.user}/${submissionId}-fightlog.csv.gz`;
+  assert.deepEqual(EVIDENCE.objects.get(key).bytes, fastBytes);                       // kept as sent
+  assert.equal(EVIDENCE.objects.get(key).type, "application/gzip");
+  const stored = () => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE submission_id = ?").get(submissionId).e);
+  assert.equal(stored().proofFightLog, key);
+  assert.equal(stored().fightStats.clockRate, 1.5);
+  assert.equal(stored().fightStats.dps, 2000);
+  assert.equal(stored().fightLogNote, undefined);
+  // a review-only flag: the game's clock ran 1.5 times real time
+  const reviewOnly = () => JSON.parse(sqlite.prepare("SELECT verify_json AS v FROM leaderboard_submissions WHERE submission_id = ?").get(submissionId).v || "{}").reviewOnly;
+  assert.deepEqual(reviewOnly().flags, [{ rule: "fight log", figure: "clockRate", sent: 1.5, max: 1.1 }]);
+
+  // public answers: as they were before the log
+  assert.deepEqual([await entries(), ...await lists()], publicBefore);
+  // staff: the figures in the list, the file to download
+  const staffList = await call(env, `${base}?shot=list`, { session: SESSIONS.dev });
+  assert.equal(staffList.headers.get("cache-control"), "private, no-store");
+  const details = await staffList.json();
+  assert.deepEqual(details.shots, ["summary"]);
+  assert.equal(details.fightLog.stats.clockRate, 1.5);
+  assert.equal(details.fightLog.note, undefined);
+  const download = await call(env, `${base}?shot=fightlog`, { session: SESSIONS.dev });
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("content-type"), "application/gzip");
+  assert.equal(download.headers.get("content-disposition"), `attachment; filename="fight-${submissionId}.csv.gz"`);
+  assert.equal(download.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(new Uint8Array(await download.arrayBuffer()), fastBytes);
+  // anyone else: the answer a missing picture gets (the sender too)
+  const missing = await (await call(env, `${base}?shot=fight1`, { session: SESSIONS.dev })).text();
+  for (const session of [SESSIONS.user, SESSIONS.dev2, undefined]) {
+    const answer = await call(env, `${base}?shot=fightlog`, { session });
+    assert.equal(answer.status, 404);
+    assert.equal(await answer.text(), missing);
+  }
+  assert.equal((await call(env, `${base}?shot=fightlog`, { token })).status, 404);
+  // the limits preview counts the run's figures
+  const preview = await (await call(env, "/api/admin/run-checks/limits", { session: SESSIONS.dev, method: "POST", body: { interlink: { fight: { clockRate: { max: 1.1 } } } } })).json();
+  assert.equal(preview.interlink.fight.runs, 1);
+  assert.deepEqual(preview.interlink.fight.flagged, { clockRate: 1 });
+
+  // a follow-up without a log keeps file, figures and flag
+  assert.equal((await send({})).status, 200);
+  assert.equal(stored().proofFightLog, key);
+  assert.equal(stored().fightStats.clockRate, 1.5);
+  assert.equal(reviewOnly().flags.length, 1);
+  // one with a log that can't be read keeps them too, and says why
+  assert.equal((await send({}, new Blob([fightCsv(200)], { type: "application/gzip" }))).status, 200);
+  assert.equal(stored().fightLogNote, "not gzip");
+  assert.equal(stored().fightStats.clockRate, 1.5);
+  assert.deepEqual((await (await call(env, `${base}?shot=list`, { session: SESSIONS.dev })).json()).fightLog, { stats: stored().fightStats, note: "not gzip" });
+  // a steady log replaces them: the flag goes, the note too
+  assert.equal((await send({}, gzipped(fightCsv(200)))).status, 200);
+  assert.equal(stored().fightStats.clockRate, 1);
+  assert.equal(stored().fightLogNote, undefined);
+  assert.equal(reviewOnly(), undefined);
+
+  // deleting the run deletes the log
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);
+  assert.equal(EVIDENCE.objects.has(key), false);
+});
+
+test("a fight log that is too big, isn't gzip or has too few rows is left out with a note; the run is stored all the same", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true" });
+  const token = await namedToken(env, SESSIONS.user);
+  const random = new Uint8Array(420 * 1024);
+  for (let i = 0; i < random.length; i += 65536) crypto.getRandomValues(random.subarray(i, i + 65536));
+  const cases = {
+    "too large": new Blob([gzipSync(random, { level: 0 })], { type: "application/gzip" }),          // over 400 KB as sent
+    "too large ": gzipped(fightCsv(200) + "9".repeat(3.2 * 1024 * 1024)),                         // over 3 MB unpacked
+    "too large  ": gzipped(`wall_s,team_damage\n${"1,1\n".repeat(30001)}`),                        // over 30,000 lines
+    "not gzip": new Blob([fightCsv(200)], { type: "application/gzip" }),
+    "not gzip ": new Blob([gzipSync(Buffer.from(fightCsv(200)))], { type: "text/csv" }),
+    "no rows": gzipped("wall_s,team_damage\n"),
+    "too few rows": gzipped(fightCsv(19)),
+  };
+  let i = 0;
+  for (const [note, log] of Object.entries(cases)) {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(`bad-${i += 1}`)));
+    form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
+    form.set("fightlog", log, "fight.csv.gz");
+    const sent = await call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+    assert.equal(sent.status, 201, note);
+    const extra = JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = ?").get(`bad-${i}`).e);
+    assert.deepEqual([extra.fightLogNote, extra.proofFightLog, extra.fightStats], [note.trim(), undefined, undefined], note);
+  }
+  // other accepted types; and without the result screen the part isn't read at all
+  for (const type of ["application/x-gzip", "application/octet-stream"]) {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(run(`ok-${type.length}`)));
+    form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
+    form.set("fightlog", gzipped(fightCsv(30), type), "fight.csv.gz");
+    assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", form })).status, 201);
+  }
+  const alone = new FormData();
+  alone.set("submission", JSON.stringify(run("no-evidence")));
+  alone.set("fightlog", gzipped(fightCsv(30)), "fight.csv.gz");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", form: alone })).status, 201);
+  assert.equal([...EVIDENCE.objects.keys()].filter((key) => key.endsWith("-fightlog.csv.gz")).length, 2);
+  assert.equal(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = 'no-evidence'").get().e, null);
+});
+
+test("the fight log goes with the crops after 90 days; its figures stay", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const token = await namedToken(env, SESSIONS.dev);
+  const send = (id, clearTimeS) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify({ kind: "sim_run", clientRunId: id, trial: "Training of Fire", difficulty: "Hard", clearTimeS, cleared: true, partySize: 1 }));
+    form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
+    form.set("fightlog", gzipped(fightCsv(40)), "fight.csv.gz");
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  await send("slow", 500);
+  await send("best", 300);
+  const extra = (client) => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = ?").get(client).e || "{}");
+  const logs = () => [...EVIDENCE.objects.keys()].filter((key) => key.endsWith("-fightlog.csv.gz")).length;
+  assert.equal(logs(), 2);
+  // 20 days: the whole screens' group leaves the log alone
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 20 * 86400").run();
+  await sendRun(env, token, run("trigger-1"));
+  assert.equal(logs(), 2);
+  // 100 days: the slower run's log goes, its figures stay; the best keeps its log
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 80 * 86400 WHERE client_run_id IN ('slow', 'best')").run();
+  await sendRun(env, token, run("trigger-2"));
+  assert.equal(logs(), 1);
+  assert.equal(extra("slow").proofFightLog, undefined);
+  assert.equal(extra("slow").fightStats.rows, 40);
+  assert.ok(extra("best").proofFightLog);
 });
 
 test("second reading (shadow mode): Workers AI re-reads the whole screens; a mismatch is listed for review, never held", async () => {

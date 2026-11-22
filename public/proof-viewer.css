@@ -98,5 +98,16 @@
 .lb-fight-back { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); cursor: pointer; }
 .lb-fight-back:hover, .lb-fight-back:focus-visible { border-color: var(--accent); color: var(--accent); }
 .lb-fight > .lb-proof-image { margin: 0 auto; }
+/* the fight log under the pictures (or alone): label / value pairs in a grid, a note, the download */
+.lb-fight-log { margin: 0 8px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 0.86rem; }
+.lb-fight-log-title { margin: 0 0 8px; color: var(--ink); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.lb-fight-log-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 8px 16px; margin: 0; }
+.lb-fight-log-figure { min-width: 0; }
+.lb-fight-log-figure dt { color: var(--ink-soft); font-size: 0.76rem; }
+.lb-fight-log-figure dd { margin: 1px 0 0; color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.lb-fight-log-note { margin: 10px 0 0; color: var(--ink-soft); }
+.lb-fight-download { margin-top: 10px; padding: 0; border: 0; background: none; color: var(--teal); font: inherit; text-decoration: underline; cursor: pointer; }
+.lb-fight-download:disabled { opacity: 0.6; cursor: progress; }
+@media (max-width: 560px) { .lb-fight-log-figures { grid-template-columns: 1fr 1fr; } }
 /* the owner and administrators: delete the run, under its pictures */
 .lb-proof-actions { display: flex; justify-content: flex-end; padding: 0 12px 12px; }

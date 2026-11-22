@@ -4,7 +4,8 @@ import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
 import { botSql, botsOf, lineupSeats, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
-import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
+import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
+import { fightStats, parseFightCsv } from "./fight-log.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -2296,19 +2297,19 @@ async function pruneProofs(env, max) {
         .bind(row.submissionId).run();
       pruned += 1;
     }
-    // the crops after 90 days
+    // the crops (and the fight log; its figures stay) after 90 days
     const crops = (await env.DB.prepare(
       `SELECT c.submission_id AS submissionId, c.evidence_key AS evidenceKey, c.battle_evidence_key AS battleKey, c.extra_json AS extraJson
        FROM leaderboard_submissions c
        WHERE (c.evidence_key IS NOT NULL OR c.battle_evidence_key IS NOT NULL OR json_extract(c.extra_json, '$.proofParty') IS NOT NULL
-              OR json_extract(c.extra_json, '$.proofGizmos') IS NOT NULL)
+              OR json_extract(c.extra_json, '$.proofGizmos') IS NOT NULL OR json_extract(c.extra_json, '$.proofFightLog') IS NOT NULL)
          AND c.proof_pruned_at IS NULL AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
     ).bind(now - RETENTION.cropsS, max).all()).results || [];
     for (const row of crops) {
       for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
       await env.DB.prepare(`UPDATE leaderboard_submissions SET evidence_key = NULL, battle_evidence_key = NULL, proof_pruned_at = ?,
-        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty', '$.proofGizmos', '$.proofFight') WHERE submission_id = ?`).bind(now, row.submissionId).run();
+        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty', '$.proofGizmos', '$.proofFight', '$.proofFightLog') WHERE submission_id = ?`).bind(now, row.submissionId).run();
       pruned += 1;
     }
   } catch (error) {
@@ -2715,6 +2716,11 @@ const MAX_EVIDENCE_BYTES = 1536 * 1024;
 const MAX_GIZMO_SHOTS = 12;
 const MAX_FIGHT_SHOTS = 6;
 const EVIDENCE_PARTS = 5 + MAX_GIZMO_SHOTS + MAX_FIGHT_SHOTS;
+// The fight log ("fightlog", with the fight pictures, staff only): aLogs' fight CSV, gzip-compressed (src/fight-log.js
+// reads it). Kept as sent; read under hard caps. One that is too big, isn't gzip or has too few rows is left out: it
+// never rejects or holds up the run (extra.fightLogNote says why).
+const FIGHT_LOG = Object.freeze({ bytes: 400 * 1024, unpacked: 3 * 1024 * 1024, lines: 30000 });
+const FIGHT_LOG_TYPES = new Set(["application/gzip", "application/x-gzip", "application/octet-stream"]);
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -3101,7 +3107,7 @@ async function readSubmissionRequest(request) {
     return { body: await readJsonBody(request, MAX_SUBMISSION_BYTES), evidence: null };
   }
   const declared = Number(request.headers.get("content-length") || 0);
-  if (declared > MAX_SUBMISSION_BYTES + EVIDENCE_PARTS * MAX_EVIDENCE_BYTES + 16384) throw new RangeError("Request body is too large.");
+  if (declared > MAX_SUBMISSION_BYTES + EVIDENCE_PARTS * MAX_EVIDENCE_BYTES + FIGHT_LOG.bytes + 16384) throw new RangeError("Request body is too large.");
   const form = await request.formData();
   const text = String(form.get("submission") || "");
   if (encoder.encode(text).byteLength > MAX_SUBMISSION_BYTES) throw new RangeError("Submission is too large.");
@@ -3135,8 +3141,50 @@ async function readSubmissionRequest(request) {
     if (!view) break;
     fights.push(view);
   }
+  // the fight log: checked when the run is stored (readFightLog), never a reason to turn the run away
+  const log = evidence ? form.get("fightlog") : null;
   return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null,
-    party: picture("party"), gizmos, fights };
+    party: picture("party"), gizmos, fights, fightLog: log && typeof log !== "string" ? log : null };
+}
+
+// A fight log part -> { bytes, stats } to keep, or { note } saying why it was left out ("too large", "not gzip", "no
+// rows", "too few rows"). Decompressed under FIGHT_LOG's caps: reading stops at the first one passed.
+async function readFightLog(file) {
+  if (!FIGHT_LOG_TYPES.has(String(file.type || "").toLowerCase())) return { note: "not gzip" };
+  if (file.size > FIGHT_LOG.bytes) return { note: "too large" };
+  let bytes;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return { note: "unreadable" };
+  }
+  if (bytes.length > FIGHT_LOG.bytes) return { note: "too large" };
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return { note: "not gzip" };
+  let text = "";
+  try {
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+    const decoder = new TextDecoder();
+    let size = 0;
+    let lines = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      for (const byte of value) if (byte === 10) lines += 1;
+      if (size > FIGHT_LOG.unpacked || lines > FIGHT_LOG.lines) {
+        await reader.cancel().catch(() => {});
+        return { note: "too large" };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } catch {
+    return { note: "not gzip" };
+  }
+  const rows = parseFightCsv(text);
+  if (!rows.length) return { note: "no rows" };
+  const stats = fightStats(rows);
+  return stats ? { bytes, stats } : { note: "too few rows" };
 }
 
 // Two app users in one Interlink run both send it: same week and boss, stored within five minutes of each other (the
@@ -3763,12 +3811,31 @@ async function submitLeaderboardRecord(request, env) {
     proofFight = views;
   }
   const keptFightShots = !fightsSent && proofFight?.length ? fightShots(stored.fightShots) : null;
-  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length) {
+  // the fight log (server-only extra.proofFightLog, its figures extra.fightStats, extra.fightLogNote when one was left
+  // out): a send with a readable log replaces file and figures; one without a log, or with one left out, keeps them
+  let proofFightLog = typeof stored.proofFightLog === "string" ? stored.proofFightLog : null;
+  let storedFightStats = stored.fightStats && typeof stored.fightStats === "object" && !Array.isArray(stored.fightStats) ? stored.fightStats : null;
+  let fightLogNote = typeof stored.fightLogNote === "string" ? stored.fightLogNote : null;
+  if (parsed.fightLog && env.EVIDENCE) {
+    const log = await readFightLog(parsed.fightLog).catch(() => ({ note: "unreadable" }));
+    if (log.stats) {
+      proofFightLog = `evidence/${account.discordId}/${submissionId}-fightlog.csv.gz`;
+      await env.EVIDENCE.put(proofFightLog, log.bytes, { httpMetadata: { contentType: "application/gzip" } });
+      storedFightStats = log.stats;
+      fightLogNote = null;
+    } else {
+      fightLogNote = log.note;
+    }
+  }
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote) {
     const extra = parseJsonColumn(record.extraJson) || {};
     delete extra.proofFull;
     delete extra.proofParty;
     delete extra.proofGizmos;
     delete extra.proofFight;
+    delete extra.proofFightLog;
+    delete extra.fightStats;
+    delete extra.fightLogNote;
     delete extra.sharedRun;
     if (Object.hasOwn(extra, "fightShots")) {
       const shots = fightShots(extra.fightShots);
@@ -3780,6 +3847,9 @@ async function submitLeaderboardRecord(request, env) {
     if (proofParty) extra.proofParty = proofParty;
     if (proofGizmos?.length) extra.proofGizmos = proofGizmos;
     if (proofFight?.length) extra.proofFight = proofFight;
+    if (proofFightLog) extra.proofFightLog = proofFightLog;
+    if (storedFightStats) extra.fightStats = storedFightStats;
+    if (fightLogNote) extra.fightLogNote = fightLogNote;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -4344,7 +4414,7 @@ function runCheckBadge(state) {
   return state === "match" || state === "confirmed" ? "verified" : state === "pending" ? "pending" : null;
 }
 
-// Review-only checks (Egg Heist's figures, a result read off the screen, an Interlink run's Avg DPS): a run that fails
+// Review-only checks (Egg Heist's figures, a result read off the screen, an Interlink run's Avg DPS and fight log): a run that fails
 // one is listed for staff and
 // nothing else changes - not its place, its visibility, or any badge. Their flags live in the check's JSON alone
 // ($.reviewOnly: { flags, decision? }); verify_state and the badge never see them. Run as a record is stored: a re-send
@@ -4355,8 +4425,11 @@ async function reviewOnlyCheck(env, submissionId, record, previous) {
   if (record.kind === "interlink_run" || record.kind === "eggheist_match") flags.push(...screenChecks(parseJsonColumn(record.extraJson) || {}, screenCheckLimits(env)));
   if (record.kind === "interlink_run") {
     const extra = parseJsonColumn(record.extraJson) || {};
+    const limits = interlinkCheckLimits(env);
     flags.push(...interlinkDpsChecks({ players: parseJsonColumn(record.playersJson) || [], lineup: extra.lineup, teamDps: record.teamDps, meterDps: record.meterDps },
-      interlinkCheckLimits(env), slotIsBot));
+      limits, slotIsBot));
+    // the fight log's figures (stored with this send, or kept from an earlier one)
+    flags.push(...fightLogChecks(extra.fightStats, limits));
   }
   const egg = record.kind.startsWith("eggheist_") ? eggCheckLimits(env) : null;
   if (record.kind === "eggheist_match") {
@@ -6715,8 +6788,9 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles, parseJsonColumn(row.extra_json)?.lineup),
       buffs: parseJsonColumn(row.buffs_json),
-      // the fight's pictures are staff only: neither their keys nor their times are shown here
-      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, proofFight: _fight, fightShots: _fightShots, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
+      // the fight's pictures and log are staff only: none of their entries is shown here
+      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, proofFight: _fight, fightShots: _fightShots, proofFightLog: _log, fightStats: _stats,
+        fightLogNote: _note, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
@@ -6813,7 +6887,7 @@ function proofKeys(row) {
   const extra = parseJsonColumn(row?.extraJson) || {};
   const full = extra.proofFull || {};
   return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || []),
-    ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])].filter(Boolean);
+    ...(Array.isArray(extra.proofFight) ? extra.proofFight : []), extra.proofFightLog].filter(Boolean);
 }
 
 async function deleteSubmission(request, env, submissionId) {
@@ -6850,9 +6924,13 @@ async function submissionEvidence(request, env, submissionId) {
   // answer a missing picture gets, so they aren't told the pictures exist
   const fights = Array.isArray(extra.proofFight) ? extra.proofFight : [];
   const fightShot = /^fight([1-9]\d?)$/u.exec(shot || "");
+  // and so is the fight log (extra.proofFightLog, its figures extra.fightStats, extra.fightLogNote)
+  const fightLog = typeof extra.proofFightLog === "string" ? extra.proofFightLog : null;
+  const logNote = typeof extra.fightLogNote === "string" ? extra.fightLogNote : null;
+  const staffOnly = fights.length > 0 || Boolean(fightLog || logNote);
   let viewer;
   const viewerAccount = async () => (viewer === undefined ? (viewer = await leaderboardAccount(request, env)) : viewer);
-  const staff = Boolean(row && fights.length && (shot === "list" || fightShot) && can(await viewerAccount(), "logs.read"));
+  const staff = Boolean(row && staffOnly && (shot === "list" || fightShot || shot === "fightlog") && can(await viewerAccount(), "logs.read"));
   // ?shot=list: the run's pictures, in the order they were on screen (the viewer's tabs), with what each player went in
   // with (the Party screen's lineup: lead, level, CP, team) and the run's buffs - public on the boards already
   const shots = row ? [row.evidenceKey && "summary", row.battleKey && "battle", ...gizmos.map((_, i) => `gizmo${i + 1}`),
@@ -6860,7 +6938,7 @@ async function submissionEvidence(request, env, submissionId) {
   const key = shot === "list" ? (shots.length ? "list" : null)
     : shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
     : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1]
-    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : row?.evidenceKey;
+    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : shot === "fightlog" ? (staff ? fightLog : null) : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
@@ -6890,19 +6968,25 @@ async function submissionEvidence(request, env, submissionId) {
     const fight = await proofFight(env, row);
     // staff: when each fight picture was taken (extra.fightShots, for the viewer's labels)
     const times = staff ? fightShots(extra.fightShots) : null;
+    const stats = extra.fightStats && typeof extra.fightStats === "object" && !Array.isArray(extra.fightStats) ? extra.fightStats : null;
+    const log = staff && (fightLog || logNote) ? { stats: fightLog ? stats : null, ...(logNote ? { note: logNote } : {}) } : null;
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
       ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}),
-      ...(times ? { fightShots: times } : {}) });
+      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}) });
     // a list naming the fight's pictures is never cached; the list depends on who asks
     listed.headers.set("cache-control", visible && !staff ? "public, max-age=300" : "private, no-store");
-    if (fights.length) listed.headers.set("vary", "Authorization");
+    if (staffOnly) listed.headers.set("vary", "Authorization");
     return listed;
   }
   const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
-  headers.set("cache-control", visible && !fightShot ? "public, max-age=86400" : "private, no-store");
+  headers.set("cache-control", visible && !fightShot && shot !== "fightlog" ? "public, max-age=86400" : "private, no-store");
+  if (shot === "fightlog") {
+    headers.set("content-type", "application/gzip");
+    headers.set("content-disposition", `attachment; filename="fight-${submissionId}.csv.gz"`);
+  }
   return new Response(object.body, { status: 200, headers });
 }
 

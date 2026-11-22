@@ -156,15 +156,16 @@
     if (shot.startsWith("gizmo")) return shots.filter((s) => s.startsWith("gizmo")).length > 1 ? `Gizmos ${shot.slice(5)}` : "Gizmos";
     return "Summary";
   }
-  // A run's tabs from its ?shot=list: a tab per picture, and the fight's pictures ("fight1"...; staff only, the API lists
-  // them for staff alone) together in one "Fight" tab after the others
+  // A run's tabs from its ?shot=list: a tab per picture, and the fight's pictures ("fight1"...) and its fight log
+  // (fightLog) together in one "Fight" tab after the others (staff only: the API lists them for staff alone)
   function listPictures(id, list, label) {
     const fights = list.shots.filter((shot) => /^fight\d+$/u.test(shot));
     const times = new Map((Array.isArray(list.fightShots) ? list.fightShots : [])
       .filter((item) => Number.isInteger(item?.n) && Number.isFinite(item?.t)).map((item) => [item.n, item.t]));
     return [
       ...list.shots.filter((shot) => !fights.includes(shot)).map((shot) => ({ id, shot, label: label(shot) })),
-      ...(fights.length ? [{ id, shot: "fight", label: "Fight", fight: fights.map((shot) => ({ shot, t: times.get(Number(shot.slice(5))) })) }] : []),
+      ...(fights.length || list.fightLog ? [{ id, shot: "fight", label: "Fight", fight: fights.map((shot) => ({ shot, t: times.get(Number(shot.slice(5))) })),
+        log: list.fightLog || null }] : []),
     ];
   }
   const COUNT_WORDS = ["One", "Two", "Three", "Four", "Five", "Six"];
@@ -172,10 +173,58 @@
     const whole = Math.floor(seconds);
     return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
   }
+  // The fight log under the pictures (or alone): its main figures, a line when the app's last log was left out, and a
+  // download of the file (the same signed-in fetch: the API gives it to staff only)
+  const LOG_NOTES = Object.freeze({ "too large": "it was too large", "not gzip": "it wasn't a gzip file", "no rows": "it had no rows",
+    "too few rows": "it had fewer than 20 usable rows", unreadable: "it couldn't be read" });
+  function fightLogPanel(id, log) {
+    const stats = log?.stats && typeof log.stats === "object" ? log.stats : null;
+    const has = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
+    const clockRate = !stats ? "" : has(stats.clockRate)
+      ? `${number(stats.clockRate)}× real time${has(stats.clockSpanS) && stats.clockSpanS < 60 ? ` (read over ${number(stats.clockSpanS)} s only)` : ""}` : "Not read";
+    const figures = stats ? [
+      ["Length", has(stats.wallS) ? clock(stats.wallS) : "—"],
+      ["Team damage", number(stats.damage)],
+      ["Team DPS", number(stats.dps)],
+      ["Hits a second", number(stats.hitsPerS)],
+      ["Median hit", number(stats.hitMedian)],
+      ["90th-percentile hit", number(stats.hitP90)],
+      ["Game clock against real time", clockRate],
+      ["Breaks a minute", number(stats.breaksPerMin)],
+      ["Time broken", has(stats.brokenSharePct) ? `${number(stats.brokenSharePct)}%` : "—"],
+    ] : [];
+    const why = LOG_NOTES[log?.note] || (log?.note ? `it was left out (${log.note})` : "");
+    const note = why ? (stats ? `The app's latest fight log for this run was left out: ${why}. The figures are from the one before.`
+      : `The app sent a fight log for this run, but it was left out: ${why}.`) : "";
+    const download = stats ? el("button", { type: "button", class: "lb-fight-download", text: "Download the fight log", onclick: async () => {
+      download.disabled = true;
+      try {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(id)}/evidence?shot=fightlog`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const url = URL.createObjectURL(await response.blob());
+        const link = el("a", { href: url, download: `fight-${id}.csv.gz` });
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch {
+        window.alert("Could not download the fight log.");
+      } finally {
+        download.disabled = false;
+      }
+    } }) : null;
+    return el("section", { class: "lb-fight-log", "aria-label": "Fight log" },
+      el("h3", { class: "lb-fight-log-title", text: "Fight log" }),
+      figures.length ? el("dl", { class: "lb-fight-log-figures" }, figures.map(([label, value]) => el("div", { class: "lb-fight-log-figure" },
+        el("dt", { text: label }), el("dd", { text: value })))) : null,
+      note ? el("p", { class: "lb-fight-log-note", text: note }) : null,
+      download);
+  }
   // The Fight tab: a line saying what the pictures are, then each picture full width with its time into the fight in a
-  // corner; a click (or Enter) opens one full size, with a way back to all of them. Never on hover.
+  // corner; a click (or Enter) opens one full size, with a way back to all of them. Never on hover. The fight log under them.
   function fightPanel(body, picture, current) {
     const shots = picture.fight;
+    const log = () => (picture.log ? fightLogPanel(picture.id, picture.log) : null);
     const count = COUNT_WORDS[shots.length - 1] || String(shots.length);
     const note = shots.length === 1
       ? "One moment of the fight, taken right after the biggest hit of that part. The numbers are this player's own hits. Click the picture to open it full size."
@@ -191,7 +240,8 @@
         return el("button", { type: "button", class: "lb-fight-shot", title: "Open full size", onclick: () => single(i) },
           img, Number.isFinite(shot.t) ? el("span", { class: "lb-fight-time", text: clock(shot.t) }) : null);
       });
-      body.replaceChildren(el("div", { class: "lb-fight" }, el("p", { class: "lb-fight-note", text: note }), el("div", { class: "lb-fight-strip" }, buttons)));
+      body.replaceChildren(el("div", { class: "lb-fight" }, shots.length ? el("p", { class: "lb-fight-note", text: note }) : null,
+        shots.length ? el("div", { class: "lb-fight-strip" }, buttons) : null, log()));
       buttons[focus]?.focus();
     };
     const single = (i) => {
@@ -328,7 +378,7 @@
       }
     };
     tabs.append(...pictures.map((picture, index) => el("button", { type: "button", role: "tab", "data-proof-shot": String(index),
-      onclick: () => show(index) }, picture.label, picture.fight ? el("span", { class: "lb-fight-count", text: String(picture.fight.length) }) : null)));
+      onclick: () => show(index) }, picture.label, picture.fight?.length ? el("span", { class: "lb-fight-count", text: String(picture.fight.length) }) : null)));
     if (comments) {
       comments.tab.addEventListener("click", showComments);
       tabs.append(comments.tab);

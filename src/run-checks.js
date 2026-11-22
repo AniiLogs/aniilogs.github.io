@@ -120,8 +120,50 @@ const ratioLimit = (value) => (typeof value === "number" && Number.isFinite(valu
 export function interlinkCheckLimits(env) {
   const sent = parsedSecret(env?.INTERLINK_CHECK_LIMITS);
   if (!sent) return null;
-  const limits = { maxPlayerAvgDps: dpsLimit(sent.maxPlayerAvgDps), maxAvgDpsPerCp: ratioLimit(sent.maxAvgDpsPerCp), maxTeamDps: dpsLimit(sent.maxTeamDps) };
-  return limits.maxPlayerAvgDps !== null || limits.maxAvgDpsPerCp !== null || limits.maxTeamDps !== null ? limits : null;
+  const fight = fightLimits(sent.fight);
+  const limits = { maxPlayerAvgDps: dpsLimit(sent.maxPlayerAvgDps), maxAvgDpsPerCp: ratioLimit(sent.maxAvgDpsPerCp), maxTeamDps: dpsLimit(sent.maxTeamDps),
+    ...(fight ? { fight } : {}) };
+  return limits.maxPlayerAvgDps !== null || limits.maxAvgDpsPerCp !== null || limits.maxTeamDps !== null || fight ? limits : null;
+}
+
+// ---------------------------------------------------------------- Interlink: the fight log (review only)
+// The figures the server keeps from an Interlink run's fight log (extra.fightStats; src/fight-log.js computes them, and
+// lists the same names as FIGHT_FIGURES). INTERLINK_CHECK_LIMITS may hold "fight": {"<figure>": {"min": x, "max": y}, ...}:
+// min and max each optional, finite numbers; a figure without either, or one not in this list, is left out. A figure
+// outside its range gives { rule: "fight log", figure, sent, min?, max? } (the range as set); a figure the log has no
+// value for (null) is never flagged.
+export const FIGHT_LOG_FIGURES = Object.freeze(["rows", "wallS", "damage", "dps", "hits", "hitsPerS", "hitMedian", "hitP90", "hitMax",
+  "secondsWithDamagePct", "clockRate", "clockSpanS", "clockRateP10", "clockRateP90", "breaks", "breaksPerMin", "drainMedianS", "drainMinS",
+  "drainSpreadS", "brokenMedianS", "brokenSharePct", "dpsUnbroken"]);
+// The clock figures say nothing when the game's countdown was read over a short stretch (a few pairs 15 s apart, or
+// none): they are only judged when the log read the clock over at least this many seconds (clockSpanS).
+export const CLOCK_SPAN_MIN_S = 60;
+const CLOCK_FIGURES = new Set(["clockRate", "clockRateP10", "clockRateP90"]);
+const finite = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+function fightLimits(value) {
+  const limits = {};
+  for (const [figure, range] of Object.entries(objectOf(value) || {})) {
+    if (!FIGHT_LOG_FIGURES.includes(figure) || !objectOf(range)) continue;
+    const min = finite(range.min);
+    const max = finite(range.max);
+    if (min === null && max === null) continue;
+    limits[figure] = { ...(min !== null ? { min } : {}), ...(max !== null ? { max } : {}) };
+  }
+  return Object.keys(limits).length ? limits : null;
+}
+// stats: a run's extra.fightStats; limits: interlinkCheckLimits(env) (its fight part)
+export function fightLogChecks(stats, limits) {
+  const ranges = limits?.fight;
+  if (!ranges || !objectOf(stats)) return [];
+  const flags = [];
+  for (const figure of FIGHT_LOG_FIGURES) {
+    const range = ranges[figure];
+    const sent = finite(stats[figure]);
+    if (!range || sent === null) continue;
+    if (CLOCK_FIGURES.has(figure) && !(finite(stats.clockSpanS) >= CLOCK_SPAN_MIN_S)) continue;
+    if ((range.min !== undefined && sent < range.min) || (range.max !== undefined && sent > range.max)) flags.push({ rule: "fight log", figure, sent, ...range });
+  }
+  return flags;
 }
 // A hint for staff, not a skip. The meter's own estimate from the boss's HP bar (meter_dps) is independent of the cards
 // (team_dps isn't: the app sends it as the cards' sum). When the cards' sum is more than this factor away from it,
@@ -264,8 +306,39 @@ const FIELD_WORDS = Object.freeze({ worst: "the largest difference", over25: "th
 const meterWords = (flag) => (flag.meterDps != null && flag.cardsSum != null
   ? ` aLogs' own estimate from the boss's HP bar is ${n(flag.meterDps)} for the team against the cards' ${n(flag.cardsSum)}: look at the Battle Data picture for a misread first.`
   : "");
+// A fight-log figure as the start of a sentence ("{}" is the value)
+const FIGHT_WORDS = Object.freeze({
+  rows: "The fight log has {} usable rows",
+  wallS: "The fight log covers {} s",
+  damage: "The fight log's team damage is {}",
+  dps: "The fight log's team DPS is {}",
+  hits: "The fight log counts {} hits",
+  hitsPerS: "The fight log counts {} hits a second",
+  hitMedian: "The fight log's median hit is {}",
+  hitP90: "The fight log's 90th-percentile hit is {}",
+  hitMax: "The fight log's biggest hit is {}",
+  secondsWithDamagePct: "The team's damage rose in {}% of the fight log's seconds",
+  clockRate: "The fight log's clock ran at {} times real time",
+  clockRateP10: "The fight log's clock ran at {} times real time at its slowest (10th percentile)",
+  clockRateP90: "The fight log's clock ran at {} times real time at its fastest (90th percentile)",
+  clockSpanS: "The fight log read the game's clock over {} s",
+  breaks: "The fight log has {} breaks",
+  breaksPerMin: "The fight log has {} breaks a minute",
+  drainMedianS: "The fight log's median drain before a break is {} s",
+  drainMinS: "The fight log's shortest drain before a break is {} s",
+  drainSpreadS: "The fight log's drains before a break differ by up to {} s",
+  brokenMedianS: "The fight log's median broken phase lasts {} s",
+  brokenSharePct: "The boss was broken for {}% of the fight log",
+  dpsUnbroken: "The fight log's team DPS outside broken phases is {}",
+});
+function fightLogWords(flag) {
+  const start = (FIGHT_WORDS[flag.figure] || `The fight log's ${flag.figure} is {}`).replace("{}", n(flag.sent));
+  const limit = flag.max !== undefined && flag.sent > flag.max ? `at most ${n(flag.max)}` : flag.min !== undefined ? `at least ${n(flag.min)}` : `at most ${n(flag.max)}`;
+  return `${start}; the limit for review is ${limit}.`;
+}
 function flagWords(flag) {
   switch (flag.rule) {
+    case "fight log": return fightLogWords(flag);
     case "stars above the cap": return `${n(flag.sent)} stars sent; this boss gives at most ${n(flag.expected)}.`;
     case "clear time possible for the difficulty": return `Cleared in ${n(flag.sent)} s; the fastest possible at this difficulty is ${n(flag.expected)} s.`;
     case "coins of a full run": return `${n(flag.sent)} coins; a full run collects at least ${n(flag.expected)}.`;
@@ -409,6 +482,16 @@ export function limitPreview(rows, limits = {}, isBot = aiFlag) {
       teamDps: spread(kept.map((result) => result.sum)),
       flagged: tally(checked.map((result) => result.flags)),
       runsFlagged: checked.filter((result) => result.flags.length).length,
+      // the fight log's figures (extra.fightStats), for candidate interlink.fight limits: runs with stored figures, each
+      // figure's spread, and how many runs each figure would flag
+      fight: (() => {
+        const stats = runs.map((row) => objectOf(objectOf(row.extra)?.fightStats)).filter(Boolean);
+        const fightFlags = stats.map((item) => fightLogChecks(item, interlink));
+        const flagged = {};
+        for (const flags of fightFlags) for (const flag of flags) flagged[flag.figure] = (flagged[flag.figure] || 0) + 1;
+        return { runs: stats.length, figures: Object.fromEntries(FIGHT_LOG_FIGURES.map((figure) => [figure, spread(stats.map((item) => item[figure]))])),
+          flagged, runsFlagged: fightFlags.filter((flags) => flags.length).length };
+      })(),
     },
   };
 }

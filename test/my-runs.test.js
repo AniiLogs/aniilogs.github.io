@@ -27,9 +27,9 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   // which fight the run is, over the pictures, from the API's fight; every page loads this version of the viewer
   assert.match(viewer, /const fight = fightLine\(details\.fight \|\| run\?\.fight\);/u);
   for (const page of [home, boards]) {
-    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.5-fight-tab">/u);
+    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.6-fight-log">/u);
     // its Comments tab (comments.js) loads just before it
-    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.9-fight-tab" defer><\/script>/u);
+    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.10-fight-log" defer><\/script>/u);
   }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);
@@ -49,6 +49,12 @@ test("the viewer's Fight tab (staff only): one tab for all the fight's pictures,
   // the pictures come through the signed-in fetch (the API answers staff only)
   assert.match(viewer, /const load = \(img, shot\) => proofImage\(picture\.id, shot\.shot\)/u);
   for (const rule of ["lb-fight-note", "lb-fight-strip", "lb-fight-shot", "lb-fight-time"]) assert.match(viewerStyles, new RegExp(`\\.${rule} \\{`, "u"));
+  // the fight log: the tab also for a log alone, its figures, a note, the download through the signed-in fetch
+  assert.match(viewer, /fights\.length \|\| list\.fightLog \?/u);
+  assert.match(viewer, /\["Game clock against real time", clockRate\]/u);
+  assert.match(viewer, /text: "Download the fight log"/u);
+  assert.match(viewer, /await apiFetch\(`\/leaderboard\/submissions\/\$\{encodeURIComponent\(id\)\}\/evidence\?shot=fightlog`\)/u);
+  assert.match(viewerStyles, /\.lb-fight-log-figure dd \{[^}]*font-variant-numeric: tabular-nums;/u);
 });
 
 test("My runs: search, mode filter, 20/30/50 per page (remembered), numbered pages, proof column, on your profile", () => {
