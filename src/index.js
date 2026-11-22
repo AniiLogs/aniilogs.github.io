@@ -2,7 +2,7 @@
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
-import { botSql, botsOf, lineupSeats, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
+import { botSql, botsOf, cardSeats, lineupSeats, nameSkeleton, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
@@ -1811,8 +1811,10 @@ function publicLineup(lineup) {
   if (!Array.isArray(lineup)) return null;
   const text = (value) => (typeof value === "string" ? value.slice(0, 40) : undefined);
   const level = (value) => (Number.isInteger(value) && value >= 1 && value <= 999 ? value : undefined);
+  // the Party screen's slot, 0-3 (seat 1-4): 0 is the first seat, kept
+  const slot = (value) => (Number.isInteger(value) && value >= 0 && value <= 3 ? value : undefined);
   return lineup.slice(0, 4).filter((item) => item && typeof item === "object").map((item) => JSON.parse(JSON.stringify({
-    slot: level(item.slot), name: text(item.name), ai: slotIsBot(item), self: item.self === true || undefined,
+    slot: slot(item.slot), name: text(item.name), ai: slotIsBot(item), self: item.self === true || undefined,
     // every player's lead, its level and CP, and the team they went in with (public, the owner's decision)
     aniimo: text(item.aniimo) ?? text(item.lead?.name) ?? text(item.lead), aniimoLevel: level(item.aniimoLevel) ?? level(item.lead?.level),
     cp: Number.isInteger(item.cp) && item.cp >= 0 && item.cp <= 10000000 ? item.cp : undefined,
@@ -2949,21 +2951,8 @@ function boundedNumber(value, min, max) {
   return Number.isFinite(number) && number >= min && number <= max ? number : undefined;
 }
 
-// Names that look the same: accents and width forms dropped, lookalike letters folded together (Cyrillic and Greek
-// letters to Latin, 0/O, 1/l/I/|, rn/m, vv/w), after Unicode's confusable-skeleton idea (UTS #39). Two characters with
-// one skeleton but different UIDs are lookalikes: the boards mark them, and only the UID tells them apart.
-const CONFUSABLE_LETTERS = Object.freeze({
-  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s", "һ": "h", "ԁ": "d",
-  "ӏ": "l", "к": "k", "м": "m", "н": "h", "т": "t", "в": "b", "ɡ": "g", "α": "a", "ο": "o", "ρ": "p", "ν": "v", "τ": "t",
-  "κ": "k", "ι": "i", "υ": "u", "χ": "x", "ε": "e", "β": "b", "μ": "u", "0": "o", "1": "l", "|": "l", "!": "l", "5": "s",
-  "$": "s", "@": "a", "3": "e", "ø": "o", "ł": "l", "đ": "d", "ß": "ss",
-});
-export function nameSkeleton(name) {
-  const folded = String(name || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-  return [...folded].map((letter) => CONFUSABLE_LETTERS[letter] ?? letter).join("")
-    .replace(/i/gu, "l").replace(/rn/gu, "m").replace(/vv/gu, "w").replace(/cl/gu, "d")
-    .replace(/[\s_.\-·•'`´]/gu, "");
-}
+// nameSkeleton (names that look the same) lives in bots.js, beside the seat rule that also uses it
+export { nameSkeleton };
 
 function boundedText(value, maxLength, pattern = null) {
   if (value === null || value === undefined || value === "") return null;
@@ -6423,14 +6412,20 @@ async function profileBoards(env, discordId) {
   return { leaderboards, trophies };
 }
 
-// A board row's seat (1P-4P) on the run it shows: the Party screen's slot (lineupSeats) whose name is the row's
-// player, either the row's name or the name this run stored for the row's UID. Only one seat may fit; else none.
+// A board row's seat (1P-4P) on the run it shows: the seat of the row's card on that run (cardSeats), the card found by
+// the row's UID, else by its name (folded), else by its skeleton, each only when one card fits. A run without cards:
+// the Party screen's slot of the row's name (lineupSeats).
 function seatOf(row, run) {
-  if (!run?.seats?.size) return null;
-  const names = [row.player];
-  if (row.uid) for (const player of run.players) if (player && typeof player === "object" && player.uid === row.uid) names.push(player.name);
-  const found = new Set(names.map((name) => run.seats.get(seatKey(name))).filter(Boolean));
-  return found.size === 1 ? [...found][0] : null;
+  if (!run) return null;
+  const cards = (run.players || []).map((card, index) => ({ card, index })).filter(({ card }) => card && typeof card === "object");
+  if (!cards.length) return run.seats?.get(seatKey(row.player)) || null;
+  const one = (found) => (found.length === 1 ? found[0] : null);
+  const name = seatKey(row.player);
+  const skeleton = typeof row.player === "string" ? nameSkeleton(row.player) : "";
+  const match = (row.uid ? one(cards.filter(({ card }) => card.uid && String(card.uid) === String(row.uid))) : null)
+    || (name ? one(cards.filter(({ card }) => seatKey(card.name) === name)) : null)
+    || (skeleton ? one(cards.filter(({ card }) => typeof card.name === "string" && nameSkeleton(card.name) === skeleton)) : null);
+  return match ? run.cardSeats?.[match.index] || null : null;
 }
 // A player's own figures as a run stored them (players_json: Avg DPS, BREAK, healing), found by UID, else by the one
 // stored player of their name; {} when none fits. For an "also" player: this run's figures, never their best run's.
@@ -6462,14 +6457,14 @@ function unlinkedOfRun(run, shown, members = new Set(), uids = new Set()) {
   const seats = new Set(shown.map((row) => seatOf(row, run)).filter(Boolean));
   const senderLinked = run.sender != null && (members.has(run.sender) || shown.some((row) => row.discordId === run.sender));
   const found = [];
-  run.players.forEach((slot) => {
+  run.players.forEach((slot, index) => {
     if (!slot || typeof slot !== "object" || slotIsBot(slot, run.lineup)) return;
     if (slot.self === true && senderLinked) return;                      // the sender's own slot, never counted twice
     if (slot.uid && (uids.has(String(slot.uid)) || shownUids.has(String(slot.uid)))) return;
     const key = seatKey(slot.name);
     const unsettled = slot.unsettled === true;
     if (!unsettled && (!key || names.has(key))) return;
-    const seat = (key && run.seats?.get(key)) || null;
+    const seat = run.cardSeats?.[index] || null;                         // the card's own seat (cardSeats)
     if (seat && seats.has(seat)) return;
     found.push(unsettled ? { player: null, ...(seat ? { seat } : {}) }
       : { player: String(slot.name), ...(seat ? { seat } : {}), ...slotFigures(slot) });
@@ -6556,7 +6551,8 @@ async function interlinkBoards(request, env, internal = false) {
         badges.set(result.id, runCheckBadge(result.state));
         realPlayers.set(result.id, realPlayersOf(result.playersJson, result.lineupJson));
         runBots.set(result.id, botsOf(result.playersJson, result.lineupJson));
-        runSeats.set(result.id, { seats: lineupSeats(result.lineupJson), players: parseJsonColumn(result.playersJson) || [],
+        const players = parseJsonColumn(result.playersJson) || [];
+        runSeats.set(result.id, { seats: lineupSeats(result.lineupJson), players, cardSeats: cardSeats(players, result.lineupJson),
           lineup: parseJsonColumn(result.lineupJson), sender: result.senderId });
       }
     }

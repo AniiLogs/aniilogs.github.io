@@ -439,6 +439,7 @@ test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, se
     [["MinMax", "Pawney", ["Pawney", "Emberpup"]], ["Bot", null, []]]);
   // each player's Avg DPS off the Battle Data card (null: no card came for the AI), and the team's DPS
   assert.deepEqual(details.lineup.map((p) => p.avgDps), [9000, null]);
+  assert.deepEqual(details.lineup.map((p) => p.slot), [0, 1]);                       // the first seat's slot 0 is kept
   assert.equal(details.teamDps, 9000);
   // a better best sent from the game's menu is shown beside the run's pictures, never instead of them
   const menu = new FormData();

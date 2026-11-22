@@ -1513,7 +1513,7 @@ function historyLineup(run) {
     for (const player of players) {
       const item = element("li", "lineup-player");
       const head = element("div", "lineup-head");
-      head.append(element("span", "lineup-name", player.name || (player.slot ? `${player.slot}P` : "Player")));
+      head.append(element("span", "lineup-name", player.name || (Number.isInteger(player.slot) ? `${player.slot + 1}P` : "Player")));
       if (player.aniimo) {
         const lead = element("span", "lineup-lead");
         lead.append(aniimoNameLink(player.aniimo));

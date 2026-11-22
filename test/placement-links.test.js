@@ -9,7 +9,7 @@ import test from "node:test";
 
 import worker, { lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
-import { botsOf, lineupSeats, realPlayersOf, slotIsBot } from "../src/bots.js";
+import { botsOf, cardSeats, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, realPlayersOf, slotIsBot } from "../src/bots.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
 import { CARD_HEIGHT, CARD_TITLE_FONTS, CARD_WIDTH, cardTitleFont, drawPlacementCard, packBlocksFor } from "../src/placement-card.js";
 
@@ -94,7 +94,7 @@ async function send(env, who, id, { score, stars = 30, party, at = 0, clearTimeS
   const players = party.map(([name, ai = false, avgDps]) => ({ name, ai, ...(name === who.name ? { self: true } : {}), ...(avgDps ? { avgDps } : {}) }));
   const body = { kind: "interlink_run", clientRunId: id, cycle: "3005", boss: BOSS, score, stars, clearTimeS, cleared: true, teamDps: 60000,
     gameUid: who.gameUid, playedAt: 1792700000 + at, players,
-    extra: lineup ? { lineup: party.map(([name, ai = false], slot) => ({ slot, name, ai, ...(name === who.name ? { self: true } : {}) })) } : {} };
+    extra: Array.isArray(lineup) ? { lineup } : lineup ? { lineup: party.map(([name, ai = false], slot) => ({ slot, name, ai, ...(name === who.name ? { self: true } : {}) })) } : {} };
   const form = new FormData();
   form.set("submission", JSON.stringify(body));
   form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
@@ -135,7 +135,7 @@ test("the label rule: four real players none, three Trio, two Duo, one Solo; no 
 test("the bots of a run: their names as stored, in the stored order, by the one bot rule, with the Party screen's seat; none: an empty list", () => {
   const person = (name) => ({ name, ai: false });
   const bot = (name) => ({ name, ai: true });
-  assert.deepEqual(botsOf([person("Aster"), bot("Flora"), bot("Mario"), bot("Leonard")]), [{ name: "Flora" }, { name: "Mario" }, { name: "Leonard" }]);
+  assert.deepEqual(botsOf([person("Aster"), bot("Flora"), bot("Mario"), bot("Leonard")]), [{ name: "Flora", seat: 2 }, { name: "Mario", seat: 3 }, { name: "Leonard", seat: 4 }]);   // four cards: by position
   assert.deepEqual(botsOf(JSON.stringify([bot("Tammy"), person("Aster"), bot("flora")])), [{ name: "Tammy" }, { name: "flora" }]);   // stored spelling
   assert.deepEqual(botsOf([person("Aster"), person("Briar"), person("Cobalt"), person("Dorian")]), []);
   // a real player who has a bot's name: a CP (on the slot or its Party card), a UID or an account says person
@@ -144,10 +144,12 @@ test("the bots of a run: their names as stored, in the stored order, by the one 
   assert.deepEqual(botsOf([{ name: "Flora", uid: "302000000777" }, bot("Tammy")]), [{ name: "Tammy" }]);
   assert.deepEqual(botsOf(null), []);
   assert.deepEqual(botsOf("not json"), []);
-  // seats: the Party screen's slot of the same name; a name it has twice, or a slot out of 1-4, gives none
+  // seats (cardSeats): four cards are the result screen's columns, 1P-4P in order, whatever the Party screen says
   const party = [{ slot: 0, name: "Aster" }, { slot: 2, name: "Flora" }, { slot: 1, name: "mario" }, { slot: 3, name: "Leonard" }];   // as aLogs stores it: 0-3
   assert.deepEqual(botsOf([person("Aster"), bot("Flora"), bot("Mario"), bot("Leonard")], party),
-    [{ name: "Flora", seat: 3 }, { name: "Mario", seat: 2 }, { name: "Leonard", seat: 4 }]);
+    [{ name: "Flora", seat: 2 }, { name: "Mario", seat: 3 }, { name: "Leonard", seat: 4 }]);
+  // fewer cards: the Party screen's slot of the same name
+  assert.deepEqual(botsOf([person("Aster"), bot("Flora"), bot("Mario")], party), [{ name: "Flora", seat: 3 }, { name: "Mario", seat: 2 }]);
   assert.deepEqual([...lineupSeats([{ slot: 0, name: "Aster" }, { slot: 1, name: "Aster" }, { slot: 9, name: "Briar" }, { name: "Cobalt" }])], []);
   // the stored slots 0-3 are the game's 1P-4P, in that order; a slot of 4 (or -1) is no seat
   assert.deepEqual([...lineupSeats([{ slot: 0, name: "Aster" }, { slot: 1, name: "Briar" }, { slot: 2, name: "Cobalt" }, { slot: 3, name: "Dorian" }])],
@@ -182,13 +184,81 @@ test("seats: each row's place on its run's Party screen; a Solo's player and its
   // the full team: the sender and the three teammates the boards list, each in their seat
   const team = all.entries.filter((e) => e.team === of("Dorian").team);
   assert.deepEqual(team.map((e) => [e.player, e.seat]).sort(), [["Dorian", 1], ["Quill", 2], ["Rowan", 3], ["Sorrel", 4]]);
-  // a run sent without a Party screen: no seat anywhere, its bots without seats
+  // a four-card run sent without a Party screen: the result screen's columns still give every seat
   const p = await player(env, sqlite, "Gorse");
   await send(env, p, "no-lineup", { score: 9000, party: [["Gorse", false, 5000], ["Flora", true], ["Mario", true], ["Tammy", true]], at: 3000, lineup: false });
   const later = await interlink(env, "ladder=score&rows=teams");
   const gorse = later.entries.find((e) => e.player === "Gorse");
-  assert.ok(!("seat" in gorse));
-  assert.deepEqual(gorse.bots, [{ name: "Flora" }, { name: "Mario" }, { name: "Tammy" }]);
+  assert.equal(gorse.seat, 1);
+  assert.deepEqual(gorse.bots, [{ name: "Flora", seat: 2 }, { name: "Mario", seat: 3 }, { name: "Tammy", seat: 4 }]);
+  // three cards and no Party screen: no seat anywhere
+  const q = await player(env, sqlite, "Hollis");
+  await send(env, q, "three-no-lineup", { score: 8000, party: [["Hollis", false, 5000], ["Flora", true], ["Mario", true]], at: 3600, lineup: false });
+  const hollis = (await interlink(env, "ladder=score&rows=teams")).entries.find((e) => e.player === "Hollis");
+  assert.ok(!("seat" in hollis));
+  assert.deepEqual(hollis.bots, [{ name: "Flora" }, { name: "Mario" }]);
+});
+
+test("cardSeats: four cards are seats 1-4 by position; fewer fall back to the Party screen, step by step; never a guess", () => {
+  const card = (name, more = {}) => ({ name, ...more });
+  const entry = (slot, name, more = {}) => ({ slot, name, ...more });
+  // four cards: by position, the lineup not asked (it disagrees here, has a gap, or is missing)
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar"), card("Cobalt"), card("Dorian")],
+    [entry(0, "Briar"), entry(1, "Aster"), entry(2, "Cobalt"), entry(3, "Dorian")]), [1, 2, 3, 4]);
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar"), card("Cobalt"), card("Dorian")]), [1, 2, 3, 4]);
+  // the owner's shapes: the sender's one-letter name, missing from the lineup, sits 2nd; a first card the lineup names otherwise
+  assert.deepEqual(cardSeats([card("Aster"), card("Q", { self: true }), card("Cobalt"), card("Dorian")],
+    [entry(0, "Aster"), entry(2, "Cobalt"), entry(3, "Dorian")]), [1, 2, 3, 4]);
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar"), card("Cobalt"), card("Dorian")],
+    [entry(0, "Wexley"), entry(1, "Briar"), entry(2, "Cobalt"), entry(3, "Dorian")]), [1, 2, 3, 4]);
+  // a column that isn't a card still counts as a position; five cards: no seats
+  assert.deepEqual(cardSeats([card("Aster"), null, card("Cobalt"), card("Dorian")]), [1, null, 3, 4]);
+  assert.deepEqual(cardSeats([card("A"), card("B"), card("C"), card("D"), card("E")], [entry(0, "A")]), [null, null, null, null, null]);
+  // three cards: 1. exact names (case and spaces folded), as before
+  assert.deepEqual(cardSeats([card("Aster"), card("briar"), card("Co balt")], [entry(2, "Aster"), entry(0, "Briar"), entry(3, "Cobalt")]), [3, 1, 4]);
+  // A: the sender's own entry is missing: the one card left takes the one entry left
+  assert.deepEqual(cardSeats([card("Aster"), card("Q", { self: true }), card("Cobalt")], [entry(0, "Aster"), entry(1, "Wexley"), entry(3, "Cobalt")]), [1, 2, 4]);
+  // B: one entry carries another name altogether: elimination
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar"), card("Cobalt")], [entry(0, "Wexley"), entry(2, "Briar"), entry(3, "Cobalt")]), [1, 3, 4]);
+  // 2. the self card with the self entry, whatever the names
+  assert.deepEqual(cardSeats([card("Aster", { self: true }), card("Briar"), card("Cobalt")],
+    [entry(1, "Wren", { self: true }), entry(0, "Wexley"), entry(2, "Yarrow")]), [2, null, null]);
+  // 3. look-alike letters (skeleton); C: a near miss, then the last card by elimination
+  assert.deepEqual(cardSeats([card("Briar"), card("Rowan")], [entry(3, "Brlar"), entry(1, "Rovvan")]), [4, 2]);
+  assert.deepEqual(cardSeats([card("Aster"), card("Marigold"), card("Q", { self: true })],
+    [entry(0, "Aster"), entry(1, "Marlgoxd"), entry(3, "Thorne")]), [1, 2, 4]);
+  // duplicate names: nobody at that step; two cards left with two entries: nobody guessed
+  assert.deepEqual(cardSeats([card("Aster"), card("Aster"), card("Cobalt")], [entry(0, "Aster"), entry(1, "Aster"), entry(2, "Cobalt")]), [null, null, 3]);
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar"), card("Cobalt")], [entry(0, "Wexley"), entry(1, "Yarrow"), entry(2, "Cobalt")]), [null, null, 3]);
+  // one card left but no entry left: no guess by free seat
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar"), card("Cobalt")], [entry(0, "Aster"), entry(1, "Briar")]), [1, 2, null]);
+  // bots match like anyone; slots outside 0-3, not integers, or read twice are ignored
+  assert.deepEqual(cardSeats([card("Aster"), card("Flora", { ai: true }), card("Mario", { ai: true })],
+    [entry(0, "Aster"), entry(3, "Flora"), entry(2, "Mario")]), [1, 4, 3]);
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar")], [entry(4, "Aster"), entry(1.5, "Briar")]), [null, null]);
+  assert.deepEqual(cardSeats([card("Aster"), card("Briar")], [entry(0, "Aster"), entry(0, "Briar")]), [null, null]);
+  // garbage
+  assert.deepEqual(cardSeats(null, null), []);
+  assert.deepEqual(cardSeats("not json", "[]"), []);
+  assert.deepEqual(cardSeats(JSON.stringify([card("Aster"), "x"]), JSON.stringify([entry(2, "Aster")])), [3, null]);
+  assert.deepEqual(cardSeats([card("Aster")], "not json"), [null]);
+});
+
+test("cardSeats near names: one or two letters off matches, an unrelated name or a tie doesn't", () => {
+  assert.deepEqual([NEAR_FLOOR, NEAR_MARGIN], [0.75, 0.2]);
+  assert.equal(nameSimilarity("Thistle", "Thistle"), 1);
+  assert.equal(nameSimilarity("Dorian", "Dorlan"), 1);                    // i and l read alike (skeleton)
+  assert.equal(nameSimilarity("Marigold", "Marigoxd"), 0.875);
+  assert.equal(nameSimilarity("", "Aster"), 0);
+  // two cards (one a stranger), entries: the names given, then a stranger's in slot 3
+  const near = (cards, ...names) => cardSeats(cards.map((name) => ({ name })),
+    names.map((name, slot) => ({ slot, name })).concat([{ slot: 3, name: "Kkkkkkkk" }]));
+  assert.deepEqual(near(["Marigold", "Zzzzzzzz"], "Marigoxd"), [1, 4]);              // one off in eight: 0.875
+  assert.deepEqual(near(["Aster", "Zzzzzzzz"], "Mabel"), [null, null]);              // an unrelated name
+  assert.deepEqual(near(["Thistle", "Zzzzzzzz"], "Thixtxe"), [null, null]);          // two off in seven: 0.71, under the floor
+  assert.deepEqual(near(["Marigold", "Zzzzzzzz"], "Marigoxd", "Marigoyd"), [null, null]);   // a tie between two entries
+  // the entry's next-best card too close (0.875 against 0.75): no match
+  assert.deepEqual(near(["Marigold", "Marigolf"], "Marigoxd"), [null, null]);
 });
 
 test("also on this run: a player whose best is another run gets their seat on this one and this run's own figures", async () => {
@@ -208,6 +278,40 @@ test("also on this run: a player whose best is another run gets their seat on th
   // a linked team-mate whose best is another run is in also only, never in unlinked; bots never are
   assert.equal("unlinked" in briar, false);
   assert.equal(all.entries.some((e) => "unlinked" in e), false);
+});
+
+test("board seats follow the result screen's columns on a four-card run, the Party screen on fewer: rows, also, unlinked and bots", async () => {
+  const { env, sqlite } = await setup();
+  const p = {};
+  for (const name of ["Aster", "Briar", "Dorian", "Ember"]) p[name] = await player(env, sqlite, name);
+  await send(env, p.Aster, "aster-best", { score: 30000, party: [["Aster", false, 30000], ["Flora", true], ["Mario", true], ["Tammy", true]], at: 0 });
+  // A: Briar's Party read lost the one-letter name in seat 2 and put Aster and Flora on each other's slots
+  const shared = [["Briar", false, 20000], ["Z", false, 5000], ["Aster", false, 12000], ["Flora", true]];
+  await send(env, p.Briar, "briar-run", { score: 20000, party: shared, at: 600,
+    lineup: [{ slot: 0, name: "Briar", self: true }, { slot: 3, name: "Aster" }, { slot: 2, name: "Flora", ai: true }] });
+  await send(env, p.Aster, "aster-copy", { score: 20000, party: shared, at: 610 });
+  // B: the first seat's Party name is another name altogether
+  await send(env, p.Dorian, "dorian-run", { score: 15000, party: [["Dorian", false, 9000], ["Quill", false, 8000], ["Rowan", false, 7000], ["Sorrel", false, 6000]],
+    at: 1200, lineup: [{ slot: 0, name: "Wexley" }, { slot: 1, name: "Quill" }, { slot: 2, name: "Rowan" }, { slot: 3, name: "Sorrel" }] });
+  // three cards (a column wasn't read): the Party screen decides, a near name included
+  await send(env, p.Ember, "ember-run", { score: 10000, party: [["Ember", false, 7000], ["Tansy", false, 3000], ["Flora", true]],
+    at: 1800, lineup: [{ slot: 1, name: "Ember", self: true }, { slot: 0, name: "Tamsy" }, { slot: 3, name: "Flora", ai: true }] });
+  const all = await interlink(env, "ladder=score&rows=teams");
+  const of = (name) => all.entries.find((e) => e.player === name);
+  const lines = (list) => (list || []).map((item) => [item.player ?? item.name, item.seat ?? null]);
+  assert.equal(of("Briar").seat, 1);
+  assert.deepEqual(lines(of("Briar").also), [["Aster", 3]]);
+  assert.deepEqual(lines(of("Briar").unlinked), [["Z", 2]]);
+  assert.deepEqual(lines(of("Briar").bots), [["Flora", 4]]);
+  assert.equal(of("Dorian").seat, 1);
+  assert.deepEqual(lines(of("Dorian").unlinked), [["Quill", 2], ["Rowan", 3], ["Sorrel", 4]]);
+  assert.equal(of("Ember").seat, 2);
+  assert.deepEqual(lines(of("Ember").unlinked), [["Tamsy", 1]]);              // the name as the settle rules gave it
+  assert.deepEqual(lines(of("Ember").bots), [["Flora", 4]]);
+  // Show unlinked: the unclaimed rows take the same seats
+  const every = await interlink(env, "ladder=score&rows=teams&unlinked=1");
+  assert.deepEqual(every.entries.filter((e) => ["Z", "Quill", "Tamsy"].includes(e.player)).map((e) => [e.player, e.seat ?? null]).sort(),
+    [["Quill", 2], ["Tamsy", 1], ["Z", 2]]);
 });
 
 // A team row lists every team-mate of its run (the owner, 22 Nov): in the Teams view without Show unlinked, the players
