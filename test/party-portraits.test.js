@@ -101,7 +101,7 @@ test("the picture decides the lead; the name the app sent only confirms it", () 
   const read = (names) => names.map((name, card) => ({ card, name, sure: Boolean(name) }));
   const copy = { aniimo: "Dewple", aniimoLevel: 70, cp: 3686, team: [{ aniimo: "Dewple" }, { aniimo: "Piopiota" }, { aniimo: "Turbo" }] };
   const lineup = [
-    { name: "A", ...copy },                                                                  // slot 0: the API leaves it out
+    { slot: 0, name: "A", ...copy },
     { slot: 1, name: "B", aniimo: "Tiamat", aniimoLevel: 70, cp: 4088, team: [{ aniimo: "Tiamat" }, { aniimo: "Piopiota" }] },
     { slot: 2, name: "C", aniimo: "Hypnyto", cp: 3561, team: [{ aniimo: "Hypnyto" }] },
     { slot: 3, name: "D", ...copy },
@@ -114,15 +114,26 @@ test("the picture decides the lead; the name the app sent only confirms it", () 
   assert.equal(out[2], lineup[2]);
   assert.equal(out[3], lineup[3]);
   // another Aniimo on a card that is word for word another player's: the picture's lead, without that card's facts
-  assert.deepEqual(plain(out[0]), { name: "A", aniimo: "Hypnyto" });
+  assert.deepEqual(plain(out[0]), { slot: 0, name: "A", aniimo: "Hypnyto" });
 });
 
 test("a lead the picture doesn't show clearly, and an AI teammate, stay as they were", () => {
-  const lineup = [{ name: "A", aniimo: "Tiamat" }, { slot: 1, name: "B", aniimo: "Nickname", ai: true }];
+  const lineup = [{ slot: 0, name: "A", aniimo: "Tiamat" }, { slot: 1, name: "B", aniimo: "Nickname", ai: true }];
   const found = [{ card: 0, name: "Jeburst", sure: false }, { card: 1, name: "Dewple", sure: true }];
   assert.deepEqual(plain(core.applyLeads(lineup, found, ["Jeburst", "Dewple"])), lineup);
   // another Aniimo with facts of its own keeps them
-  const own = [{ name: "A", aniimo: "Dewple", cp: 3000, team: [{ aniimo: "Dewple" }, { aniimo: "Turbo" }] }];
+  const own = [{ slot: 0, name: "A", aniimo: "Dewple", cp: 3000, team: [{ aniimo: "Dewple" }, { aniimo: "Turbo" }] }];
   assert.deepEqual(plain(core.applyLeads(own, [{ card: 0, name: "Jeburst", sure: true }], ["Jeburst", "Dewple", "Turbo"])),
-    [{ name: "A", aniimo: "Jeburst", cp: 3000, team: [{ aniimo: "Jeburst" }, { aniimo: "Turbo" }] }]);
+    [{ slot: 0, name: "A", aniimo: "Jeburst", cp: 3000, team: [{ aniimo: "Jeburst" }, { aniimo: "Turbo" }] }]);
+});
+
+test("an entry without a slot takes no lead from the picture, never the first card's", () => {
+  const lineup = [{ slot: 0, name: "A", aniimo: "Dewple" }, { name: "D", fromBattleData: true }, { slot: 3, name: "C", aniimo: "Turbo" }];
+  const found = [{ card: 0, name: "Jeburst", sure: true }, { card: 3, name: "Turbo", sure: true }];
+  const out = plain(core.applyLeads(lineup, found, ["Jeburst", "Dewple", "Turbo"]));
+  assert.deepEqual(out[1], { name: "D", fromBattleData: true });
+  assert.equal(out[0].aniimo, "Jeburst");
+  // given its slot (the API's lineupSlots), the same entry takes its own card's lead
+  const slotted = plain(core.applyLeads([{ slot: 2, name: "D", fromBattleData: true }], [{ card: 0, name: "Jeburst", sure: true }, { card: 2, name: "Dewple", sure: true }], ["Jeburst", "Dewple"]));
+  assert.deepEqual(slotted, [{ slot: 2, name: "D", fromBattleData: true, aniimo: "Dewple", team: [] }]);
 });
