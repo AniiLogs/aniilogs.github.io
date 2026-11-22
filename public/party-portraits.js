@@ -277,7 +277,7 @@
   // - a name that is no Aniimo: it is the player's nickname for it (kept as `nickname`), the picture gives the species;
   // - another Aniimo: the picture's. When that card's level, CP and team are also another player's word for word (a
   //   card read twice), they were never this player's and are left out.
-  // A lead the picture doesn't show clearly is left exactly as it was. Slots count from 0; the API leaves 0 out.
+  // A lead the picture doesn't show clearly is left exactly as it was. Slots count from 0 (an entry without one is card 0).
   function applyLeads(lineup, found, speciesNames) {
     if (!Array.isArray(lineup) || !Array.isArray(found)) return lineup;
     const species = new Set([...speciesNames].map((name) => String(name).toLowerCase()));
