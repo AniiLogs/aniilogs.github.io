@@ -12,10 +12,10 @@ const css = read("leaderboard/leaderboard.css");
 
 // the page's own ordinal(), taken out of the page script and run as it is
 function loadOrdinal() {
-  const start = boards.indexOf("function ordinal(n) {");
-  assert.ok(start > 0, "ordinal() is in the page script");
-  const end = boards.indexOf("\n  }\n", start);
-  return vm.runInNewContext(`(${boards.slice(start, end + 4)})`);
+  // either line ending: a Windows checkout has CRLF in the working copy
+  const found = /function ordinal\(n\) \{[\s\S]*?\r?\n  \}\r?\n/u.exec(boards);
+  assert.ok(found, "ordinal() is in the page script");
+  return vm.runInNewContext(`(${found[0]})`);
 }
 
 test("ordinal: 1st, 2nd, 3rd, 4th, and the teens with th", () => {
