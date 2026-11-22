@@ -21,7 +21,7 @@
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <link rel="stylesheet" href="/styles.css?v=0.17.3-profile-polish">
-    <link rel="stylesheet" href="/proof-viewer.css?v=0.2.4-badge-by-tabs">
+    <link rel="stylesheet" href="/proof-viewer.css?v=0.2.6-fight-log">
     <link rel="stylesheet" href="/leaderboard/leaderboard.css?v=0.3.19-one-board-1200">
     <link rel="stylesheet" href="/leaderboard/share.css?v=0.1.0">
     <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
@@ -40,11 +40,11 @@
     <script src="/explorer/aniimo-picker.js?v=0.1.5-row-rename" defer></script>
     <script src="/party-portraits.js?v=0.1.0" defer></script>
     <script src="/comments.js?v=0.1.0" defer></script>
-    <script src="/proof-viewer.js?v=0.2.8-all-players" defer></script>
+    <script src="/proof-viewer.js?v=0.2.10-fight-log" defer></script>
     <script src="/table-sort.js?v=0.1.0" defer></script>
     <script src="/short-link.js?v=0.1.0" defer></script>
     <script src="/leaderboard/share.js?v=0.2.0-lb-links" defer></script>
-    <script src="/leaderboard/leaderboard.js?v=0.3.34-one-board-1200" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.3.35-team-unlinked" defer></script>
   </head>
   <body class="site-chrome-page" data-site-sidebar="always">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -137,7 +137,7 @@
           <label class="lb-server" data-server-pick hidden><span>Server</span>
             <select data-server-select></select>
           </label>
-          <label class="lb-unlinked" title="Also list players who aren't linked: teammates known only by the name read off the screen, and app users whose character name was never read. For spotting doubles and misread names."><input type="checkbox" data-unlinked> Show unlinked</label>
+          <label class="lb-unlinked" title="Also rank players who aren't linked: teammates known only by the name read off the screen, and app users whose character name was never read. For spotting doubles and misread names. Without it, a team row still lists its unlinked teammates, softer and unranked."><input type="checkbox" data-unlinked> Show unlinked</label>
           <div class="lb-show" role="group" aria-label="Show teams or players" title="Teams: one row per run, its players together. Players: one row each." data-rows-pick hidden><span>Show</span>
             <div class="lb-seg"><button type="button" data-rows-choice="teams" aria-pressed="true">Teams</button><button type="button" data-rows-choice="players" aria-pressed="false">Players</button></div>
           </div>

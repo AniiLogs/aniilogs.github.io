@@ -205,6 +205,67 @@ test("also on this run: a player whose best is another run gets their seat on th
   assert.deepEqual(briar.also?.map((a) => [a.player, a.rank, a.seat, a.avgDps ?? null]), [["Aster", 1, 3, 12000]]);
   assert.equal(briar.seat, 1);
   assert.deepEqual(briar.bots, [{ name: "Mario", seat: 2 }, { name: "Flora", seat: 4 }]);
+  // a linked team-mate whose best is another run is in also only, never in unlinked; bots never are
+  assert.equal("unlinked" in briar, false);
+  assert.equal(all.entries.some((e) => "unlinked" in e), false);
+});
+
+// A team row lists every team-mate of its run (the owner, 22 Nov): in the Teams view without Show unlinked, the players
+// known only by their name are on the row's first entry as `unlinked`, unranked, with their seat and this run's figures.
+async function unlinkedTeam() {
+  const { env, sqlite } = await setup();
+  const p = {};
+  for (const name of ["Aster", "Briar", "Cobalt"]) p[name] = await player(env, sqlite, name);
+  // a four-player run sent by one linked player, with three bare names (Sorrel's card had no Avg DPS)
+  await send(env, p.Aster, "four", { score: 30000, party: [["Aster", false, 9000], ["Quill", false, 8000], ["Rowan", false, 7000], ["Sorrel", false]], at: 0 });
+  // a lower, fully linked team: Briar and Cobalt both sent it, with two bots
+  const duo = [["Briar", false, 21000], ["Cobalt", false, 26000], ["Flora", true], ["Mario", true]];
+  await send(env, p.Briar, "duo-b", { score: 25000, party: duo, at: 600 });
+  await send(env, p.Cobalt, "duo-c", { score: 25000, party: duo, at: 610 });
+  return { env, sqlite, p };
+}
+
+test("team rows list their unlinked team-mates: seats and this run's figures, unranked; ranks, teams and the Players view unchanged", async () => {
+  const { env } = await unlinkedTeam();
+  const teams = await interlink(env, "ladder=score&rows=teams");
+  const aster = teams.entries.find((e) => e.player === "Aster");
+  assert.deepEqual(aster.unlinked, [{ player: "Quill", seat: 2, avgDps: 8000 }, { player: "Rowan", seat: 3, avgDps: 7000 }, { player: "Sorrel", seat: 4 }]);
+  // nothing that ranks, links or names an account
+  for (const item of aster.unlinked) for (const field of ["rank", "team", "profileId", "uid", "discordName", "unclaimed", "own"]) assert.equal(field in item, false, field);
+  // only the row's first entry carries it; the fully linked team (two bots) has none
+  assert.equal(teams.entries.filter((e) => "unlinked" in e).length, 1);
+  assert.deepEqual(teams.entries.map((e) => [e.player, e.rank, e.team]), [["Aster", 1, 1], ["Cobalt", 2, 2], ["Briar", 2, 2]]);
+  assert.deepEqual([teams.teams, teams.total], [2, 3]);
+  // the Players view: as before, no list
+  const players = await interlink(env, "ladder=score");
+  assert.equal(players.entries.some((e) => "unlinked" in e), false);
+  assert.deepEqual(players.entries.map((e) => [e.player, e.rank]).sort(), [["Aster", 1], ["Briar", 2], ["Cobalt", 2]]);
+  // Show unlinked: the three are ranked entries as today, and there is no list
+  const every = await interlink(env, "ladder=score&rows=teams&unlinked=1");
+  assert.equal(every.entries.some((e) => "unlinked" in e), false);
+  assert.deepEqual(every.entries.filter((e) => e.team === 1).map((e) => [e.player, e.rank, e.unclaimed]).sort(),
+    [["Aster", 1, false], ["Quill", 1, true], ["Rowan", 1, true], ["Sorrel", 1, true]]);
+  // the Solo / Duo / Trio filter is about bots: the four-player run is still the only full team, with its list
+  const full = await interlink(env, "ladder=score&rows=teams&players=4");
+  assert.deepEqual(full.entries.map((e) => [e.player, e.unlinked?.length]), [["Aster", 3]]);
+  // a one-player ladder never has one
+  const dps = await interlink(env, "ladder=dps&rows=teams");
+  assert.equal(dps.entries.some((e) => "unlinked" in e), false);
+  // no account data in the answer that wasn't there: the names' UIDs and profiles never appear for them
+  const text = JSON.stringify(teams);
+  assert.equal((text.match(/"uid"/gu) || []).length, teams.entries.length);
+});
+
+test("team rows' unlinked: a name no copy agrees on (unsettled) is listed without it, in its seat; the order is by seat", async () => {
+  const { env, sqlite } = await unlinkedTeam();
+  // as settledRun stores it: the slot keeps its read and is marked unsettled
+  const row = sqlite.prepare("SELECT submission_id AS id, players_json AS players FROM leaderboard_submissions WHERE client_run_id = 'four'").get();
+  const stored = JSON.parse(row.players).map((slot) => (slot.name === "Rowan" ? { ...slot, unsettled: true } : slot));
+  sqlite.prepare("UPDATE leaderboard_submissions SET players_json = ? WHERE submission_id = ?").run(JSON.stringify(stored), row.id);
+  const teams = await interlink(env, "ladder=score&rows=teams");
+  assert.deepEqual(teams.entries.find((e) => e.player === "Aster").unlinked,
+    [{ player: "Quill", seat: 2, avgDps: 8000 }, { player: null, seat: 3 }, { player: "Sorrel", seat: 4 }]);
+  assert.equal(JSON.stringify(teams).includes("Rowan"), false);
 });
 
 test("?order=submitted lists rows newest first (a team row by its first copy), places kept; submitted_asc oldest first; pages that order", async () => {

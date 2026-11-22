@@ -80,5 +80,34 @@
 .lb-proof-tabs .lb-check { align-self: center; margin-left: 2px; font-size: 0.8rem; }
 .lb-proof-dialog .lb-empty { padding: 1.2rem; text-align: center; opacity: 0.7; }
 .lb-proof-party .lb-ai { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); font-size: 0.75em; font-weight: 700; opacity: 0.8; }
+/* the Fight tab (staff only): a note, then each picture of the fight full width with its time into the fight in a corner;
+   one opens full size on a click, with a way back */
+.lb-proof-tabs { flex-wrap: wrap; }
+.lb-fight-count { margin-left: 5px; opacity: 0.75; font-size: 0.85em; }
+.lb-fight { width: min(1278px, calc(96vw - 2px)); }
+.lb-fight-note { margin: 0; padding: 0 12px 10px; color: var(--ink-soft); font-size: 0.86rem; }
+.lb-fight-strip { display: grid; gap: 6px; padding: 0 8px 10px; }
+.lb-fight-shot { position: relative; display: block; min-height: 3rem; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+  background: #000; cursor: zoom-in; }
+.lb-fight-shot:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.lb-fight-shot img { display: block; width: 100%; height: auto; }
+.lb-fight-shot .lb-empty { display: block; color: #fff; }
+.lb-fight-time { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.66); color: #fff;
+  font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lb-fight-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; padding: 0 12px 10px; color: var(--ink-soft); font-size: 0.86rem; }
+.lb-fight-back { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); cursor: pointer; }
+.lb-fight-back:hover, .lb-fight-back:focus-visible { border-color: var(--accent); color: var(--accent); }
+.lb-fight > .lb-proof-image { margin: 0 auto; }
+/* the fight log under the pictures (or alone): label / value pairs in a grid, a note, the download */
+.lb-fight-log { margin: 0 8px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 0.86rem; }
+.lb-fight-log-title { margin: 0 0 8px; color: var(--ink); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.lb-fight-log-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 8px 16px; margin: 0; }
+.lb-fight-log-figure { min-width: 0; }
+.lb-fight-log-figure dt { color: var(--ink-soft); font-size: 0.76rem; }
+.lb-fight-log-figure dd { margin: 1px 0 0; color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.lb-fight-log-note { margin: 10px 0 0; color: var(--ink-soft); }
+.lb-fight-download { margin-top: 10px; padding: 0; border: 0; background: none; color: var(--teal); font: inherit; text-decoration: underline; cursor: pointer; }
+.lb-fight-download:disabled { opacity: 0.6; cursor: progress; }
+@media (max-width: 560px) { .lb-fight-log-figures { grid-template-columns: 1fr 1fr; } }
 /* the owner and administrators: delete the run, under its pictures */
 .lb-proof-actions { display: flex; justify-content: flex-end; padding: 0 12px 12px; }
