@@ -3904,6 +3904,51 @@ test("limit previews: counts and distributions only, for candidate limits sent i
   assert.equal(JSON.stringify(some).includes("UserOne"), false);
 });
 
+// made-up limits (the real ones are secrets)
+const INTERLINK_LIMITS = JSON.stringify({ maxPlayerAvgDps: 20000 });
+async function interlinkDpsWorld(extraEnv) {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev, ...extraEnv });
+  const token = await namedToken(env, SESSIONS.user);
+  const other = await namedToken(env, SESSIONS.dev);
+  // one run over the made-up limit, sent by two team-mates; one whose cards are ten times the meter's figure (a misread)
+  const big = run("dps-big", { extra: { instanceId: "inst-1" } });
+  assert.equal((await sendWithScreens(env, token, big)).status, 201);
+  assert.equal((await sendWithScreens(env, other, { ...big, clientRunId: "dps-big-2" })).status, 201);
+  assert.equal((await sendWithScreens(env, token, run("dps-misread", { meterDps: 2900 }))).status, 201);
+  // the two copies tie, and which of the two ranks first differs between two databases by chance: lists compared as
+  // sets, without the tie's rank and team number
+  const unordered = (value) => (Array.isArray(value) ? value.map(unordered).sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1))
+    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== "rank" && key !== "team").map(([key, item]) => [key, unordered(item)])) : value);
+  const answers = async () => unordered(publicView({
+    interlink: await (await call(env, "/api/leaderboard/interlink?cycle=3005")).json(),
+    runs: await (await call(env, "/api/leaderboard/entries?kind=interlink_run&best=0")).json(),
+  }));
+  return { env, sqlite, answers };
+}
+
+test("review-only Interlink Avg DPS: a run over the limit is listed for staff by card position; misreads and the public views are untouched", async () => {
+  const plain = await interlinkDpsWorld({});
+  const flagged = await interlinkDpsWorld({ INTERLINK_CHECK_LIMITS: INTERLINK_LIMITS });
+  const staff = async (world) => (await call(world.env, "/api/admin/run-checks/staff", { session: SESSIONS.dev })).json();
+  assert.equal((await staff(plain)).count, 0);
+  const listed = await staff(flagged);
+  assert.equal(listed.count, 2);                                                 // each sender's copy
+  assert.deepEqual(listed.runs.map((r) => r.decides), ["nothing", "nothing"]);
+  assert.deepEqual(listed.runs[0].reasons, ["Player 1's Avg DPS is 25,913; the limit for review is 20,000."]);
+  assert.deepEqual(stateOf(flagged.sqlite, "dps-big").check.reviewOnly.flags, [{ rule: "player avg dps", card: 1, sent: 25913, limit: 20000 }]);
+  assert.equal(stateOf(flagged.sqlite, "dps-misread").check.reviewOnly, undefined);
+  for (const id of ["dps-big", "dps-big-2", "dps-misread"]) assert.equal(stateOf(flagged.sqlite, id).state, stateOf(plain.sqlite, id).state);
+  assert.deepEqual(await flagged.answers(), await plain.answers());
+  // a broken secret checks nothing
+  assert.equal((await staff(await interlinkDpsWorld({ INTERLINK_CHECK_LIMITS: "{nope" }))).count, 0);
+  // the preview counts the run once across its two copies, and the misread as set aside
+  const preview = await (await call(plain.env, "/api/admin/run-checks/limits", { session: SESSIONS.dev, method: "POST", body: { interlink: JSON.parse(INTERLINK_LIMITS) } })).json();
+  assert.deepEqual([preview.interlink.copies, preview.interlink.runs, preview.interlink.skippedAsMisread, preview.interlink.runsFlagged],
+    [3, 2, 1, 1]);
+  assert.deepEqual(preview.interlink.flagged, { "player avg dps": 1 });
+  assert.equal(/MinMax|Leonard/u.test(JSON.stringify(preview)), false);
+});
+
 test("run checks: a re-check can set aside readings that read nothing, so those runs are read again", async () => {
   const AI = { async run() { return { response: "" }; } };
   const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), AI, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });

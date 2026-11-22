@@ -105,11 +105,70 @@ export function screenChecks(extra, limits) {
   return flags;
 }
 
+const fold = (name) => String(name || "").toLocaleLowerCase().replace(/\s+/gu, "");
+
+// ---------------------------------------------------------------- Interlink (review only)
+// A damage multiplier makes the game itself count the inflated damage, so the cheater's Battle Data card shows a real
+// but far too high Avg DPS. INTERLINK_CHECK_LIMITS (a secret), JSON: {"maxPlayerAvgDps": n, "maxAvgDpsPerCp": x,
+// "maxTeamDps": n} (maxAvgDpsPerCp may be a decimal). Any part can be left out (that rule is then off); without the
+// secret, or with one that doesn't parse, nothing is checked. Review only: a flagged run is listed for staff, nothing
+// else changes (not its place, visibility or badge). Who is a bot: isBot(card, lineup), which src/index.js passes as the
+// site's one rule (bots.js slotIsBot; this file is inlined into the worker and can't import it); without one, the
+// card's own ai flag.
+const dpsLimit = (value) => (Number.isInteger(value) && value > 0 && value <= 1e12 ? value : null);
+const ratioLimit = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 1e6 ? value : null);
+export function interlinkCheckLimits(env) {
+  const sent = parsedSecret(env?.INTERLINK_CHECK_LIMITS);
+  if (!sent) return null;
+  const limits = { maxPlayerAvgDps: dpsLimit(sent.maxPlayerAvgDps), maxAvgDpsPerCp: ratioLimit(sent.maxAvgDpsPerCp), maxTeamDps: dpsLimit(sent.maxTeamDps) };
+  return limits.maxPlayerAvgDps !== null || limits.maxAvgDpsPerCp !== null || limits.maxTeamDps !== null ? limits : null;
+}
+// The misread guard: a flag must never come from a misread. aLogs' old readers dropped a decimal point and sent Avg DPS
+// ten times too high; the meter's own estimate from the boss's HP bar (meter_dps) is independent of the cards and,
+// though often off, not by this much. Cards whose sum is more than this factor away from it (either way) don't hang
+// together, and the run is not checked. (team_dps can't serve: the app sends it as the same cards' sum.)
+const MISREAD_FACTOR = 3;
+const cardDps = (card) => (typeof card.avgDps === "number" && Number.isFinite(card.avgDps) && card.avgDps >= 0 ? card.avgDps : null);
+const aiFlag = (card) => Boolean(card.ai);
+// row: { players, lineup, teamDps, meterDps } (players_json and extra.lineup parsed). -> { flags, skipped, cards, sum }:
+// skipped is true when the misread guard set the run aside; cards: the real players' { card, avgDps, cp }. A card is
+// named by its position in players (card: 1-based), never by its name or UID.
+function interlinkDps(row, limits, isBot = aiFlag) {
+  const players = (Array.isArray(row?.players) ? row.players : []).filter(objectOf);
+  if (!players.length) return { flags: [], skipped: false, cards: [], sum: null };
+  if (players.some((card) => cardDps(card) === null)) return { flags: [], skipped: true, cards: [], sum: null };
+  const sum = players.reduce((total, card) => total + card.avgDps, 0);
+  const meter = Number(row.meterDps);
+  if (row.meterDps != null && Number.isFinite(meter) && meter > 0 && (sum > meter * MISREAD_FACTOR || sum * MISREAD_FACTOR < meter)) {
+    return { flags: [], skipped: true, cards: [], sum: null };
+  }
+  const lineup = (Array.isArray(row.lineup) ? row.lineup : []).filter(objectOf);
+  const cards = players.map((card, index) => {
+    if (isBot(card, lineup)) return null;
+    const entries = fold(card.name) ? lineup.filter((entry) => fold(entry.name) === fold(card.name)) : [];
+    const cp = entries.length === 1 && entries[0].cp != null ? Number(entries[0].cp) : NaN;
+    return { card: index + 1, avgDps: card.avgDps, cp: Number.isFinite(cp) && cp > 0 ? cp : null };
+  }).filter(Boolean);
+  const flags = [];
+  if (limits) {
+    for (const { card, avgDps, cp } of cards) {
+      if (limits.maxPlayerAvgDps !== null && avgDps > limits.maxPlayerAvgDps) flags.push({ rule: "player avg dps", card, sent: avgDps, limit: limits.maxPlayerAvgDps });
+      if (limits.maxAvgDpsPerCp !== null && cp !== null && avgDps / cp > limits.maxAvgDpsPerCp) {
+        flags.push({ rule: "player avg dps per cp", card, sent: Math.round((avgDps / cp) * 10) / 10, avgDps, cp, limit: limits.maxAvgDpsPerCp });
+      }
+    }
+    if (limits.maxTeamDps !== null && sum > limits.maxTeamDps) flags.push({ rule: "team dps", sent: sum, limit: limits.maxTeamDps });
+  }
+  return { flags, skipped: false, cards, sum };
+}
+export function interlinkDpsChecks(row, limits, isBot = aiFlag) {
+  return limits ? interlinkDps(row, limits, isBot).flags : [];
+}
+
 // ---------------------------------------------------------------- players' copies of one Interlink run
 const BATTLE_FIELDS = ["avgDps", "breakValue", "damageTaken", "heal"];
 const withBattleData = (players) => (Array.isArray(players) ? players : [])
   .filter((player) => player && BATTLE_FIELDS.every((field) => Number.isFinite(player[field])) && player.avgDps > 0);
-const fold = (name) => String(name || "").toLocaleLowerCase().replace(/\s+/gu, "");
 // Two copies agree: score and stars equal, clear time within a second, and where both carry Battle Data, the cards'
 // numbers equal for the players both list (the same UID, else the same name).
 export function copiesAgree(a, b) {
@@ -210,6 +269,9 @@ function flagWords(flag) {
     case "egg time": return `Won in ${n(flag.sent)} s; the fastest possible at this difficulty is ${n(flag.limit)} s.`;
     case "egg defeats": return `${n(flag.sent)} defeats sent; that isn't a count a match can have.`;
     case "egg points": return `${n(flag.sent)} rank points gained since the last standing; ${n(flag.matches)} matches can give at most ${n(flag.limit)}.`;
+    case "player avg dps": return `Player ${n(flag.card)}'s Avg DPS is ${n(flag.sent)}; the limit for review is ${n(flag.limit)}.`;
+    case "player avg dps per cp": return `Player ${n(flag.card)}'s Avg DPS is ${n(flag.sent)} per point of CP (${n(flag.avgDps)} at CP ${n(flag.cp)}); the limit for review is ${n(flag.limit)}.`;
+    case "team dps": return `The team's Avg DPS add up to ${n(flag.sent)}; the limit for review is ${n(flag.limit)}.`;
     case "screen copy failed": return `The ${SCREEN_NAMES[flag.screen] || flag.screen} was taken from the screen, and the copy of the game window failed.`;
     case "screen differs": return `The ${SCREEN_NAMES[flag.screen] || flag.screen} was taken from the screen, and it differs from the game window (${FIELD_WORDS[flag.field] || flag.field}: ${n(flag.sent)}, the limit is ${n(flag.limit)}).`;
     // checks stored before 21 Nov
@@ -264,11 +326,30 @@ const tally = (lists) => lists.reduce((totals, flags) => {
   for (const [rule, value] of Object.entries(count(flags))) totals[rule] = (totals[rule] || 0) + value;
   return totals;
 }, {});
-// rows: stored rows ({ kind, score, clearTimeS, cleared, difficulty, defeats, extra }); limits: candidate limits as
-// the secrets would hold them ({ egg, screen }). Counts and distributions only.
-export function limitPreview(rows, limits = {}) {
+// One copy of each Interlink run: team-mates' copies share extra.instanceId, and the newest copy stands for the run
+// (a row without one is a run by itself).
+function oneCopyEach(rows) {
+  const runs = new Map();
+  rows.forEach((row, index) => {
+    const instance = objectOf(row.extra)?.instanceId;
+    const key = instance != null && String(instance) !== "" ? `i:${instance}` : `r:${row.submissionId ?? index}`;
+    const held = runs.get(key);
+    if (!held || (Number(row.createdAt) || 0) > (Number(held.createdAt) || 0)) runs.set(key, row);
+  });
+  return [...runs.values()];
+}
+// rows: stored rows ({ kind, score, clearTimeS, cleared, difficulty, defeats, extra }; an Interlink run also
+// { submissionId, createdAt, players, teamDps, meterDps }); limits: candidate limits as the secrets would hold them
+// ({ egg, screen, interlink }); isBot: as for interlinkDpsChecks. Counts and distributions only.
+export function limitPreview(rows, limits = {}, isBot = aiFlag) {
   const egg = eggCheckLimits({ EGG_CHECK_LIMITS: JSON.stringify(limits.egg ?? null) });
   const screen = screenCheckLimits({ SCREEN_CHECK_LIMITS: JSON.stringify(limits.screen ?? null) });
+  const interlink = interlinkCheckLimits({ INTERLINK_CHECK_LIMITS: JSON.stringify(limits.interlink ?? null) });
+  const interlinkRows = rows.filter((row) => row.kind === "interlink_run");
+  const runs = oneCopyEach(interlinkRows);
+  const checked = runs.map((row) => interlinkDps({ players: row.players, lineup: objectOf(row.extra)?.lineup, teamDps: row.teamDps, meterDps: row.meterDps }, interlink, isBot));
+  const kept = checked.filter((result) => !result.skipped && result.sum !== null);
+  const cards = kept.flatMap((result) => result.cards);
   const matches = rows.filter((row) => row.kind === "eggheist_match");
   const byDifficulty = {};
   for (const row of matches) (byDifficulty[row.difficulty || "unknown"] ||= []).push(row);
@@ -307,6 +388,20 @@ export function limitPreview(rows, limits = {}) {
       over40: spread(compared.map((part) => part.over40)),
       flagged: tally(screenFlags),
       rowsFlagged: screenFlags.filter((flags) => flags.length).length,
+    },
+    // each run counted once (one copy per extra.instanceId); runs the misread guard set aside are counted, not judged,
+    // and stay out of the distributions
+    interlink: {
+      limits: interlink,
+      copies: interlinkRows.length,
+      runs: runs.length,
+      runsChecked: kept.length,
+      skippedAsMisread: checked.filter((result) => result.skipped).length,
+      playerAvgDps: spread(cards.map((card) => card.avgDps)),
+      avgDpsPerCp: spread(cards.filter((card) => card.cp !== null).map((card) => Math.round((card.avgDps / card.cp) * 10) / 10)),
+      teamDps: spread(kept.map((result) => result.sum)),
+      flagged: tally(checked.map((result) => result.flags)),
+      runsFlagged: checked.filter((result) => result.flags.length).length,
     },
   };
 }
