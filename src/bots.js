@@ -28,6 +28,38 @@ export function realPlayersOf(players, party = null) {
   return bots && real >= 1 && real <= 3 ? real : null;
 }
 
+const parsed = (value) => (typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value);
+
+// The seats (1P-4P) a run's Party screen gives (extra.lineup: each entry's `slot`, 1-4): folded name -> seat. The stored
+// players (players_json) carry no seat of their own, so a player's seat is the lineup slot whose name is theirs; a name
+// the lineup has twice, or a slot outside 1-4, gives no seat (a seat is never guessed).
+export function lineupSeats(party) {
+  const lineup = parsed(party);
+  if (!Array.isArray(lineup)) return new Map();
+  const found = new Map();
+  for (const item of lineup) {
+    if (!item || typeof item !== "object" || !fold(item.name) || !Number.isInteger(item.slot) || item.slot < 1 || item.slot > 4) continue;
+    const key = fold(item.name);
+    found.set(key, found.has(key) ? null : item.slot);
+  }
+  return new Map([...found].filter(([, seat]) => seat !== null));
+}
+export const seatKey = fold;
+
+// The bots of a run, by the same rule: [{ name, seat? }] with each name as the run has it, in the stored players'
+// order, and its seat when the Party screen gives one (lineupSeats); [] when there are none. The boards list them on a
+// team row (never credited, ranked or counted).
+export function botsOf(players, party = null) {
+  const list = parsed(players);
+  if (!Array.isArray(list)) return [];
+  const lineup = parsed(party);
+  const seats = lineupSeats(lineup);
+  return list.filter((player) => player && typeof player === "object" && slotIsBot(player, lineup)).map((player) => {
+    const seat = seats.get(fold(player.name));
+    return seat ? { name: String(player.name), seat } : { name: String(player.name) };
+  });
+}
+
 // The same rule in SQL, for a json_each row `slot` of a run `run`'s players_json (the boards' crediting)
 export function botSql(slot, run) {
   const name = (value) => `replace(lower(json_extract(${value}, '$.name')), ' ', '')`;

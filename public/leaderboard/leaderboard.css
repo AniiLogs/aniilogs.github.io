@@ -1,6 +1,16 @@
 /* Leaderboards page. Colors come from the shared theme variables set by theme-shell.js. */
-/* one column that never grows past the screen: a wide table scrolls inside its panel instead of widening the page */
-.lb-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.4rem; padding: 2rem 0 3rem; }
+/* one column that never grows past the screen: a wide table scrolls inside its panel instead of widening the page.
+   Wider than the site's other pages (styles.css: min(1180px, 92vw)), so three boards side by side get room on a wide
+   screen; 900px and under (one board at a time) keeps the site's width. From 1644px the site's sidebar docks in the
+   margin left of the page (site-sidebar.js): the page leaves that margin room for a 200px column (+ 16px either side),
+   and the sidebar is told the margin it really has (--site-margin, site-sidebar.css), so the two never overlap. */
+:root { --lb-page-width: min(1560px, 94vw); }
+@media (max-width: 900px) { :root { --lb-page-width: min(1180px, 92vw); } }
+@media (min-width: 1644px) {
+  :root { --lb-page-width: max(1180px, min(1560px, 100vw - 464px)); }
+  body .site-sidebar.is-docked { --site-margin: calc((100vw - var(--lb-page-width)) / 2); }   /* "body": over site-sidebar.css, loaded later */
+}
+.lb-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.4rem; width: var(--lb-page-width); padding: 2rem 0 3rem; }
 .lb-main > * { min-width: 0; }
 .lb-heading h1 { margin: 0.5rem 0 0.6rem; font-size: clamp(2.2rem, 4.5vw, 3.4rem); }
 .lb-intro { max-width: 640px; margin: 0; color: var(--ink-soft); line-height: 1.6; }
@@ -160,7 +170,25 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-info-pop ul { margin: 0.5rem 0; padding-left: 1.1rem; color: var(--ink-soft); }
 .lb-info-pop p { margin: 0; color: var(--ink-soft); }
 
-/* a teammate's unclaimed row, a lookalike name */
+/* a claimed player's blue badge (one blue for all four themes: #2b7de9), the rare marks (no character, a lookalike
+   name), and an unclaimed player's softer name (no mark; its line says why on hover) */
+.lb-claimed { display: inline-grid; width: 1.05em; height: 1.05em; flex: none; place-items: center; color: #2b7de9; vertical-align: -0.15em; cursor: help; }
+.lb-claimed svg { width: 100%; height: 100%; }
+.is-unclaimed .lb-name, .lb-player.is-unclaimed .lb-expand { color: color-mix(in srgb, var(--text) 62%, transparent); font-weight: 700; }
+.is-unclaimed { cursor: help; }
+/* a team row's seats: the game's 1P-4P / Ai mark in a fixed column left of each name (the picture as it is, no
+   backdrop of ours; its text in the same spot until or unless the picture loads), a bot's softer plain name, and a
+   player ranked with another run in italics with their place */
+.lb-seat { display: inline-grid; flex: none; place-items: center; width: 1.65rem; height: 1.45rem; margin-right: 0.1rem; }
+.lb-seat img { display: block; width: auto; height: 22px; }
+.lb-seat-text { color: var(--muted); font-size: 0.62rem; font-weight: 850; letter-spacing: 0.02em; }
+.lb-seat .lb-ai { margin: 0; padding: 0 4px; font-size: 0.62rem; line-height: 1.35; }
+.lb-bot .lb-name { color: color-mix(in srgb, var(--text) 62%, transparent); font-weight: 700; }
+.lb-bot { cursor: help; }
+.lb-also-line > .lb-name, .lb-also-place, .lb-legend-also { color: color-mix(in srgb, var(--text) 62%, transparent); font-style: italic; font-weight: 650; }
+.lb-also-line { cursor: help; }
+.lb-also-place { flex: none; }
+.lb-marks-legend .lb-seat { width: auto; height: auto; margin: 0; }
 .lb-mark { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 12%, transparent); font-size: 0.72em; font-weight: 700; letter-spacing: 0.03em; opacity: 0.75; cursor: help; }
 .lb-lookalike { background: color-mix(in srgb, var(--coral) 22%, transparent); color: var(--coral); opacity: 1; }
 .lb-player [title] { cursor: help; }
@@ -256,9 +284,30 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-primary); font-weight: 850; }
 .lb-seg button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22), inset 0 0 0 1px var(--accent); }
 .lb-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 1.4rem 4.2rem; align-items: center; gap: 0.5rem;
-  border-radius: 8px; padding: 0.25rem 0.45rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
-.lb-figs { display: grid; justify-items: end; }
+/* A Per Boss row, both views: three columns, top-aligned: the place | one line per player | the result (figure, stars,
+   outcome, icons), right-aligned and no wider than it needs */
+.lb-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; align-items: start; gap: 0 0.6rem;
+  border-radius: 8px; padding: 0.4rem 0.5rem; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.lb-row .lb-rk { line-height: 1.45rem; }
+.lb-figs { display: grid; justify-items: end; align-content: start; gap: 1px; max-width: 11rem; text-align: right; }
+.lb-row .lb-val { font-size: 0.95rem; line-height: 1.45rem; }
+.lb-row-result { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px 0.3rem; color: var(--muted);
+  font-size: 0.75rem; font-weight: 650; white-space: nowrap; }
+.lb-row-result .lb-party-tag { margin-right: 0; }
+/* a phone: the Solo / Duo / Trio tag over the outcome, so the result column stays narrow */
+@media (max-width: 640px) { .lb-row-result { flex-direction: column; align-items: flex-end; gap: 2px; } }
+/* the run's icons, one line: its check, its pictures, its link, when it was updated; one size each */
+.lb-row-icons { display: flex; align-items: center; justify-content: flex-end; gap: 2px; margin-top: 2px; }
+.lb-row-icons > .lb-proof, .lb-row-icons > .lb-link, .lb-row-icons > .lb-row-when { width: 1.5rem; height: 1.5rem; min-width: 0; min-height: 0; margin: 0; padding: 0; }
+.lb-row-icons > .lb-proof svg, .lb-row-icons > .lb-link svg, .lb-row-icons > .lb-row-when svg { width: 1rem; height: 1rem; flex: none; }
+.lb-row-icons > .lb-check { margin: 0 2px 0 0; font-size: 0.8rem; }
+.lb-row-icons > .lb-link { position: relative; justify-content: center; }
+/* the link's word ("Link copied", "Couldn't make the link", or the link itself to copy by hand): a bubble over the
+   button, anchored at its right edge, so the row doesn't move and nothing runs off the card */
+.lb-row-icons .lb-link-label { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 6; padding: 0.25rem 0.5rem;
+  border: 1px solid currentColor; border-radius: 6px; background: rgb(var(--panel-rgb)); box-shadow: var(--shadow);
+  font-size: 0.72rem; font-weight: 700; line-height: 1.3; text-align: left; white-space: nowrap; }
+.lb-row-icons .lb-link[data-state="manual"] .lb-link-label { width: max-content; max-width: min(18rem, 70vw); color: var(--ink); white-space: normal; }
 .lb-week-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; margin-top: 0.3rem; }
 .lb-week-head h3 { margin: 0; font-size: 1rem; }
 .lb-week-head > span { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
@@ -270,20 +319,16 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-row[data-place="1"] .lb-rk { color: #e8b923; }
 .lb-row[data-place="2"] .lb-rk { color: #a9b6ba; }
 .lb-row[data-place="3"] .lb-rk { color: #d08a5a; }
-/* Teams: one row per run, its players' names wrapping onto more lines; who else was on the run under the result */
-.lb-team-names { column-gap: 0.3rem; }
-.lb-team-names > * { flex: 0 1 auto; }
-.lb-team-names > a, .lb-team-names > span:not([class]) { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lb-team-names .lb-you { margin-left: 0; }
-.lb-sep { color: var(--muted); font-weight: 700; }
-.lb-also { display: block; color: var(--muted); font-size: 0.75rem; font-style: italic; white-space: normal; }
-.lb-team .lb-who { gap: 2px; }
-.lb-who { display: grid; min-width: 0; }
-/* the name and its marks (you, unclaimed, Verified, the proof button) wrap onto a second line rather than being cut off;
-   only a name too long for the whole line is shortened */
-.lb-who-name { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-width: 0; font-size: 0.9rem; font-weight: 800; }
-.lb-who-name > :first-child { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lb-who-name > * + * { flex: none; }
+/* The players: one line each (Teams: the run's players in its order); who else was on the run under them */
+.lb-also { display: block; margin-top: 2px; color: var(--muted); font-size: 0.75rem; font-style: italic; white-space: normal; }
+.lb-who { display: grid; align-content: start; min-width: 0; }
+/* a player's line: the name, then its marks (claimed, you, no character, a lookalike) and their own copy's pictures,
+   which never wrap away from it; only the name is cut with "…" when the line is too short */
+.lb-who-name { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.3rem; min-width: 0; font-size: 0.9rem; font-weight: 800; line-height: 1.45rem; }
+.lb-who-name > .lb-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-who-name > :not(.lb-name) { flex: none; }
+.lb-who-name > .lb-you, .lb-who-name > .lb-mark, .lb-who-name > .lb-proof, .lb-who-name > .lb-check { margin-left: 0; }
+.lb-who-name > .lb-proof { width: 1.3rem; height: 1.3rem; }
 .lb-who-name a { color: inherit; }
 .lb-who small { color: var(--muted); font-size: 0.75rem; }
 .lb-result { display: inline-flex; align-items: center; gap: 2px; }
@@ -305,7 +350,6 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
 .lb-table tr.lb-team-first:not(:first-child) td { border-top: 1px solid var(--line); }
 .lb-table td[rowspan] { vertical-align: top; }
 .lb-table .lb-also { margin-top: 2px; }
-.lb-who-name .lb-proof { margin-left: 2px; }
 
 /* Season Ladder */
 .lb-split { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.8rem; font-weight: 800; }
@@ -329,13 +373,18 @@ a.lb-character, .lb-players a { color: inherit; text-decoration: underline; text
   .lb-hide-sm { display: none; }
 }
 
-/* Per Boss: "last updated" as a calendar icon per row (hover or tap for the time), an update icon over that column */
-.lb-rows-head { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 1.4rem 4.2rem; gap: 0.5rem; padding: 0 0.45rem 0.15rem;
+/* Per Boss: the columns' names over the rows (the row's three columns), and "last updated" as a calendar icon in each
+   row's icons (hover or tap for the time) */
+.lb-rows-head { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; gap: 0.6rem; padding: 0 0.5rem 0.15rem;
   color: var(--muted); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .lb-rows-head > span:first-child { text-align: center; }
 .lb-rows-head > span:last-child { text-align: right; }
-.lb-rows-head-when { display: grid; place-items: center; }
 .lb-line-icon { width: 0.95rem; height: 0.95rem; }
+/* the two marks, said once beside the week menu */
+.lb-marks-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.9rem; margin: 0 0 0 auto; color: var(--muted); font-size: 0.76rem; font-weight: 650; }
+.lb-marks-legend > span { display: inline-flex; align-items: center; gap: 0.3rem; }
+.lb-marks-legend .lb-claimed { font-size: 0.95rem; }
+.lb-marks-legend .lb-check { margin: 0; font-size: 0.8rem; }
 .lb-row-when { position: relative; display: grid; place-items: center; width: 1.4rem; height: 1.4rem; padding: 0; border: 0;
   border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
 .lb-row-when:hover, .lb-row-when:focus-visible, .lb-row-when.is-open { color: var(--teal); outline: none; }

@@ -2,7 +2,7 @@
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
-import { botSql, realPlayersOf, slotIsBot } from "./bots.js";
+import { botSql, botsOf, lineupSeats, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 const DISCORD_API = "https://discord.com/api/v10";
@@ -6282,6 +6282,30 @@ async function profileBoards(env, discordId) {
   return { leaderboards, trophies };
 }
 
+// A board row's seat (1P-4P) on the run it shows: the Party screen's slot (lineupSeats) whose name is the row's
+// player, either the row's name or the name this run stored for the row's UID. Only one seat may fit; else none.
+function seatOf(row, run) {
+  if (!run?.seats?.size) return null;
+  const names = [row.player];
+  if (row.uid) for (const player of run.players) if (player && typeof player === "object" && player.uid === row.uid) names.push(player.name);
+  const found = new Set(names.map((name) => run.seats.get(seatKey(name))).filter(Boolean));
+  return found.size === 1 ? [...found][0] : null;
+}
+// A player's own figures as a run stored them (players_json: Avg DPS, BREAK, healing), found by UID, else by the one
+// stored player of their name; {} when none fits. For an "also" player: this run's figures, never their best run's.
+function storedFigures(row, run) {
+  const list = (run?.players || []).filter((player) => player && typeof player === "object");
+  const byUid = row.uid ? list.filter((player) => player.uid === row.uid) : [];
+  const byName = list.filter((player) => seatKey(player.name) && seatKey(player.name) === seatKey(row.player));
+  const match = byUid.length === 1 ? byUid[0] : byName.length === 1 ? byName[0] : null;
+  if (!match) return {};
+  const figures = {};
+  for (const [from, to] of [["avgDps", "avgDps"], ["breakValue", "breakValue"], ["heal", "heal"]]) {
+    if (Number.isFinite(match[from])) figures[to] = match[from];
+  }
+  return figures;
+}
+
 // internal: the week's answer as an object, not a response (placement links read the board through it); null when the
 // boards aren't open to everyone
 async function interlinkBoards(request, env, internal = false) {
@@ -6346,6 +6370,8 @@ async function interlinkBoards(request, env, internal = false) {
   const proofRunIds = [...new Set(rows.flatMap((row) => Object.values(row.proofIds)))];
   const badges = new Map();
   const realPlayers = new Map();                             // Solo / Duo / Trio (realPlayersOf): the run had bots
+  const runBots = new Map();                                 // those bots (botsOf): [{ name, seat? }], listed on a team row
+  const runSeats = new Map();                                // the run's seats (1P-4P) by name, and its stored players
   try {
     for (let i = 0; i < proofRunIds.length; i += 90) {
       const chunk = proofRunIds.slice(i, i + 90);
@@ -6355,6 +6381,8 @@ async function interlinkBoards(request, env, internal = false) {
       for (const result of results || []) {
         badges.set(result.id, runCheckBadge(result.state));
         realPlayers.set(result.id, realPlayersOf(result.playersJson, result.lineupJson));
+        runBots.set(result.id, botsOf(result.playersJson, result.lineupJson));
+        runSeats.set(result.id, { seats: lineupSeats(result.lineupJson), players: parseJsonColumn(result.playersJson) || [] });
       }
     }
   } catch (error) {
@@ -6366,6 +6394,10 @@ async function interlinkBoards(request, env, internal = false) {
     row.checks = Object.fromEntries(Object.entries(row.proofIds).map(([metric, id]) => [metric, badges.get(id) || null]).filter(([, badge]) => badge));
     const real = realPlayers.get(row.proofIds[labelProof] || row.proofIds.score);
     if (real) row.realPlayers = real;
+    const bots = runBots.get(row.proofIds[labelProof] || row.proofIds.score);
+    if (bots?.length) row.bots = bots;
+    const seat = seatOf(row, runSeats.get(row.proofIds[labelProof] || row.proofIds.score));
+    if (seat) row.seat = seat;
   }
   const bossIds = cycle.bosses.map((boss) => boss.id);
   for (const row of rows) {                                  // a boss the table doesn't list (newer game data)
@@ -6417,9 +6449,13 @@ async function interlinkBoards(request, env, internal = false) {
       for (const lead of ranked) {
         if (also.has(lead.team)) continue;
         const on = runMembers.get(lead.figureGroup ?? lead.runGroup);
-        also.set(lead.team, on ? ranked.filter((row) => row.team !== lead.team && on.has(row.discordId)).map((row) => ({
-          player: row.player || "Pathfinder", rank: row.rank, profileId: row.profileId || null,
-          ...(row.discordName ? { discordName: row.discordName } : {}) })) : []);
+        // each with their seat on this run, and their figures as this run stored them (never their other run's)
+        const run = runSeats.get(lead.proofIds?.[labelProof] || lead.proofIds?.score);
+        also.set(lead.team, on ? ranked.filter((row) => row.team !== lead.team && on.has(row.discordId)).map((row) => {
+          const seat = seatOf(row, run);
+          return { player: row.player || "Pathfinder", rank: row.rank, profileId: row.profileId || null,
+            ...(row.discordName ? { discordName: row.discordName } : {}), ...(seat ? { seat } : {}), ...storedFigures(row, run) };
+        }) : []);
       }
     }
     const everyone = ranked.map(({ discordId, cycle: _c, bossId, bossName, firstAt, runGroup, runFirst, figureGroup, figureFirst, ...row }, index) => ({
