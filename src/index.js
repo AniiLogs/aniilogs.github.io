@@ -4,7 +4,7 @@ import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
 import { botSql, botsOf, lineupSeats, realPlayersOf, seatKey, slotIsBot } from "./bots.js";
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
-import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
+import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -3777,7 +3777,8 @@ async function submitLeaderboardRecord(request, env) {
     ? await checkSimRun(env, submissionId).catch((error) => { console.error("Sim run checks failed", error); return false; })
     : false;
   await corroborateRun(env, submissionId).catch((error) => { console.error("Settling the run's copies failed", error); });
-  // the review-only checks (Egg Heist's figures, a result read off the screen): listed for staff, nothing else changes
+  // the review-only checks (Egg Heist's figures, a result read off the screen, Interlink Avg DPS): listed for staff,
+  // nothing else changes
   await reviewOnlyCheck(env, submissionId, record, existing).catch((error) => { console.error("Review-only checks failed", error); });
   try {
     await storeRunOutcome(env, submissionId);
@@ -4289,7 +4290,8 @@ function runCheckBadge(state) {
   return state === "match" || state === "confirmed" ? "verified" : state === "pending" ? "pending" : null;
 }
 
-// Review-only checks (Egg Heist's figures, a result read off the screen): a run that fails one is listed for staff and
+// Review-only checks (Egg Heist's figures, a result read off the screen, an Interlink run's Avg DPS): a run that fails
+// one is listed for staff and
 // nothing else changes - not its place, its visibility, or any badge. Their flags live in the check's JSON alone
 // ($.reviewOnly: { flags, decision? }); verify_state and the badge never see them. Run as a record is stored: a re-send
 // with the same flags keeps what staff decided; new flags replace the old (and the decision); none left removes them.
@@ -4297,6 +4299,11 @@ function runCheckBadge(state) {
 async function reviewOnlyCheck(env, submissionId, record, previous) {
   const flags = [];
   if (record.kind === "interlink_run" || record.kind === "eggheist_match") flags.push(...screenChecks(parseJsonColumn(record.extraJson) || {}, screenCheckLimits(env)));
+  if (record.kind === "interlink_run") {
+    const extra = parseJsonColumn(record.extraJson) || {};
+    flags.push(...interlinkDpsChecks({ players: parseJsonColumn(record.playersJson) || [], lineup: extra.lineup, teamDps: record.teamDps, meterDps: record.meterDps },
+      interlinkCheckLimits(env), slotIsBot));
+  }
   const egg = record.kind.startsWith("eggheist_") ? eggCheckLimits(env) : null;
   if (record.kind === "eggheist_match") {
     flags.push(...eggMatchChecks({ score: record.score, clearTimeS: record.clearTimeS, cleared: record.cleared == null ? null : Number(record.cleared),
@@ -4483,9 +4490,10 @@ async function recheckRunChecks(request, env) {
     next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
 }
 
-// POST /api/admin/run-checks/limits {egg?, screen?} (administrators and the owner): for candidate limits (the JSON the
-// EGG_CHECK_LIMITS and SCREEN_CHECK_LIMITS secrets would hold), how many stored rows each rule would flag, and the
-// distributions to pick them by (limitPreview). Reads only; counts and numbers only.
+// POST /api/admin/run-checks/limits {egg?, screen?, interlink?} (administrators and the owner): for candidate limits (the
+// JSON the EGG_CHECK_LIMITS, SCREEN_CHECK_LIMITS and INTERLINK_CHECK_LIMITS secrets would hold; all three review only),
+// how many stored rows each rule would flag (Interlink: runs, one copy of each), and the distributions to pick them by
+// (limitPreview). Reads only; counts and numbers only (no names, no UIDs).
 async function previewRunCheckLimits(request, env) {
   const account = await leaderboardAccount(request, env);
   if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
@@ -4493,11 +4501,13 @@ async function previewRunCheckLimits(request, env) {
   let body = {};
   try { body = (await readJsonBody(request, 4096)) || {}; } catch (error) { return json({ error: error.message }, 400); }
   const { results } = await env.DB.prepare(
-    `SELECT kind, score, clear_time_s AS clearTimeS, cleared, difficulty, defeats, extra_json AS extraJson FROM leaderboard_submissions
-     WHERE kind IN ('eggheist_match', 'eggheist_season') OR (json_valid(extra_json) AND json_extract(extra_json, '$.screenCheck') IS NOT NULL)`,
+    `SELECT submission_id AS submissionId, kind, score, clear_time_s AS clearTimeS, cleared, difficulty, defeats, created_at AS createdAt,
+       CASE WHEN kind = 'interlink_run' THEN players_json END AS playersJson, team_dps AS teamDps, meter_dps AS meterDps,
+       extra_json AS extraJson FROM leaderboard_submissions
+     WHERE kind IN ('eggheist_match', 'eggheist_season', 'interlink_run') OR (json_valid(extra_json) AND json_extract(extra_json, '$.screenCheck') IS NOT NULL)`,
   ).all();
-  const rows = (results || []).map(({ extraJson, ...row }) => ({ ...row, extra: parseJsonColumn(extraJson) || {} }));
-  return json(limitPreview(rows, { egg: body.egg ?? null, screen: body.screen ?? null }));
+  const rows = (results || []).map(({ extraJson, playersJson, ...row }) => ({ ...row, extra: parseJsonColumn(extraJson) || {}, players: parseJsonColumn(playersJson) || [] }));
+  return json(limitPreview(rows, { egg: body.egg ?? null, screen: body.screen ?? null, interlink: body.interlink ?? null }, slotIsBot));
 }
 
 // POST /api/admin/run-checks/<id>/read (administrators and the owner): reads one Interlink run's pictures again now,
