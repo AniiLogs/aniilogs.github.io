@@ -1,5 +1,6 @@
 // The run's proof viewer, shared by the leaderboards and My runs: every picture of a run in its own tab (the result
-// screen, Battle Data, Holo-Battle Sim's Gizmo screen, the Party screen), a menu best's picture beside its run's, and
+// screen, Battle Data, Holo-Battle Sim's Gizmo screen, the Party screen; for staff, the fight's pictures together in
+// one Fight tab), a menu best's picture beside its run's, and
 // what each player went in with, under a line saying which fight it is. window.AniilogsProof: open(submissionId, check, menuId, options), button(...), checkBadge,
 // partyPanel, allowDelete({ any, onDeleted }). options (the profile's trophies): shot, the picture to open on ("battle"), and note, a line over the
 // pictures (Battle Data shows the whole party: the note says whose row the trophy is). options.tab "comments": open on
@@ -155,6 +156,55 @@
     if (shot.startsWith("gizmo")) return shots.filter((s) => s.startsWith("gizmo")).length > 1 ? `Gizmos ${shot.slice(5)}` : "Gizmos";
     return "Summary";
   }
+  // A run's tabs from its ?shot=list: a tab per picture, and the fight's pictures ("fight1"...; staff only, the API lists
+  // them for staff alone) together in one "Fight" tab after the others
+  function listPictures(id, list, label) {
+    const fights = list.shots.filter((shot) => /^fight\d+$/u.test(shot));
+    const times = new Map((Array.isArray(list.fightShots) ? list.fightShots : [])
+      .filter((item) => Number.isInteger(item?.n) && Number.isFinite(item?.t)).map((item) => [item.n, item.t]));
+    return [
+      ...list.shots.filter((shot) => !fights.includes(shot)).map((shot) => ({ id, shot, label: label(shot) })),
+      ...(fights.length ? [{ id, shot: "fight", label: "Fight", fight: fights.map((shot) => ({ shot, t: times.get(Number(shot.slice(5))) })) }] : []),
+    ];
+  }
+  const COUNT_WORDS = ["One", "Two", "Three", "Four", "Five", "Six"];
+  function clock(seconds) {
+    const whole = Math.floor(seconds);
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+  }
+  // The Fight tab: a line saying what the pictures are, then each picture full width with its time into the fight in a
+  // corner; a click (or Enter) opens one full size, with a way back to all of them. Never on hover.
+  function fightPanel(body, picture, current) {
+    const shots = picture.fight;
+    const count = COUNT_WORDS[shots.length - 1] || String(shots.length);
+    const note = shots.length === 1
+      ? "One moment of the fight, taken right after the biggest hit of that part. The numbers are this player's own hits. Click the picture to open it full size."
+      : `${count} moments of the fight, each taken right after the biggest hit of that part. The numbers are this player's own hits. Click a picture to open it full size.`;
+    const alt = (i) => `Fight picture ${i + 1} of ${shots.length}`;
+    const load = (img, shot) => proofImage(picture.id, shot.shot)
+      .then((url) => { if (current()) img.src = url; })
+      .catch(() => { img.replaceWith(el("span", { class: "lb-empty", text: "This picture couldn't be loaded." })); });
+    const strip = (focus = -1) => {
+      const buttons = shots.map((shot, i) => {
+        const img = el("img", { alt: alt(i) });
+        load(img, shot);
+        return el("button", { type: "button", class: "lb-fight-shot", title: "Open full size", onclick: () => single(i) },
+          img, Number.isFinite(shot.t) ? el("span", { class: "lb-fight-time", text: clock(shot.t) }) : null);
+      });
+      body.replaceChildren(el("div", { class: "lb-fight" }, el("p", { class: "lb-fight-note", text: note }), el("div", { class: "lb-fight-strip" }, buttons)));
+      buttons[focus]?.focus();
+    };
+    const single = (i) => {
+      const img = el("img", { class: "lb-proof-image", alt: alt(i) });
+      load(img, shots[i]);
+      const back = el("button", { type: "button", class: "lb-fight-back", text: "← Back to all", onclick: () => strip(i) });
+      const time = Number.isFinite(shots[i].t) ? el("span", { class: "lb-fight-at", text: `${alt(i)} · ${clock(shots[i].t)}` })
+        : el("span", { class: "lb-fight-at", text: alt(i) });
+      body.replaceChildren(el("div", { class: "lb-fight" }, el("p", { class: "lb-fight-bar" }, back, time), img));
+      back.focus();
+    };
+    strip();
+  }
   function proofButton(submissionId, check = null, menuId = null, options = {}) {
     if (!submissionId) return null;
     const button = el("button", { type: "button", class: "lb-proof", title: "This run's screenshots",
@@ -226,8 +276,8 @@
     if (fight) dialog.insertBefore(fight, dialog.querySelector(".lb-proof-note") || body);
     const pictures = [
       ...(menu?.shots?.includes("summary") ? [{ id: menuId, shot: "summary", label: "Menu" }] : []),
-      ...details.shots.map((shot) => ({ id: submissionId, shot, label: details.menu && shot === "summary" ? "Menu" : shotLabel(shot, details.shots) })),
-      ...(run ? run.shots.map((shot) => ({ id: details.runProof, shot, label: shotLabel(shot, run.shots) })) : []),
+      ...listPictures(submissionId, details, (shot) => (details.menu && shot === "summary" ? "Menu" : shotLabel(shot, details.shots))),
+      ...(run ? listPictures(details.runProof, run, (shot) => shotLabel(shot, run.shots)) : []),
     ];
     dialog.querySelector(".lb-proof-party")?.remove();
     const shown = details.lineup?.length || details.buffs?.length || !run ? details : run;
@@ -267,6 +317,7 @@
       comments?.tab.setAttribute("aria-selected", "false");
       if (!picture) { body.replaceChildren(el("p", { class: "lb-empty", text: "This run isn't available." })); return; }
       for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(Number(tab.dataset.proofShot) === index));
+      if (picture.fight) { fightPanel(body, picture, () => proofOpenFor === submissionId); return; }
       body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
       try {
         const url = await proofImage(picture.id, picture.shot);
@@ -277,7 +328,7 @@
       }
     };
     tabs.append(...pictures.map((picture, index) => el("button", { type: "button", role: "tab", "data-proof-shot": String(index),
-      text: picture.label, onclick: () => show(index) })));
+      onclick: () => show(index) }, picture.label, picture.fight ? el("span", { class: "lb-fight-count", text: String(picture.fight.length) }) : null)));
     if (comments) {
       comments.tab.addEventListener("click", showComments);
       tabs.append(comments.tab);

@@ -457,6 +457,121 @@ test("Holo-Battle Sim's Gizmo views are stored with the run, listed in order, se
   assert.equal(EVIDENCE.objects.size, 3);                                             // the Interlink run's two and the menu's are left
 });
 
+test("the fight's pictures: stored in order, replaced or kept on a re-send, staff only, never cached, deleted with the run", async () => {
+  const EVIDENCE = evidenceStore();
+  // dev is the owner (logs.read); dev2 a developer (no logs.read); user sends the run
+  const { env } = await setup({ EVIDENCE, LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const jpeg = (mark) => { const data = new Uint8Array(512); data.set([0xff, 0xd8, 0xff, mark]); return new Blob([data], { type: "image/jpeg" }); };
+  const send = async (body, parts) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(body));
+    for (const [name, mark] of parts) form.set(name, jpeg(mark), `${name}.jpg`);
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  // the app can't name stored pictures; its fightShots are kept, cleaned
+  const body = run("fight-run", { extra: { proofFight: ["evidence/someone-else.jpg"], proofBoxes: { evidence: [0.1, 0.1, 0.9, 0.9] },
+    fightShots: [{ n: 1, t: 12.44 }, { n: 2, t: 75.06, x: "dropped" }, { n: 3, t: -1 }, { n: 2, t: 9 }, { n: 7, t: 5 }, { n: 1.5, t: 3 },
+      "junk", { n: 4, t: Infinity }, { n: 5, t: "60" }, { n: 6, t: 3600 }] } });
+  // fight7 is ignored; a gap after fight3 would end the list
+  const sent = await send(body, [["evidence", 1], ["battle", 2], ["party", 3], ["fight1", 31], ["fight2", 32], ["fight3", 33], ["fight7", 37]]);
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  const base = `/api/leaderboard/submissions/${submissionId}/evidence`;
+  const keys = () => [...EVIDENCE.objects.keys()].filter((key) => key.includes("-fight")).sort();
+  assert.deepEqual(keys(), [1, 2, 3].map((n) => `evidence/${IDS.user}/${submissionId}-fight${n}.jpg`));
+  const stored = JSON.parse((await env.DB.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).first()).e);
+  assert.deepEqual(stored.proofFight, keys());
+  assert.deepEqual(stored.fightShots, [{ n: 1, t: 12.4 }, { n: 2, t: 75.1 }, { n: 3 }, { n: 4 }, { n: 5 }, { n: 6, t: 3600 }]);
+
+  // the list: fight1..3 and their times for staff only; the sender, a developer and a visitor get today's answer
+  const list = (session) => call(env, `${base}?shot=list`, { session });
+  const staffList = await list(SESSIONS.dev);
+  assert.equal(staffList.headers.get("cache-control"), "private, no-store");
+  const staffDetails = await staffList.json();
+  assert.deepEqual(staffDetails.shots, ["summary", "battle", "party", "fight1", "fight2", "fight3"]);
+  assert.deepEqual(staffDetails.fightShots.slice(0, 2), [{ n: 1, t: 12.4 }, { n: 2, t: 75.1 }]);
+  for (const session of [SESSIONS.user, SESSIONS.dev2, undefined]) {
+    const answer = await list(session);
+    assert.equal(answer.headers.get("cache-control"), "public, max-age=300");
+    const details = await answer.json();
+    assert.deepEqual(details.shots, ["summary", "battle", "party"]);
+    assert.equal(details.fightShots, undefined);
+  }
+  // the pictures: staff get them, never cached; anyone else the answer a missing picture gets
+  const picture = (shot, session) => call(env, `${base}?shot=${shot}`, { session });
+  const staffPicture = await picture("fight2", SESSIONS.dev);
+  assert.equal(staffPicture.status, 200);
+  assert.equal(staffPicture.headers.get("cache-control"), "private, no-store");
+  assert.equal(new Uint8Array(await staffPicture.arrayBuffer())[3], 32);
+  assert.equal((await picture("fight4", SESSIONS.dev)).status, 404);
+  assert.equal((await picture("fight7", SESSIONS.dev)).status, 404);
+  const missing = await (await picture("fight4", SESSIONS.dev)).text();
+  for (const session of [SESSIONS.user, SESSIONS.dev2, undefined]) {
+    const answer = await picture("fight1", session);
+    assert.equal(answer.status, 404);
+    assert.equal(await answer.text(), missing);
+  }
+  assert.equal((await call(env, `${base}?shot=fight1`, { token })).status, 404);    // the sender's app too
+  // the other pictures are as before: public and cached
+  assert.equal((await picture("party")).headers.get("cache-control"), "public, max-age=86400");
+
+  // the boards show neither the keys nor the times
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries[0];
+  assert.equal(entry.extra.proofFight, undefined);
+  assert.equal(entry.extra.fightShots, undefined);
+  assert.deepEqual(entry.extra.proofBoxes, { evidence: [0.1, 0.1, 0.9, 0.9] });
+  assert.ok(!JSON.stringify(entry).includes("-fight"));
+
+  // a follow-up without fight pictures keeps them and their times
+  assert.equal((await send(run("fight-run", { extra: { proofBoxes: { evidence: [0.1, 0.1, 0.9, 0.9] } } }), [["evidence", 1]])).status, 200);
+  assert.equal(keys().length, 3);
+  assert.deepEqual((await (await list(SESSIONS.dev)).json()).fightShots[0], { n: 1, t: 12.4 });
+  // a follow-up with them replaces the set (fight3 is deleted)
+  assert.equal((await send(run("fight-run", { extra: { fightShots: [{ n: 1, t: 1 }, { n: 2, t: 2 }] } }), [["evidence", 1], ["fight1", 41], ["fight2", 42]])).status, 200);
+  assert.deepEqual(keys(), [1, 2].map((n) => `evidence/${IDS.user}/${submissionId}-fight${n}.jpg`));
+  const replaced = await (await list(SESSIONS.dev)).json();
+  assert.deepEqual(replaced.shots.filter((s) => s.startsWith("fight")), ["fight1", "fight2"]);
+  assert.deepEqual(replaced.fightShots, [{ n: 1, t: 1 }, { n: 2, t: 2 }]);
+  assert.equal(new Uint8Array(await (await picture("fight1", SESSIONS.dev)).arrayBuffer())[3], 41);
+  // fight pictures without the result screen aren't taken
+  assert.equal((await send(run("no-proof"), [["fight1", 51]])).status, 201);
+  assert.equal(keys().length, 2);
+
+  // deleting the run deletes its fight pictures
+  assert.equal((await call(env, `/api/leaderboard/submissions/${submissionId}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);
+  assert.deepEqual(keys(), []);
+});
+
+test("the fight's pictures go with the whole screens after 14 days; a current best and a run under review keep them", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const token = await namedToken(env, SESSIONS.dev);
+  const sim = (id, clearTimeS) => ({ kind: "sim_run", clientRunId: id, trial: "Training of Fire", difficulty: "Hard", clearTimeS, cleared: true, partySize: 1,
+    extra: { fightShots: [{ n: 1, t: 10 }] } });
+  const screens = ["evidence", "evidence_full", "fight1", "fight2"];
+  const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
+  const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
+    .map((key) => /-(full|fight\d)\.jpg$/u.exec(key)?.[1] || "crop").sort();
+  const extra = (client) => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = ?").get(client).e || "{}");
+  await sendRun(env, token, sim("slow", 500), screens);
+  await sendRun(env, token, sim("review", 450), screens);
+  await sendRun(env, token, sim("best", 300), screens);
+  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "full"]);
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 20 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
+  sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch' WHERE client_run_id = 'review'").run();
+  for (let i = 0; i < 2; i += 1) await sendRun(env, token, run(`trigger-${i}`));
+  // the slower run: its whole screen and fight pictures gone, the crop kept (90 days), proofFight cleared
+  assert.deepEqual(pictures("slow"), ["crop"]);
+  assert.equal(extra("slow").proofFight, undefined);
+  assert.equal(extra("slow").proofFull, undefined);
+  for (const kept of ["best", "review"]) assert.deepEqual(pictures(kept), ["crop", "fight1", "fight2", "full"], kept);
+  // after 90 days the crops go too, with anything left
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 100 * 86400 WHERE client_run_id = 'slow'").run();
+  await sendRun(env, token, run("trigger-x"));
+  assert.deepEqual(pictures("slow"), []);
+});
+
 test("second reading (shadow mode): Workers AI re-reads the whole screens; a mismatch is listed for review, never held", async () => {
   const EVIDENCE = evidenceStore();
   // a stand-in for Workers AI: the first result screen reads score 20000 / 20 stars / 3:00, the next 15000 / 15; the

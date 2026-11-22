@@ -2282,15 +2282,17 @@ async function pruneProofs(env, max) {
   const now = Math.floor(Date.now() / 1000);
   let pruned = 0;
   try {
-    // the whole screens after 14 days
+    // the whole screens and the fight's pictures after 14 days
     const full = (await env.DB.prepare(
       `SELECT c.submission_id AS submissionId, c.extra_json AS extraJson FROM leaderboard_submissions c
-       WHERE json_extract(c.extra_json, '$.proofFull') IS NOT NULL AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
+       WHERE (json_extract(c.extra_json, '$.proofFull') IS NOT NULL OR json_extract(c.extra_json, '$.proofFight') IS NOT NULL)
+         AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
     ).bind(now - RETENTION.fullScreensS, max).all()).results || [];
     for (const row of full) {
-      for (const key of Object.values((parseJsonColumn(row.extraJson) || {}).proofFull || {})) await env.EVIDENCE.delete(key);
-      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_remove(extra_json, '$.proofFull') WHERE submission_id = ?")
+      const extra = parseJsonColumn(row.extraJson) || {};
+      for (const key of [...Object.values(extra.proofFull || {}), ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])]) await env.EVIDENCE.delete(key);
+      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_remove(extra_json, '$.proofFull', '$.proofFight') WHERE submission_id = ?")
         .bind(row.submissionId).run();
       pruned += 1;
     }
@@ -2306,7 +2308,7 @@ async function pruneProofs(env, max) {
     for (const row of crops) {
       for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
       await env.DB.prepare(`UPDATE leaderboard_submissions SET evidence_key = NULL, battle_evidence_key = NULL, proof_pruned_at = ?,
-        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty', '$.proofGizmos') WHERE submission_id = ?`).bind(now, row.submissionId).run();
+        extra_json = json_remove(extra_json, '$.proofFull', '$.proofParty', '$.proofGizmos', '$.proofFight') WHERE submission_id = ?`).bind(now, row.submissionId).run();
       pruned += 1;
     }
   } catch (error) {
@@ -2707,10 +2709,12 @@ const MAX_SUBMISSION_BYTES = 64 * 1024;
 // ("battle", "battle_full"), and the Party screen as it was when the battle started ("party": the leader or anyone can
 // still change their Aniimo until then, so it's the last capture). Each image is capped here; anything larger isn't a
 // screenshot from the app. Holo-Battle Sim's run also sends its Gizmo screen, a whole screen for each part of the list
-// ("gizmo1"...), at most MAX_GIZMO_SHOTS of them.
+// ("gizmo1"...), at most MAX_GIZMO_SHOTS of them. An Interlink run can also send pictures of the fight itself ("fight1"
+// ... "fight6", each right after the biggest hit of a part of the fight): for staff only, never public (the owner).
 const MAX_EVIDENCE_BYTES = 1536 * 1024;
 const MAX_GIZMO_SHOTS = 12;
-const EVIDENCE_PARTS = 5 + MAX_GIZMO_SHOTS;
+const MAX_FIGHT_SHOTS = 6;
+const EVIDENCE_PARTS = 5 + MAX_GIZMO_SHOTS + MAX_FIGHT_SHOTS;
 const EVIDENCE_TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" });
 const LEADERBOARD_KINDS = Object.freeze({
   interlink_run: "interlink",
@@ -3072,6 +3076,25 @@ export function leaderboardSubmission(value) {
   return { record };
 }
 
+// extra.fightShots, the app's list of when each fight picture was taken: [{ n: 1..6, t: seconds into the fight }], at
+// most MAX_FIGHT_SHOTS, one per picture. A bad entry (no whole n in 1..6, or an n already listed) is dropped; a bad t
+// (not a finite number in 0..3600) leaves the entry without its time. Null when nothing is left.
+function fightShots(value) {
+  if (!Array.isArray(value)) return null;
+  const seen = new Set();
+  const shots = [];
+  for (const item of value) {
+    if (shots.length >= MAX_FIGHT_SHOTS) break;
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const n = item.n;
+    if (!Number.isInteger(n) || n < 1 || n > MAX_FIGHT_SHOTS || seen.has(n)) continue;
+    seen.add(n);
+    const t = item.t;
+    shots.push(typeof t === "number" && Number.isFinite(t) && t >= 0 && t <= 3600 ? { n, t: Math.round(t * 10) / 10 } : { n });
+  }
+  return shots.length ? shots : null;
+}
+
 async function readSubmissionRequest(request) {
   const type = request.headers.get("content-type") || "";
   if (!type.toLowerCase().startsWith("multipart/form-data")) {
@@ -3105,8 +3128,15 @@ async function readSubmissionRequest(request) {
     if (!view) break;
     gizmos.push(view);
   }
+  // the fight's pictures (staff only), in N order; a gap ends the list, and any other "fightN" is ignored
+  const fights = [];
+  for (let i = 1; evidence && i <= MAX_FIGHT_SHOTS; i += 1) {
+    const view = picture(`fight${i}`);
+    if (!view) break;
+    fights.push(view);
+  }
   return { body, evidence, battle, evidenceFull: evidence ? picture("evidence_full") : null, battleFull: battle ? picture("battle_full") : null,
-    party: picture("party"), gizmos };
+    party: picture("party"), gizmos, fights };
 }
 
 // Two app users in one Interlink run both send it: same week and boss, stored within five minutes of each other (the
@@ -3717,15 +3747,39 @@ async function submitLeaderboardRecord(request, env) {
     for (const key of proofGizmos || []) if (!views.includes(key)) await env.EVIDENCE.delete(key);
     proofGizmos = views;
   }
-  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos) {
+  // the fight's pictures, staff only (server-only extra.proofFight, in N order): a re-send with fight pictures replaces
+  // them all, one without keeps them (and their times, extra.fightShots, unless it sends new ones), as the Gizmo views
+  const stored = parseJsonColumn(existing?.extraJson) || {};
+  let proofFight = Array.isArray(stored.proofFight) ? stored.proofFight : null;
+  const fightsSent = Boolean(parsed.fights?.length && env.EVIDENCE);
+  if (fightsSent) {
+    const views = [];
+    for (const [i, part] of parsed.fights.entries()) {
+      const key = `evidence/${account.discordId}/${submissionId}-fight${i + 1}.${EVIDENCE_TYPES[part.type]}`;
+      await env.EVIDENCE.put(key, part.stream(), { httpMetadata: { contentType: part.type } });
+      views.push(key);
+    }
+    for (const key of proofFight || []) if (!views.includes(key)) await env.EVIDENCE.delete(key);
+    proofFight = views;
+  }
+  const keptFightShots = !fightsSent && proofFight?.length ? fightShots(stored.fightShots) : null;
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length) {
     const extra = parseJsonColumn(record.extraJson) || {};
     delete extra.proofFull;
     delete extra.proofParty;
     delete extra.proofGizmos;
+    delete extra.proofFight;
     delete extra.sharedRun;
+    if (Object.hasOwn(extra, "fightShots")) {
+      const shots = fightShots(extra.fightShots);
+      if (shots) extra.fightShots = shots;
+      else delete extra.fightShots;
+    }
+    if (!extra.fightShots && keptFightShots) extra.fightShots = keptFightShots;
     if (Object.keys(proofFull).length) extra.proofFull = proofFull;
     if (proofParty) extra.proofParty = proofParty;
     if (proofGizmos?.length) extra.proofGizmos = proofGizmos;
+    if (proofFight?.length) extra.proofFight = proofFight;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -6661,7 +6715,8 @@ async function leaderboardEntries(request, env) {
       profileId: row.profileId || null,
       players: withProfiles(parseJsonColumn(row.players_json), profiles, parseJsonColumn(row.extra_json)?.lineup),
       buffs: parseJsonColumn(row.buffs_json),
-      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
+      // the fight's pictures are staff only: neither their keys nor their times are shown here
+      extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, proofFight: _fight, fightShots: _fightShots, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
@@ -6757,7 +6812,8 @@ async function moderateSubmission(request, env, submissionId) {
 function proofKeys(row) {
   const extra = parseJsonColumn(row?.extraJson) || {};
   const full = extra.proofFull || {};
-  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || [])].filter(Boolean);
+  return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || []),
+    ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])].filter(Boolean);
 }
 
 async function deleteSubmission(request, env, submissionId) {
@@ -6790,17 +6846,25 @@ async function submissionEvidence(request, env, submissionId) {
   const full = extra.proofFull || {};
   const gizmos = Array.isArray(extra.proofGizmos) ? extra.proofGizmos : [];
   const gizmo = /^gizmo([1-9]\d?)$/u.exec(shot || "");
+  // the fight's pictures (extra.proofFight) are for staff only (logs.read): anyone else, the run's sender too, gets the
+  // answer a missing picture gets, so they aren't told the pictures exist
+  const fights = Array.isArray(extra.proofFight) ? extra.proofFight : [];
+  const fightShot = /^fight([1-9]\d?)$/u.exec(shot || "");
+  let viewer;
+  const viewerAccount = async () => (viewer === undefined ? (viewer = await leaderboardAccount(request, env)) : viewer);
+  const staff = Boolean(row && fights.length && (shot === "list" || fightShot) && can(await viewerAccount(), "logs.read"));
   // ?shot=list: the run's pictures, in the order they were on screen (the viewer's tabs), with what each player went in
   // with (the Party screen's lineup: lead, level, CP, team) and the run's buffs - public on the boards already
   const shots = row ? [row.evidenceKey && "summary", row.battleKey && "battle", ...gizmos.map((_, i) => `gizmo${i + 1}`),
-    extra.proofParty && "party"].filter(Boolean) : [];
+    extra.proofParty && "party", ...(staff ? fights.map((_, i) => `fight${i + 1}`) : [])].filter(Boolean) : [];
   const key = shot === "list" ? (shots.length ? "list" : null)
     : shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
-    : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1] : row?.evidenceKey;
+    : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1]
+    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
-    const account = await leaderboardAccount(request, env);
+    const account = await viewerAccount();
     if (!account) return json({ error: "Authentication required." }, 401);
     if (row.discordId !== account.discordId && !account.developerModeAvailable) {
       return json({ error: "This entry is hidden: its proof is visible to its submitter and developers only." }, 403);
@@ -6824,16 +6888,21 @@ async function submissionEvidence(request, env, submissionId) {
        ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(${RUN_SCORE("r")}, -1) DESC, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC LIMIT 1`,
     ).bind(row.discordId, row.cycle, row.bossId).first() : null;
     const fight = await proofFight(env, row);
+    // staff: when each fight picture was taken (extra.fightShots, for the viewer's labels)
+    const times = staff ? fightShots(extra.fightShots) : null;
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
-      ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}) });
-    listed.headers.set("cache-control", visible ? "public, max-age=300" : "private, no-store");
+      ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}),
+      ...(times ? { fightShots: times } : {}) });
+    // a list naming the fight's pictures is never cached; the list depends on who asks
+    listed.headers.set("cache-control", visible && !staff ? "public, max-age=300" : "private, no-store");
+    if (fights.length) listed.headers.set("vary", "Authorization");
     return listed;
   }
   const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
-  headers.set("cache-control", visible ? "public, max-age=86400" : "private, no-store");
+  headers.set("cache-control", visible && !fightShot ? "public, max-age=86400" : "private, no-store");
   return new Response(object.body, { status: 200, headers });
 }
 
