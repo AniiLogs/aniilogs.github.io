@@ -47,6 +47,8 @@ export function lineupSeats(party) {
   return new Map([...found].filter(([, seat]) => seat !== null));
 }
 export const seatKey = fold;
+// nameSimilarity under a name of its own, for index.js (which has an older nameSimilarity, an LCS measure, of its own)
+export const seatNameSimilarity = (a, b) => nameSimilarity(a, b);
 
 // Near names (cardSeats step 4): the similarity of two names is 1 - (Levenshtein distance of their skeletons, in
 // characters) / (the longer skeleton's length), 0..1; an empty name is 0. A card and a Party entry are the same player
@@ -149,6 +151,7 @@ export function partyBySeat(players, party = null) {
   const list = parsed(players);
   if (!Array.isArray(list) || list.length !== 4) return null;
   const lineup = parsed(party);
+  if (lineupBelongs(list, lineup) === false) return list.map(() => null);    // another lobby's Party: nothing from it
   const entries = (Array.isArray(lineup) ? lineup : []).filter((item) => item && typeof item === "object");
   const usable = (slot) => Number.isInteger(slot) && slot >= 0 && slot <= 3;
   const loose = entries.filter((entry) => !usable(entry.slot));
@@ -174,22 +177,65 @@ export function partyBySeat(players, party = null) {
   return out;
 }
 
+// Whether a stored lineup is its run's own Party at all. Old app builds sometimes sent the Party of the lobby before
+// (stored runs: 12 four-card runs whose lineup had at most one name on the result cards, one with CP on the entries of
+// three bot cards' seats); placed by seat, it would put strangers' leads, levels and CP under this run's players. A
+// lineup vouches for its run when at least LINEUP_MIN_MATCHES of its named entries have a name (nameSkeleton) found
+// among the cards' names: one name alone can be a player who stayed for the next lobby. -> true, false (another
+// lobby's), or null when the lineup has no named entry at all (nothing to judge; nothing to show from it either).
+export const LINEUP_MIN_MATCHES = 2;
+export function lineupBelongs(players, party = null) {
+  const list = parsed(players);
+  const lineup = parsed(party);
+  const key = (item) => (item && typeof item === "object" && typeof item.name === "string" && item.name.trim() ? nameSkeleton(item.name) : "");
+  const named = (Array.isArray(lineup) ? lineup : []).map(key).filter(Boolean);
+  if (!named.length) return null;
+  const cards = new Set((Array.isArray(list) ? list : []).map(key).filter(Boolean));
+  return named.filter((name) => cards.has(name)).length >= LINEUP_MIN_MATCHES;
+}
+
+// The seat's CP on its card: on a four-card run whose lineup is its own (lineupBelongs true), each card without an
+// integer cp of its own takes the integer CP of the Party entry at its own seat (partyBySeat), when that entry has one.
+// A bot's Party card has no CP, so a bot's card stays without; a card's own cp is never changed. Both twins of the bot
+// rule (slotIsBot and botSql) already call a card with a CP a person, so a bot-named card whose own seat shows CP is a
+// person in JS and SQL alike, without either changing. Written when a copy is stored and whenever its players are
+// rewritten (corroborateRun); server-only: the public answers leave a card's cp out. -> a new list, or the input.
+export function withSeatCp(players, party = null) {
+  const list = parsed(players);
+  if (!Array.isArray(list) || list.length !== 4) return list;
+  const lineup = parsed(party);
+  if (lineupBelongs(list, lineup) !== true) return list;
+  const found = partyBySeat(list, lineup);
+  let changed = false;
+  const out = list.map((card, index) => {
+    if (!card || typeof card !== "object" || Number.isInteger(card.cp)) return card;
+    const cp = found[index]?.cp;
+    if (!Number.isInteger(cp) || cp < 0 || cp > 10000000) return card;
+    changed = true;
+    return { ...card, cp };
+  });
+  return changed ? out : list;
+}
+
 // What a Party entry says about the card on the Party screen (lead, nickname, level, CP, team...): everything but who
 // the player is and where they sat, which on a four-card run come from the result screen's cards (lineupBySeat).
 const NOT_PARTY_DATA = new Set(["slot", "name", "ai", "self", "unnamed", "avgDps", "fromBattleData", "skel", "uid", "confirmed", "unsettled"]);
 // A four-card run's lineup rebuilt by seat: four entries in seat order, entry s = { slot: s - 1, name (card s's, or
 // unnamed when the boards keep that name out), ai (the one bot rule), self (only when card s is the shown copy's
-// sender), ...the Party data of that seat's entry (partyBySeat) }. Null when the run hasn't exactly four cards.
+// sender), ...the Party data of that seat's entry (partyBySeat) }. Null when the run hasn't exactly four cards. A
+// lineup that is another lobby's (lineupBelongs false): the four cards with no slot and no Party data, so the page
+// takes nothing from the Party picture either (it is that other lobby's too).
 export function lineupBySeat(players, party = null) {
   const list = parsed(players);
   const lineup = parsed(party);
   const found = partyBySeat(list, lineup);
   if (!found) return null;
+  const stale = lineupBelongs(list, lineup) === false;
   return list.map((card, index) => {
     const isCard = Boolean(card && typeof card === "object");
     const named = isCard && typeof card.name === "string" && card.name.trim() && card.unsettled !== true;
     const data = Object.fromEntries(Object.entries(found[index] || {}).filter(([key]) => !NOT_PARTY_DATA.has(key)));
-    return { slot: index, ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }),
+    return { ...(stale ? {} : { slot: index }), ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }),
       ai: isCard ? slotIsBot(card, Array.isArray(lineup) ? lineup : null) : false, ...(isCard && card.self === true ? { self: true } : {}), ...data };
   });
 }

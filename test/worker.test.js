@@ -156,6 +156,7 @@ async function authenticatedTestDatabase() {
               if (sql === "DELETE FROM leaderboard_tokens WHERE discord_id = ?"
                 || sql === "DELETE FROM leaderboard_submissions WHERE discord_id = ?"
                 || sql === "DELETE FROM game_characters WHERE discord_id = ?"
+                || sql === "DELETE FROM interlink_presence WHERE discord_id = ?"
                 || sql === "DELETE FROM profile_photos WHERE discord_id = ?") {
                 return { meta: { changes: 0 } };
               }
