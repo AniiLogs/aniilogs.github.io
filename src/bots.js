@@ -194,6 +194,29 @@ export function lineupBelongs(players, party = null) {
   return named.filter((name) => cards.has(name)).length >= LINEUP_MIN_MATCHES;
 }
 
+// The seat's CP on its card: on a four-card run whose lineup is its own (lineupBelongs true), each card without an
+// integer cp of its own takes the integer CP of the Party entry at its own seat (partyBySeat), when that entry has one.
+// A bot's Party card has no CP, so a bot's card stays without; a card's own cp is never changed. Both twins of the bot
+// rule (slotIsBot and botSql) already call a card with a CP a person, so a bot-named card whose own seat shows CP is a
+// person in JS and SQL alike, without either changing. Written when a copy is stored and whenever its players are
+// rewritten (corroborateRun); server-only: the public answers leave a card's cp out. -> a new list, or the input.
+export function withSeatCp(players, party = null) {
+  const list = parsed(players);
+  if (!Array.isArray(list) || list.length !== 4) return list;
+  const lineup = parsed(party);
+  if (lineupBelongs(list, lineup) !== true) return list;
+  const found = partyBySeat(list, lineup);
+  let changed = false;
+  const out = list.map((card, index) => {
+    if (!card || typeof card !== "object" || Number.isInteger(card.cp)) return card;
+    const cp = found[index]?.cp;
+    if (!Number.isInteger(cp) || cp < 0 || cp > 10000000) return card;
+    changed = true;
+    return { ...card, cp };
+  });
+  return changed ? out : list;
+}
+
 // What a Party entry says about the card on the Party screen (lead, nickname, level, CP, team...): everything but who
 // the player is and where they sat, which on a four-card run come from the result screen's cards (lineupBySeat).
 const NOT_PARTY_DATA = new Set(["slot", "name", "ai", "self", "unnamed", "avgDps", "fromBattleData", "skel", "uid", "confirmed", "unsettled"]);

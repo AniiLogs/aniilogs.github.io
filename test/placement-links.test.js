@@ -9,7 +9,7 @@ import test from "node:test";
 
 import worker, { lineupSlots, lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
-import { botsOf, cardSeats, LINEUP_MIN_MATCHES, lineupBelongs, lineupBySeat, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, partyBySeat, realPlayersOf, slotIsBot } from "../src/bots.js";
+import { botSql, botsOf, cardSeats, LINEUP_MIN_MATCHES, lineupBelongs, lineupBySeat, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, partyBySeat, realPlayersOf, slotIsBot, withSeatCp } from "../src/bots.js";
 import { interlinkCheckLimits, interlinkDpsChecks } from "../src/run-checks.js";
 const interlinkCheckLimitsOf = (value) => interlinkCheckLimits({ INTERLINK_CHECK_LIMITS: JSON.stringify(value) });
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
@@ -789,6 +789,55 @@ test("a lineup that is another lobby's (fewer than two of its names on the cards
   // no named entry at all: nothing to judge (null), slots kept and no Party data
   assert.equal(lineupBelongs(four, []), null);
   assert.deepEqual(lineupBySeat(four, null).map((entry) => entry.slot), [0, 1, 2, 3]);
+});
+
+test("a card takes its own seat's Party CP when stored (a lineup that belongs, four cards): a bot-named card with CP is a person in JS and SQL", async () => {
+  const { env, sqlite } = await setup();
+  const ansel = await player(env, sqlite, "Ansel");
+  const briar = await player(env, sqlite, "Briar");
+  // Flora's seat: a nameless Party entry with CP (a real player called Flora); Mario's seat: no CP (a bot); Tammy's: CP
+  const party = [["Ansel", false, 9000], ["Flora", true, 8000], ["Mario", true], ["Tammy", true, 7000]];
+  const lineup = [{ slot: 0, name: "Ansel", self: true, cp: 3000 }, { slot: 1, cp: 2500 }, { slot: 2, name: "Mario", ai: true },
+    { slot: 3, name: "Tammy", cp: 2800 }];
+  await send(env, ansel, "seat-cp", { score: 30000, party, lineup });
+  const cards = () => JSON.parse(sqlite.prepare("SELECT players_json AS p FROM leaderboard_submissions WHERE client_run_id = 'seat-cp'").get().p);
+  assert.deepEqual(cards().map((card) => card.cp ?? null), [3000, 2500, null, 2800]);
+  const id = idOf(sqlite, "seat-cp");
+  const people = () => sqlite.prepare(`SELECT pl.key AS seat FROM leaderboard_submissions c, json_each(c.players_json) pl
+    WHERE c.submission_id = ? AND NOT ${botSql("pl", "c")} ORDER BY pl.key`).all(id).map((row) => row.seat);
+  const stored = () => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE submission_id = ?").get(id).e).lineup;
+  assert.deepEqual(cards().map((card) => slotIsBot(card, stored())), [false, false, true, false]);
+  assert.deepEqual(people(), [0, 1, 3]);                                       // the SQL twin agrees
+  // public answers: a card's cp never goes out
+  const entries = await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json();
+  assert.ok(entries.entries.length);
+  for (const entry of entries.entries) for (const card of entry.players || []) assert.equal("cp" in card, false);
+  const board = await (await call(env, `/api/leaderboard/interlink?cycle=3005&boss=${BOSS.id}&ladder=score&rows=teams&unlinked=1`)).json();
+  assert.equal(JSON.stringify(board).includes("\"cp\""), false);
+  // a re-send (cards without cp) gets it again; a re-settle by another copy of the run keeps it
+  await send(env, ansel, "seat-cp", { score: 30000, party, lineup });
+  assert.deepEqual(cards().map((card) => card.cp ?? null), [3000, 2500, null, 2800]);
+  await send(env, briar, "seat-cp-briar", { score: 30000, party: [["Ansel", false, 9000], ["Briar", false, 8000], ["Mario", true], ["Tammy", true, 7000]], at: 5,
+    lineup: [{ slot: 0, name: "Ansel", cp: 3000 }, { slot: 1, name: "Briar", self: true, cp: 2500 }, { slot: 2, name: "Mario" }, { slot: 3, name: "Tammy", cp: 2800 }] });
+  assert.deepEqual(cards().map((card) => card.cp ?? null), [3000, 2500, null, 2800]);
+  assert.deepEqual(people(), [0, 1, 3]);
+});
+
+test("the seat's CP is written only for a lineup that belongs and four cards; a card's own cp never changes", () => {
+  const cards = [{ name: "Ansel" }, { name: "Flora", ai: true }, { name: "Mario", ai: true }, { name: "Tammy", ai: true }];
+  // a stale lineup (another lobby's): nothing, even with CP on every seat; the name rule still calls them bots
+  const stale = ["Wexley", "Xylo", "Yarrow", "Zinnia"].map((name, slot) => ({ slot, name, cp: 3000 + slot }));
+  assert.equal(withSeatCp(cards, stale), cards);
+  assert.equal(slotIsBot(cards[1], stale), true);
+  // three cards: nothing
+  const three = cards.slice(0, 3);
+  assert.equal(withSeatCp(three, [{ slot: 0, name: "Ansel", cp: 1 }, { slot: 1, name: "Flora", cp: 2 }, { slot: 2, name: "Mario", cp: 3 }]), three);
+  // a card's own cp stays; a seat without CP writes nothing; idempotent
+  const lineup = [{ slot: 0, name: "Ansel", cp: 3000 }, { slot: 1, name: "Flora", cp: 2500 }, { slot: 2, name: "Mario" }, { slot: 3, name: "Tammy" }];
+  const once = withSeatCp([{ name: "Ansel", cp: 1234 }, ...cards.slice(1)], lineup);
+  assert.deepEqual(once.map((card) => card.cp ?? null), [1234, 2500, null, null]);
+  assert.equal(withSeatCp(once, lineup), once);
+  assert.equal(withSeatCp(null, lineup), null);
 });
 
 test("a one-player ladder's card marks whose placement it is and lists the other three", () => {

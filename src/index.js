@@ -2,7 +2,7 @@
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
-import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, NEAR_FLOOR, partyBySeat, realPlayersOf, seatKey, seatNameSimilarity, slotIsBot } from "./bots.js";
+import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, NEAR_FLOOR, partyBySeat, realPlayersOf, seatKey, seatNameSimilarity, slotIsBot, withSeatCp } from "./bots.js";
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
@@ -3334,6 +3334,8 @@ async function corroborateRun(env, submissionId, { dryRun = false } = {}) {
       if (notes.length || (players || []).some((slot) => slot?.noted === true)) {
         settled.set(entry.copy.id, presencePlayers(players, notes, { copyUids, lineup: entry.copy.lineup }));
       }
+      // and each card its own seat's Party CP (withSeatCp), kept through every rewrite
+      settled.set(entry.copy.id, withSeatCp(settled.get(entry.copy.id), entry.copy.lineup));
     }
     const writes = group.map((entry) => ({ entry, next: settled.get(entry.copy.id) }))
       .filter(({ entry, next }) => stableJson(next) !== stableJson(entry.copy.players));
@@ -4180,6 +4182,12 @@ async function submitLeaderboardRecord(request, env) {
   // its sender's corrected runs carry (a re-send is judged against when the record first arrived)
   const zone = record.playedAt != null && playedAtAffected(record.kind, record.clientVersion) ? await senderZone(env, account.discordId) : null;
   const played = arrivalPlayedAt(record.kind, record.clientVersion, record.playedAt, Number(existing?.createdAt) || now, zone);
+  // an Interlink run's cards take their own seat's Party CP (withSeatCp: the bot rule's "a card with CP is a person")
+  if (record.kind === "interlink_run" && record.playersJson) {
+    const players = parseJsonColumn(record.playersJson);
+    const seated = withSeatCp(players, (parseJsonColumn(record.extraJson) || {}).lineup);
+    if (seated !== players) record.playersJson = JSON.stringify(seated);
+  }
   await env.DB.prepare(
     `INSERT INTO leaderboard_submissions (
       submission_id, discord_id, mode, kind, client_run_id, game_uid, cycle, boss_id, boss_name, boss_level,
@@ -4792,7 +4800,8 @@ async function listRunChecks(request, env) {
   return json({
     state,
     runs: (results || []).map(({ playersJson, verifyJson, bossId, ...row }) => ({
-      ...row, bossName: interlinkBossName(list, bossId, row.bossName, row.cycle), players: parseJsonColumn(playersJson) || [], check: parseJsonColumn(verifyJson) || {}, proof: proofLinks(row.submissionId),
+      ...row, bossName: interlinkBossName(list, bossId, row.bossName, row.cycle), players: (parseJsonColumn(playersJson) || []).map((player) => (player && typeof player === "object" ? (({ cp: _cp, ...card }) => card)(player) : player)),
+      check: parseJsonColumn(verifyJson) || {}, proof: proofLinks(row.submissionId),
     })),
   });
 }
@@ -5653,7 +5662,7 @@ function withProfiles(players, profiles, lineup = null) {
   return players.map((player) => {
     if (!player || typeof player !== "object") return player;
     // server-only marks: the folded name, recorded UIDs, and what the app read before the copies settled a name
-    const { skel: _skeleton, uid: _uid, confirmed: _confirmed, read: _read, unsettled: _unsettled, noted: _noted, ...shown } = player;
+    const { skel: _skeleton, uid: _uid, confirmed: _confirmed, read: _read, unsettled: _unsettled, noted: _noted, cp: _cp, ...shown } = player;
     const ai = slotIsBot(player, lineup);
     if (!player.name || ai) return { ...shown, ai };
     const publicId = profiles.get(String(player.name).toLowerCase());
