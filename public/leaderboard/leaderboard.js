@@ -798,15 +798,19 @@
     return proofs.get(entry) ? proofButton(proofs.get(entry), rowCheck(entry, ladder)) : null;
   }
   // A team row's seats, each { kind, seat, entry }: its players ("player"), the players on the run who are ranked with
-  // another run ("also", the API's lead.also) and the run's bots ("bot", lead.bots, the API's one bot rule). The API
-  // sends a seat (1-4, the run's 1P-4P) only when it knows it. In seat order when every line has one; otherwise the
-  // players, then the also-players, then the bots, as the API lists them.
+  // another run ("also", the API's lead.also), the run's players known only by the name read off the screen
+  // ("unlinked", lead.unlinked: unranked, sent only in the Teams view without Show unlinked) and the run's bots ("bot",
+  // lead.bots, the API's one bot rule). The API sends a seat (1-4, the run's 1P-4P) only when it knows it. In seat order
+  // when every line has one; otherwise the players, then the also-players, then the unlinked, then the bots, as the API
+  // lists them.
   const seatOf = (value) => ([1, 2, 3, 4].includes(value) ? value : null);
   function teamSeats(members) {
     const lead = members[0];
     const items = [
       ...members.map((entry) => ({ kind: "player", seat: seatOf(entry.seat), entry })),
       ...(Array.isArray(lead?.also) ? lead.also : []).map((entry) => ({ kind: "also", seat: seatOf(entry?.seat), entry })),
+      ...(Array.isArray(lead?.unlinked) ? lead.unlinked : []).filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({ kind: "unlinked", seat: seatOf(entry.seat), entry })),
       ...(Array.isArray(lead?.bots) ? lead.bots : []).map((bot) => ({ kind: "bot", seat: seatOf(bot?.seat),
         entry: { name: String((typeof bot === "string" ? bot : bot?.name) || "") } })),
     ];
@@ -838,8 +842,11 @@
   }
   // One line per seat (teamSeats), each starting with its mark: a player's name line with their own copy's pictures; an
   // also-player's name in italics with their place, "Name (1st)" (a link when they have a public profile); a bot's
-  // name, plain softer text, never a link. Bots and also-players are never claimed and never "you".
+  // name, plain softer text, never a link; an unlinked player's name in the unclaimed style (softer, its reason on
+  // hover), never a link, no place, "Unknown player" when the copies didn't agree on the name. Bots, also-players and
+  // unlinked players are never claimed and never "you".
   const BOT_TEXT = "A bot the game added to fill the team.";
+  const UNKNOWN_PLAYER = "Unknown player";
   function teamNames(members, ladder) {
     const proofs = copyProofs(members, ladder);
     return teamSeats(members).map((item) => seatLine(item, item.kind === "player" ? [memberProof(item.entry, proofs, ladder)] : []));
@@ -847,6 +854,10 @@
   function seatLine(item, extra = []) {
     const mark = seatMark(item.seat, item.kind === "bot");
     if (item.kind === "bot") return el("span", { class: "lb-who-name lb-bot", title: BOT_TEXT }, mark, fullTitle(el("span", { class: "lb-name", text: item.entry.name })));
+    if (item.kind === "unlinked") {
+      return el("span", { class: "lb-who-name is-unclaimed lb-unlinked-line", title: UNCLAIMED_TEXT }, mark,
+        fullTitle(el("span", { class: "lb-name", text: item.entry.player ? String(item.entry.player) : UNKNOWN_PLAYER })));
+    }
     if (item.kind === "also") {
       const other = item.entry;
       const place = ordinal(other.rank);

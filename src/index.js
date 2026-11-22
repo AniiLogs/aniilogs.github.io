@@ -5969,16 +5969,19 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        r.clear_time_s AS clear, r.team_dps AS teamDps, r.p_dps AS dps, r.p_break AS "break", r.p_heal AS heal,
        json_extract(r.extra_json, '$.starCap') AS sentCap,
        (r.evidence_key IS NOT NULL OR r.battle_evidence_key IS NOT NULL) AS hasProof,
-       ${COPY_GROUP("r")} AS runGroup, r.run_first AS runFirst
+       ${COPY_GROUP("r")} AS runGroup, r.run_first AS runFirst,
+       COALESCE(r.teammate_uid, CASE WHEN r.teammate IS NULL THEN r.game_uid END) AS memberUid
      FROM ${CREDITED_COPIES()} r
      WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND COALESCE(r.outcome, '') <> 'invalid' AND r.boss_id IS NOT NULL
        AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""} AND ${onBoards(unlinked, "r")}
      ORDER BY r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC, r.submission_id ASC`,
   ).bind(...cycles, ...(server ? [server] : [])).all();
   const members = new Map();          // who was on each run: runGroup -> Set of who
+  const memberUids = new Map();       // and the UIDs those credits came with: runGroup -> Set of game UIDs
   for (const run of figures.results || []) {
-    if (!members.has(run.runGroup)) members.set(run.runGroup, new Set());
+    if (!members.has(run.runGroup)) { members.set(run.runGroup, new Set()); memberUids.set(run.runGroup, new Set()); }
     members.get(run.runGroup).add(run.who);
+    if (run.memberUid) memberUids.get(run.runGroup).add(String(run.memberUid));
     const key = `${run.who}|${run.cycle}|${run.bossId}`;
     const own = ownBests.get(key) || {};
     // a clear counts as the boards count one: finished, with that boss's stars for a clear that week
@@ -6053,6 +6056,7 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
   });
   // who was on each run (a board's "also on this run"), beside the rows so every other caller reads them as before
   Object.defineProperty(out, "runMembers", { value: members, enumerable: false });
+  Object.defineProperty(out, "runMemberUids", { value: memberUids, enumerable: false });
   return out;
 }
 
@@ -6435,12 +6439,43 @@ function storedFigures(row, run) {
   const byUid = row.uid ? list.filter((player) => player.uid === row.uid) : [];
   const byName = list.filter((player) => seatKey(player.name) && seatKey(player.name) === seatKey(row.player));
   const match = byUid.length === 1 ? byUid[0] : byName.length === 1 ? byName[0] : null;
-  if (!match) return {};
+  return match ? slotFigures(match) : {};
+}
+function slotFigures(slot) {
   const figures = {};
   for (const [from, to] of [["avgDps", "avgDps"], ["breakValue", "breakValue"], ["heal", "heal"]]) {
-    if (Number.isFinite(match[from])) figures[to] = match[from];
+    if (Number.isFinite(slot[from])) figures[to] = slot[from];
   }
   return figures;
+}
+// The run's real players a team row shows nowhere else (the Teams view without Show unlinked: the owner, 22 Nov): every
+// slot of the run that isn't a bot (the one bot rule), isn't one of the row's players or its "also" players (by UID, by
+// name, or by seat), isn't a linked player credited with this run (the sender's own slot, or a teammate's recorded UID:
+// those are ranked elsewhere or not on this ladder) and has a name. Each: { player, seat?, ...this run's figures }, as an
+// "also" item carries them, never a rank, a profile, a UID or a Discord name. A slot whose name no copy agrees on
+// (unsettled) is listed without it: { player: null, seat? }. By seat where known, else as stored.
+// shown: the board rows on the team row and in its "also"; members/uids: runMembers/runMemberUids of the run.
+function unlinkedOfRun(run, shown, members = new Set(), uids = new Set()) {
+  if (!run || !Array.isArray(run.players)) return [];
+  const names = new Set(shown.map((row) => seatKey(row.player)).filter(Boolean));
+  const shownUids = new Set(shown.map((row) => row.uid).filter(Boolean).map(String));
+  const seats = new Set(shown.map((row) => seatOf(row, run)).filter(Boolean));
+  const senderLinked = run.sender != null && (members.has(run.sender) || shown.some((row) => row.discordId === run.sender));
+  const found = [];
+  run.players.forEach((slot) => {
+    if (!slot || typeof slot !== "object" || slotIsBot(slot, run.lineup)) return;
+    if (slot.self === true && senderLinked) return;                      // the sender's own slot, never counted twice
+    if (slot.uid && (uids.has(String(slot.uid)) || shownUids.has(String(slot.uid)))) return;
+    const key = seatKey(slot.name);
+    const unsettled = slot.unsettled === true;
+    if (!unsettled && (!key || names.has(key))) return;
+    const seat = (key && run.seats?.get(key)) || null;
+    if (seat && seats.has(seat)) return;
+    found.push(unsettled ? { player: null, ...(seat ? { seat } : {}) }
+      : { player: String(slot.name), ...(seat ? { seat } : {}), ...slotFigures(slot) });
+  });
+  return found.map((item, index) => ({ item, index }))
+    .sort((a, b) => (a.item.seat ?? 9) - (b.item.seat ?? 9) || a.index - b.index).map(({ item }) => item);
 }
 
 // internal: the week's answer as an object, not a response (placement links read the board through it); null when the
@@ -6496,6 +6531,7 @@ async function interlinkBoards(request, env, internal = false) {
   const asked = String(params.get("ladder") || "");
   const bests = await interlinkBests(env, [cycle.id], list, server, unlinked);
   const runMembers = bests.runMembers || new Map();
+  const runMemberUids = bests.runMemberUids || new Map();
   const rows = bests.map((row) => withOwnBest(row, asked));
   for (const row of rows) {                                  // the row's one run is the proof for every figure on it
     const { runId, hasProof, figureRuns = {} } = row; delete row.runId; delete row.hasProof; delete row.figureRuns; delete row.kind; delete row.playedAt;
@@ -6513,13 +6549,15 @@ async function interlinkBoards(request, env, internal = false) {
     for (let i = 0; i < proofRunIds.length; i += 90) {
       const chunk = proofRunIds.slice(i, i + 90);
       const { results } = await env.DB.prepare(
-        `SELECT submission_id AS id, verify_state AS state, players_json AS playersJson, json_extract(extra_json, '$.lineup') AS lineupJson FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
+        `SELECT submission_id AS id, verify_state AS state, players_json AS playersJson, json_extract(extra_json, '$.lineup') AS lineupJson,
+           discord_id AS senderId FROM leaderboard_submissions WHERE submission_id IN (${chunk.map(() => "?").join(", ")})`,
       ).bind(...chunk).all();
       for (const result of results || []) {
         badges.set(result.id, runCheckBadge(result.state));
         realPlayers.set(result.id, realPlayersOf(result.playersJson, result.lineupJson));
         runBots.set(result.id, botsOf(result.playersJson, result.lineupJson));
-        runSeats.set(result.id, { seats: lineupSeats(result.lineupJson), players: parseJsonColumn(result.playersJson) || [] });
+        runSeats.set(result.id, { seats: lineupSeats(result.lineupJson), players: parseJsonColumn(result.playersJson) || [],
+          lineup: parseJsonColumn(result.lineupJson), sender: result.senderId });
       }
     }
   } catch (error) {
@@ -6585,22 +6623,33 @@ async function interlinkBoards(request, env, internal = false) {
     // "also on this run": players on the run a team row shows who are ranked in another of this board's team rows
     // (their best is another run), on the row's first entry
     const also = new Map();
+    // Teams without Show unlinked: the run's players shown nowhere else on the row (unlinkedOfRun), grey and unranked
+    const unlinkedOn = new Map();
     if (pooled) {
       for (const lead of ranked) {
         if (also.has(lead.team)) continue;
-        const on = runMembers.get(lead.figureGroup ?? lead.runGroup);
+        const group = lead.figureGroup ?? lead.runGroup;
+        const on = runMembers.get(group);
         // each with their seat on this run, and their figures as this run stored them (never their other run's)
         const run = runSeats.get(lead.proofIds?.[labelProof] || lead.proofIds?.score);
-        also.set(lead.team, on ? ranked.filter((row) => row.team !== lead.team && on.has(row.discordId)).map((row) => {
+        const alsoRows = on ? ranked.filter((row) => row.team !== lead.team && on.has(row.discordId)) : [];
+        also.set(lead.team, alsoRows.map((row) => {
           const seat = seatOf(row, run);
           return { player: row.player || "Pathfinder", rank: row.rank, profileId: row.profileId || null,
             ...(row.discordName ? { discordName: row.discordName } : {}), ...(seat ? { seat } : {}), ...storedFigures(row, run) };
-        }) : []);
+        }));
+        if (byTeams && !unlinked) {
+          const shown = [...ranked.filter((row) => row.team === lead.team), ...alsoRows];
+          unlinkedOn.set(lead.team, unlinkedOfRun(run, shown, on, runMemberUids.get(group)));
+        }
       }
     }
-    const everyone = ranked.map(({ discordId, cycle: _c, bossId, bossName, firstAt, runGroup, runFirst, figureGroup, figureFirst, ...row }, index) => ({
-      ...row, player: row.player || "Pathfinder", updatedAt: firstAt, own: own(discordId),   // updatedAt: when this best run reached the site
-      ...((index === 0 || ranked[index - 1].team !== row.team) && also.get(row.team)?.length ? { also: also.get(row.team) } : {}) }));
+    const everyone = ranked.map(({ discordId, cycle: _c, bossId, bossName, firstAt, runGroup, runFirst, figureGroup, figureFirst, ...row }, index) => {
+      const first = index === 0 || ranked[index - 1].team !== row.team;
+      return { ...row, player: row.player || "Pathfinder", updatedAt: firstAt, own: own(discordId),   // updatedAt: when this best run reached the site
+        ...(first && also.get(row.team)?.length ? { also: also.get(row.team) } : {}),
+        ...(first && unlinkedOn.get(row.team)?.length ? { unlinked: unlinkedOn.get(row.team) } : {}) };
+    });
     const all = players ? everyone.filter((row) => (row.realPlayers || 4) === players) : everyone;
     const teams = players ? new Set(all.map((row) => row.team)).size : all.length ? all[all.length - 1].team : 0;
     const teamRows = [];                                     // the entries of each team row, in rank order

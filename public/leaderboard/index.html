@@ -44,7 +44,7 @@
     <script src="/table-sort.js?v=0.1.0" defer></script>
     <script src="/short-link.js?v=0.1.0" defer></script>
     <script src="/leaderboard/share.js?v=0.2.0-lb-links" defer></script>
-    <script src="/leaderboard/leaderboard.js?v=0.3.34-one-board-1200" defer></script>
+    <script src="/leaderboard/leaderboard.js?v=0.3.35-team-unlinked" defer></script>
   </head>
   <body class="site-chrome-page" data-site-sidebar="always">
     <div class="sky-speckles" aria-hidden="true"></div>
@@ -137,7 +137,7 @@
           <label class="lb-server" data-server-pick hidden><span>Server</span>
             <select data-server-select></select>
           </label>
-          <label class="lb-unlinked" title="Also list players who aren't linked: teammates known only by the name read off the screen, and app users whose character name was never read. For spotting doubles and misread names."><input type="checkbox" data-unlinked> Show unlinked</label>
+          <label class="lb-unlinked" title="Also rank players who aren't linked: teammates known only by the name read off the screen, and app users whose character name was never read. For spotting doubles and misread names. Without it, a team row still lists its unlinked teammates, softer and unranked."><input type="checkbox" data-unlinked> Show unlinked</label>
           <div class="lb-show" role="group" aria-label="Show teams or players" title="Teams: one row per run, its players together. Players: one row each." data-rows-pick hidden><span>Show</span>
             <div class="lb-seg"><button type="button" data-rows-choice="teams" aria-pressed="true">Teams</button><button type="button" data-rows-choice="players" aria-pressed="false">Players</button></div>
           </div>

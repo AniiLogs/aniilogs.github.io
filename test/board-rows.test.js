@@ -95,7 +95,46 @@ test("the boards page is wider on a wide screen and leaves the docked sidebar it
   assert.match(css, /@media \(min-width: 1644px\) \{\s*:root \{ --lb-page-width: max\(1180px, min\(1560px, 100vw - 464px\)\); \}\s*body \.site-sidebar\.is-docked \{ --site-margin: calc\(\(100vw - var\(--lb-page-width\)\) \/ 2\); \}/u);
   const page = read("leaderboard/index.html");
   assert.match(page, /leaderboard\.css\?v=0\.3\.19-one-board-1200/u);
-  assert.match(page, /leaderboard\.js\?v=0\.3\.34-one-board-1200/u);
+  assert.match(page, /leaderboard\.js\?v=0\.3\.35-team-unlinked/u);
+});
+
+// the page's own teamSeats(), taken out of the page script and run as it is
+function loadTeamSeats() {
+  const seat = /const seatOf = \(value\) => [^\n]*\r?\n/u.exec(boards);
+  const seats = /function teamSeats\(members\) \{[\s\S]*?\r?\n  \}\r?\n/u.exec(boards);
+  assert.ok(seat && seats, "teamSeats() is in the page script");
+  return vm.runInNewContext(`${seat[0]}(${seats[0]})`);
+}
+
+test("a team row lists its unlinked team-mates: a seat line each, in seat order with the others, or after the also-players", () => {
+  const load = loadTeamSeats();
+  const teamSeats = (members) => JSON.parse(JSON.stringify(load(members)));       // out of the vm's realm
+  const lead = { player: "Alpha", seat: 1, unlinked: [{ player: "Gamma", seat: 3, avgDps: 7000 }, { player: null, seat: 4 }],
+    also: [{ player: "Beta", rank: 1, seat: 2 }] };
+  assert.deepEqual(teamSeats([lead]).map((item) => [item.kind, item.seat, "player" in item.entry ? item.entry.player : item.entry.name]),
+    [["player", 1, "Alpha"], ["also", 2, "Beta"], ["unlinked", 3, "Gamma"], ["unlinked", 4, null]]);
+  // a line without a seat: the players, the also-players, the unlinked, then the bots, as the API lists them
+  const unseated = { player: "Alpha", unlinked: [{ player: "Gamma" }], also: [{ player: "Beta", rank: 1 }], bots: [{ name: "Flora" }] };
+  assert.deepEqual(teamSeats([unseated]).map((item) => item.kind), ["player", "also", "unlinked", "bot"]);
+  // an older answer without the list: as before
+  assert.deepEqual(teamSeats([{ player: "Alpha" }]).map((item) => item.kind), ["player"]);
+});
+
+test("an unlinked team-mate's line: the seat mark, the softer unclaimed name and its tip, \"Unknown player\" without a name; no check, place or link", () => {
+  const line = boards.slice(boards.indexOf('if (item.kind === "unlinked") {'), boards.indexOf('if (item.kind === "also") {'));
+  assert.match(line, /el\("span", \{ class: "lb-who-name is-unclaimed lb-unlinked-line", title: UNCLAIMED_TEXT \}, mark,\s*fullTitle\(el\("span", \{ class: "lb-name", text: item\.entry\.player \? String\(item\.entry\.player\) : UNKNOWN_PLAYER \}\)\)\);/u);
+  assert.match(boards, /const UNKNOWN_PLAYER = "Unknown player";/u);
+  // a plain name span: never profileName (a link), claimedBadge, "you" or a place
+  assert.doesNotMatch(line, /profileName|claimedBadge|nameMarks|ordinal|lb-also-place|lb-you/u);
+  // its mark is a seat's, never the Ai one
+  assert.match(boards, /const mark = seatMark\(item\.seat, item\.kind === "bot"\);/u);
+  // the grey comes from the existing unclaimed style
+  assert.match(css, /\.is-unclaimed \.lb-name, \.lb-player\.is-unclaimed \.lb-expand \{ color: color-mix\(in srgb, var\(--text\) 62%, transparent\);/u);
+  // View all and the phone stack: this run's figures on its line (only a bot's are "—")
+  assert.match(boards, /item\.kind === "bot" \? "—" : column\.value\(item\.entry, boss\)/u);
+  assert.match(boards, /line\(seatLine\(seat\), seat\.kind === "bot" \? null : seat\.entry\)/u);
+  // the Show unlinked tip says they are still listed without it
+  assert.match(read("leaderboard/index.html"), /Without it, a team row still lists its unlinked teammates, softer and unranked\./u);
 });
 
 test("View all, Teams: one block per team, a row per seat; the place and the run's figures merged after a divider; lines end there", () => {
