@@ -1883,7 +1883,10 @@ const COPY_GROUP = (alias) => `COALESCE(json_extract(${alias}.extra_json, '$.sha
 const OWN_COPY_FIRST = (alias) => `(${alias}.discord_id = ${alias}.who) DESC, ${clientVersionSql(`${alias}.client_version`)} DESC`;
 // CREDITED_RUNS with each row's run_first: when the first copy of its run reached AniiLogs (the "first to get there"
 // tiebreak, so a player's own copy can win over a teammate's copy of the same run without passing an earlier run)
-const CREDITED_COPIES = () => `(SELECT cc.*, MIN(cc.created_at) OVER (PARTITION BY ${COPY_GROUP("cc")}) AS run_first FROM ${CREDITED_RUNS} cc)`;
+// oneBoard: only one Interlink week and boss (binds: cycle, boss id): every copy of a run is on its run's week and boss
+// (runCopies), so run_first is the same and far fewer rows are read
+const CREDITED_COPIES = (oneBoard = false) => `(SELECT cc.*, MIN(cc.created_at) OVER (PARTITION BY ${COPY_GROUP("cc")}) AS run_first
+  FROM ${CREDITED_RUNS} cc${oneBoard ? " WHERE cc.cycle = ? AND cc.boss_id = ?" : ""})`;
 // The other copies of these shared runs, each run's newest build first: sharedRun -> [{ id, discordId, lineup }]
 async function sharedCopies(env, sharedIds) {
   const ids = [...new Set(sharedIds.filter((id) => typeof id === "string"))];
@@ -4046,8 +4049,10 @@ async function submitLeaderboardRecord(request, env) {
   if (error) return json({ error }, 400);
   // An Interlink run must be on one of its week's three bosses, and takes that boss's name from the week's list
   // (a misread name on the screen never reaches the boards).
+  let weeks = null;                                          // the Interlink weeks, read once (the answer's standing too)
   if ((record.kind === "interlink_run" || record.kind === "interlink_best") && record.cycle != null) {
-    const week = interlinkCycle(await interlinkCycles(env), record.cycle);
+    weeks = await interlinkCycles(env);
+    const week = interlinkCycle(weeks, record.cycle);
     if (week) {
       // From week 4003 the middle fight can have two bosses: a run on the second one counts on the middle board.
       const middle = interlinkSecondMiddle(week, record.bossId);
@@ -4069,7 +4074,7 @@ async function submitLeaderboardRecord(request, env) {
   const now = Math.floor(Date.now() / 1000);
   const existing = await env.DB.prepare(
     `SELECT submission_id AS submissionId, evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt,
-       score, updated_at AS updatedAt FROM leaderboard_submissions
+       score, updated_at AS updatedAt, status FROM leaderboard_submissions
      WHERE discord_id = ? AND kind = ? AND client_run_id = ? LIMIT 1`,
   ).bind(account.discordId, record.kind, record.clientRunId).first();
   // at most DAILY_RUN_LIMIT (default 300) new records an account a UTC day: far above real play (a run is 3 minutes),
@@ -4244,6 +4249,15 @@ async function submitLeaderboardRecord(request, env) {
   const pruning = pruneProofs(env, 4).catch((error) => console.error("Picture retention failed", error));
   if (env.waitUntil) env.waitUntil(pruning);
   else await pruning;
+  // a run held back or hidden has no standing to tell; a failure here never fails the send (the record is stored)
+  let standing = null;
+  if (!otherPartyHidden && !checkHeld && (existing?.status ?? "visible") === "visible") {
+    try {
+      standing = await submissionStanding(env, account.discordId, submissionId, record, weeks);
+    } catch (error) {
+      console.error("Could not tell the send's standing", error);
+    }
+  }
   return json({
     ok: true,
     submissionId,
@@ -4251,7 +4265,74 @@ async function submitLeaderboardRecord(request, env) {
     evidenceStored: Boolean(parsed.evidence && env.EVIDENCE),
     battleEvidenceStored: Boolean(parsed.battle && env.EVIDENCE),
     ...(otherPartyHidden ? { hidden: "party" } : checkHeld ? { hidden: "check" } : {}),
+    ...(standing ? { standing } : {}),
   }, existing ? 200 : 201);
+}
+
+// What a send did to its sender's place on the board it belongs to (the answer's `standing`), once it is stored and
+// settled: { best, position?, of?, counts? }. best: this run is the one the sender's row shows there now (their best);
+// only then the row's place, as the boards page, a profile trophy and a placement link state it: position, of (their
+// "players": what "#2 of 41" counts) and counts ("teams" or "players"). Null when it can't be told (no row for the
+// sender, ...); the app shows "ranking updated" or just "run submitted" from it.
+// - interlink_run: the week's Per Boss board of the run's boss on its first ladder, Score (the page opens on it): each
+//   player's own best score there (withOwnBest), team rows (rankedLadder), every server, linked players, as
+//   interlinkBoards ranks it. "This run" is the row's run or any copy of it (its run group: a team-mate's copy sent
+//   first counts). One statement decides best (interlinkShownRun); only a best reads the week's board for the place.
+// - sim_run: the season's board of the run's trial and difficulty; eggheist_match: the Matches board (best loot). Each
+//   sender's best and its place as a profile states it (boardStandings): one statement, the place with it.
+async function submissionStanding(env, discordId, submissionId, record, weeks) {
+  if (record.kind === "interlink_run") {
+    if (record.cycle == null || record.bossId == null) return null;
+    const shown = await interlinkShownRun(env, discordId, submissionId, record);
+    if (!shown) return null;
+    if (!shown.best) return { best: false };
+    const list = weeks || await interlinkCycles(env);
+    const rows = (await interlinkBests(env, [record.cycle], list, null, false, record.bossId)).filter((row) => String(row.bossId) === String(record.bossId));
+    const board = rankedLadder(rows.map((row) => withOwnBest(row, "score")), "score");
+    const mine = board.find((row) => row.discordId === discordId);
+    if (!mine) return null;
+    // the board as read now has the last word (another send may have landed in between)
+    if ((mine.figureGroup ?? mine.runGroup) !== shown.group) return { best: false };
+    return { best: true, position: mine.rank, of: board.at(-1)?.team ?? 0, counts: "teams" };
+  }
+  if (record.kind === "sim_run" || record.kind === "eggheist_match") {
+    const same = (a, b) => (a ?? null) === (b ?? null) || String(a) === String(b);
+    const mine = (await boardStandings(env, discordId, record.kind)).find((entry) => record.kind === "eggheist_match"
+      || (same(entry.cycle, record.cycle) && same(entry.trial, record.trial) && same(entry.difficulty, record.difficulty)));
+    if (!mine) return null;
+    if (mine.submissionId !== submissionId) return { best: false };
+    return { best: true, position: mine.position, of: mine.players, counts: "players" };
+  }
+  return null;
+}
+
+// Which run the sender's row on an Interlink Per Boss board shows on the Score ladder, read for that one board and
+// player only: interlinkBests' pick (most stars, then score, a run before a menu best, the first to get there) unless
+// another of their runs has a higher score (withOwnBest), the first of those as interlinkBests' own bests order them.
+// The copies are read for that week and boss only: every copy of a run is (runCopies). { best, group } (group: this
+// send's run group), or null when this send isn't on the boards or the sender has no row there.
+async function interlinkShownRun(env, discordId, submissionId, record) {
+  const { results } = await env.DB.prepare(
+    `SELECT me.status, me.grp, b.runGroup, b.score, b.standingPick, b.standingTop
+     FROM (SELECT s.status, ${COPY_GROUP("s")} AS grp FROM leaderboard_submissions s WHERE s.submission_id = ?) me
+     LEFT JOIN (
+       SELECT ${COPY_GROUP("r")} AS runGroup, r.run_score AS score,
+         ROW_NUMBER() OVER (ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
+           CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC) AS standingPick,
+         ROW_NUMBER() OVER (ORDER BY (r.run_score IS NULL), r.run_score DESC, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC,
+           r.submission_id ASC) AS standingTop
+       FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_COPIES(true)} c) r
+       WHERE r.who = ? AND r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best')
+         AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL) AND ${onBoards(false, "r")}
+     ) b ON b.standingPick = 1 OR b.standingTop = 1`,
+  ).bind(submissionId, record.cycle, record.bossId, discordId).all();
+  const me = results?.[0];
+  if (!me || me.status !== "visible") return null;
+  const pick = results.find((row) => Number(row.standingPick) === 1);
+  const top = results.find((row) => Number(row.standingTop) === 1);
+  if (!top || top.score == null) return null;                     // no score: no row on the Score ladder
+  const shown = pick && pick.score != null && Number(pick.score) >= Number(top.score) ? pick : top;
+  return { best: shown.runGroup === me.grp, group: me.grp };
 }
 
 
@@ -6251,8 +6332,11 @@ function clearedSql(kind, list = []) {
 // everything on their row (score, clear, DPS, BREAK, damage, healing, team DPS) is that run's, its pictures the proof
 // for all of it (the owner, 2 Nov: a row is one run, not each figure's best from a different run). With each
 // player's in-game name and public profile id (if public).
-async function interlinkBests(env, cycles, list, server = null, unlinked = false) {
+// bossId (with one week): only that boss's board, its rows as they'd be among the whole week's.
+async function interlinkBests(env, cycles, list, server = null, unlinked = false, bossId = null) {
   if (!cycles.length) return [];
+  const oneBoard = bossId != null && cycles.length === 1;
+  const narrow = oneBoard ? [cycles[0], bossId] : [];        // CREDITED_COPIES(true)'s binds, first in each query
   const bests = (kinds, proofOnly) => env.DB.prepare(
     `SELECT s.who AS discordId, s.cycle, s.boss_id AS bossId, s.boss_name AS bossName, s.run_score AS score, s.stars,
        CASE WHEN ${clearedSql("interlink_run", list)} AND s.cleared = 1 AND s.clear_time_s IS NOT NULL THEN s.clear_time_s END AS clearTimeS,
@@ -6278,12 +6362,12 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
      FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.who, r.cycle, r.boss_id
              ORDER BY COALESCE(r.stars, -1) DESC, COALESCE(r.run_score, -1) DESC,
                CASE WHEN r.kind = 'interlink_run' THEN 0 ELSE 1 END, r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC) AS pick
-           FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_COPIES()} c) r
+           FROM (SELECT c.*, ${RUN_SCORE("c")} AS run_score FROM ${CREDITED_COPIES(oneBoard)} c) r
            WHERE r.status = 'visible' AND r.kind IN (${kinds})${proofOnly ? " AND r.evidence_key IS NOT NULL AND COALESCE(r.outcome, '') <> 'invalid'" : ""} AND (r.run_score IS NOT NULL OR r.stars IS NOT NULL)
              AND r.boss_id IS NOT NULL AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""}
              AND ${onBoards(unlinked, "r")}) s
      WHERE s.pick = 1`,
-  ).bind(...cycles, ...(server ? [server] : [])).all();
+  ).bind(...narrow, ...cycles, ...(server ? [server] : [])).all();
   const { results } = await bests("'interlink_run', 'interlink_best'", false);
   // each player's own best of each ladder's figure (withOwnBest)
   const ownBests = new Map();
@@ -6294,11 +6378,11 @@ async function interlinkBests(env, cycles, list, server = null, unlinked = false
        (r.evidence_key IS NOT NULL OR r.battle_evidence_key IS NOT NULL) AS hasProof,
        ${COPY_GROUP("r")} AS runGroup, r.run_first AS runFirst,
        COALESCE(r.teammate_uid, CASE WHEN r.teammate IS NULL THEN r.game_uid END) AS memberUid
-     FROM ${CREDITED_COPIES()} r
+     FROM ${CREDITED_COPIES(oneBoard)} r
      WHERE r.status = 'visible' AND r.kind IN ('interlink_run', 'interlink_best') AND COALESCE(r.outcome, '') <> 'invalid' AND r.boss_id IS NOT NULL
        AND r.cycle IN (${cycles.map(() => "?").join(", ")})${server ? " AND r.server = ?" : ""} AND ${onBoards(unlinked, "r")}
      ORDER BY r.run_first ASC, ${OWN_COPY_FIRST("r")}, r.created_at ASC, r.submission_id ASC`,
-  ).bind(...cycles, ...(server ? [server] : [])).all();
+  ).bind(...narrow, ...cycles, ...(server ? [server] : [])).all();
   const members = new Map();          // who was on each run: runGroup -> Set of who
   const memberUids = new Map();       // and the UIDs those credits came with: runGroup -> Set of game UIDs
   for (const run of figures.results || []) {
