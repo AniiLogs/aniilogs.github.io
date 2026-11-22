@@ -138,6 +138,62 @@ export function cardSeats(players, party = null) {
   return seats;
 }
 
+// The Party entry that describes each card of a four-card run, by seat: [entry | null] in the cards' order, or null
+// when the run hasn't exactly four cards (then nothing here applies: callers keep their name rules). Older app builds
+// put the Party screen's NAMES on the wrong slots (rotated, swapped, spelt otherwise, left out), while each slot's own
+// Party data (lead, level, CP, team) is that seat's; the result screen's cards are right about who sat where
+// (cardSeats). So card s takes the one entry whose slot is s - 1, whatever its name. When no entry holds that slot, or
+// two do, an entry without a usable slot (not an integer 0-3) may still be the card's by its name: the one such entry of
+// the same folded name, else of the same skeleton. Each entry describes one card at most.
+export function partyBySeat(players, party = null) {
+  const list = parsed(players);
+  if (!Array.isArray(list) || list.length !== 4) return null;
+  const lineup = parsed(party);
+  const entries = (Array.isArray(lineup) ? lineup : []).filter((item) => item && typeof item === "object");
+  const usable = (slot) => Number.isInteger(slot) && slot >= 0 && slot <= 3;
+  const loose = entries.filter((entry) => !usable(entry.slot));
+  const used = new Set();
+  const byName = (card, key) => {
+    const name = card && typeof card === "object" && typeof card.name === "string" ? key(card.name) : "";
+    if (!name) return null;
+    const same = loose.filter((entry) => !used.has(entry) && typeof entry.name === "string" && key(entry.name) === name);
+    return same.length === 1 ? same[0] : null;
+  };
+  const out = list.map((card, index) => {
+    const held = entries.filter((entry) => entry.slot === index);
+    return held.length === 1 ? held[0] : null;
+  });
+  out.forEach((entry) => { if (entry) used.add(entry); });
+  for (const key of [fold, nameSkeleton]) {
+    list.forEach((card, index) => {
+      if (out[index] || entries.filter((entry) => entry.slot === index).length === 1) return;
+      const entry = byName(card, key);
+      if (entry) { out[index] = entry; used.add(entry); }
+    });
+  }
+  return out;
+}
+
+// What a Party entry says about the card on the Party screen (lead, nickname, level, CP, team...): everything but who
+// the player is and where they sat, which on a four-card run come from the result screen's cards (lineupBySeat).
+const NOT_PARTY_DATA = new Set(["slot", "name", "ai", "self", "unnamed", "avgDps", "fromBattleData", "skel", "uid", "confirmed", "unsettled"]);
+// A four-card run's lineup rebuilt by seat: four entries in seat order, entry s = { slot: s - 1, name (card s's, or
+// unnamed when the boards keep that name out), ai (the one bot rule), self (only when card s is the shown copy's
+// sender), ...the Party data of that seat's entry (partyBySeat) }. Null when the run hasn't exactly four cards.
+export function lineupBySeat(players, party = null) {
+  const list = parsed(players);
+  const lineup = parsed(party);
+  const found = partyBySeat(list, lineup);
+  if (!found) return null;
+  return list.map((card, index) => {
+    const isCard = Boolean(card && typeof card === "object");
+    const named = isCard && typeof card.name === "string" && card.name.trim() && card.unsettled !== true;
+    const data = Object.fromEntries(Object.entries(found[index] || {}).filter(([key]) => !NOT_PARTY_DATA.has(key)));
+    return { slot: index, ...(named ? { name: String(card.name).slice(0, 40) } : { unnamed: true }),
+      ai: isCard ? slotIsBot(card, Array.isArray(lineup) ? lineup : null) : false, ...(isCard && card.self === true ? { self: true } : {}), ...data };
+  });
+}
+
 // The bots of a run, by the same rule: [{ name, seat? }] with each name as the run has it, in the stored players'
 // order, and its seat when one is known (cardSeats); [] when there are none. The boards list them on a team row (never
 // credited, ranked or counted).

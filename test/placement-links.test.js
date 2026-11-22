@@ -9,7 +9,7 @@ import test from "node:test";
 
 import worker, { lineupSlots, lineupWithCards } from "../src/index.js";
 import { cardPlayers, PLACEMENT_LADDERS, TEAM_TAGS } from "../src/placement-links.js";
-import { botsOf, cardSeats, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, realPlayersOf, slotIsBot } from "../src/bots.js";
+import { botsOf, cardSeats, lineupBySeat, lineupSeats, nameSimilarity, NEAR_FLOOR, NEAR_MARGIN, partyBySeat, realPlayersOf, slotIsBot } from "../src/bots.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
 import { CARD_HEIGHT, CARD_TITLE_FONTS, CARD_WIDTH, cardTitleFont, drawPlacementCard, packBlocksFor } from "../src/placement-card.js";
 
@@ -689,6 +689,74 @@ test("the viewer's lineup: an entry without a slot takes its card's seat, only w
   assert.equal(lineupSlots(null, cards("Aster")), null);
 });
 
+test("lineupBySeat: a four-card run's lineup rebuilt by seat: card s's player with seat s's Party data, whatever name the entry carries", () => {
+  const card = (name, more = {}) => ({ name, ...more });
+  // rotated: the names one seat along, each slot's Party data its own seat's
+  assert.deepEqual(lineupBySeat([card("Ansel", { self: true }), card("Bodie"), card("Corin"), card("Delph")], [
+    { slot: 0, name: "Ansel", ai: false, self: true, aniimo: "Hollow", cp: 3971 }, { slot: 1, name: "Delph", ai: false, aniimo: "Wisp", cp: 3686 },
+    { slot: 2, name: "Bodie", ai: false, aniimo: "Lumen", cp: 3802 }, { slot: 3, name: "Corin", ai: false, aniimo: "Thorn", cp: 4088 }]), [
+    { slot: 0, name: "Ansel", ai: false, self: true, aniimo: "Hollow", cp: 3971 }, { slot: 1, name: "Bodie", ai: false, aniimo: "Wisp", cp: 3686 },
+    { slot: 2, name: "Corin", ai: false, aniimo: "Lumen", cp: 3802 }, { slot: 3, name: "Delph", ai: false, aniimo: "Thorn", cp: 4088 }]);
+  // bots swapped: Mario sits 2nd with seat 2's lead, Flora 4th with seat 4's
+  assert.deepEqual(lineupBySeat([card("Pell", { self: true }), card("Mario", { ai: true }), card("Tammy", { ai: true }), card("Flora", { ai: true })], [
+    { slot: 0, name: "Pell", self: true, aniimo: "Sprig", cp: 2789 }, { slot: 1, name: "Flora", ai: true, aniimo: "Xeno" },
+    { slot: 2, name: "Tammy", ai: true }, { slot: 3, name: "Mario", ai: true, aniimo: "Gale" }]), [
+    { slot: 0, name: "Pell", ai: false, self: true, aniimo: "Sprig", cp: 2789 }, { slot: 1, name: "Mario", ai: true, aniimo: "Xeno" },
+    { slot: 2, name: "Tammy", ai: true }, { slot: 3, name: "Flora", ai: true, aniimo: "Gale" }]);
+  // misspelt and missing: seat 2 has no entry (no Party data), seat 3's entry spelt otherwise still describes Corin
+  assert.deepEqual(lineupBySeat([card("Ansel"), card("Z"), card("Corin"), card("Delph")], [
+    { slot: 0, name: "Ansel", aniimo: "Gale", cp: 3515 }, { slot: 2, name: "Cx", aniimo: "Nimbus", cp: 2981 }, { slot: 3, name: "Delph", aniimo: "Gale", cp: 3420 }]), [
+    { slot: 0, name: "Ansel", ai: false, aniimo: "Gale", cp: 3515 }, { slot: 1, name: "Z", ai: false },
+    { slot: 2, name: "Corin", ai: false, aniimo: "Nimbus", cp: 2981 }, { slot: 3, name: "Delph", ai: false, aniimo: "Gale", cp: 3420 }]);
+  // a clean lineup listed out of order: the same entries, in seat order; level and team carried
+  const team = [{ aniimo: "Gale", aniimoLevel: 60 }, { aniimo: "Wisp" }];
+  assert.deepEqual(lineupBySeat([card("Ansel"), card("Bodie"), card("Corin"), card("Delph")], [
+    { slot: 2, name: "Corin", ai: false, aniimo: "Lumen" }, { slot: 0, name: "Ansel", ai: false, aniimo: "Gale", aniimoLevel: 60, cp: 3000, team },
+    { slot: 3, name: "Delph", ai: false }, { slot: 1, name: "Bodie", ai: false, aniimo: "Wisp" }]), [
+    { slot: 0, name: "Ansel", ai: false, aniimo: "Gale", aniimoLevel: 60, cp: 3000, team }, { slot: 1, name: "Bodie", ai: false, aniimo: "Wisp" },
+    { slot: 2, name: "Corin", ai: false, aniimo: "Lumen" }, { slot: 3, name: "Delph", ai: false }]);
+  // no lineup: names and slots only (a bot by the one rule); an unsettled name and a column that isn't a card: unnamed
+  assert.deepEqual(lineupBySeat([card("Ansel"), card("Flora", { ai: true }), card("Rook", { unsettled: true }), null]), [
+    { slot: 0, name: "Ansel", ai: false }, { slot: 1, name: "Flora", ai: true }, { slot: 2, unnamed: true, ai: false }, { slot: 3, unnamed: true, ai: false }]);
+  // self: from the shown copy's cards only, however many entries a merged lineup marks
+  assert.deepEqual(lineupBySeat([card("Ansel"), card("Bodie", { self: true }), card("Corin"), card("Delph")],
+    [0, 1, 2, 3].map((slot) => ({ slot, name: "X", self: true }))).map((entry) => entry.self === true), [false, true, false, false]);
+  // a slot two entries hold, or none: an entry without a usable slot by the card's name (folded, then skeleton)
+  assert.deepEqual(lineupBySeat([card("Ansel"), card("Bodie"), card("Corin"), card("Delph")], [
+    { slot: 1, name: "Bodie", cp: 1 }, { slot: 1, name: "Corin", cp: 2 }, { name: "bodie", cp: 3 }, { name: "Delph", slot: 7, cp: 4 }, { name: "C0rin", cp: 5 }])
+    .map((entry) => entry.cp ?? null), [null, 3, 5, 4]);
+  // fewer or more than four cards: nothing to rebuild (callers keep their name rules); garbage
+  assert.equal(lineupBySeat([card("Ansel"), card("Bodie"), card("Corin")], []), null);
+  assert.equal(lineupBySeat([1, 2, 3, 4, 5], []), null);
+  assert.equal(lineupBySeat("not json", []), null);
+  assert.deepEqual(partyBySeat([card("A"), card("B"), card("C"), card("D")], "not json"), [null, null, null, null]);
+});
+
+test("the viewer and the boards' run list show a four-card run by seat; a three-card run as before", async () => {
+  const { env, sqlite } = await setup();
+  const ansel = await player(env, sqlite, "Ansel");
+  // rotated names on the Party read: each seat's own lead stays on its seat
+  await send(env, ansel, "rotated", { score: 30000, party: [["Ansel", false, 9000], ["Bodie", false, 8000], ["Corin", false, 7000], ["Delph", false, 6000]],
+    lineup: [{ slot: 0, name: "Ansel", self: true, aniimo: "Hollow", cp: 3971 }, { slot: 1, name: "Delph", aniimo: "Wisp", cp: 3686 },
+      { slot: 2, name: "Bodie", aniimo: "Lumen", cp: 3802 }, { slot: 3, name: "Corin", aniimo: "Thorn", cp: 4088 }] });
+  const id = idOf(sqlite, "rotated");
+  const list = await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json();
+  const shown = (lineup) => lineup.map((p) => [p.slot, p.name, p.aniimo ?? null, p.cp ?? null]);
+  // the names are the cards' as stored (the settle rules may have renamed them); the Party data stays on its seat
+  const cards = JSON.parse(sqlite.prepare("SELECT players_json AS p FROM leaderboard_submissions WHERE submission_id = ?").get(id).p).map((c) => c.name);
+  const bySeat = [["Hollow", 3971], ["Wisp", 3686], ["Lumen", 3802], ["Thorn", 4088]].map(([aniimo, cp], slot) => [slot, cards[slot], aniimo, cp]);
+  assert.deepEqual(shown(list.lineup), bySeat);
+  assert.deepEqual(list.lineup.map((p) => p.avgDps), [9000, 8000, 7000, 6000]);
+  assert.deepEqual(list.lineup.map((p) => p.self === true), [true, false, false, false]);
+  const runs = await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json();
+  assert.deepEqual(shown(runs.entries.find((e) => e.extra?.lineup).extra.lineup), bySeat);
+  // three cards: the name rules as before (a card only by its name: no Party data moves to it)
+  await send(env, ansel, "three", { score: 20000, at: 600, party: [["Ansel", false, 9000], ["Bodie", false, 8000], ["Corin", false, 7000]],
+    lineup: [{ slot: 0, name: "Ansel", self: true, aniimo: "Hollow", cp: 3971 }, { slot: 1, name: "Corin", aniimo: "Wisp", cp: 3686 }, { slot: 2, name: "Bodie", aniimo: "Lumen", cp: 3802 }] });
+  const three = await (await call(env, `/api/leaderboard/submissions/${idOf(sqlite, "three")}/evidence?shot=list`)).json();
+  assert.deepEqual(three.lineup.map((p) => [p.slot, p.aniimo ?? null]), [[0, "Hollow"], [1, "Wisp"], [2, "Lumen"]]);
+});
+
 test("a one-player ladder's card marks whose placement it is and lists the other three", () => {
   const lineup = [{ name: "Aster", avgDps: 9000 }, { name: "Briar", avgDps: 12000 }, { name: "Flora", ai: true, avgDps: null }, { name: "Cobalt", avgDps: 3000 }];
   const rows = cardPlayers({ ladder: PLACEMENT_LADDERS.dps, lead: { player: "Aster", avgDps: 9000 }, members: [], lineup });
@@ -708,9 +776,9 @@ test("the run viewer lists a player only the Battle Data cards had, and the link
   const id = idOf(sqlite, "missed");
   const list = await (await call(env, `/api/leaderboard/submissions/${id}/evidence?shot=list`)).json();
   assert.deepEqual(list.lineup.map((p) => [p.name, p.avgDps ?? null, Boolean(p.ai)]),
-    [["Ashwick", 20000, false], ["Fernley", 15000, false], ["Flora", null, true], ["Gorse", 9000, false]]);
-  // Gorse's entry, made from the third card, takes that card's slot: the Party picture's lead is Gorse's own
-  assert.deepEqual(list.lineup.map((p) => p.slot ?? null), [0, 1, 3, 2]);
+    [["Ashwick", 20000, false], ["Fernley", 15000, false], ["Gorse", 9000, false], ["Flora", null, true]]);
+  // a four-card run is listed by seat: Gorse, the third card, on slot 2 (the Party picture's lead is Gorse's own)
+  assert.deepEqual(list.lineup.map((p) => p.slot ?? null), [0, 1, 2, 3]);
   const { code } = await (await createLink(env, { run: id, ladder: "score" })).json();
   const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
   assert.match(html, /<meta property="og:description" content="Ashwick, Fernley, Gorse and Flora \(AI\): 31,000 with 30 stars\. Trio: three players and a bot\./u);
