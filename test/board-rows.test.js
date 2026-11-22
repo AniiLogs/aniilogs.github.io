@@ -94,8 +94,8 @@ test("the boards page is wider on a wide screen and leaves the docked sidebar it
   assert.match(css, /:root \{ --lb-page-width: min\(1560px, 94vw\); \}/u);
   assert.match(css, /@media \(min-width: 1644px\) \{\s*:root \{ --lb-page-width: max\(1180px, min\(1560px, 100vw - 464px\)\); \}\s*body \.site-sidebar\.is-docked \{ --site-margin: calc\(\(100vw - var\(--lb-page-width\)\) \/ 2\); \}/u);
   const page = read("leaderboard/index.html");
-  assert.match(page, /leaderboard\.css\?v=0\.3\.17-view-all-teams/u);
-  assert.match(page, /leaderboard\.js\?v=0\.3\.32-view-all-teams/u);
+  assert.match(page, /leaderboard\.css\?v=0\.3\.18-seats-from-0/u);
+  assert.match(page, /leaderboard\.js\?v=0\.3\.33-seats-from-0/u);
 });
 
 test("View all, Teams: one block per team, a row per seat; the place and the run's figures merged after a divider; lines end there", () => {
@@ -140,9 +140,9 @@ test("View all on a phone: a block per team, the run's values stacked on the rig
   assert.match(boards, /el\("select", \{ "aria-label": "Sort by", onchange: \(event\) => sortBy\(event\.target\.value, false\) \}/u);
   // top to bottom: score and stars on one line, team DPS, the outcome, when it was submitted, then the tag and icons
   assert.match(boards, /el\("span", \{ class: "lb-stack-score" \}, el\("b", \{ text: number\(lead\.score\) \}\), stars\(lead\.stars\)\),\s*el\("span", \{ class: "lb-stack-teamdps" \}[^\n]*\n\s*el\("span", \{ class: "lb-stack-outcome", text \}\),\s*el\("span", \{ class: "lb-stack-when" \}[^\n]*\n\s*el\("span", \{ class: "lb-stack-icons" \}, tag, checkBadge\(rowCheck\(lead, ladder\)\), proof, link\)\)/u);
-  // the table hides for the stack from 900px down; the visitor's name in the pill's colour there; names keep their full
+  // the table hides for the stack from 1200px down; the visitor's name in the pill's colour there; names keep their full
   // text on hover; a 360px screen scrolls a little rather than cutting names further
-  assert.match(css, /@media \(max-width: 900px\) \{\s*\.lb-table-wrap\.has-stack \.lb-table \{ display: none; \}/u);
+  assert.match(css, /@media \(max-width: 1200px\) \{\s*\.lb-table-wrap\.has-stack \.lb-table \{ display: none; \}/u);
   assert.match(css, /\.lb-stack \.lb-you \{ display: none; \}\s*\.lb-stack \.is-own-name > \.lb-name \{ color: var\(--accent-2\); \}/u);
   assert.match(boards, /function fullTitle\(node\)/u);
   assert.match(css, /min-width: 366px;/u);

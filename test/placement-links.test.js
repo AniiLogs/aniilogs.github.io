@@ -94,7 +94,7 @@ async function send(env, who, id, { score, stars = 30, party, at = 0, clearTimeS
   const players = party.map(([name, ai = false, avgDps]) => ({ name, ai, ...(name === who.name ? { self: true } : {}), ...(avgDps ? { avgDps } : {}) }));
   const body = { kind: "interlink_run", clientRunId: id, cycle: "3005", boss: BOSS, score, stars, clearTimeS, cleared: true, teamDps: 60000,
     gameUid: who.gameUid, playedAt: 1792700000 + at, players,
-    extra: lineup ? { lineup: party.map(([name, ai = false], slot) => ({ slot: slot + 1, name, ai, ...(name === who.name ? { self: true } : {}) })) } : {} };
+    extra: lineup ? { lineup: party.map(([name, ai = false], slot) => ({ slot, name, ai, ...(name === who.name ? { self: true } : {}) })) } : {} };
   const form = new FormData();
   form.set("submission", JSON.stringify(body));
   form.set("evidence", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), "result.jpg");
@@ -145,10 +145,14 @@ test("the bots of a run: their names as stored, in the stored order, by the one 
   assert.deepEqual(botsOf(null), []);
   assert.deepEqual(botsOf("not json"), []);
   // seats: the Party screen's slot of the same name; a name it has twice, or a slot out of 1-4, gives none
-  const party = [{ slot: 1, name: "Aster" }, { slot: 3, name: "Flora" }, { slot: 2, name: "mario" }, { slot: 4, name: "Leonard" }];
+  const party = [{ slot: 0, name: "Aster" }, { slot: 2, name: "Flora" }, { slot: 1, name: "mario" }, { slot: 3, name: "Leonard" }];   // as aLogs stores it: 0-3
   assert.deepEqual(botsOf([person("Aster"), bot("Flora"), bot("Mario"), bot("Leonard")], party),
     [{ name: "Flora", seat: 3 }, { name: "Mario", seat: 2 }, { name: "Leonard", seat: 4 }]);
-  assert.deepEqual([...lineupSeats([{ slot: 1, name: "Aster" }, { slot: 2, name: "Aster" }, { slot: 9, name: "Briar" }, { name: "Cobalt" }])], []);
+  assert.deepEqual([...lineupSeats([{ slot: 0, name: "Aster" }, { slot: 1, name: "Aster" }, { slot: 9, name: "Briar" }, { name: "Cobalt" }])], []);
+  // the stored slots 0-3 are the game's 1P-4P, in that order; a slot of 4 (or -1) is no seat
+  assert.deepEqual([...lineupSeats([{ slot: 0, name: "Aster" }, { slot: 1, name: "Briar" }, { slot: 2, name: "Cobalt" }, { slot: 3, name: "Dorian" }])],
+    [["aster", 1], ["briar", 2], ["cobalt", 3], ["dorian", 4]]);
+  assert.deepEqual([...lineupSeats([{ slot: 4, name: "Ember" }, { slot: -1, name: "Fenwick" }])], []);
 });
 
 test("board rows list their run's bots: a Solo three, a Duo two, a Trio one, a full team none; places and counts unchanged", async () => {

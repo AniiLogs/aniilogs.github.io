@@ -30,17 +30,18 @@ export function realPlayersOf(players, party = null) {
 
 const parsed = (value) => (typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value);
 
-// The seats (1P-4P) a run's Party screen gives (extra.lineup: each entry's `slot`, 1-4): folded name -> seat. The stored
-// players (players_json) carry no seat of their own, so a player's seat is the lineup slot whose name is theirs; a name
-// the lineup has twice, or a slot outside 1-4, gives no seat (a seat is never guessed).
+// The seats (1P-4P) a run's Party screen gives: folded name -> seat. aLogs stores the Party screen's slots 0-3
+// (extra.lineup[].slot, alogs-meter payloads.rs), and the game marks them 1P-4P in that order, so seat = slot + 1. The
+// stored players (players_json) carry no seat of their own, so a player's seat is the lineup slot whose name is theirs;
+// a name the lineup has twice, or a slot outside 0-3, gives no seat (a seat is never guessed).
 export function lineupSeats(party) {
   const lineup = parsed(party);
   if (!Array.isArray(lineup)) return new Map();
   const found = new Map();
   for (const item of lineup) {
-    if (!item || typeof item !== "object" || !fold(item.name) || !Number.isInteger(item.slot) || item.slot < 1 || item.slot > 4) continue;
+    if (!item || typeof item !== "object" || !fold(item.name) || !Number.isInteger(item.slot) || item.slot < 0 || item.slot > 3) continue;
     const key = fold(item.name);
-    found.set(key, found.has(key) ? null : item.slot);
+    found.set(key, found.has(key) ? null : item.slot + 1);
   }
   return new Map([...found].filter(([, seat]) => seat !== null));
 }

@@ -533,7 +533,7 @@
     if (!parts.length) parts.push(el("p", { class: "lb-facts", text: "No further details were recorded for this entry." }));
     return el("tr", { class: "lb-detail" }, el("td", { colspan: span }, parts));
   }
-  // View all's phone layout (leaderboard.css shows it, not the table, from 900px down): put in, or taken out
+  // View all's phone layout (leaderboard.css shows it, not the table, from 1200px down): put in, or taken out
   function showStack(node = null) {
     els.tableWrap.querySelector(".lb-stack")?.remove();
     els.tableWrap.classList.toggle("has-stack", Boolean(node));
@@ -1141,7 +1141,7 @@
       submitted ? ` · ${state.viewOrder === "submitted" ? "newest" : "oldest"} submitted first` : ""} · ${
       teams ? `${number(boss.teams)} team${boss.teams === 1 ? "" : "s"} · ${players}` : players}`;
   }
-  // View all on a phone (900px and under, where the regrouped table no longer fits): a block per team (or per player
+  // View all on a phone (1200px and under, where the regrouped table no longer fits without scrolling): a block per team (or per player
   // in the Players view), no sideways scrolling. Left: the place, then one line per seat (mark, name, claimed check)
   // with that player's Avg DPS, BREAK and healing in three narrow columns, named once above the first block. Right,
   // after the same column line: the run's score and stars on one line, its team DPS, how it ended, when it was submitted,
