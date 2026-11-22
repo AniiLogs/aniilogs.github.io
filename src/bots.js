@@ -47,6 +47,8 @@ export function lineupSeats(party) {
   return new Map([...found].filter(([, seat]) => seat !== null));
 }
 export const seatKey = fold;
+// nameSimilarity under a name of its own, for index.js (which has an older nameSimilarity, an LCS measure, of its own)
+export const seatNameSimilarity = (a, b) => nameSimilarity(a, b);
 
 // Near names (cardSeats step 4): the similarity of two names is 1 - (Levenshtein distance of their skeletons, in
 // characters) / (the longer skeleton's length), 0..1; an empty name is 0. A card and a Party entry are the same player
