@@ -142,14 +142,52 @@
     return entry.discordName ? profileName(entry.discordName, entry.profileId, props, entry.uid, entry.player)
       : profileName(entry.player, entry.profileId, props, entry.uid);
   }
-  // Marks after a name: a teammate's row nobody claimed yet, and a name that looks like a claimed one.
+  // A claimed player's badge: a filled blue seal with a white tick, after the name. It differs from the run's green
+  // check (proof-viewer.js) in shape as well as colour: this one is about who the player is, that one about the run.
+  const CLAIMED_TEXT = "Claimed: this run is tied to this player's own UID.";
+  const UNCLAIMED_TEXT = "From a teammate's run. Not claimed: no UID was recorded for this player with the run.";
+  const SEAL = Array.from({ length: 24 }, (_, i) => {          // a 12-point scalloped seal, rounded by its own stroke
+    const angle = (i * Math.PI) / 12 - Math.PI / 2;
+    const radius = i % 2 ? 9.6 : 11;
+    return `${(12 + radius * Math.cos(angle)).toFixed(2)},${(12 + radius * Math.sin(angle)).toFixed(2)}`;
+  }).join(" ");
+  function claimedBadge() {
+    const badge = el("span", { class: "lb-claimed", role: "img", title: CLAIMED_TEXT, "aria-label": CLAIMED_TEXT });
+    badge.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="${SEAL}" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>`
+      + '<path d="M7.6 12.4l3 3 5.8-6.2" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return badge;
+  }
+  // Marks after a name, in this order: the blue badge when the player is claimed, "you", an app user without a
+  // character name, a name that looks like a claimed one. An unclaimed player gets no mark: their line is softer and
+  // says why on hover (nameLine).
   function nameMarks(entry) {
     return [
-      entry.unclaimed ? el("span", { class: "lb-mark", title: "From a teammate's run. Not claimed: no UID was recorded for this player with the run.", text: "unclaimed" }) : null,
+      entry.unclaimed ? null : claimedBadge(),
+      entry.own ? el("span", { class: "lb-you", text: "you" }) : null,
       // shown with "Show unlinked": an app user whose character name was never read (no UID to show either)
       !entry.unclaimed && !entry.uid && state.unlinked && entry.player === "Pathfinder" ? el("span", { class: "lb-mark", title: "An aLogs user whose app hasn't read their character's name yet.", text: "no character" }) : null,
       entry.lookalike ? el("span", { class: "lb-mark lb-lookalike", title: "This name looks like a claimed player's name but isn't theirs. Only the UID tells players apart.", text: "≈" }) : null,
     ];
+  }
+  // One player's line: the name (cut with "…" only when it alone is too long), then its marks and `extra` (their own
+  // copy's pictures), which never wrap away from it. An unclaimed player's line is marked is-unclaimed.
+  function nameLine(entry, ...extra) {
+    return el("span", { class: ["lb-who-name", entry.unclaimed ? "is-unclaimed" : "", entry.own ? "is-own-name" : ""].filter(Boolean).join(" "),
+      title: entry.unclaimed ? UNCLAIMED_TEXT : null },
+      fullTitle(rowName(entry, { class: "lb-name" })), ...nameMarks(entry), ...extra);
+  }
+  // a name that may be cut with "…" keeps all of it on hover: the shown name first in its title
+  function fullTitle(node) {
+    const shown = node.textContent.trim();
+    if (shown && !String(node.title || "").startsWith(shown)) node.title = [shown, node.title].filter(Boolean).join(" · ");
+    return node;
+  }
+  // 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, 101st, 111th, ...: a place said in running text
+  function ordinal(n) {
+    const value = Math.trunc(Number(n));
+    const teen = Math.abs(value) % 100;
+    const suffix = teen >= 11 && teen <= 13 ? "th" : ["th", "st", "nd", "rd"][Math.abs(value) % 10] || "th";
+    return `${value}${suffix}`;
   }
   function number(value) {
     return value === null || value === undefined ? "—" : Number(value).toLocaleString();
@@ -180,7 +218,8 @@
     state.order = params.get("order") || "";
     state.offset = Math.max(0, Number.parseInt(params.get("offset") || "0", 10) || 0);
     state.week = params.get("week") || ""; state.viewBoss = params.get("boss") || ""; state.viewLadder = ladderOf(params.get("ladder")).id;
-    state.viewOrder = state.viewBoss && ["asc", "desc"].includes(state.order) ? state.order : "";   // "View all": its ladder flipped
+    // "View all": its ladder flipped, or listed by when the rows were submitted (newest or oldest first)
+    state.viewOrder = state.viewBoss && ["asc", "desc", "submitted", "submitted_asc"].includes(state.order) ? state.order : "";
     state.season = params.get("season") || ""; state.split = params.get("split") || "";
     state.rows = ["teams", "players"].includes(params.get("rows")) ? params.get("rows") : storedRows();
     state.players = ["1", "2", "3", "4"].includes(params.get("players")) ? params.get("players") : "";   // the Party filter
@@ -494,7 +533,14 @@
     if (!parts.length) parts.push(el("p", { class: "lb-facts", text: "No further details were recorded for this entry." }));
     return el("tr", { class: "lb-detail" }, el("td", { colspan: span }, parts));
   }
+  // View all's phone layout (leaderboard.css shows it, not the table, from 1200px down): put in, or taken out
+  function showStack(node = null) {
+    els.tableWrap.querySelector(".lb-stack")?.remove();
+    els.tableWrap.classList.toggle("has-stack", Boolean(node));
+    if (node) els.tableWrap.append(node);
+  }
   function renderRows(entries) {
+    showStack();
     const columns = COLUMNS[state.kind];
     const span = columns.length + 2;
     const rows = [];
@@ -502,7 +548,7 @@
       const open = state.expanded.has(entry.submissionId);
       const cells = [
         el("td", { class: "lb-rank", text: String(entry.rank) }),
-        el("td", { class: "lb-player" }, el("button", {
+        el("td", { class: entry.unclaimed ? "lb-player is-unclaimed" : "lb-player", title: entry.unclaimed ? UNCLAIMED_TEXT : null }, el("button", {
           type: "button", class: "lb-expand", "aria-expanded": String(open), text: entry.discordName ? null : entry.player || "—",
           title: [entry.discordName ? `Discord name · character ${entry.player}` : "", entry.uid ? `UID ${entry.uid}` : ""].filter(Boolean).join(" · ") || null,
           onclick: () => {
@@ -510,7 +556,7 @@
             else state.expanded.add(entry.submissionId);
             renderRows(entries);
           },
-        }, entry.discordName ? shownName(entry.discordName, "discord") : null), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry),
+        }, entry.discordName ? shownName(entry.discordName, "discord") : null), ...nameMarks(entry),
         entry.hasEvidence ? proofButton(entry.submissionId) : null,
         entry.profileId ? profileName("View profile", entry.profileId, { class: "lb-character" }) : null),
         ...columns.map((column) => el("td", { text: column.value(entry) })),
@@ -530,20 +576,19 @@
       + '<path d="M12 5.2l1.95 4.1 4.5.55-3.3 3.1.85 4.45L12 15.2l-4 2.2.85-4.45-3.3-3.1 4.5-.55z" fill="#7a4b00"/>';
     return svg;
   }
-  // Line icons for the boards' "last updated": a calendar per row, and circling arrows over that column (drawn here).
-  function lineIcon(kind) {
+  // The line icon for a row's "last updated": a calendar (drawn here).
+  function calendarIcon() {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("class", "lb-line-icon"); svg.setAttribute("aria-hidden", "true");
-    svg.innerHTML = kind === "calendar"
-      ? '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></g>'
-      : '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></g>';
+    svg.innerHTML = '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></g>';
     return svg;
   }
-  // A Per Boss row's "last updated": a calendar icon; hover or tap shows when that player's best run reached AniiLogs.
+  // A Per Boss row's "Submitted": a calendar icon, last in the row's icons; hover or tap shows when that player's
+  // best run reached AniiLogs.
   function updatedIcon(unix) {
     if (!unix) return el("span", { class: "lb-row-when" });
     const at = new Date(unix * 1000);
-    const tip = `Updated ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (${agoText(unix)})`;
+    const tip = `Submitted ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (${agoText(unix)})`;
     const button = el("button", { type: "button", class: "lb-row-when", title: tip, "aria-label": tip, "data-tip": tip,
       onclick: (event) => {
         event.stopPropagation();
@@ -551,7 +596,7 @@
         for (const other of document.querySelectorAll(".lb-row-when.is-open")) other.classList.remove("is-open");
         button.classList.toggle("is-open", open);
       } });
-    button.append(lineIcon("calendar"));
+    button.append(calendarIcon());
     return button;
   }
   function stars(value) {
@@ -691,9 +736,9 @@
   function rowCheck(entry, ladder) {
     return Object.keys(entry.proofIds || {}).length ? entry.checks?.[ladder.proof] || entry.checks?.score : "invalid";
   }
-  function playerName(entry, proofId, check = null) {
-    return el("span", { class: "lb-who-name" }, rowName(entry),
-      entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), checkBadge(check), proofButton(proofId, check));
+  // a table's player cell (View all, Season Ladder): the name line, then the run's check
+  function playerName(entry, check = null) {
+    return nameLine(entry, checkBadge(check));
   }
   function bossHead(boss, className, detail = "") {
     return el("div", { class: className },
@@ -702,6 +747,7 @@
       boss.starCap ? el("div", { class: "lb-cap" }, el("span", { text: "Max stars" }), stars(boss.starCap)) : null);
   }
   function failed() {
+    showStack();
     els.summary.textContent = "The leaderboard could not be loaded.";
     els.interlink.replaceChildren();
     els.tableWrap.hidden = true;
@@ -709,8 +755,8 @@
     showRowsPick();
   }
 
-  // Per Boss: the week's three boards, each with its own ladder menu. A row: the player and how the run ended on the
-  // left, the ladder's figure over the stars on the right.
+  // Per Boss: the week's three boards, each with its own ladder menu. A row: the place, then one line per player on
+  // the left, and on the right the ladder's figure over the stars, how the run ended and the run's icons (rowFigures).
   // Team ladders rank runs: one Interlink run sent by each of its players is one result, its players sharing a row and
   // its place (Teams), or one row each with that place (Players). Avg DPS, BREAK and healing are one player's own.
   const TEAM_LADDERS = ["score", "stars", "clear", "teamDps"];
@@ -735,11 +781,6 @@
     const times = members.map((entry) => entry.updatedAt).filter(Boolean);
     return times.length ? Math.min(...times) : null;
   }
-  // players on the run a team row shows whose own best is another run, so they're ranked in another row
-  function alsoLine(entry) {
-    if (!entry?.also?.length) return null;
-    return el("small", { class: "lb-also", text: `Also on this run: ${entry.also.map((other) => `${other.discordName || other.player} (place ${other.rank})`).join(", ")}` });
-  }
   // Every copy of a team row's run that came with pictures: the lead's is on the row's result line; a player whose
   // pictures are another copy (their own app's) gets that copy's button by their name. A copy is shown once (a
   // teammate credited from someone's copy has that copy's pictures). entry -> proof id, or null
@@ -756,17 +797,85 @@
   function memberProof(entry, proofs, ladder) {
     return proofs.get(entry) ? proofButton(proofs.get(entry), rowCheck(entry, ladder)) : null;
   }
-  // a team row's players, each with their "you", marks and own copy's pictures, joined by a muted dot
+  // A team row's seats, each { kind, seat, entry }: its players ("player"), the players on the run who are ranked with
+  // another run ("also", the API's lead.also) and the run's bots ("bot", lead.bots, the API's one bot rule). The API
+  // sends a seat (1-4, the run's 1P-4P) only when it knows it. In seat order when every line has one; otherwise the
+  // players, then the also-players, then the bots, as the API lists them.
+  const seatOf = (value) => ([1, 2, 3, 4].includes(value) ? value : null);
+  function teamSeats(members) {
+    const lead = members[0];
+    const items = [
+      ...members.map((entry) => ({ kind: "player", seat: seatOf(entry.seat), entry })),
+      ...(Array.isArray(lead?.also) ? lead.also : []).map((entry) => ({ kind: "also", seat: seatOf(entry?.seat), entry })),
+      ...(Array.isArray(lead?.bots) ? lead.bots : []).map((bot) => ({ kind: "bot", seat: seatOf(bot?.seat),
+        entry: { name: String((typeof bot === "string" ? bot : bot?.name) || "") } })),
+    ];
+    if (items.every((item) => item.seat)) items.sort((a, b) => a.seat - b.seat);
+    return items;
+  }
+  // The game's seat mark left of a name on a team row: 1P-4P, or "Ai" for a bot in place of its number (the game's own
+  // pictures, from the content store; never in this repository). Until a picture loads, or when it can't, its text in
+  // the same spot: "1P" ... "4P", and the "AI" pill for a bot. No seat: the same empty space, so the names line up.
+  const SEAT_PICTURES = Object.freeze({ 1: "1p", 2: "2p", 3: "3p", 4: "4p", ai: "ai" });
+  function contentUrl(path) {
+    const base = String(siteConfig.contentBaseUrl || "").replace(/\/+$/u, "");
+    if (!base) return "";
+    const url = new URL(`${base}/${path}`, window.location.href);
+    if (siteConfig.contentRevision) url.searchParams.set("v", String(siteConfig.contentRevision));
+    return url.toString();
+  }
+  function seatMark(seat, bot = false) {
+    const box = el("span", { class: "lb-seat" });
+    const label = bot ? "AI" : seat ? `${seat}P` : "";
+    if (!label) return box;
+    const fallback = () => box.replaceChildren(bot ? botPill() : el("span", { class: "lb-seat-text", text: label }));
+    const src = contentUrl(`assets/ui/position/${SEAT_PICTURES[bot ? "ai" : seat]}.png`);
+    if (!src) { fallback(); return box; }
+    const picture = el("img", { src, alt: label, width: bot ? 93 : 90, height: bot ? 87 : 85, decoding: "async", title: bot ? BOT_TEXT : null });
+    picture.addEventListener("error", fallback, { once: true });
+    box.append(picture);
+    return box;
+  }
+  // One line per seat (teamSeats), each starting with its mark: a player's name line with their own copy's pictures; an
+  // also-player's name in italics with their place, "Name (1st)" (a link when they have a public profile); a bot's
+  // name, plain softer text, never a link. Bots and also-players are never claimed and never "you".
+  const BOT_TEXT = "A bot the game added to fill the team.";
   function teamNames(members, ladder) {
     const proofs = copyProofs(members, ladder);
-    return el("span", { class: "lb-who-name lb-team-names" }, ...members.flatMap((entry, index) => [
-      index ? el("span", { class: "lb-sep", "aria-hidden": "true", text: "·" }) : null,
-      rowName(entry), entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), memberProof(entry, proofs, ladder)]));
+    return teamSeats(members).map((item) => seatLine(item, item.kind === "player" ? [memberProof(item.entry, proofs, ladder)] : []));
   }
-  // a team row's result: how the run ended, its one check badge and its proof pictures
+  function seatLine(item, extra = []) {
+    const mark = seatMark(item.seat, item.kind === "bot");
+    if (item.kind === "bot") return el("span", { class: "lb-who-name lb-bot", title: BOT_TEXT }, mark, fullTitle(el("span", { class: "lb-name", text: item.entry.name })));
+    if (item.kind === "also") {
+      const other = item.entry;
+      const place = ordinal(other.rank);
+      const name = other.discordName ? profileName(other.discordName, other.profileId, { class: "lb-name" }, null, other.player)
+        : profileName(other.player || "Pathfinder", other.profileId, { class: "lb-name" });
+      return el("span", { class: "lb-who-name lb-also-line", title: `Ranked ${place} with another run.` }, mark, fullTitle(name),
+        el("span", { class: "lb-also-place", text: `(${place})` }));
+    }
+    const line = nameLine(item.entry, ...extra);
+    line.prepend(mark);
+    return line;
+  }
+  function botPill() {
+    return el("span", { class: "lb-ai", title: BOT_TEXT, text: "AI" });
+  }
+  // View all's result cell: how the run ended, its one check badge and its proof pictures
   function teamResult(lead, ladder, boss) {
     const [tag, text, proof, link] = resultLine(lead, ladder, boss);
     return [tag, text, checkBadge(rowCheck(lead, ladder)), proof, link];
+  }
+  // A Per Boss row's right column, right-aligned, top to bottom: the ladder's figure, the stars, how the run ended (the
+  // Solo / Duo / Trio tag, then "Boss Killed: 1:55"), then one line of icons: the run's check, its pictures, its link
+  // and the "last updated" calendar. The same in both views (Teams: the lead's copy; Players: the player's own best).
+  function rowFigures(entry, ladder, boss, updatedAt) {
+    const [tag, text, proof, link] = resultLine(entry, ladder, boss);
+    return el("span", { class: "lb-figs" },
+      el("span", { class: "lb-val", text: ladder.value(entry, boss) }), stars(entry.stars),
+      el("small", { class: "lb-row-result" }, tag, el("span", { class: "lb-outcome", text })),
+      el("span", { class: "lb-row-icons" }, checkBadge(rowCheck(entry, ladder)), proof, link, updatedIcon(updatedAt)));
   }
   // The page's one Teams / Players switch (beside Server and Show unlinked): it changes every board on the page, or
   // View all's table. The control stays in place while the boards reload, so keyboard focus stays on the pressed button.
@@ -802,23 +911,23 @@
     ...LADDERS.map((item) => el("option", { value: item.id, text: item.label })));
     select.value = ladder.id;
     const teams = teamView(boss, ladder);
+    // A row, both views: three columns, top-aligned: the place | one line per seat (Teams: players, players ranked with another run, bots) | the
+    // ladder's figure, stars, outcome and icons (rowFigures).
     const playerRow = (entry) => el("li", { class: entry.own ? "lb-row is-own" : "lb-row", "data-place": String(entry.rank) },
       el("span", { class: "lb-rk", text: String(entry.rank) }),
-      el("span", { class: "lb-who" }, playerName(entry, null, rowCheck(entry, ladder)), el("small", { class: "lb-result" }, ...resultLine(entry, ladder, boss))),
-      updatedIcon(entry.updatedAt),
-      el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(entry, boss) }), stars(entry.stars)));
+      el("span", { class: "lb-who" }, nameLine(entry)),
+      rowFigures(entry, ladder, boss, entry.updatedAt));
     const teamRow = (members) => {
       const lead = members[0];
       return el("li", { class: members.some((entry) => entry.own) ? "lb-row lb-team is-own" : "lb-row lb-team", "data-place": String(lead.rank) },
         el("span", { class: "lb-rk", text: String(lead.rank) }),
-        el("span", { class: "lb-who" }, teamNames(members, ladder), el("small", { class: "lb-result" }, ...teamResult(lead, ladder, boss)), alsoLine(lead)),
-        updatedIcon(teamUpdated(members)),
-        el("span", { class: "lb-figs" }, el("span", { class: "lb-val", text: ladder.value(lead, boss) }), stars(lead.stars)));
+        el("span", { class: "lb-who" }, ...teamNames(members, ladder)),
+        rowFigures(lead, ladder, boss, teamUpdated(members)));
     };
     const rows = teams ? teamsOf(boss.entries).map(teamRow) : boss.entries.map(playerRow);
-    // over the rows: what each column is, with the "last updated" column as its icon
+    // over the rows: what each column is
     const head = el("div", { class: "lb-rows-head", "aria-hidden": "true" }, el("span", { text: "#" }), el("span", { text: teams ? "Team" : "Player" }),
-      el("span", { class: "lb-rows-head-when", title: "Last updated" }, lineIcon("update")), el("span", { text: ladder.label.replace(/ \(one player\)$/u, "") }));
+      el("span", { text: ladder.label.replace(/ \(one player\)$/u, "") }));
     const count = teams ? boss.teams : boss.total;
     const noun = boss.teams === undefined ? "" : ` ${teams ? "team" : "player"}${count === 1 ? "" : "s"}`;
     return el("article", { class: `lb-boss ${SLOT_CLASSES[boss.slotIndex] || ""}`, "data-board-id": boss.id, "data-week": cycleId,
@@ -884,13 +993,20 @@
     return el("div", { class: "lb-week-head" }, el("h3", { text: label }), dates ? el("span", { text: weekRange(data.cycle) }) : null,
       data.cycle.start <= now ? updatedLine(data.updatedAt) : null);
   }
+  // the marks on the boards' rows, said once beside the week menu
+  function marksLegend() {
+    return el("p", { class: "lb-marks-legend" }, el("span", {}, claimedBadge(), " claimed player"),
+      el("span", {}, seatMark(null, true), " a bot"),
+      el("span", {}, el("span", { class: "lb-legend-also", text: "Name (1st)" }), " ranked with another run"),
+      el("span", {}, checkBadge("verified"), " verified run"));
+  }
   function renderPerBoss(data, last = null) {
     const caps = data.rules?.starCaps || [];
     const clear = data.rules?.clearStars || [];
     const slotted = data.bosses.filter((boss) => boss.slotIndex != null);
     const rules = rulesLine(caps, clear, data.rules?.slots || [], slotted);
     els.interlink.replaceChildren(
-      el("div", { class: "lb-subbar" }, weekNav(data), last ? null : updatedLine(data.updatedAt)),
+      el("div", { class: "lb-subbar" }, weekNav(data), marksLegend(), last ? null : updatedLine(data.updatedAt)),
       el("p", { class: "lb-rules" },
         ...rules.filter((part) => !part.pair).map((part) => (part.label
           ? el("span", {}, el("b", { text: part.label }), part.text) : el("span", { text: part.text }))),
@@ -914,16 +1030,19 @@
   }
 
   // "View all": one board, every player, paged, with every figure; a figure's column header ranks the board by it
-  // (the API's ?ladder=, clicked again ?order= the other way round). Who sent it and when only show.
+  // (the API's ?ladder=, clicked again ?order= the other way round). Who sent it and when only show. The columns come
+  // in two groups: each player's own figures (Avg DPS, BREAK, healing) beside their name, then the run's shared figures
+  // (score, stars, time, team DPS, when it was sent) after a soft divider. Both views use this order, so the columns
+  // don't move when Teams / Players is switched.
   const FULL_COLUMNS = [
-    { id: "score", label: "Score", value: (e) => number(e.score) },
-    { id: "stars", label: "Stars", value: (e) => stars(e.stars) },
-    { id: "clear", label: "Time", value: (e, boss) => clearText(e, boss) },
-    { id: "teamDps", label: "Team DPS", value: (e) => number(e.teamDps) },
     { id: "dps", label: "Avg DPS", value: (e) => number(e.avgDps) },
     { id: "break", label: "BREAK", value: (e) => number(e.breakValue) },
     { id: "heal", label: "Healing", value: (e) => number(e.heal) },
-    { id: "date", label: "Last updated", value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best was sent
+    { id: "score", label: "Score", shared: "start", value: (e) => number(e.score) },
+    { id: "stars", label: "Stars", shared: true, value: (e) => stars(e.stars) },
+    { id: "clear", label: "Time", shared: true, value: (e, boss) => clearText(e, boss) },
+    { id: "teamDps", label: "Team DPS", shared: true, value: (e) => number(e.teamDps) },
+    { id: "date", label: "Submitted", shared: true, value: (e) => playerUpdated(e.updatedAt, "") || "—" },     // when this best reached the site
   ];
   function renderFull(data) {
     const boss = data.bosses[0];
@@ -938,8 +1057,22 @@
     // score, stars and time fold away
     const columns = FULL_COLUMNS;
     const natural = ladder.id === "clear" ? "asc" : "desc";
-    const order = state.viewOrder || natural;
-    const ranked = (column) => [column.id === ladder.id ? "is-ranked" : "", fold(column, ladder)].join(" ").trim() || null;
+    // sorted by Submitted: the rows by when they reached the site (the API's order=submitted / submitted_asc), each
+    // keeping its place on the ladder (the # column)
+    const submitted = state.viewOrder.startsWith("submitted");
+    const order = submitted ? natural : state.viewOrder || natural;
+    // what a column header does (and the phone's Sort by): a ladder ranks by it, again the other way round; Submitted
+    // lists newest first, again oldest first
+    const sortBy = (id, flip = true) => {
+      if (id === "date") state.viewOrder = flip && state.viewOrder === "submitted" ? "submitted_asc" : "submitted";
+      else if (flip && id === ladder.id && !submitted) state.viewOrder = order === "asc" ? "desc" : "asc";
+      else { state.viewLadder = id; state.viewOrder = ""; }
+      if (state.viewOrder === (state.viewLadder === "clear" ? "asc" : "desc")) state.viewOrder = "";
+      state.offset = 0;
+      void loadEntries();
+    };
+    const ranked = (column) => [column.id === ladder.id ? "is-ranked" : "", fold(column, ladder), column.shared === "start" ? "lb-shared-start" : "", column.shared ? "" : "lb-own-fig"]
+      .join(" ").trim() || null;
     els.interlink.replaceChildren(
       el("div", { class: "lb-subbar" },
         el("div", { class: "lb-crumbs" }, el("button", { type: "button", class: "lb-back", text: "← Per Boss", onclick: back }),
@@ -951,43 +1084,49 @@
     const teams = teamView(boss, ladder);
     els.head.replaceChildren(el("tr", {}, el("th", { scope: "col", text: "#" }), el("th", { scope: "col", text: "Player" }),
       columns.map((column) => headCell(column.label, {
-        sortable: LADDERS.some((item) => item.id === column.id), active: column.id === ladder.id, order, className: ranked(column),
-        onSort: () => {
-          if (column.id === ladder.id) state.viewOrder = order === "asc" ? "desc" : "asc";
-          else { state.viewLadder = column.id; state.viewOrder = ""; }
-          if (state.viewOrder === (state.viewLadder === "clear" ? "asc" : "desc")) state.viewOrder = "";
-          state.offset = 0;
-          void loadEntries();
-        },
+        sortable: column.id === "date" || LADDERS.some((item) => item.id === column.id),
+        active: column.id === "date" ? submitted : column.id === ladder.id && !submitted,
+        order: column.id === "date" ? (state.viewOrder === "submitted_asc" ? "asc" : "desc") : order, className: ranked(column),
+        onSort: () => sortBy(column.id),
       }))));
     const playerRow = (entry) => el("tr", { class: entry.own ? "is-own" : null },
       el("td", { class: "lb-rank", text: String(entry.rank) }),
-      el("td", { class: "lb-player" }, playerName(entry, null, rowCheck(entry, ladder))),
+      el("td", { class: "lb-player" }, playerName(entry, rowCheck(entry, ladder))),
       columns.map((column) => el("td", { class: ranked(column) },
         column.id === "clear" ? el("span", { class: "lb-result" }, ...resultLine(entry, ladder, boss)) : column.value(entry, boss))));
-    // Teams: one group of rows per team row, one row per player. The run's figures (and its place, result and when it
-    // was sent) span the group; each player's row has their name and their own Avg DPS, BREAK and healing.
+    // Teams: one block of rows per team row, one row per seat (teamSeats: its players, the players ranked with another
+    // run as "Name (1st)", its bots), each with its mark and that player's own Avg DPS, BREAK and healing ("—" for a bot:
+    // the API sends no bot figures; an also-player's are this run's, when the API passes them). The place and the run's
+    // shared figures are one cell each for the block (rowspan), after the divider, so the faint lines between its
+    // players stop at the divider and a stronger line closes the block. Hover and the own-team colour light the block.
     const teamRows = (members) => {
       const lead = members[0];
-      const span = members.length > 1 ? String(members.length) : null;
+      const items = teamSeats(members);
+      const span = items.length > 1 ? String(items.length) : null;
       const shared = { ...lead, updatedAt: teamUpdated(members) };
       const own = members.some((entry) => entry.own);
       const proofs = copyProofs(members, ladder);
-      return members.map((entry, index) => el("tr", { class: [index ? "" : "lb-team-first", own ? "is-own" : ""].join(" ").trim() || null },
+      const block = [];
+      const hover = (on) => () => { for (const row of block) row.classList.toggle("is-hover", on); };
+      items.forEach((item, index) => {
+        const row = el("tr", { class: ["lb-team-row", index ? "" : "lb-team-first", index === items.length - 1 ? "lb-team-last" : "", own ? "is-own" : ""]
+          .filter(Boolean).join(" "), onmouseenter: hover(true), onmouseleave: hover(false) },
         index ? null : el("td", { class: "lb-rank", rowspan: span, text: String(lead.rank) }),
-        el("td", { class: "lb-player" }, el("span", { class: "lb-who-name" }, rowName(entry),
-          entry.own ? el("span", { class: "lb-you", text: "you" }) : null, ...nameMarks(entry), memberProof(entry, proofs, ladder)),
-        index === members.length - 1 ? alsoLine(lead) : null),
+        el("td", { class: "lb-player" }, seatLine(item, item.kind === "player" ? [memberProof(item.entry, proofs, ladder)] : [])),
         columns.map((column) => {
-          if (ONE_PLAYER_COLUMNS.includes(column.id)) return el("td", { class: ranked(column) }, column.value(entry, boss));
+          if (!column.shared) return el("td", { class: ranked(column) }, item.kind === "bot" ? "—" : column.value(item.entry, boss));
           if (index) return null;
           return el("td", { class: ranked(column), rowspan: span },
             column.id === "clear" ? el("span", { class: "lb-result" }, ...teamResult(lead, ladder, boss)) : column.value(shared, boss));
-        })));
+        }));
+        block.push(row);
+      });
+      return block;
     };
     const shown = teams ? teamsOf(boss.entries) : boss.entries;
     els.rows.replaceChildren(...(shown.length ? shown.flatMap((item) => (teams ? teamRows(item) : [playerRow(item)]))
       : [el("tr", {}, el("td", { colspan: String(columns.length + 2), class: "lb-empty", text: "No runs on this ladder yet." }))]));
+    showStack(fullStack({ boss, ladder, teams, shown, submitted, order, sortBy }));
     els.tableWrap.hidden = false;
     // Teams pages by team rows
     const count = teams ? boss.teams : boss.total;
@@ -998,8 +1137,52 @@
     els.prev.disabled = state.offset <= 0;
     els.next.disabled = last >= count;
     const players = `${number(boss.total)} player${boss.total === 1 ? "" : "s"}`;
-    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"} · ${
+    els.summary.textContent = `${bossName(boss)} · ranked by ${ladder.label.toLowerCase()}${order === natural ? "" : " (reversed)"}${
+      submitted ? ` · ${state.viewOrder === "submitted" ? "newest" : "oldest"} submitted first` : ""} · ${
       teams ? `${number(boss.teams)} team${boss.teams === 1 ? "" : "s"} · ${players}` : players}`;
+  }
+  // View all on a phone (1200px and under, where the regrouped table no longer fits without scrolling): a block per team (or per player
+  // in the Players view), no sideways scrolling. Left: the place, then one line per seat (mark, name, claimed check)
+  // with that player's Avg DPS, BREAK and healing in three narrow columns, named once above the first block. Right,
+  // after the same column line: the run's score and stars on one line, its team DPS, how it ended, when it was submitted,
+  // then its icons (the Solo / Duo / Trio tag first, so the outcome never wraps). The visitor's own name takes the
+  // "you" pill's colour (no room for the pill). A Sort by menu and a direction button do what the headers do.
+  const SORT_CHOICES = [["score", "Score"], ["stars", "Stars"], ["clear", "Time"], ["teamDps", "Team DPS"], ["date", "Submitted"],
+    ["dps", "Avg DPS"], ["break", "BREAK"], ["heal", "Healing"]];
+  function fullStack({ boss, ladder, teams, shown, submitted, order, sortBy }) {
+    const figure = (id, entry) => el("span", { class: "lb-stack-num" }, entry ? FULL_COLUMNS.find((column) => column.id === id).value(entry, boss) : "—");
+    const line = (name, entry) => el("div", { class: "lb-stack-line" }, name, ...["dps", "break", "heal"].map((id) => figure(id, entry)));
+    const run = (lead, updatedAt) => {
+      const [tag, text, proof, link] = resultLine(lead, ladder, boss);
+      return el("div", { class: "lb-stack-run" },
+        el("span", { class: "lb-stack-score" }, el("b", { text: number(lead.score) }), stars(lead.stars)),
+        el("span", { class: "lb-stack-teamdps" }, el("small", { text: "Team DPS " }), number(lead.teamDps)),
+        el("span", { class: "lb-stack-outcome", text }),
+        el("span", { class: "lb-stack-when" }, playerUpdated(updatedAt, "") || "—"),
+        el("span", { class: "lb-stack-icons" }, tag, checkBadge(rowCheck(lead, ladder)), proof, link));
+    };
+    const block = (rank, own, lines, lead, updatedAt) => el("li", { class: own ? "lb-stack-team is-own" : "lb-stack-team", "data-place": String(rank) },
+      el("span", { class: "lb-stack-rank", text: String(rank) }), el("div", { class: "lb-stack-players" }, lines), run(lead, updatedAt));
+    const blocks = shown.map((item) => {
+      if (!teams) return block(item.rank, item.own, [line(nameLine(item), item)], item, item.updatedAt);
+      // a line is only the mark, the name and its check here: a teammate's own copy's pictures are in the table's view
+      return block(item[0].rank, item.some((entry) => entry.own), teamSeats(item).map((seat) => line(seatLine(seat), seat.kind === "bot" ? null : seat.entry)),
+      item[0], teamUpdated(item));
+    });
+    const current = submitted ? "date" : ladder.id;
+    const ascending = submitted ? state.viewOrder === "submitted_asc" : order === "asc";
+    const now = current === "date" ? (ascending ? "oldest first" : "newest first") : ascending ? "lowest first" : "highest first";
+    const pick = el("select", { "aria-label": "Sort by", onchange: (event) => sortBy(event.target.value, false) },
+      ...SORT_CHOICES.map(([id, label]) => el("option", { value: id, text: label })));
+    pick.value = current;
+    return el("div", { class: "lb-stack" },
+      el("div", { class: "lb-stack-sort" }, el("label", {}, el("span", { text: "Sort by" }), pick),
+        el("button", { type: "button", class: "lb-stack-dir", title: `Now ${now}; press to reverse`, "aria-label": `Reverse the order (now ${now})`,
+          text: ascending ? "▲" : "▼", onclick: () => sortBy(current) })),
+      blocks.length ? el("div", { class: "lb-stack-head", "aria-hidden": "true" }, el("span", { text: "#" }),
+        el("div", { class: "lb-stack-line" }, el("span", { text: teams ? "Team" : "Player" }), el("span", { text: "Avg DPS" }), el("span", { text: "Break" }), el("span", { text: "Heal" })),
+        el("span", { class: "lb-stack-runhead", text: "Run" })) : null,
+      blocks.length ? el("ol", { class: "lb-stack-list" }, blocks) : el("p", { class: "lb-empty", text: "No runs on this ladder yet." }));
   }
   const ONE_PLAYER_COLUMNS = ["dps", "break", "heal"];     // a player's own figures: one cell each in a team's rows
   function fold(column, ladder) {
@@ -1024,6 +1207,7 @@
     return state.rankOrder || SEASON_SORTS[state.rank].natural;
   }
   function renderSeason(data) {
+    showStack();
     state.seasonData = data;
     const pick = el("select", { "aria-label": "Season or split", onchange: (event) => {
       [state.season, state.split] = event.target.value.split("|");
