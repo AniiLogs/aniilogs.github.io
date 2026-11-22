@@ -3,6 +3,8 @@
 // and the run viewer. window.AniilogsShare:
 //   button({ run, ladder, player, code }): a small link button. A click asks the API for the placement's link (made the
 //     first time), copies it and says "Link copied"; code: a link already known (a page opened from one).
+//     On aniilogs.github.io the copied link is the site's own aniilogs.github.io/lb/<code> (short-link.js, opened by
+//     /404.html), so it doesn't name the API's host; elsewhere, or without short-link.js, it's the API's /<code> link.
 //   tag(realPlayers): "Solo", "Duo" or "Trio" when the run had bots in the team (the API's realPlayers), else null.
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
@@ -41,16 +43,19 @@
     }
   }
 
+  // "https://aniilogs.github.io/lb" on aniilogs.github.io (short-link.js), else "": the API's own link
+  const shortBase = () => { try { return window.AniilogsShortLink?.base(window.location) || ""; } catch { return ""; } };
+
   async function linkFor(target) {
-    if (target.code) return `${new URL(API_URL).origin}/${target.code}`;
+    if (target.code) return shortBase() ? `${shortBase()}/${target.code}` : `${new URL(API_URL).origin}/${target.code}`;
     const key = `${target.run}|${target.ladder}|${target.player || ""}`;
     if (!known.has(key)) {
       known.set(key, (async () => {
         const response = await fetch(`${API_URL}/links`, { method: "POST", credentials: "omit", headers: { "content-type": "application/json" },
           body: JSON.stringify({ run: target.run, ladder: target.ladder, ...(target.player ? { player: target.player } : {}) }) });
         if (!response.ok) throw new Error(response.status === 404 ? "gone" : "failed");
-        const { url } = await response.json();
-        return url;
+        const { code, url } = await response.json();
+        return shortBase() && CODE.test(String(code || "")) ? `${shortBase()}/${code}` : url;
       })().catch((error) => { known.delete(key); throw error; }));
     }
     return known.get(key);
