@@ -2017,6 +2017,7 @@ ul.team-skill-operations .team-skill-operation {
 
   .app-shell.is-sidebar-collapsed .sidebar-restore-button:not([hidden]) {
     display: inline-grid;
+    z-index: 221;                                         /* above the map/Aniilog panel (200), like the collapse button */
   }
 }
 
@@ -9162,13 +9163,17 @@ select option:hover {
 
 @media (min-width: 821px) and (pointer: fine) {
   body.aniilog-artwork-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniimo-turntable {
-    left: 360px;
-    width: calc(100vw - 360px);
+    /* the list's own width (this panel is zoomed on big screens, so px and vw here scale with it; right: 0 does not) */
+    left: clamp(280px, 21vw, 360px);
+    right: 0;
+    width: auto;
   }
 
   body.aniilog-artwork-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniimo-live-viewer {
-    left: 360px;
-    width: calc(100vw - 360px);
+    /* the list's own width (this panel is zoomed on big screens, so px and vw here scale with it; right: 0 does not) */
+    left: clamp(280px, 21vw, 360px);
+    right: 0;
+    width: auto;
   }
 }
 
@@ -9314,8 +9319,10 @@ body.aniilog-model-mode .catalog-model-controls .catalog-artwork-select-button {
 
 @media (min-width: 821px) and (pointer: fine) {
   body.aniilog-model-mode .app-shell:not(.is-sidebar-collapsed) .catalog-aniilog-record.is-model-view > .catalog-model-viewer {
-    left: 360px;
-    width: calc(100vw - 360px);
+    /* the list's own width (this panel is zoomed on big screens, so px and vw here scale with it; right: 0 does not) */
+    left: clamp(280px, 21vw, 360px);
+    right: 0;
+    width: auto;
   }
 }
 
