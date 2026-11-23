@@ -5,17 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
     <meta name="theme-color" content="#f5eecb">
-    <!-- GitHub Pages serves this page for every address without a file, at that address: every path here is absolute. -->
+    <!-- Not deferred, and before the stylesheets: the saved theme is on <html> before the first paint (carry-in.js first: settings brought from the old address). -->
+    <script src="/carry-in.js?v=0.1.0"></script>
+    <script src="/theme-shell.js?v=0.3.5-site-menu"></script>
+    <!-- Served for every address without a file, at that address: every path here is absolute. -->
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <title>Page not found — AniiLogs</title>
     <link rel="stylesheet" href="/styles.css?v=0.17.6-update-details">
     <script src="/explorer/app-config.js?v=20261119-build3989635-r96" defer></script>
-    <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
     <script src="/icons/alogs-loader.js?v=0.4.0" defer></script>
-    <script src="/short-link.js?v=0.1.0" defer></script>
-    <script src="/not-found.js?v=0.1.0" defer></script>
     <style>
       .not-found-main { display: grid; place-items: center; min-height: 100vh; padding: 2rem 16px; }
       .not-found-card { width: min(100%, 520px); padding: clamp(1.6rem, 5vw, 2.6rem); border: 1px solid var(--line); border-radius: 28px; background: rgba(var(--panel-rgb), .88); box-shadow: var(--shadow); text-align: center; }
@@ -40,7 +40,6 @@
         <span class="not-found-loader" data-not-found-loader></span>
         <h1 data-not-found-title>Page not found</h1>
         <p data-not-found-text>There's nothing at this address.</p>
-        <noscript><p>Turn on JavaScript to open a run link, or go to the <a href="/leaderboard/">leaderboards</a>.</p></noscript>
         <div class="not-found-actions" data-not-found-actions>
           <a class="primary-button" href="/">Home</a>
           <a class="secondary-button" href="/leaderboard/">Leaderboards</a>

@@ -3,7 +3,7 @@ import { lstat, opendir, readFile } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const excludedDirectories = new Set([".git", ".pages-api-dist", ".wrangler", "node_modules"]);
+const excludedDirectories = new Set([".git", ".github-forwarder", ".pages-api-dist", ".wrangler", "node_modules"]);
 const forbiddenSegments = new Set(["_private", "captures", "game-files", "raw-captures"]);
 const forbiddenExtensions = new Set([".pcap", ".pcapng", ".proto"]);
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -101,17 +101,25 @@ if (widestDirectory[1] > MAX_DIRECTORY_ENTRIES) {
   throw new Error(`Repository directory exceeds 3,000 entries: ${widestDirectory[0]}`);
 }
 
+// GitHub Pages (aniilogs.github.io) publishes only the generated forwarder, never the repository or public/ itself
 const workflow = await readFile(resolve(root, ".github", "workflows", "pages.yml"), "utf8");
-if (!/uses:\s*actions\/upload-pages-artifact@v5[\s\S]*?with:\s*[\s\S]*?path:\s*public/iu.test(workflow)) {
-  throw new Error("GitHub Pages workflow is not pinned to the public directory.");
+if (!/uses:\s*actions\/upload-pages-artifact@v5[\s\S]*?with:\s*[\s\S]*?path:\s*\.github-forwarder\s*$/imu.test(workflow)) {
+  throw new Error("GitHub Pages workflow is not pinned to the generated forwarder (.github-forwarder).");
 }
-if (/path:\s*(?:\.|\.\/|\$\{\{)/iu.test(workflow)) {
-  throw new Error("GitHub Pages workflow may upload a broader path than public.");
+if (/path:\s*(?:\.\s*$|\.\/|\$\{\{)/imu.test(workflow)) {
+  throw new Error("GitHub Pages workflow may upload a broader path than the forwarder.");
 }
 const approvalGateIndex = workflow.indexOf("npm run release:deploy-check");
+const forwarderIndex = workflow.indexOf("npm run forwarder:build");
 const uploadIndex = workflow.indexOf("actions/upload-pages-artifact@v5");
-if (approvalGateIndex < 0 || uploadIndex < 0 || approvalGateIndex > uploadIndex) {
-  throw new Error("GitHub Pages workflow does not fail closed on reviewed release approval before upload.");
+if (approvalGateIndex < 0 || forwarderIndex < 0 || uploadIndex < 0 || approvalGateIndex > forwarderIndex || forwarderIndex > uploadIndex) {
+  throw new Error("GitHub Pages workflow does not fail closed on reviewed release approval before building and uploading.");
+}
+// the site itself: Cloudflare Pages gets the worker bundle built from src/ and public/ only
+const apiWorkflow = await readFile(resolve(root, ".github", "workflows", "api.yml"), "utf8");
+if (!/command:\s*pages deploy \.pages-api-dist /u.test(apiWorkflow) || apiWorkflow.indexOf("npm run release:deploy-check") < 0
+  || apiWorkflow.indexOf("npm run release:deploy-check") > apiWorkflow.indexOf("pages deploy")) {
+  throw new Error("The site and API workflow must check the reviewed release, then deploy .pages-api-dist only.");
 }
 
 console.log(JSON.stringify({
@@ -127,7 +135,8 @@ console.log(JSON.stringify({
   projectFileLimitBytes: MAX_FILE_BYTES,
   projectRepositoryLimitBytes: MAX_REPOSITORY_BYTES,
   projectPublishedSiteLimitBytes: MAX_PUBLISHED_SITE_BYTES,
-  githubPagesUploadRoot: "public",
+  githubPagesUploadRoot: ".github-forwarder",
+  sitePagesUploadRoot: ".pages-api-dist (public/ + _worker.js + _routes.json)",
   privatePathsFound: 0,
   credentialFilesFound: 0,
   packetOrProtoFilesFound: 0,

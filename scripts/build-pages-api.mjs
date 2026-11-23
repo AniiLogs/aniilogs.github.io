@@ -1,9 +1,11 @@
 // game-audit: n/a build script; only blocks private game data from the bundle
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { siteRoutes } from "./site-routes.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const sourceRoot = resolve(root, "src");
+const publicRoot = resolve(root, "public");
 const outputRoot = resolve(root, ".pages-api-dist");
 let source = await readFile(resolve(sourceRoot, "index.js"), "utf8");
 
@@ -31,12 +33,16 @@ if (/\b_private\b|\b[A-Z]:\\|PMDATA|bundle[-_ ]index/iu.test(source)) {
   throw new Error("API source contains a private extraction reference.");
 }
 
+// The site's files (public/) are served by the same Pages project, next to the worker: https://aniilogs.app is the
+// site, https://aniilogs-api.pages.dev the API (both hosts answer both). public/_headers gives the static files their
+// security headers; _routes.json (scripts/site-routes.mjs) keeps them off the worker.
+const routes = await siteRoutes(publicRoot);
+await rm(outputRoot, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
-await rm(resolve(outputRoot, "_worker.js"), { recursive: true, force: true });
+await cp(publicRoot, outputRoot, { recursive: true });
 await writeFile(resolve(outputRoot, "_worker.js"), source, "utf8");
-await writeFile(
-  resolve(outputRoot, "index.html"),
-  "<!doctype html><meta charset=utf-8><meta name=robots content=noindex><title>AniiLogs API</title><p>AniiLogs account API</p>\n",
-  "utf8",
-);
-console.log(JSON.stringify({ status: "built", output: outputRoot, inlined: modules, workerBytes: Buffer.byteLength(source) }));
+await writeFile(resolve(outputRoot, "_routes.json"), `${JSON.stringify(routes, null, 2)}\n`, "utf8");
+console.log(JSON.stringify({
+  status: "built", output: outputRoot, inlined: modules, workerBytes: Buffer.byteLength(source),
+  routes: { include: routes.include.length, exclude: routes.exclude.length },
+}));

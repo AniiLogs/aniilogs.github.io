@@ -1,7 +1,14 @@
-name: Deploy AniiLogs to GitHub Pages
+name: Deploy the aniilogs.github.io forwarder to GitHub Pages
 
+# The site itself is served from https://aniilogs.app by the Cloudflare Pages project (api.yml deploys public/ with the
+# API). GitHub Pages keeps the old address as a forwarder: every page and every other address (404.html) sends the
+# visitor to the same path, query and #fragment on https://aniilogs.app (scripts/build-github-forwarder.mjs).
+
+# It runs once the site and API deploy (api.yml) has succeeded, so the old address only forwards to a site that is up.
 on:
-  push:
+  workflow_run:
+    workflows: ["Deploy AniiLogs API to Cloudflare Pages"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -14,6 +21,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,16 +29,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Install pinned validation dependencies
         run: npm ci
       - name: Verify reviewed release and deployment approval
         run: npm run release:deploy-check
+      - name: Build the forwarder
+        run: npm run forwarder:build
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-      - name: Upload public site
+      - name: Upload the forwarder
         uses: actions/upload-pages-artifact@v5
         with:
-          path: public
+          path: .github-forwarder
 
   deploy:
     needs: build

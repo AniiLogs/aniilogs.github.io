@@ -111,6 +111,47 @@ export async function readGlyphPack(block, bytes) {
 }
 const PACK_RETRY_MS = 5 * 60 * 1000;
 
+// The small page a link-preview crawler is given: Open Graph and Twitter tags (a 1200x630 card when there is an image)
+// and a line or two for anyone who opens it without being sent on. Shared by every short link (/lb/, /a/, /m/).
+export function linkPage(status, { title, description = "", url = null, image = null, imageAlt = "", body, tabTitle = title }) {
+  const meta = [
+    ["name", "description", description], ["name", "theme-color", "#f5eecb"], ["name", "robots", "noindex"],
+    ["property", "og:site_name", "AniiLogs"], ["property", "og:type", "website"], ["property", "og:title", title],
+    ["property", "og:description", description], url && ["property", "og:url", url],
+    image && ["property", "og:image", image], image && ["property", "og:image:type", "image/png"],
+    image && ["property", "og:image:width", String(CARD_WIDTH)], image && ["property", "og:image:height", String(CARD_HEIGHT)],
+    image && ["property", "og:image:alt", imageAlt], ["name", "twitter:card", image ? "summary_large_image" : "summary"],
+    ["name", "twitter:title", title], ["name", "twitter:description", description], image && ["name", "twitter:image", image],
+  ].filter(Boolean).filter(([, , value]) => value !== "");
+  const html = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n`
+    + `<title>${escapeHtml(tabTitle)}</title>\n`
+    + meta.map(([attr, name, value]) => `<meta ${attr}="${escapeHtml(name)}" content="${escapeHtml(value)}">`).join("\n")
+    + `\n<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1215;color:#f4f4e9;font:16px/1.5 Inter,system-ui,sans-serif}`
+    + `main{max-width:32rem;padding:24px 16px}a{color:#62d9b3}p{color:#9bb5b2}</style>\n</head>\n<body>\n<main>\n${body}\n</main>\n</body>\n</html>\n`;
+  return new Response(html, { status, headers: {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": status === 200 ? "public, max-age=60" : "no-store",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "referrer-policy": "strict-origin-when-cross-origin", "x-content-type-options": "nosniff", vary: "user-agent",
+  } });
+}
+export const escapeLinkHtml = escapeHtml;
+
+// Link-preview crawlers say who they are; anyone else is a person and is sent straight on.
+export const LINK_CRAWLER = /bot\b|bot\/|crawler|spider|facebookexternalhit|facebot|embedly|iframely|slack|discord|telegram|whatsapp|skypeuripreview|vkshare|mastodon|bluesky|cardyb|preview/iu;
+export const isLinkCrawler = (request) => LINK_CRAWLER.test(request.headers.get("user-agent") || "");
+
+// The address links are made on: LINK_ORIGIN (the site's own domain once it is attached to this project, e.g.
+// https://aniilogs.app) or, unset, the host the request came to.
+export const linkOriginOf = (request, env) => (/^https:\/\/[a-z0-9.-]+$/u.test(String(env.LINK_ORIGIN || ""))
+  ? String(env.LINK_ORIGIN) : new URL(request.url).origin);
+
+// A card picture: for a year when the address names the exact look (?v=), else for five minutes
+export const cardPngResponse = (body, immutable) => new Response(body, { status: 200, headers: {
+  "content-type": "image/png", "cache-control": immutable ? "public, max-age=31536000, immutable" : "public, max-age=300",
+  "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'",
+} });
+
 export function createPlacementLinks({ boardData, copyGroupSql, json, browserWriteAllowed, readJsonBody, siteOrigin, drawCard, runPlayers = null,
   packBlocks = null }) {
   const packs = new Map();                               // block -> { at, letters: Promise<Map | null> }
@@ -246,41 +287,16 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     return `${siteOrigin(env)}${BOARDS_PATH}?${params}`;
   }
 
-  function page(status, { title, description = "", url = null, image = null, imageAlt = "", body, tabTitle = title }) {
-    const meta = [
-      ["name", "description", description], ["name", "theme-color", "#f5eecb"], ["name", "robots", "noindex"],
-      ["property", "og:site_name", "AniiLogs"], ["property", "og:type", "website"], ["property", "og:title", title],
-      ["property", "og:description", description], url && ["property", "og:url", url],
-      image && ["property", "og:image", image], image && ["property", "og:image:type", "image/png"],
-      image && ["property", "og:image:width", String(CARD_WIDTH)], image && ["property", "og:image:height", String(CARD_HEIGHT)],
-      image && ["property", "og:image:alt", imageAlt], ["name", "twitter:card", image ? "summary_large_image" : "summary"],
-      ["name", "twitter:title", title], ["name", "twitter:description", description], image && ["name", "twitter:image", image],
-    ].filter(Boolean).filter(([, , value]) => value !== "");
-    const html = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n`
-      + `<title>${escapeHtml(tabTitle)}</title>\n`
-      + meta.map(([attr, name, value]) => `<meta ${attr}="${escapeHtml(name)}" content="${escapeHtml(value)}">`).join("\n")
-      + `\n<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1215;color:#f4f4e9;font:16px/1.5 Inter,system-ui,sans-serif}`
-      + `main{max-width:32rem;padding:24px 16px}a{color:#62d9b3}p{color:#9bb5b2}</style>\n</head>\n<body>\n<main>\n${body}\n</main>\n</body>\n</html>\n`;
-    return new Response(html, { status, headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": status === 200 ? "public, max-age=60" : "no-store",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-      "referrer-policy": "strict-origin-when-cross-origin", "x-content-type-options": "nosniff", vary: "user-agent",
-    } });
-  }
+  const page = linkPage;
   function unavailable(env) {
     const boards = `${siteOrigin(env)}${BOARDS_PATH}`;
     return page(404, { title: "This run isn't available · AniiLogs", description: "This run isn't on the AniiLogs boards.",
       body: `<h1>This run isn't available</h1>\n<p>It may have left the boards.</p>\n<p><a href="${escapeHtml(boards)}">Open the leaderboards</a></p>` });
   }
 
-  // Link-preview crawlers say who they are; anyone else is a person and goes straight to the run on the boards.
-  const CRAWLER = /bot\b|bot\/|crawler|spider|facebookexternalhit|facebot|embedly|iframely|slack|discord|telegram|whatsapp|skypeuripreview|vkshare|mastodon|bluesky|cardyb|preview/iu;
-
-  // The address links are made on: LINK_ORIGIN (the site's own domain once it is attached to this project, e.g.
-  // https://aniilogs.app) or, unset, the host the request came to.
-  const linkOrigin = (request, env) => (/^https:\/\/[a-z0-9.-]+$/u.test(String(env.LINK_ORIGIN || ""))
-    ? String(env.LINK_ORIGIN) : new URL(request.url).origin);
+  // a crawler gets the preview; a person goes straight to the run on the boards
+  const CRAWLER = LINK_CRAWLER;
+  const linkOrigin = linkOriginOf;
 
   async function open(request, env, code) {
     const link = await linkOf(env, code);
@@ -300,10 +316,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
       body: `<h1>${escapeHtml(title)}</h1>\n<p>${escapeHtml(description)}</p>\n<p><a href="${escapeHtml(target)}">Open it on AniiLogs</a></p>` });
   }
 
-  const pngResponse = (body, immutable) => new Response(body, { status: 200, headers: {
-    "content-type": "image/png", "cache-control": immutable ? "public, max-age=31536000, immutable" : "public, max-age=300",
-    "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'",
-  } });
+  const pngResponse = cardPngResponse;
 
   // The card: kept in R2 under the link, the place and a hash of everything it shows, so the same look is drawn once
   // and a new place (or a changed name or figure) draws a new one. ?p=&v= (from the preview's tags) finds a kept one

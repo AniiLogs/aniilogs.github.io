@@ -75,10 +75,11 @@ class Picture {
       at = this.palette.length; this.palette.push(rgb);
     } else {                                   // full: the nearest colour already in the image
       let best = Infinity;
-      this.palette.forEach(([r, g, b], i) => {
-        const d = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2;
+      for (let i = 0; i < this.palette.length; i += 1) {
+        const c = this.palette[i];
+        const d = (c[0] - rgb[0]) ** 2 + (c[1] - rgb[1]) ** 2 + (c[2] - rgb[2]) ** 2;
         if (d < best) { best = d; at = i; }
-      });
+      }
     }
     this.index.set(key, at);
     return at;
@@ -434,5 +435,357 @@ export async function drawPlacementCard(model, letters) {
     if (model.stars != null) p.text("★", W - PAD - Math.min(lineWidth, 520) - 10, 524, "body", COLORS.gold, { align: "right" });
   }
   if (model.extra) p.text(model.extra, W - PAD, 566, "small", COLORS.soft, { align: "right", max: 560 });
+  return p.png();
+}
+
+// ---------------------------------------------------------------- pictures on the cards (Aniimo art, map art)
+// A PNG read back into pixels: 8-bit greyscale, RGB, palette, grey+alpha or RGBA, not interlaced (what the content
+// release's icons and the map bases of scripts/build-map-card-bases.mjs are). Returns { width, height, rgba }; a
+// palette picture gives { width, height, palette: [[r, g, b]...], indices } instead (one byte a pixel), so a picture
+// already cut to a few colours keeps them (and costs no more than its bytes). Throws on anything else. options: inflate (bytes -> bytes; default the runtime's
+// DecompressionStream) and maxPixels (default 4096 x 4096).
+const PNG_CHANNELS = Object.freeze({ 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 });
+export async function decodePng(bytes, { inflate = null, maxPixels = 4096 * 4096 } = {}) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (data.length < 33 || signature.some((byte, i) => data[i] !== byte)) throw new Error("Not a PNG picture.");
+  let at = 8; let header = null; let palette = null; let alpha = null; const parts = [];
+  while (at + 8 <= data.length) {
+    const length = view.getUint32(at); const type = String.fromCharCode(...data.subarray(at + 4, at + 8));
+    const body = data.subarray(at + 8, at + 8 + length);
+    if (body.length !== length) throw new Error("A PNG chunk is cut short.");
+    if (type === "IHDR") header = { width: view.getUint32(at + 8), height: view.getUint32(at + 12), depth: body[8], type: body[9], interlace: body[12] };
+    else if (type === "PLTE") palette = body;
+    else if (type === "tRNS") alpha = body;
+    else if (type === "IDAT") parts.push(body);
+    else if (type === "IEND") break;
+    at += 12 + length;
+  }
+  const channels = header ? PNG_CHANNELS[header.type] : undefined;
+  if (!header || header.depth !== 8 || !channels || header.interlace) throw new Error("Only 8-bit, not interlaced PNG pictures are read.");
+  const { width, height } = header;
+  if (!width || !height || width * height > maxPixels) throw new Error("The PNG picture is too large.");
+  const packed = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) { packed.set(part, offset); offset += part.length; }
+  const raw = inflate ? await inflate(packed)
+    : new Uint8Array(await new Response(new Blob([packed]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
+  const stride = width * channels;
+  if (raw.length < (stride + 1) * height) throw new Error("The PNG picture's data is cut short.");
+  const pixels = new Uint8Array(stride * height);
+  const zero = new Uint8Array(stride);
+  for (let y = 0; y < height; y += 1) {                 // undo each row's filter
+    const filter = raw[y * (stride + 1)]; const from = y * (stride + 1) + 1; const to = y * stride;
+    const line = raw.subarray(from, from + stride); const out = pixels.subarray(to, to + stride);
+    const above = y ? pixels.subarray(to - stride, to) : zero;
+    const c = channels;
+    if (filter === 0) out.set(line);
+    else if (filter === 1) {
+      for (let x = 0; x < c; x += 1) out[x] = line[x];
+      for (let x = c; x < stride; x += 1) out[x] = line[x] + out[x - c];
+    } else if (filter === 2) {
+      for (let x = 0; x < stride; x += 1) out[x] = line[x] + above[x];
+    } else if (filter === 3) {
+      for (let x = 0; x < c; x += 1) out[x] = line[x] + (above[x] >> 1);
+      for (let x = c; x < stride; x += 1) out[x] = line[x] + ((out[x - c] + above[x]) >> 1);
+    } else if (filter === 4) {
+      for (let x = 0; x < c; x += 1) out[x] = line[x] + above[x];
+      for (let x = c; x < stride; x += 1) {
+        const left = out[x - c]; const up = above[x]; const corner = above[x - c];
+        const pa = Math.abs(up - corner); const pb = Math.abs(left - corner); const pc = Math.abs(left + up - 2 * corner);
+        out[x] = line[x] + (pa <= pb && pa <= pc ? left : pb <= pc ? up : corner);
+      }
+    } else throw new Error("The PNG picture has an unknown row filter.");
+  }
+  if (header.type === 3 && palette) {                  // a palette picture: its colours and indices (no rgba)
+    const colours = Array.from({ length: palette.length / 3 }, (_, i) => [palette[i * 3], palette[i * 3 + 1], palette[i * 3 + 2]]);
+    return { width, height, palette: colours, indices: pixels, alpha };
+  }
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0, o = 0; i < pixels.length; i += channels, o += 4) {
+    if (header.type === 3) {
+      const c = pixels[i];
+      rgba[o] = palette?.[c * 3] ?? 0; rgba[o + 1] = palette?.[c * 3 + 1] ?? 0; rgba[o + 2] = palette?.[c * 3 + 2] ?? 0;
+      rgba[o + 3] = alpha && c < alpha.length ? alpha[c] : 255;
+    } else if (channels <= 2) {
+      rgba[o] = rgba[o + 1] = rgba[o + 2] = pixels[i]; rgba[o + 3] = channels === 2 ? pixels[i + 1] : 255;
+    } else {
+      rgba[o] = pixels[i]; rgba[o + 1] = pixels[i + 1]; rgba[o + 2] = pixels[i + 2]; rgba[o + 3] = channels === 4 ? pixels[i + 3] : 255;
+    }
+  }
+  return { width, height, rgba };
+}
+
+// The colours a picture is drawn in (the card holds 256): median cut over 5-bit colour boxes, weighted by how many
+// pixels have each. colours: a Uint32Array of 32768 counts, by (r >> 3) << 10 | (g >> 3) << 5 | b >> 3. Returns the
+// boxes' mean colours, at most `count` of them.
+export function medianCut(colours, count) {
+  let boxes = [];
+  const keys = [];
+  for (let key = 0; key < 32768; key += 1) if (colours[key]) keys.push(key);
+  if (!keys.length) return [];
+  const channel = (key, c) => (c === 0 ? key >> 10 : c === 1 ? (key >> 5) & 31 : key & 31);
+  const describe = (list) => {
+    const lo = [31, 31, 31]; const hi = [0, 0, 0]; let weight = 0;
+    for (const key of list) {
+      weight += colours[key];
+      for (let c = 0; c < 3; c += 1) { const v = channel(key, c); if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
+    }
+    const spans = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    const widest = spans.indexOf(Math.max(...spans));
+    return { list, weight, widest, span: spans[widest] };
+  };
+  boxes.push(describe(keys));
+  while (boxes.length < count) {
+    // split the box with the most weight that can still be split (by its widest channel, at its weighted median)
+    let pick = -1; let best = -1;
+    boxes.forEach((box, i) => { const score = box.span ? box.weight * box.span : -1; if (score > best) { best = score; pick = i; } });
+    if (pick < 0) break;
+    const box = boxes[pick];
+    const sorted = box.list.slice().sort((a, b) => channel(a, box.widest) - channel(b, box.widest));
+    let half = 0; let cut = 0;
+    while (cut < sorted.length - 1 && half + colours[sorted[cut]] <= box.weight / 2) { half += colours[sorted[cut]]; cut += 1; }
+    cut = Math.max(1, cut);
+    boxes = [...boxes.slice(0, pick), describe(sorted.slice(0, cut)), describe(sorted.slice(cut)), ...boxes.slice(pick + 1)];
+  }
+  return boxes.map(({ list, weight }) => {
+    const sum = [0, 0, 0];
+    for (const key of list) for (let c = 0; c < 3; c += 1) sum[c] += ((channel(key, c) << 3) | 4) * colours[key];
+    return sum.map((value) => Math.round(value / weight));
+  });
+}
+
+// Puts a picture (rgba, width x height) into the card at x, y, scaled to w x h, over the flat colour `under` (what the
+// card shows there), in at most `count` colours of its own. The colours are worked out at the picture's own size and
+// the result is scaled by repeating pixels: a link preview shows the card at about a third of its size, where that
+// can't be told from smooth scaling, at a quarter of the work (the API has about 10 ms a request).
+function placeArt(p, art, x, y, w, h, under, count) {
+  const { width: sw, height: sh, rgba } = art;
+  const keys = new Int32Array(sw * sh).fill(-1);        // each source pixel's 5-bit colour box over `under`
+  const colours = new Uint32Array(32768);
+  const [ur, ug, ub] = under;
+  for (let i = 0, o = 0; o < keys.length; i += 4, o += 1) {
+    const alpha = rgba[i + 3];
+    if (alpha < 6) continue;
+    const a = alpha / 255; const rest = 1 - a;
+    const key = (((rgba[i] * a + ur * rest) >> 3) << 10) | (((rgba[i + 1] * a + ug * rest) >> 3) << 5) | ((rgba[i + 2] * a + ub * rest) >> 3);
+    keys[o] = key;
+    colours[key] += 1;
+  }
+  const palette = medianCut(colours, count).map((rgb) => p.color(rgb));
+  const nearest = new Int16Array(32768).fill(-1);
+  for (let key = 0; key < 32768; key += 1) {            // each box used: its nearest colour of the picture's own
+    if (!colours[key]) continue;
+    const r = ((key >> 10) << 3) | 4; const g = (((key >> 5) & 31) << 3) | 4; const b = ((key & 31) << 3) | 4;
+    let best = Infinity; let pick = 0;
+    for (const index of palette) {
+      const c = p.palette[index];
+      const d = (c[0] - r) ** 2 + (c[1] - g) ** 2 + (c[2] - b) ** 2;
+      if (d < best) { best = d; pick = index; }
+    }
+    nearest[key] = pick;
+  }
+  const cols = new Int32Array(w);
+  for (let tx = 0; tx < w; tx += 1) cols[tx] = Math.min(sw - 1, Math.floor(((tx + 0.5) * sw) / w));
+  for (let ty = 0; ty < h; ty += 1) {
+    const py = y + ty;
+    if (py < 0 || py >= p.height) continue;
+    const row = Math.min(sh - 1, Math.floor(((ty + 0.5) * sh) / h)) * sw;
+    for (let tx = 0; tx < w; tx += 1) {
+      const key = keys[row + cols[tx]]; const px = x + tx;
+      if (key >= 0 && px >= 0 && px < p.width) p.raw[py * p.stride + 1 + px] = nearest[key];
+    }
+  }
+}
+
+// A palette picture (the map bases) copied in as it is: its colours become the card's, each pixel a scale x scale
+// square, at x, y. A row is drawn once and copied for the rest of its square.
+function placeIndexed(p, art, x, y, scale = 1) {
+  const map = art.palette.map((rgb) => p.color(rgb));
+  for (let row = 0; row < art.height; row += 1) {
+    const py = y + row * scale;
+    if (py < 0 || py + scale > p.height) continue;
+    const start = py * p.stride + 1;
+    for (let col = 0; col < art.width; col += 1) {
+      const px = x + col * scale;
+      if (px < 0 || px + scale > p.width) continue;
+      const c = map[art.indices[row * art.width + col]] ?? 0;
+      for (let k = 0; k < scale; k += 1) p.raw[start + px + k] = c;
+    }
+    for (let k = 1; k < scale; k += 1) p.raw.copyWithin(start + k * p.stride + x, start + x, start + x + art.width * scale);
+  }
+}
+
+// The card's letters lack a few marks game text uses: long dashes, curly quotes and the ellipsis become their plain kin
+export const cardText = (value) => String(value ?? "").replace(/[—―]/gu, "–").replace(/[‘’ʼ]/gu, "'").replace(/[“”]/gu, '"')
+  .replace(/…/gu, "...").replace(/\s+/gu, " ").trim();
+// words laid out in lines at most `width` wide; the last line ends "..." when there was more
+function wrapLines(p, text, font, width, lines) {
+  const words = cardText(text).split(" ").filter(Boolean);
+  const out = [];
+  let line = "";
+  for (let i = 0; i < words.length; i += 1) {
+    const next = line ? `${line} ${words[i]}` : words[i];
+    if (p.measure(next, font) <= width || !line) { line = next; continue; }
+    out.push(line); line = words[i];
+    if (out.length === lines) { line = ""; out[lines - 1] = `${out[lines - 1]} ${words.slice(i).join(" ")}`; break; }
+  }
+  if (line) out.push(line);
+  return out.slice(0, lines);
+}
+const hexRgb = (hex) => (/^#[0-9a-f]{6}$/iu.test(String(hex || "")) ? [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) : null);
+// a colour lifted towards white until it reads on the dark card
+function readable(rgb) {
+  const light = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  let c = rgb.slice();
+  for (let i = 0; i < 6 && light(c) < 120; i += 1) c = c.map((v) => Math.round(v + (255 - v) * 0.22));
+  return c;
+}
+function brand(p) {
+  const width = p.text("Anii", 64, 104, "title", COLORS.ink);
+  p.text("Logs", 64 + width + 2, 104, "title", COLORS.mint);
+}
+// a pill on the top line, right-aligned at `right`; returns its left edge
+function topPill(p, label, right, rgb) {
+  const w = p.measure(label, "label", 2) + 44;
+  p.pill(right - w, 62, w, 50, rgb, COLORS.paper, 3);
+  p.text(label, right - w / 2, 95, "label", rgb === COLORS.soft ? COLORS.ink : rgb, { align: "center", spacing: 2 });
+  return right - w;
+}
+
+// An Aniimo's card: its art on the left, the name, form, elements and role, a few facts and the Aniilog's own words on
+// the right. model: { name, form ("Highland Form"), number ("#001"), elements: [{ label, color: "#e03d3d" }], role,
+// facts: ["0.9 m · 12 kg"], description }; art: a decoded picture ({ width, height, rgba }) or null.
+export async function drawAniimoCard(model, letters, art = null) {
+  const p = background(await atlas(letters));
+  p.extra = letters.extra || null;
+  const W = CARD_WIDTH; const PAD = 64;
+  brand(p);
+  const number = String(model.number || "").replace(/[^0-9]/gu, "");
+  topPill(p, number ? `ANIILOG ${number}` : "ANIILOG", W - PAD, COLORS.soft);
+  // the art, in a panel
+  const box = { x: PAD, y: 150, size: 416 };
+  p.round(box.x, box.y, box.size, box.size, 32, COLORS.line);
+  p.round(box.x + 2, box.y + 2, box.size - 4, box.size - 4, 30, COLORS.panel);
+  const firstColor = readable(hexRgb(model.elements?.[0]?.color) || COLORS.mint);
+  if (art) {
+    const room = box.size - 40;
+    const scale = Math.min(room / art.width, room / art.height);
+    const w = Math.round(art.width * scale); const h = Math.round(art.height * scale);
+    placeArt(p, art, box.x + Math.round((box.size - w) / 2), box.y + Math.round((box.size - h) / 2), w, h, COLORS.panel, 150);
+  } else {                                               // no art in the release: the name's first letter
+    const letter = [...cardText(model.name || "?")][0] || "?";
+    p.round(box.x + 128, box.y + 128, 160, 160, 80, firstColor);
+    p.round(box.x + 134, box.y + 134, 148, 148, 74, COLORS.panel);
+    p.text(letter.toUpperCase(), box.x + box.size / 2, box.y + box.size / 2 + 19, "title", firstColor, { align: "center" });
+  }
+  // the name and form
+  const left = box.x + box.size + 48; const room = W - PAD - left;
+  const name = cardText(model.name || "Aniimo");
+  p.text(name, left, 214, cardTitleFont((font) => p.measure(name, font), room), COLORS.ink, { max: room });
+  if (model.form) p.text(cardText(model.form), left, 262, "body", COLORS.soft, { max: room });
+  // elements and role as pills
+  let x = left;
+  const pills = [...(model.elements || []).map((element) => [cardText(element.label).toUpperCase(), readable(hexRgb(element.color) || COLORS.soft)]),
+    ...(model.role ? [[cardText(model.role).toUpperCase(), COLORS.soft]] : [])];
+  for (const [label, rgb] of pills) {
+    const w = p.measure(label, "label", 2) + 40;
+    if (x + w > W - PAD) break;
+    p.pill(x, 292, w, 46, rgb, COLORS.paper, 3);
+    p.text(label, x + w / 2, 323, "label", rgb === COLORS.soft ? COLORS.ink : rgb, { align: "center", spacing: 2 });
+    x += w + 12;
+  }
+  // facts, then the Aniilog's description
+  let y = 390;
+  for (const fact of (model.facts || []).slice(0, 2)) {
+    p.text(cardText(fact), left, y, "small", COLORS.soft, { max: room });
+    y += 38;
+  }
+  p.fill(left, y - 14, room, 2, COLORS.line);
+  y += 30;
+  for (const line of wrapLines(p, model.description || "", "small", room, Math.max(1, Math.floor((582 - y) / 36) + 1))) {
+    p.text(line, left, y, "small", COLORS.ink, { max: room });
+    y += 36;
+  }
+  return p.png();
+}
+
+// The map card's picture room. The map bases (scripts/build-map-card-bases.mjs) are made at half its size and drawn
+// doubled: a link preview shows the card at about a third of its size, so nothing is lost there, and a doubled picture
+// costs the API a quarter of the work to draw and about half to pack (every second row repeats the one above).
+export const MAP_CARD_BOX = Object.freeze({ x: 456, y: 56, width: 680, height: 518 });
+export const MAP_BASE_SCALE = 2;
+// A map pin link's card: how many pins and on which map on the left, the map with the pins on it on the right.
+// model: { count, map ("Breezy Plains"), world ("Idyll"), kinds (how many kinds of pin), aspect (map width / height),
+// points: [x0, y0, x1, y1, ...] each 0..9999 across the map }; base: the map's decoded palette picture, or null (a
+// plain plate in the map's shape then).
+export async function drawMapCard(model, letters, base = null) {
+  const p = background(await atlas(letters));
+  p.extra = letters.extra || null;
+  const PAD = 64; const BOX = MAP_CARD_BOX;
+  brand(p);
+  // the map, or a plate in its shape
+  let area;
+  const S = MAP_BASE_SCALE;
+  if (base?.indices && base.width * S <= BOX.width && base.height * S <= BOX.height) {
+    const w = base.width * S; const h = base.height * S;
+    area = { x: BOX.x + Math.round((BOX.width - w) / 2), y: BOX.y + Math.round((BOX.height - h) / 2), w, h };
+    p.fill(area.x - 2, area.y - 2, area.w + 4, area.h + 4, COLORS.line);
+    placeIndexed(p, base, area.x, area.y, S);
+  } else {
+    const aspect = Number(model.aspect) > 0 ? Number(model.aspect) : BOX.width / BOX.height;
+    const w = Math.round(Math.min(BOX.width, BOX.height * aspect)); const h = Math.round(Math.min(BOX.height, BOX.width / aspect));
+    area = { x: BOX.x + Math.round((BOX.width - w) / 2), y: BOX.y + Math.round((BOX.height - h) / 2), w, h };
+    p.round(area.x - 2, area.y - 2, area.w + 4, area.h + 4, 18, COLORS.line);
+    p.round(area.x, area.y, area.w, area.h, 16, COLORS.panel);
+    for (let gx = 1; gx < 8; gx += 1) p.fill(area.x + Math.round((area.w * gx) / 8), area.y + 12, 1, area.h - 24, COLORS.line);
+    for (let gy = 1; gy < 6; gy += 1) p.fill(area.x + 12, area.y + Math.round((area.h * gy) / 6), area.w - 24, 1, COLORS.line);
+  }
+  // the pins: a gold dot with a dark ring, smaller when there are many
+  const points = Array.isArray(model.points) ? model.points : [];
+  const dots = points.length / 2;
+  const r = dots > 600 ? 3 : dots > 150 ? 4 : dots > 40 ? 6 : 8;
+  const ring = p.color(COLORS.paper); const dot = p.color(COLORS.gold);
+  // a disc as [dx, dy, coverage 1..15] once, then stamped at every pin
+  const disc = (radius) => {
+    const out = [];
+    for (let dy = -radius - 1; dy <= radius; dy += 1) {
+      for (let dx = -radius - 1; dx <= radius; dx += 1) {
+        const level = Math.round(Math.max(0, Math.min(1, radius + 0.5 - Math.hypot(dx + 0.5, dy + 0.5))) * 15);
+        if (level) out.push(dx, dy, level);
+      }
+    }
+    return out;
+  };
+  const centres = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    const px = Number(points[i]); const py = Number(points[i + 1]);
+    if (!(px >= 0 && px <= 9999 && py >= 0 && py <= 9999)) continue;
+    centres.push(area.x + Math.round((px / 9999) * (area.w - 1)), area.y + Math.round((py / 9999) * (area.h - 1)));
+  }
+  for (const [stamp, colour] of [[disc(r + 2), ring], [disc(r), dot]]) {
+    for (let i = 0; i < centres.length; i += 2) {
+      for (let k = 0; k < stamp.length; k += 3) p.put(centres[i] + stamp[k], centres[i + 1] + stamp[k + 1], colour, stamp[k + 2]);
+    }
+  }
+  // the count, the map's name and where it is
+  const room = BOX.x - PAD - 40;
+  const count = Math.max(0, Math.floor(Number(model.count) || 0));
+  p.text(count.toLocaleString("en-US"), PAD - 4, 292, "figure", COLORS.gold, { max: room });
+  p.text(count === 1 ? "PIN ON" : "PINS ON", PAD, 336, "label", COLORS.soft, { spacing: 2 });
+  const mapName = cardText(model.map || "the AniiLogs map");
+  // the largest title size that shows the whole name on two lines; else three lines at the smallest, cut if need be
+  const fits = (name, lines) => wrapLines(p, mapName, name, room, lines).every((line) => p.measure(line, name) <= room);
+  const font = CARD_TITLE_FONTS.find((name) => fits(name, 2)) || "title36";
+  let y = 396;
+  const lineHeight = CARD_FONTS[font].size + 6;
+  for (const line of wrapLines(p, mapName, font, room, font === "title36" ? 3 : 2)) {
+    p.text(line, PAD, y, font, COLORS.ink, { max: room });
+    y += lineHeight;
+  }
+  const detail = [model.world ? cardText(model.world) : null, model.kinds > 1 ? `${model.kinds} kinds of pin` : null].filter(Boolean).join(" · ");
+  if (detail) p.text(detail, PAD, Math.max(y + 8, 520), "small", COLORS.soft, { max: room });
+  p.text("Interactive map", PAD, 566, "small", COLORS.mint, { max: room });
   return p.png();
 }

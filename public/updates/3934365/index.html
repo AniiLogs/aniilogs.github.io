@@ -5,33 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="What Aniimo's Aniimo Dash update (game build 3934365) changed, from the game's own files, and how AniiLogs followed: balance, world, renames and every site tool.">
     <meta name="theme-color" content="#f5eecb">
+    <!-- Not deferred, and before the stylesheets: the saved theme is on <html> before the first paint (carry-in.js first: settings brought from the old address). -->
+    <script src="/carry-in.js?v=0.1.0"></script>
+    <script src="/theme-shell.js?v=0.3.5-site-menu"></script>
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <title>Game update: Aniimo Dash (build 3934365) · AniiLogs</title>
-    <link rel="canonical" href="https://aniilogs.github.io/updates/3934365/">
+    <link rel="canonical" href="https://aniilogs.app/updates/3934365/">
     <meta property="og:site_name" content="AniiLogs">
     <meta property="og:type" content="article">
     <meta property="og:title" content="Game update: Aniimo Dash (build 3934365) · AniiLogs">
     <meta property="og:description" content="What Aniimo's Aniimo Dash update (game build 3934365) changed, from the game's own files, and how AniiLogs followed: balance, world, renames and every site tool.">
-    <meta property="og:url" content="https://aniilogs.github.io/updates/3934365/">
-    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:url" content="https://aniilogs.app/updates/3934365/">
+    <meta property="og:image" content="https://aniilogs.app/icons/og-card.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <link rel="stylesheet" href="/styles.css?v=0.13.6-dots-behind">
     <link rel="stylesheet" href="/updates/updates.css?v=0.2.1">
-    <link rel="stylesheet" href="/site-chrome.css?v=0.1.5-embed-corner">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.6-site-menu">
     <link rel="stylesheet" href="/notifications.css?v=0.1.0">
     <link rel="stylesheet" href="/run-checks.css?v=0.1.0">
     <script src="/explorer/app-config.js?v=20261119-build3989635-r96" defer></script>
-    <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
     <script src="/site-chrome.js?v=0.1.0" defer></script>
     <script src="/icons/alogs-loader.js?v=0.4.0" defer></script>
     <script src="/notifications.js?v=0.1.0" defer></script>
     <script src="/run-checks.js?v=0.1.0" defer></script>
-    <script src="/aniimo-link.js?v=0.1.1" defer></script>
+    <script src="/aniimo-link.js?v=0.1.2" defer></script>
     <script src="/updates/updates.js?v=0.1.0" defer></script>
   </head>
   <body class="site-chrome-page">
@@ -53,15 +55,6 @@
         <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
       </nav>
       <div class="app-topbar-actions">
-        <label class="theme-picker-label">
-          <span class="theme-picker-copy">Theme</span>
-          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
-            <option value="default">Night</option>
-            <option value="meadow">Meadow</option>
-            <option value="emberpup">Emberpup</option>
-            <option value="pawney">Pawney</option>
-          </select>
-        </label>
         <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
           <option value="en">🇺🇸</option>
           <option value="de-DE">🇩🇪</option>
@@ -77,10 +70,24 @@
           <option value="zh-CN">🇨🇳</option>
           <option value="zh-TW">🇹🇼</option>
         </select>
-        <a class="settings-gear-button" href="/explorer/?settings=1" data-settings-shortcut aria-label="Open settings" title="Settings">
+        <details class="account-menu site-menu" data-site-menu data-settings-shortcut>
+          <summary class="settings-gear-button" aria-label="Settings and theme" title="Settings">
           <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
-          <span class="settings-gear-label">Settings</span>
-        </a>
+            <span class="settings-gear-label">Settings</span>
+          </summary>
+          <div class="account-menu-popover">
+            <label class="menu-theme-picker">
+              <span>Theme</span>
+              <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+                <option value="default">Night</option>
+                <option value="meadow">Meadow</option>
+                <option value="emberpup">Emberpup</option>
+                <option value="pawney">Pawney</option>
+              </select>
+            </label>
+            <a href="/explorer/?settings=1">All settings</a>
+          </div>
+        </details>
         <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
           <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
           <span>Sign in</span>
@@ -92,6 +99,15 @@
             <span class="account-menu-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div class="account-menu-popover">
+            <label class="menu-theme-picker">
+              <span>Theme</span>
+              <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+                <option value="default">Night</option>
+                <option value="meadow">Meadow</option>
+                <option value="emberpup">Emberpup</option>
+                <option value="pawney">Pawney</option>
+              </select>
+            </label>
             <a href="/?view=profile" data-profile-link hidden>My Profile</a>
             <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
             <a href="/explorer/?settings=1">Settings</a>

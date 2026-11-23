@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="The Aniilog: turn every Aniimo and its forms around in 3D. Plus the AniiLogs map of Aniimo, with Lumin Amber and chests.">
     <meta name="theme-color" content="#1a1f22">
+    <!-- Not deferred, and before the stylesheets: the saved theme is on <html> before the first paint (carry-in.js first: settings brought from the old address). -->
+    <script src="/carry-in.js?v=0.1.0"></script>
+    <script src="/theme-shell.js?v=0.3.5-site-menu"></script>
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -13,13 +16,13 @@
     <meta property="og:type" content="website">
     <meta property="og:title" content="Aniilog — Every Aniimo in 3D · AniiLogs">
     <meta property="og:description" content="The Aniilog: turn every Aniimo and its forms around in 3D. Plus the AniiLogs map of Aniimo, with Lumin Amber and chests.">
-    <meta property="og:url" content="https://aniilogs.github.io/explorer/?view=aniilog">
-    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:url" content="https://aniilogs.app/explorer/?view=aniilog">
+    <meta property="og:image" content="https://aniilogs.app/icons/og-card.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
-    <link rel="stylesheet" href="./styles.css?v=0.21.36-skill-tags">
+    <link rel="stylesheet" href="./styles.css?v=0.21.37-short-links">
     <link rel="stylesheet" href="/notifications.css?v=0.1.0">
     <link rel="stylesheet" href="/run-checks.css?v=0.1.0">
   </head>
@@ -41,15 +44,6 @@
         <a id="topNavProfiles" href="/?view=profile">Profiles</a>
       </nav>
       <div class="app-topbar-actions">
-        <label class="theme-picker-label">
-          <span class="theme-picker-copy">Theme</span>
-          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
-            <option value="default">Night</option>
-            <option value="meadow">Meadow</option>
-            <option value="emberpup">Emberpup</option>
-            <option value="pawney">Pawney</option>
-          </select>
-        </label>
         <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
           <option value="en">🇺🇸</option>
           <option value="de-DE">🇩🇪</option>
@@ -83,6 +77,15 @@
             <span class="account-menu-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div class="account-menu-popover">
+            <label class="menu-theme-picker">
+              <span>Theme</span>
+              <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+                <option value="default">Night</option>
+                <option value="meadow">Meadow</option>
+                <option value="emberpup">Emberpup</option>
+                <option value="pawney">Pawney</option>
+              </select>
+            </label>
             <a id="topbarProfileLink" href="/?view=profile" hidden>My Profile</a>
             <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
             <button id="topbarDeveloperButton" type="button" hidden>Developer</button>
@@ -303,8 +306,7 @@
     </div>
 
   <script defer src="./app-config.js?v=20261119-build3989635-r96"></script>
-  <script defer src="../theme-shell.js?v=0.3.4-fresh-reload"></script>
-  <script defer src="../aniimo-link.js?v=0.1.1"></script>
+  <script defer src="../aniimo-link.js?v=0.1.2"></script>
   <script defer src="./localization.js?v=0.6.2-lumin-amber-element-search"></script>
   <script defer src="./progress-storage.js?v=0.2.0"></script>
   <script defer src="./view-model-catalog.js?v=0.1.0-build3634150"></script>
@@ -322,7 +324,7 @@
   <script defer src="./skill-tags.js?v=0.1.0"></script>
   <script defer src="./build-card.js?v=0.2.7-enhanced"></script>
   <script defer src="./team-builder.js?v=0.9.15-bugged-note"></script>
-  <script defer src="./app.js?v=0.20.48-skill-tags"></script>
+  <script defer src="./app.js?v=0.20.49-short-links"></script>
   <script defer src="/notifications.js?v=0.1.0"></script>
   <script defer src="/run-checks.js?v=0.1.0"></script>
   </body>

@@ -3,8 +3,8 @@
 // and the run viewer. window.AniilogsShare:
 //   button({ run, ladder, player, code }): a small link button. A click asks the API for the placement's link (made the
 //     first time), copies it and says "Link copied"; code: a link already known (a page opened from one).
-//     On aniilogs.github.io the copied link is the site's own aniilogs.github.io/lb/<code> (short-link.js, opened by
-//     /404.html), so it doesn't name the API's host; elsewhere, or without short-link.js, it's the API's /<code> link.
+//     The copied link is the site's own <linkOrigin>/lb/<code> (app-config.js; the worker answers it with the Discord
+//     card), or the API's /<code> link when no linkOrigin is set.
 //   tag(realPlayers): "Solo", "Duo" or "Trio" when the run had bots in the team (the API's realPlayers), else null.
 (() => {
   const siteConfig = window.ANIILOGS_CONFIG || {};
@@ -43,15 +43,12 @@
     }
   }
 
-  // "https://aniilogs.github.io/lb" on aniilogs.github.io (short-link.js), else "": the API's own link
-  const shortBase = () => { try { return window.AniilogsShortLink?.base(window.location) || ""; } catch { return ""; } };
-
   // the site's own link domain (app-config.js linkOrigin), which shows the card in Discord and has no "dev" in it
   const linkBase = () => { try { return String(window.ANIILOGS_CONFIG?.linkOrigin || "").replace(/\/+$/u, ""); } catch { return ""; } };
 
   async function linkFor(target) {
     if (target.code && linkBase()) return `${linkBase()}/lb/${target.code}`;
-    if (target.code) return shortBase() ? `${shortBase()}/${target.code}` : `${new URL(API_URL).origin}/${target.code}`;
+    if (target.code) return `${new URL(API_URL).origin}/${target.code}`;
     const key = `${target.run}|${target.ladder}|${target.player || ""}`;
     if (!known.has(key)) {
       known.set(key, (async () => {
@@ -60,7 +57,7 @@
         if (!response.ok) throw new Error(response.status === 404 ? "gone" : "failed");
         const { code, url } = await response.json();
         if (linkBase() && CODE.test(String(code || ""))) return `${linkBase()}/lb/${code}`;
-        return shortBase() && CODE.test(String(code || "")) ? `${shortBase()}/${code}` : url;
+        return url;
       })().catch((error) => { known.delete(key); throw error; }));
     }
     return known.get(key);

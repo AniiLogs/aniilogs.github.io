@@ -1,4 +1,6 @@
 name: Deploy AniiLogs API to Cloudflare Pages
+# The project serves the site too (public/ on https://aniilogs.app), so a change to public/ deploys it; the
+# aniilogs.github.io forwarder (pages.yml) follows once this has succeeded.
 
 on:
   push:
@@ -6,7 +8,9 @@ on:
     paths:
       - ".github/workflows/api.yml"
       - "migrations/**"
+      - "public/**"
       - "scripts/build-pages-api.mjs"
+      - "scripts/site-routes.mjs"
       - "scripts/validate-live-api.mjs"
       - "scripts/validate-pages-api.mjs"
       - "scripts/validate-public-repository-boundary.mjs"

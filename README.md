@@ -5,9 +5,18 @@ Item-log, Discord-backed accounts, and opt-in public player profiles.
 
 ## Architecture
 
-- GitHub Pages serves the public website at `https://aniilogs.github.io`.
-- A Cloudflare Pages API at `https://aniilogs-api.pages.dev`, D1 database, and
-  private R2 bucket provide the backend without exposing the old account slug.
+- One Cloudflare Pages project, `aniilogs-api`, serves the public website at
+  `https://aniilogs.app` (the static files of `public/`) and the API at
+  `https://aniilogs-api.pages.dev/api` (the worker, `src/`), with a D1
+  database and a private R2 bucket. Both hosts answer both; the site calls the
+  API on `aniilogs-api.pages.dev` so Discord's registered redirect stays put.
+- `_routes.json` (made by `scripts/site-routes.mjs`) sends only `/api/*`,
+  `/lb`, `/lb/*`, `/a/*`, `/m/*`, root placement codes and unknown
+  addresses to the worker; the site's files are served directly, with the
+  headers in `public/_headers`.
+- `https://aniilogs.github.io` (GitHub Pages) is a forwarder: every page sends
+  the visitor to the same path, query and fragment on `https://aniilogs.app`
+  (`scripts/build-github-forwarder.mjs`).
 - Cloudflare D1 stores Discord identities, short-lived website sessions, and
   private-by-default profile settings.
 - Reviewed game-derived JSON and image assets live in the private
@@ -16,7 +25,7 @@ Item-log, Discord-backed accounts, and opt-in public player profiles.
   without exposing a bucket listing.
 - Discord OAuth requests only the `identify` scope. Access and refresh tokens
   are not retained after the identity lookup.
-- GitHub Pages receives a short-lived, one-time OAuth handoff in the URL
+- The site receives a short-lived, one-time OAuth handoff in the URL
   fragment, exchanges it once, and removes the fragment from browser history.
   API sessions use bearer tokens so the integration does not depend on blocked
   third-party cookies.
@@ -36,20 +45,24 @@ when testing Discord sign-in. Never commit `.dev.vars`.
 
 ## Deployment
 
-The primary public deployment is `https://aniilogs.github.io`. GitHub Actions
-publishes the reviewed contents of `public` whenever `main` changes. The
-account-level Cloudflare `workers.dev` hostname is not part of the public brand.
+The primary public deployment is `https://aniilogs.app`: `api.yml` deploys
+the reviewed contents of `public` together with the worker whenever `main`
+changes them, and `pages.yml` then publishes the `aniilogs.github.io`
+forwarder. The account-level Cloudflare `workers.dev` hostname is not part of
+the public brand. `npm run api:dev` (`wrangler pages dev`) serves the site
+and the API together locally.
 
 Discord sign-in uses the dedicated AniiLogs API origin. Configure:
 
 - `DISCORD_CLIENT_ID`
 - `DISCORD_CLIENT_SECRET` (secret)
 - `SESSION_SECRET` (secret, at least 32 random bytes)
-- `PUBLIC_SITE_ORIGIN=https://aniilogs.github.io`
+- `PUBLIC_SITE_ORIGIN=https://aniilogs.app`
 
 `apiUrl` in `public/explorer/app-config.js` is pinned to the dedicated API only
 after its health, CORS, D1 migrations, and privacy checks pass. The API accepts
-browser calls only from the exact configured site origin; wildcard CORS is not
+browser calls only from the exact configured site origin (and, while it
+forwards, the old `https://aniilogs.github.io`); wildcard CORS is not
 used for account or profile routes. Immutable, read-only R2 release objects use
 public read CORS so the local preview can load the same reviewed package.
 

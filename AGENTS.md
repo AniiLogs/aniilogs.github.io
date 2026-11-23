@@ -4,6 +4,9 @@
 - **`main` is protected: changes land by pull request** (merging deploys the public site). Claim a GitHub issue
   first, branch as `<github-name>/<topic>`, open the PR with `Closes #<issue>` and turn on auto-merge
   (`gh pr create --fill`, `gh pr merge --auto --squash`). It merges itself once the `site` check passes.
+- **The site is on https://aniilogs.app**, served with the API by the Cloudflare Pages project `aniilogs-api`
+  (`public/` next to the worker; `_routes.json` keeps static files off the worker; headers in `public/_headers`).
+  `https://aniilogs.github.io` only forwards there (`pages.yml`, `scripts/build-github-forwarder.mjs`).
 - Two developers share this repository. Follow the working agreement in the aLogs repository,
   https://github.com/AniiLogs/aLogs/blob/main/docs/working-together.md: claim an issue first, small short-lived
   branches, `git pull --rebase origin main` before pushing, never force-push.
@@ -12,8 +15,8 @@
 - **A PR that changes `public/` re-pins `release-review.json` in the same PR:** run `npm run release:validate`, and
   copy the three numbers its error prints (`publicFileCount`, `publicTotalBytes`, `publicTreeSha256`) into the file.
   The PR check fails until they match.
-- **The API isn't deployed by merging.** After a merged PR that changes `src/`, `migrations/` or `wrangler.jsonc`,
-  whoever merged it deploys from an up-to-date `main`: `npm run db:migrate:remote` first if it adds a migration, then
+- **The site and API deploy on merging** (`api.yml`, for `public/`, `src/`, `migrations/`, `wrangler.jsonc`).
+  To deploy by hand from an up-to-date `main`: `npm run db:migrate:remote` first if it adds a migration, then
   `npm run deploy`, then `npm run api:smoke -- --api-origin=https://aniilogs-api.pages.dev`. Say in the PR that it's
   deployed. Either developer may do this.
 - **Keep it cheap:**

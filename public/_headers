@@ -1,0 +1,13 @@
+# Cloudflare Pages: headers for the site's static files, which _routes.json serves without the worker (so the
+# worker's securityHeaders() never sees them). The policy is the worker's siteContentSecurityPolicy() in
+# src/index.js, letter for letter (test/site-move.test.js checks): the worker sends it on the pages it hands out.
+/*
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; connect-src 'self' blob: https://api.github.com https://aniilogs-api.pages.dev; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://aniilogs-renderer-qa-3634150.pages.dev; img-src 'self' data: blob: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com; media-src 'self' blob: https://aniilogs-api.pages.dev; object-src 'none'; script-src 'self' https://aniilogs-api.pages.dev; style-src 'self' 'unsafe-inline'
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# The API's own host serves the same files: search engines index the site on https://aniilogs.app only.
+https://aniilogs-api.pages.dev/*
+  X-Robots-Tag: noindex

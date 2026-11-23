@@ -276,10 +276,18 @@ const MAX_SHARED_PINS_PAYLOAD_LENGTH = 24000;
 const SHORT_SHARE_PARAM = "s";
 const TEAM_SHARE_PARAM = "team";
 const SHORT_SHARE_CODE_PATTERN = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/;
+// Map pin links, https://aniilogs.app/m/<code> (src/map-links.js): Share makes one; a link whose pins are too many for
+// the ?pins= address opens the map as ?pinlink=<code>, read from the API. The older 3-hour ?s= links still load.
+const PIN_LINK_PARAM = "pinlink";
+const PIN_LINK_CODE_PATTERN = /^[23456789abcdefghjkmnpqrstuvwxyz]{5}$/;
+const MAX_PIN_LINK_POINTS = 1500;
+// The address short links are copied on (app-config.js linkOrigin: the API's own domain, with no "dev" for the game's
+// chat to hide)
+const LINK_ORIGIN = String(SITE_CONFIG.linkOrigin || "").replace(/\/+$/u, "");
 const API_URL = String(
   SITE_CONFIG.apiUrl
   || SITE_CONFIG.shareApiUrl
-  || (window.location.hostname === "aniilogs.github.io" ? "" : `${window.location.origin}/api`),
+  || `${window.location.origin}/api`,
 ).replace(/\/+$/, "");
 const SHARE_API_URL = API_URL;
 const CLOUD_SYNC_ENABLED = Boolean(API_URL);
@@ -320,6 +328,9 @@ const REQUESTED_ANIIMO_ARTWORK = INITIAL_URL_PARAMS.get("artwork") === "1";
 const REQUESTED_SHARED_PIN_SELECTION = parseSharedPinSelection(INITIAL_URL_PARAMS.get(SHARED_PINS_PARAM));
 const REQUESTED_SHORT_SHARE_ID = SHORT_SHARE_CODE_PATTERN.test(INITIAL_URL_PARAMS.get(SHORT_SHARE_PARAM) || "")
   ? INITIAL_URL_PARAMS.get(SHORT_SHARE_PARAM)
+  : "";
+const REQUESTED_PIN_LINK_CODE = PIN_LINK_CODE_PATTERN.test(INITIAL_URL_PARAMS.get(PIN_LINK_PARAM) || "")
+  ? INITIAL_URL_PARAMS.get(PIN_LINK_PARAM)
   : "";
 const REQUESTED_TEAM_SHARE_ID = SHORT_SHARE_CODE_PATTERN.test(INITIAL_URL_PARAMS.get(TEAM_SHARE_PARAM) || "")
   ? INITIAL_URL_PARAMS.get(TEAM_SHARE_PARAM)
@@ -8725,6 +8736,36 @@ function renderAfpFormPills(entry) {
   return row;
 }
 
+// An Aniimo's short link, https://aniilogs.app/a/<slug> (src/aniimo-links.js: a person lands here, Discord shows its
+// card). The slugs come from the Aniilog's own released forms, made the way the API makes them (aniimo-link.js).
+let aniimoShortSlugs = null;
+function aniimoShortLink(entry) {
+  const id = String(entry?.form_id || "");
+  const entries = state.aniilogData?.entries || [];
+  if (!aniimoShortSlugs || aniimoShortSlugs.entries !== entries) {
+    const released = entries.filter((item) => !item?.availability);   // Developer Mode's extra records get none
+    aniimoShortSlugs = { entries, slugs: window.AniilogsAniimoLink?.shortSlugs?.(released) || new Map() };
+  }
+  const slug = aniimoShortSlugs.slugs.get(id);
+  if (slug && LINK_ORIGIN) return `${LINK_ORIGIN}/a/${slug}`;
+  return new URL(`/explorer/?aniimo=${encodeURIComponent(id)}`, window.location.origin).href;
+}
+
+async function copyAniimoLink(button, link) {
+  const copied = await copyText(link);
+  if (!copied) {
+    window.prompt("Copy this link:", link);                 // no clipboard here: the link itself, to copy by hand
+    return;
+  }
+  window.clearTimeout(button.copyResetTimer);
+  button.textContent = "Link copied";
+  button.classList.add("copied");
+  button.copyResetTimer = window.setTimeout(() => {
+    button.textContent = "Copy link";
+    button.classList.remove("copied");
+  }, 1800);
+}
+
 function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
@@ -8778,8 +8819,18 @@ function renderAniilogCatalogRecord(entry) {
     locate.textContent = "Locate on Map";
     locate.addEventListener("click", () => locateAniilogEntry(entry));
     actions.append(locate);
-    identity.append(actions);
   }
+  if (!entry.availability) {
+    const link = aniimoShortLink(entry);
+    const copyLink = document.createElement("button");
+    copyLink.type = "button";
+    copyLink.className = "catalog-copy-link-button";
+    copyLink.textContent = "Copy link";
+    copyLink.title = `Copy ${link}`;
+    copyLink.addEventListener("click", () => copyAniimoLink(copyLink, link));
+    actions.append(copyLink);
+  }
+  if (actions.childElementCount) identity.append(actions);
   record.append(identity);
   record.append(renderAniilogFormGrid(entry));
   return record;
@@ -10916,6 +10967,8 @@ function syncMobileCatalogStickyIdentity() {
     stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button, .catalog-hide-artwork-button").forEach((button) => {
       button.addEventListener("click", () => identity.querySelector(`.${button.classList[0]}`)?.click());
     });
+    // and its Copy link the real one (which shows "Link copied")
+    stickyIdentity.querySelector(".catalog-copy-link-button")?.addEventListener("click", () => identity.querySelector(".catalog-copy-link-button")?.click());
     // So do its form chips (same order as the header's).
     const sourceForms = identity.querySelectorAll(".afp-form");
     stickyIdentity.querySelectorAll(".afp-form").forEach((button, index) => {
@@ -13531,12 +13584,59 @@ function sharedPinSelectionForActiveMap() {
   };
 }
 
-function shortSharedPinUrl(id) {
+// The pins in the address itself (?pins=v1.<base64url JSON>, read by parseSharedPinSelection): what Share copies when
+// the short link can't be made. "" when they are too many for it.
+function longSharedPinUrl(selection) {
+  const bytes = new TextEncoder().encode(JSON.stringify(sharedPinPayload(selection)));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  const value = `v${SHARED_PINS_VERSION}.${window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+  if (value.length > MAX_SHARED_PINS_PAYLOAD_LENGTH) return "";
   const url = new URL(window.location.href);
   url.search = "";
   url.hash = "";
-  url.searchParams.set(SHORT_SHARE_PARAM, id);
+  url.searchParams.set(SHARED_PINS_PARAM, value);
   return url.href;
+}
+
+// Where the shared pins are, for the link's preview card: { count, points: [x, y, ...] } each 0..9999 across the map,
+// at most MAX_PIN_LINK_POINTS of them (evenly picked when there are more)
+function sharedPinPoints() {
+  const points = [];
+  let count = 0;
+  activeMapItems().forEach((item) => {
+    const selection = itemSelectionState(item.item_id);
+    if (!selection.selected) return;
+    selection.entries.forEach(({ spawn }) => {
+      if (state.disabledSpawnIds.has(spawnSelectionId(spawn))) return;
+      count += 1;
+      const x = Number(spawn.normalized?.x); const y = Number(spawn.normalized?.y);
+      if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1) points.push(Math.round(x * 9999), Math.round(y * 9999));
+    });
+  });
+  const pairs = points.length / 2;
+  if (pairs <= MAX_PIN_LINK_POINTS) return { count, points };
+  const picked = [];
+  for (let i = 0; i < MAX_PIN_LINK_POINTS; i += 1) {
+    const at = Math.floor((i * pairs) / MAX_PIN_LINK_POINTS) * 2;
+    picked.push(points[at], points[at + 1]);
+  }
+  return { count, points: picked };
+}
+
+// POST /api/map-links: the pins' short link (https://aniilogs.app/m/<code>); throws when it can't be made
+async function createPinLink(selection) {
+  if (!API_URL) throw new Error("The AniiLogs API is not configured.");
+  const response = await fetch(`${API_URL}/map-links`, {
+    method: "POST",
+    credentials: "omit",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ version: SHARED_PINS_VERSION, selection: sharedPinPayload(selection), ...sharedPinPoints() }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !PIN_LINK_CODE_PATTERN.test(body?.code || "")) throw new Error(body?.error || `Map links returned ${response.status}`);
+  if (LINK_ORIGIN) return `${LINK_ORIGIN}/m/${body.code}`;
+  return /^https:\/\//u.test(String(body.url || "")) ? String(body.url) : `${API_URL.replace(/\/api$/u, "")}/m/${body.code}`;
 }
 
 function sharedPinPayload(selection) {
@@ -13553,7 +13653,40 @@ function setSharePinsNotice(message = "", tone = "info") {
   els.sharePinsNotice.hidden = !message;
 }
 
+// ?pinlink=<code>: a map pin link whose pins didn't fit the address (src/map-links.js)
+async function loadRequestedPinLink() {
+  if (!API_URL) {
+    setSharePinsNotice("This pin link can't be loaded right now.", "error");
+    return;
+  }
+  setSharePinsNotice("Loading shared pins…");
+  try {
+    const response = await fetch(`${API_URL}/map-links/${REQUESTED_PIN_LINK_CODE}`, {
+      credentials: "omit",
+      headers: { accept: "application/json" },
+    });
+    if (response.status === 404) {
+      setSharePinsNotice("This pin link was not found.", "error");
+      return;
+    }
+    if (!response.ok) throw new Error(`Map links returned ${response.status}`);
+    const body = await response.json();
+    const selection = normalizeSharedPinPayload(body?.selection);
+    if (!selection) throw new Error("Shared pin data is invalid");
+    state.pendingSharedPinSelection = selection;
+    state.activeMapId = selection.mapId;
+    setSharePinsNotice("Shared pins loaded.", "success");
+  } catch (error) {
+    console.error("Could not load a pin link", error);
+    setSharePinsNotice("The shared pins could not be loaded. Please try again.", "error");
+  }
+}
+
 async function loadRequestedShortShareSelection() {
+  if (REQUESTED_PIN_LINK_CODE) {
+    await loadRequestedPinLink();
+    return;
+  }
   if (!REQUESTED_SHORT_SHARE_ID) return;
   if (!SHARE_API_URL) {
     setSharePinsNotice("This short pin link cannot be loaded until the share service is configured.", "error");
@@ -13636,7 +13769,7 @@ function updateSharePinsButton() {
   const count = selectedPinCount();
   els.sharePinsButton.disabled = state.sharePinsBusy || count === 0;
   els.sharePinsButton.title = count
-    ? "Copy a short link that expires after 3 hours"
+    ? "Copy a link to these pins"
     : "Select at least one pin to create a link";
 }
 
@@ -13660,37 +13793,28 @@ async function copySharedPinLink() {
     setSharePinsFeedback("Select at least one pin", 1500);
     return;
   }
-  if (!SHARE_API_URL) {
-    setSharePinsFeedback("Short-link service is not configured", 4000, "error");
-    return;
-  }
   state.sharePinsBusy = true;
   window.clearTimeout(state.sharePinsResetTimer);
-  els.sharePinsButton.textContent = "Creating short link…";
-  els.sharePinsStatus.textContent = "Creating short link";
-  setSharePinsNotice("Creating a 3-hour link…");
+  els.sharePinsButton.textContent = "Creating link…";
+  els.sharePinsStatus.textContent = "Creating link";
+  setSharePinsNotice("Creating a link…");
   updateSharePinsButton();
   try {
-    const response = await apiFetch("/v1/shares", {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        version: SHARED_PINS_VERSION,
-        selection: sharedPinPayload(selection),
-      }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || !SHORT_SHARE_CODE_PATTERN.test(body?.id || "")) {
-      throw new Error(body?.error || `Share service returned ${response.status}`);
+    // the short link; if it can't be made, the long one with the pins in it
+    let link = "";
+    try {
+      link = await createPinLink(selection);
+    } catch (error) {
+      console.error("Could not create a short pin link", error);
     }
-    const copied = await copyText(shortSharedPinUrl(body.id));
-    setSharePinsFeedback(copied ? "3-hour link copied" : "Could not copy short link", 2600, copied ? "success" : "error");
-  } catch (error) {
-    console.error("Could not create short pin link", error);
-    setSharePinsFeedback("Could not create short link", 3500, "error");
+    const short = Boolean(link);
+    if (!link) link = longSharedPinUrl(selection);
+    if (!link) {
+      setSharePinsFeedback("Too many pins for one link", 3500, "error");
+      return;
+    }
+    const copied = await copyText(link);
+    setSharePinsFeedback(copied ? (short ? "Link copied" : "Long link copied") : "Could not copy the link", 2600, copied ? "success" : "error");
   } finally {
     state.sharePinsBusy = false;
     updateSharePinsButton();
@@ -16083,6 +16207,7 @@ function switchMap(mapId, preserveSharedPins = false) {
   if (!preserveSharedPins) {
     url.searchParams.delete(SHARED_PINS_PARAM);
     url.searchParams.delete(SHORT_SHARE_PARAM);
+    url.searchParams.delete(PIN_LINK_PARAM);
   }
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   state.selectedPin = null;
@@ -16775,7 +16900,7 @@ async function init() {
   renderChecklist();
   renderSettings();
   renderMapTabs();
-  switchMap(state.activeMapId, Boolean(state.pendingSharedPinSelection || REQUESTED_SHORT_SHARE_ID));
+  switchMap(state.activeMapId, Boolean(state.pendingSharedPinSelection || REQUESTED_SHORT_SHARE_ID || REQUESTED_PIN_LINK_CODE));
   if (REQUESTED_SETTINGS_OPEN) {
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete("settings");

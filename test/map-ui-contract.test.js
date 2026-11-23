@@ -115,8 +115,9 @@ test("Aniimo without verified wild locations do not offer Locate on Map", () => 
 test("named and custom themes share one site-wide preference", () => {
   assert.match(landingHtml, /data-site-theme-select/u);
   assert.match(explorerHtml, /data-site-theme-select/u);
-  assert.match(landingHtml, /class="theme-picker-copy">Theme</u);
-  assert.match(explorerHtml, /class="theme-picker-copy">Theme</u);
+  // the picker sits in the header's menus (account menu; signed out, the gear's menu on the other pages)
+  assert.match(landingHtml, /<label class="menu-theme-picker">\s*<span>Theme<\/span>/u);
+  assert.match(explorerHtml, /<label class="menu-theme-picker">\s*<span>Theme<\/span>/u);
   assert.match(landingHtml, /theme-shell\.js/u);
   assert.match(explorerHtml, /theme-shell\.js/u);
   assert.match(themeShell, /aniilogs:explorer:preferences:v1/u);
@@ -330,7 +331,7 @@ test("Team Builder mounts the skill and synergy builder from reviewed release da
   assert.match(teamBuilder, /\["types", "Type matchups"\]/u);
   assert.match(teamBuilder, /function formsWithTypes\(types\)/u);
   assert.doesNotMatch(teamBuilder, /2×|½×/u);
-  assert.match(explorerHtml, /styles\.css\?v=0.21.36-skill-tags/u);
+  assert.match(explorerHtml, /styles\.css\?v=0.21.37-short-links/u);
   assert.match(teamBuilder, /matchups\.groups\(matchups\.row\(data\.elements, types, mode\)\)/u);
   // Recommended partners strip, Skills | Build | Stats member tabs; stats use duel.js's grownStat on the
   // Aniilog's stat_growth, and unreleased partners or items only come from the Developer Mode overlay.

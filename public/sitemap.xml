@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://aniilogs.github.io/leaderboard/</loc></url>
-  <url><loc>https://aniilogs.github.io/companion/</loc></url>
-  <url><loc>https://aniilogs.github.io/guides/</loc></url>
-  <url><loc>https://aniilogs.github.io/updates/3989635/</loc></url>
-  <url><loc>https://aniilogs.github.io/updates/3973445/</loc></url>
-  <url><loc>https://aniilogs.github.io/updates/3934365/</loc></url>
-  <url><loc>https://aniilogs.github.io/guides/?guide=damage</loc></url>
-  <url><loc>https://aniilogs.github.io/guides/?guide=interlink</loc></url>
-  <url><loc>https://aniilogs.github.io/explorer/?view=aniilog</loc></url>
-  <url><loc>https://aniilogs.github.io/</loc></url>
-  <url><loc>https://aniilogs.github.io/explorer/</loc></url>
-  <url><loc>https://aniilogs.github.io/privacy.html</loc></url>
+  <url><loc>https://aniilogs.app/leaderboard/</loc></url>
+  <url><loc>https://aniilogs.app/companion/</loc></url>
+  <url><loc>https://aniilogs.app/guides/</loc></url>
+  <url><loc>https://aniilogs.app/updates/3989635/</loc></url>
+  <url><loc>https://aniilogs.app/updates/3973445/</loc></url>
+  <url><loc>https://aniilogs.app/updates/3934365/</loc></url>
+  <url><loc>https://aniilogs.app/guides/?guide=damage</loc></url>
+  <url><loc>https://aniilogs.app/guides/?guide=interlink</loc></url>
+  <url><loc>https://aniilogs.app/explorer/?view=aniilog</loc></url>
+  <url><loc>https://aniilogs.app/</loc></url>
+  <url><loc>https://aniilogs.app/explorer/</loc></url>
+  <url><loc>https://aniilogs.app/privacy</loc></url>
 </urlset>

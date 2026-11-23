@@ -275,7 +275,7 @@
     if (team.length) drawTeam(ctx, team, teamImages, spec.mode);
 
     // Footer.
-    text(ctx, spec.footer || "aniilogs.github.io", WIDTH - 40, height - 24, { size: 14, color: COLORS.muted, align: "right" });
+    text(ctx, spec.footer || "aniilogs.app", WIDTH - 40, height - 24, { size: 14, color: COLORS.muted, align: "right" });
     text(ctx, [spec.slot, "aLogs Team Builder"].filter(Boolean).join(" · "), left, height - 24, { size: 14, weight: 700, color: COLORS.accent });
     return canvas;
   }

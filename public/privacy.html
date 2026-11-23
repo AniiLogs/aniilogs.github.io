@@ -5,24 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="How AniiLogs handles Discord identity, progress, profiles, and shared map links.">
     <meta name="theme-color" content="#f5eecb">
+    <!-- Not deferred, and before the stylesheets: the saved theme is on <html> before the first paint (carry-in.js first: settings brought from the old address). -->
+    <script src="/carry-in.js?v=0.1.0"></script>
+    <script src="/theme-shell.js?v=0.3.5-site-menu"></script>
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <title>Privacy — AniiLogs</title>
-    <link rel="canonical" href="https://aniilogs.github.io/privacy.html">
+    <link rel="canonical" href="https://aniilogs.app/privacy">
     <meta property="og:site_name" content="AniiLogs">
     <meta property="og:type" content="website">
     <meta property="og:title" content="Privacy — AniiLogs">
     <meta property="og:description" content="How AniiLogs handles Discord identity, progress, profiles, and shared map links.">
-    <meta property="og:url" content="https://aniilogs.github.io/privacy.html">
-    <meta property="og:image" content="https://aniilogs.github.io/icons/og-card.png">
+    <meta property="og:url" content="https://aniilogs.app/privacy">
+    <meta property="og:image" content="https://aniilogs.app/icons/og-card.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
     <meta name="twitter:card" content="summary_large_image">
     <link rel="stylesheet" href="/styles.css?v=0.9.1-header-language">
     <script src="/explorer/app-config.js?v=20261119-build3989635-r96" defer></script>
-    <script src="/theme-shell.js?v=0.3.4-fresh-reload" defer></script>
     <script src="/explorer/localization.js?v=0.6.2-lumin-amber-element-search" data-auto-start="true" defer></script>
     <style>
       .privacy-main { max-width: 820px; padding: 5rem 0 7rem; }
@@ -92,7 +94,8 @@
           <li>Discord sign-in requests expire after 10 minutes.</li>
           <li>One-time browser handoffs expire after 5 minutes and are consumed once.</li>
           <li>A signed-in AniiLogs session expires after 30 days.</li>
-          <li>Map share links expire after 3 hours and expose only the selected map pins, never the creator's Discord identity.</li>
+          <li>Older map share links (made while signed in) expire after 3 hours and expose only the selected map pins, never the creator's Discord identity.</li>
+          <li>Map pin links (aniilogs.app/m/…) are kept for good and hold only the selected map pins and where they sit; no account is stored with them. A one-way hash of the sharer's network address is kept for a day to limit how many links one network makes, then wiped.</li>
         </ul>
       </section>
 

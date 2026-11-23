@@ -1954,7 +1954,7 @@
       research: (form?.form_research || []).filter((row) => researched.has(String(row.form_id))).map((row) => row.form_label || "Form"),
       aniilog: { forms: member.formsCaught ?? 1, total: forms > 1 ? forms : 0, prismana: member.prismanaCaught ?? 0 },
       coreUpgraded: Boolean(member.coreUpgraded),
-      footer: `aniilogs.github.io${build ? ` · game build ${build}` : ""}`,
+      footer: `aniilogs.app${build ? ` · game build ${build}` : ""}`,
     };
   }
 

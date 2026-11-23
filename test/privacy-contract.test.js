@@ -65,7 +65,8 @@ test("the public site discloses its unofficial status and links its privacy poli
   assert.match(privacy, /Profiles are public by default, and you choose who sees yours/u);
   assert.match(privacy, /A part you keep private is never sent to anyone else/u);
   assert.match(privacy, /Leaderboard entries are public/u);
-  assert.match(privacy, /Map share links expire after 3 hours/u);
+  assert.match(privacy, /map share links \(made while signed in\) expire after 3 hours/u);
+  assert.match(privacy, /Map pin links \(aniilogs\.app\/m\/…\) are kept for good[^<]*no account is stored[^<]*kept for a day[^<]*then wiped/u);
 });
 
 test("account deletion is confirmed, comprehensive, and exposed through CORS", () => {
