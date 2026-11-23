@@ -11,6 +11,7 @@ import worker from "../src/index.js";
 import { aniimoLinkIndex, aniimoSlugs, describeAniimo, findAniimo, slugPart } from "../src/aniimo-links.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "../src/card-glyphs.js";
 import { cardText, decodePng, drawAniimoCard, medianCut } from "../src/placement-card.js";
+import { linkPage } from "../src/placement-links.js";
 
 const LETTERS = { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS };
 const ORIGIN = "https://aniilogs.github.io";
@@ -64,6 +65,18 @@ const ENTRIES = [
   { form_id: "9000500", name: "Quote \"<b>\" Mon", form_key: "basic", form_label: "Basic Form", aniilog_number: "#905", elements: [], role: "HEALER",
     description: "Says <script>alert(1)</script> & more.", skills: [] },
 ];
+// what the search page shows: the basic Testpup's stats, skills, traits, home abilities, places, evolution, research
+Object.assign(ENTRIES[0], {
+  stats: [{ label: "HP", value: 67 }, { label: "Attack", value: 90 }],
+  skills: [{ ...SKILL("Fire", "#e03d3d"), name: "Test Bolt", group: "Skill", description: "Throws a made-up <bolt>." }],
+  ultimates: [{ name: "Test Star", description: "A made-up ultimate." }],
+  traits: [{ name: "Test Trait", description: "Made up too." }],
+  homeland: [{ name: "Hauling", description: "Carries things home." }],
+  explore_ability: { name: "Hustle" },
+  locations: [{ map_label: "Test Plains", areas: ["North Field", "South Field"] }],
+  evolution: { from: [], to: [{ id: "aniimo:9000400" }] },
+  aniilog_research: [{ name: "Test Research", objective: "Take a photo of Testpup." }],
+});
 const DATA = { entries: ENTRIES, element_labels: { Fire: "Fire", Rock: "Earth", Holy: "Light" } };
 
 function setup({ data = DATA, icon = iconPng(), env: extra = {} } = {}) {
@@ -162,10 +175,46 @@ test("a crawler gets the preview: the name, short facts, the link on aniilogs.ap
   assert.match(odd, /Quote &quot;&lt;b&gt;&quot; Mon/u);
 });
 
+test("search engines get the Aniimo's page: indexed, canonical on aniilogs.app, with the Aniilog's facts; link previews too", async () => {
+  const { env } = setup();
+  const google = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+  const bing = "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)";
+  for (const ua of [google, bing, DISCORD_UA]) assert.equal((await call(env, "/a/testpup", { ua })).status, 200, ua);
+  const html = await (await call(env, "/a/testpup", { ua: google })).text();
+  assert.doesNotMatch(html, /noindex/u);
+  assert.match(html, /<link rel="canonical" href="https:\/\/aniilogs\.app\/a\/testpup">/u);
+  assert.match(html, /<title>Testpup - Aniimo stats, skills and where to find it · AniiLogs<\/title>/u);
+  assert.match(html, /<img src="https:\/\/api\.aniilogs\.example\/api\/content\/releases\/3535596\/assets\/icons\/testpup\.png"/u);
+  for (const words of ["<h1>Testpup</h1>", "<th>Attack</th><td>90</td>", "<strong>Test Bolt (Skill, Fire)</strong> - Throws a made-up &lt;bolt&gt;.",
+    "<strong>Test Star (Ultimate)</strong>", "<strong>Test Trait</strong> - Made up too.", "<strong>Hauling</strong>", "Exploration: Hustle",
+    "<strong>Test Plains</strong> - North Field, South Field", "<strong>Test Research</strong> - Take a photo of Testpup.",
+    "<h2>Evolves into</h2>", `<a href="https://aniilogs.app/a/eclair-mon">Éclair Mon</a>`,
+    `<a href="https://aniilogs.app/a/testpup-highland">Testpup (Highland Form)</a>`,
+    `<a href="${ORIGIN}/explorer/?aniimo=9000100">Open Testpup in the 3D Aniilog</a>`]) assert.ok(html.includes(words), words);
+  assert.doesNotMatch(html, /Evolves from/u);                     // no section without anything in it
+  // the other short links' pages (/lb/, /m/) stay out of search results
+  const other = await linkPage(200, { title: "A run", url: "https://aniilogs.app/lb/abcde", body: "" }).text();
+  assert.match(other, /<meta name="robots" content="noindex">/u);
+  assert.doesNotMatch(other, /canonical/u);
+});
+
+test("the Aniimo sitemap lists every form's /a/ page on aniilogs.app, and robots.txt names it", async () => {
+  const { env } = setup();
+  const response = await call(env, "/api/sitemap/aniimo.xml");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /^application\/xml/u);
+  const locs = [...(await response.text()).matchAll(/<loc>([^<]+)<\/loc>/gu)].map((match) => match[1]);
+  assert.equal(locs.length, ENTRIES.length);
+  assert.ok(locs.includes("https://aniilogs.app/a/testpup-highland"));
+  assert.ok(locs.every((loc) => /^https:\/\/aniilogs\.app\/a\/[a-z0-9-]+$/u.test(loc)));
+  assert.equal((await call(setup({ env: { CONTENT_RELEASE_ENABLED: "false" } }).env, "/api/sitemap/aniimo.xml")).status, 503);
+  assert.match(readFileSync(new URL("../public/robots.txt", import.meta.url), "utf8"), /^Sitemap: https:\/\/aniilogs\.app\/api\/sitemap\/aniimo\.xml\r?$/mu);
+});
+
 test("the index is made from the release once and kept in R2; the next isolate reads only the small copy", async () => {
   const { env, reads, objects } = setup();
   await call(env, "/a/testpup");
-  const key = `link-index/aniimo-v1-${RELEASE}.json`;
+  const key = `link-index/aniimo-v2-${RELEASE}.json`;
   assert.ok(objects.has(key));
   assert.equal(JSON.parse(Buffer.from(objects.get(key).bytes).toString()).forms.length, ENTRIES.length);
   const before = reads.filter((read) => read.endsWith("aniilog_data.json")).length;

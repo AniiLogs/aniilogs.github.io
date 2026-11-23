@@ -3,3 +3,4 @@ Allow: /
 
 Sitemap: https://aniilogs.app/sitemap.xml
 Sitemap: https://aniilogs.app/api/sitemap/profiles.xml
+Sitemap: https://aniilogs.app/api/sitemap/aniimo.xml
