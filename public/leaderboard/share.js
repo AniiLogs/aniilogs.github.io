@@ -50,7 +50,7 @@
   const linkBase = () => { try { return String(window.ANIILOGS_CONFIG?.linkOrigin || "").replace(/\/+$/u, ""); } catch { return ""; } };
 
   async function linkFor(target) {
-    if (target.code && linkBase()) return `${linkBase()}/${target.code}`;
+    if (target.code && linkBase()) return `${linkBase()}/lb/${target.code}`;
     if (target.code) return shortBase() ? `${shortBase()}/${target.code}` : `${new URL(API_URL).origin}/${target.code}`;
     const key = `${target.run}|${target.ladder}|${target.player || ""}`;
     if (!known.has(key)) {
@@ -59,7 +59,7 @@
           body: JSON.stringify({ run: target.run, ladder: target.ladder, ...(target.player ? { player: target.player } : {}) }) });
         if (!response.ok) throw new Error(response.status === 404 ? "gone" : "failed");
         const { code, url } = await response.json();
-        if (linkBase() && CODE.test(String(code || ""))) return `${linkBase()}/${code}`;
+        if (linkBase() && CODE.test(String(code || ""))) return `${linkBase()}/lb/${code}`;
         return shortBase() && CODE.test(String(code || "")) ? `${shortBase()}/${code}` : url;
       })().catch((error) => { known.delete(key); throw error; }));
     }
