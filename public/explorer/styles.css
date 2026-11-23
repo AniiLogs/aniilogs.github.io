@@ -7083,7 +7083,8 @@ select option:hover {
   margin-left: 0;
 }
 
-.catalog-locate-button {
+.catalog-locate-button,
+.catalog-copy-link-button {
   min-height: 36px;
   border-color: rgba(var(--accent-rgb), 0.68);
   background: rgba(var(--accent-rgb), 0.1);
@@ -8868,7 +8869,8 @@ select option:hover {
   pointer-events: auto;
 }
 
-.catalog-mobile-sticky-identity.is-stuck .catalog-locate-button {
+.catalog-mobile-sticky-identity.is-stuck .catalog-locate-button,
+.catalog-mobile-sticky-identity.is-stuck .catalog-copy-link-button {
   min-height: 34px;
   padding: 0 9px;
   font-size: 11px;
@@ -9048,7 +9050,8 @@ select option:hover {
   display: block;
 }
 
-.catalog-aniilog-record.is-showcase .catalog-locate-button {
+.catalog-aniilog-record.is-showcase .catalog-locate-button,
+.catalog-aniilog-record.is-showcase .catalog-copy-link-button {
   display: none;
 }
 
@@ -10738,7 +10741,8 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     align-self: flex-start;
   }
 
-  .catalog-locate-button {
+  .catalog-locate-button,
+  .catalog-copy-link-button {
     padding: 0 9px;
   }
 
@@ -11248,7 +11252,8 @@ body.aniilog-artwork-mode .catalog-aniilog-record.is-showcase > :not(.catalog-an
     line-height: 1;
   }
 
-  .catalog-mobile-sticky-identity .catalog-locate-button {
+  .catalog-mobile-sticky-identity .catalog-locate-button,
+  .catalog-mobile-sticky-identity .catalog-copy-link-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;

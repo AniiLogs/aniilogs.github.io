@@ -102,10 +102,34 @@
     return pair;
   }
 
+  // Short links (https://aniilogs.app/a/<slug>, src/aniimo-links.js): every form's slug, made exactly as the API makes
+  // them (aniimoSlugs there; test/aniimo-short-links.test.js keeps the two the same). The name in lower case, letters
+  // and digits joined by "-"; a form other than the basic one adds its form's name; forms are named in form id order and
+  // a slug already taken gets the form id after it. entries: the Aniilog's released forms. Map form id -> slug.
+  function slugPart(text) {
+    return String(text ?? "").normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase().replace(/&/gu, " and ")
+      .replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "");
+  }
+  function shortSlugs(entries) {
+    const forms = [...(entries || [])].filter((entry) => /^\d{1,12}$/u.test(String(entry?.form_id ?? "")))
+      .sort((a, b) => Number(a.form_id) - Number(b.form_id));
+    const taken = new Set(); const slugs = new Map();
+    for (const entry of forms) {
+      const id = String(entry.form_id);
+      const base = slugPart(entry.name) || "aniimo";
+      const basic = String(entry.form_key || "basic").toLowerCase() === "basic";
+      const form = slugPart(String(entry.form_label || "").replace(/\s*\bform\s*$/iu, ""));
+      let slug = basic ? base : form ? `${base}-${form}` : `${base}-${id}`;
+      if (taken.has(slug)) slug = `${slug}-${id}`;
+      taken.add(slug); slugs.set(id, slug);
+    }
+    return slugs;
+  }
+
   // The explorer registers how it opens an Aniimo's page in place (with a history entry).
   function setNavigator(open) {
     navigator = typeof open === "function" ? open : null;
   }
 
-  window.AniilogsAniimoLink = Object.freeze({ url, create, inline, wrapCorner, setNavigator, PAGE_PATH });
+  window.AniilogsAniimoLink = Object.freeze({ url, create, inline, wrapCorner, setNavigator, shortSlugs, PAGE_PATH });
 })();

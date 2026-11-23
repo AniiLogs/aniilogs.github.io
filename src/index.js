@@ -1,9 +1,10 @@
 // game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
-import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
+import { decodePng, drawAniimoCard, drawPlacementCard, packBlocksFor } from "./placement-card.js";
 import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, NEAR_FLOOR, partyBySeat, realPlayersOf, seatKey, seatNameSimilarity, slotIsBot, withSeatCp } from "./bots.js";
-import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, LB_BOARDS, LB_PATH, PLACEMENT_CARD_PATH, PLACEMENT_CODE, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
+import { cardPngResponse, createPlacementLinks, escapeLinkHtml, GLYPH_PACK_BLOCK, glyphPackKey, isLinkCrawler, LB_BOARDS, LB_PATH, linkOriginOf, linkPage, PLACEMENT_CARD_PATH, PLACEMENT_CODE, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
+import { ANIIMO_CARD_PATH, ANIIMO_INDEX_VERSION, ANIIMO_PATH, aniimoLinkIndex, createAniimoLinks } from "./aniimo-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
 import { sanitizeStages, simLevelFlags, simLevels, simLevelsLogLine } from "./sim-levels.js";
@@ -8526,6 +8527,9 @@ async function api(request, env) {
   if (glyphPackMatch && request.method === "PUT") return putGlyphPack(request, env, glyphPackMatch[1]);
   const placementCard = url.pathname.match(PLACEMENT_CARD_PATH);
   if (placementCard && (request.method === "GET" || request.method === "HEAD")) return placementLinks.cardImage(request, env, placementCard[1]);
+  // Aniimo links' cards (src/aniimo-links.js)
+  const aniimoCard = url.pathname.match(ANIIMO_CARD_PATH);
+  if (aniimoCard && (request.method === "GET" || request.method === "HEAD")) return aniimoLinks.cardImage(request, env, aniimoCard[1]);
   if (url.pathname === "/api/leaderboard/interlink/cycles" && request.method === "POST") return uploadInterlinkCycles(request, env);
   if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
   if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
@@ -8625,6 +8629,53 @@ async function putGlyphPack(request, env, block) {
   return json({ ok: true, block, letters: letters.size, bytes: bytes.length });
 }
 
+// A file of the content release, as its public route serves it (with the older release's files behind it)
+async function releaseFile(env, relative) {
+  const response = await getReleaseContent(new Request(`https://content.invalid${CONTENT_PATH_PREFIX}${relative}`), env);
+  return response.ok ? response : null;
+}
+
+// Aniimo links (src/aniimo-links.js). Their index is made from aniilog_data.json once a release and kept in R2, so
+// only the first look after a new release reads that 3 MB file; the isolate keeps it after that.
+const ANIIMO_INDEX_KEY = `link-index/aniimo-v${ANIIMO_INDEX_VERSION}-${CONTENT_RELEASE}.json`;
+const aniimoIndexes = new WeakMap();                     // content binding -> the index (a promise), per isolate
+function aniimoIndexOf(env) {
+  if (!env.CONTENT) return Promise.resolve(null);
+  let aniimoIndex = aniimoIndexes.get(env.CONTENT);
+  if (!aniimoIndex) {
+    aniimoIndex = (async () => {
+      const kept = env.EVIDENCE ? await env.EVIDENCE.get(ANIIMO_INDEX_KEY) : null;
+      if (kept) return JSON.parse(await new Response(kept.body).text());
+      const data = await (await releaseFile(env, "data/aniilog_data.json"))?.json();
+      if (!data) return null;
+      const index = aniimoLinkIndex(data, CONTENT_RELEASE);
+      if (env.EVIDENCE && index.forms.length) {
+        const put = env.EVIDENCE.put(ANIIMO_INDEX_KEY, JSON.stringify(index), { httpMetadata: { contentType: "application/json" } });
+        if (env.waitUntil) env.waitUntil(put.catch((error) => console.error("Could not keep the Aniimo link index", error)));
+        else await put;
+      }
+      return index;
+    })().catch((error) => { console.error("Could not read the Aniimo link index", error); return null; })
+      .then((index) => { if (!index?.forms?.length) aniimoIndexes.delete(env.CONTENT); return index; });
+    aniimoIndexes.set(env.CONTENT, aniimoIndex);
+  }
+  return aniimoIndex;
+}
+const aniimoLinks = createAniimoLinks({
+  json, siteOrigin: configuredPublicSiteOrigin, loadIndex: aniimoIndexOf, page: linkPage, isCrawler: isLinkCrawler,
+  linkOrigin: linkOriginOf, pngResponse: cardPngResponse, escapeHtml: escapeLinkHtml,
+  loadArt: async (env, icon) => {
+    try {
+      const file = await releaseFile(env, icon);
+      return file ? await decodePng(new Uint8Array(await file.arrayBuffer())) : null;
+    } catch (error) {
+      console.error("Could not read an Aniimo's art", error);
+      return null;
+    }
+  },
+  drawCard: (card, art) => drawAniimoCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS }, art),
+});
+
 // Placement links (src/placement-links.js): the boards' own ranking, read as the boards page reads it
 const placementLinks = createPlacementLinks({
   boardData: (env, params) => interlinkBoards(new Request(`https://placement.invalid/api/leaderboard/interlink?${params}`), env, true),
@@ -8651,6 +8702,12 @@ async function handleRequest(request, env) {
   if (lb && !PLACEMENT_CODE.test(lbName)) {
     const to = `${configuredPublicSiteOrigin(env) || "https://aniilogs.github.io"}${LB_BOARDS[Object.hasOwn(LB_BOARDS, lbName) ? lbName : ""]}`;
     return new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store" } });
+  }
+  // /a/<slug>: an Aniimo's link (GET and HEAD only)
+  const aniimo = url.pathname.match(ANIIMO_PATH);
+  if (aniimo) {
+    if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Not found" }, 404);
+    return aniimoLinks.open(request, env, aniimo[1] || "");
   }
   const placement = lb ? [url.pathname, lbName] : url.pathname.match(PLACEMENT_PATH);
   if (url.pathname.startsWith("/api/") || placement) {

@@ -276,6 +276,9 @@ const MAX_SHARED_PINS_PAYLOAD_LENGTH = 24000;
 const SHORT_SHARE_PARAM = "s";
 const TEAM_SHARE_PARAM = "team";
 const SHORT_SHARE_CODE_PATTERN = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/;
+// The address short links are copied on (app-config.js linkOrigin: the API's own domain, with no "dev" for the game's
+// chat to hide)
+const LINK_ORIGIN = String(SITE_CONFIG.linkOrigin || "").replace(/\/+$/u, "");
 const API_URL = String(
   SITE_CONFIG.apiUrl
   || SITE_CONFIG.shareApiUrl
@@ -8725,6 +8728,36 @@ function renderAfpFormPills(entry) {
   return row;
 }
 
+// An Aniimo's short link, https://aniilogs.app/a/<slug> (src/aniimo-links.js: a person lands here, Discord shows its
+// card). The slugs come from the Aniilog's own released forms, made the way the API makes them (aniimo-link.js).
+let aniimoShortSlugs = null;
+function aniimoShortLink(entry) {
+  const id = String(entry?.form_id || "");
+  const entries = state.aniilogData?.entries || [];
+  if (!aniimoShortSlugs || aniimoShortSlugs.entries !== entries) {
+    const released = entries.filter((item) => !item?.availability);   // Developer Mode's extra records get none
+    aniimoShortSlugs = { entries, slugs: window.AniilogsAniimoLink?.shortSlugs?.(released) || new Map() };
+  }
+  const slug = aniimoShortSlugs.slugs.get(id);
+  if (slug && LINK_ORIGIN) return `${LINK_ORIGIN}/a/${slug}`;
+  return new URL(`/explorer/?aniimo=${encodeURIComponent(id)}`, window.location.origin).href;
+}
+
+async function copyAniimoLink(button, link) {
+  const copied = await copyText(link);
+  if (!copied) {
+    window.prompt("Copy this link:", link);                 // no clipboard here: the link itself, to copy by hand
+    return;
+  }
+  window.clearTimeout(button.copyResetTimer);
+  button.textContent = "Link copied";
+  button.classList.add("copied");
+  button.copyResetTimer = window.setTimeout(() => {
+    button.textContent = "Copy link";
+    button.classList.remove("copied");
+  }, 1800);
+}
+
 function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
@@ -8778,8 +8811,18 @@ function renderAniilogCatalogRecord(entry) {
     locate.textContent = "Locate on Map";
     locate.addEventListener("click", () => locateAniilogEntry(entry));
     actions.append(locate);
-    identity.append(actions);
   }
+  if (!entry.availability) {
+    const link = aniimoShortLink(entry);
+    const copyLink = document.createElement("button");
+    copyLink.type = "button";
+    copyLink.className = "catalog-copy-link-button";
+    copyLink.textContent = "Copy link";
+    copyLink.title = `Copy ${link}`;
+    copyLink.addEventListener("click", () => copyAniimoLink(copyLink, link));
+    actions.append(copyLink);
+  }
+  if (actions.childElementCount) identity.append(actions);
   record.append(identity);
   record.append(renderAniilogFormGrid(entry));
   return record;
@@ -10916,6 +10959,8 @@ function syncMobileCatalogStickyIdentity() {
     stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button, .catalog-hide-artwork-button").forEach((button) => {
       button.addEventListener("click", () => identity.querySelector(`.${button.classList[0]}`)?.click());
     });
+    // and its Copy link the real one (which shows "Link copied")
+    stickyIdentity.querySelector(".catalog-copy-link-button")?.addEventListener("click", () => identity.querySelector(".catalog-copy-link-button")?.click());
     // So do its form chips (same order as the header's).
     const sourceForms = identity.querySelectorAll(".afp-form");
     stickyIdentity.querySelectorAll(".afp-form").forEach((button, index) => {
