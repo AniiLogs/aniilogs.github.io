@@ -311,7 +311,7 @@ test("the live layer follows the existing mobile fullscreen and desktop index la
   assert.match(styles, /\.catalog-aniilog-record\.is-showcase \.catalog-aniimo-live-viewer\.is-ready \{[^}]*opacity: 1;/u);
   assert.match(styles, /\.catalog-aniilog-record\.is-live-ready \.catalog-aniimo-turntable,\s*\.catalog-aniilog-record\.is-live-ready \.catalog-aniimo-video-backdrop/u);
   assert.match(styles, /\.catalog-aniimo-live-viewer\.is-gender-selected:not\(\.is-ready\) \.catalog-aniimo-live-frame \{\s*opacity: 0;/u);
-  assert.match(styles, /body\.aniilog-artwork-mode \.app-shell:not\(\.is-sidebar-collapsed\) \.catalog-aniimo-live-viewer \{\s*left: 360px;/u);
+  assert.match(styles, /body\.aniilog-artwork-mode \.app-shell:not\(\.is-sidebar-collapsed\) .catalog-aniimo-live-viewer \{\s*\/\*[^*]*\*\/\s*left: clamp\(280px, 21vw, 360px\);\s*right: 0;\s*width: auto;/u);
   assert.match(explorer, /if \(state\.aniilogShowcaseMode\) liveViewer\?\.start\(\);\s*else liveViewer\?\.stop\(\);/u);
   assert.match(styles, /\.catalog-artwork-menu:nth-child\(even\) \.catalog-artwork-select-menu \{\s*right: 0;\s*left: auto;/u);
   assert.match(styles, /\.catalog-artwork-controls\.is-visible\.has-three-menus \{\s*display: grid;\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/u);

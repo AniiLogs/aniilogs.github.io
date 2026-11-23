@@ -47,7 +47,12 @@ test("normal Aniilog video preview remains visible while unopened frame output s
 });
 
 test("desktop artwork rotation stays centered beside the visible Aniimo index", () => {
-  assert.match(styles, /@media \(min-width: 821px\) and \(pointer: fine\) \{\s*body\.aniilog-artwork-mode \.app-shell:not\(\.is-sidebar-collapsed\) \.catalog-aniimo-turntable \{\s*left: 360px;\s*width: calc\(100vw - 360px\);/u);
+  assert.match(styles, /@media \(min-width: 821px\) and \(pointer: fine\) \{\s*body\.aniilog-artwork-mode \.app-shell:not\(\.is-sidebar-collapsed\) .catalog-aniimo-turntable \{\s*\/\*[^*]*\*\/\s*left: clamp\(280px, 21vw, 360px\);\s*right: 0;\s*width: auto;/u);
+  // View Model too: the list's width (zoomed with the panel on big screens), never a fixed 360px or 100vw
+  assert.match(styles, /\.catalog-aniilog-record\.is-model-view > \.catalog-model-viewer \{\s*\/\*[^*]*\*\/\s*left: clamp\(280px, 21vw, 360px\);\s*right: 0;\s*width: auto;/u);
+  assert.doesNotMatch(styles, /100vw - 360px/u);
+  // the Show sidebar tab sits above the map/Aniilog panel (z-index 200), so a collapsed list can always come back
+  assert.match(styles, /\.app-shell\.is-sidebar-collapsed \.sidebar-restore-button:not\(\[hidden\]\) \{\s*display: inline-grid;\s*z-index: 221;/u);
 });
 
 test("only package-matched, approved transparent frame outputs reach the viewer", () => {
