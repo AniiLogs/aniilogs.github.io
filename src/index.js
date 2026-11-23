@@ -1,9 +1,11 @@
 // game-audit: unaudited release-data policies (build 3535596), Interlink and Holo-Battle Sim leaderboard rules from the game tables
 import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
-import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
+import { decodePng, drawAniimoCard, drawMapCard, drawPlacementCard, MAP_BASE_SCALE, MAP_CARD_BOX, packBlocksFor } from "./placement-card.js";
 import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, NEAR_FLOOR, partyBySeat, realPlayersOf, seatKey, seatNameSimilarity, slotIsBot, withSeatCp } from "./bots.js";
-import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, LB_BOARDS, LB_PATH, PLACEMENT_CARD_PATH, PLACEMENT_CODE, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
+import { cardPngResponse, createPlacementLinks, escapeLinkHtml, GLYPH_PACK_BLOCK, glyphPackKey, isLinkCrawler, LB_BOARDS, LB_PATH, linkOriginOf, linkPage, PLACEMENT_CARD_PATH, PLACEMENT_CODE, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
+import { ANIIMO_CARD_PATH, ANIIMO_INDEX_VERSION, ANIIMO_PATH, aniimoLinkIndex, createAniimoLinks } from "./aniimo-links.js";
+import { createMapLinks, MAP_LINK_API_PATH, MAP_LINK_PATH } from "./map-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
 import { sanitizeStages, simLevelFlags, simLevels, simLevelsLogLine } from "./sim-levels.js";
@@ -8557,6 +8559,16 @@ async function api(request, env) {
   if (glyphPackMatch && request.method === "PUT") return putGlyphPack(request, env, glyphPackMatch[1]);
   const placementCard = url.pathname.match(PLACEMENT_CARD_PATH);
   if (placementCard && (request.method === "GET" || request.method === "HEAD")) return placementLinks.cardImage(request, env, placementCard[1]);
+  // Aniimo links' cards, and map pin links (src/aniimo-links.js, src/map-links.js)
+  const aniimoCard = url.pathname.match(ANIIMO_CARD_PATH);
+  if (aniimoCard && (request.method === "GET" || request.method === "HEAD")) return aniimoLinks.cardImage(request, env, aniimoCard[1]);
+  if (url.pathname === "/api/map-links" && request.method === "POST") return mapLinks.create(request, env);
+  const mapLinkMatch = url.pathname.match(MAP_LINK_API_PATH);
+  if (mapLinkMatch && (request.method === "GET" || request.method === "HEAD")) {
+    return mapLinkMatch[2] ? mapLinks.cardImage(request, env, mapLinkMatch[1]) : mapLinks.read(request, env, mapLinkMatch[1]);
+  }
+  const mapBaseMatch = url.pathname.match(/^\/api\/admin\/map-card-bases\/([a-z0-9-]{1,80})$/u);
+  if (mapBaseMatch && request.method === "PUT") return putMapCardBase(request, env, mapBaseMatch[1]);
   if (url.pathname === "/api/leaderboard/interlink/cycles" && request.method === "POST") return uploadInterlinkCycles(request, env);
   if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
   if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
@@ -8656,6 +8668,120 @@ async function putGlyphPack(request, env, block) {
   return json({ ok: true, block, letters: letters.size, bytes: bytes.length });
 }
 
+// PUT /api/admin/map-card-bases/<map id>: an administrator stores one map's picture for the map link cards
+// (scripts/build-map-card-bases.mjs, tools/upload-map-card-bases.mjs) in R2. It must be a palette PNG that fits the
+// card's map room at the card's scale, for a map the site has, under 512 KB. Same permission as the letter packs.
+const MAP_BASE_MAX_BYTES = 512 * 1024;
+const mapCardBaseKey = (mapId) => `map-card-bases/${CONTENT_RELEASE}/${mapId}.png`;
+async function putMapCardBase(request, env, mapId) {
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (Number(request.headers.get("content-length") || 0) > MAP_BASE_MAX_BYTES) return json({ error: "A map picture is at most 512 KB." }, 413);
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (!bytes.length || bytes.length > MAP_BASE_MAX_BYTES) return json({ error: "A map picture is at most 512 KB." }, 413);
+  const picture = await decodePng(bytes).catch(() => null);
+  if (!picture?.indices || picture.width * MAP_BASE_SCALE > MAP_CARD_BOX.width || picture.height * MAP_BASE_SCALE > MAP_CARD_BOX.height) {
+    return json({ error: `A map picture is a palette PNG of at most ${Math.floor(MAP_CARD_BOX.width / MAP_BASE_SCALE)}x${Math.floor(MAP_CARD_BOX.height / MAP_BASE_SCALE)}.` }, 400);
+  }
+  const maps = await siteMaps(env);
+  if (!maps?.has(mapId)) return json({ error: "That map isn't on the site." }, 400);
+  if (!env.EVIDENCE) return json({ error: "Storage is unavailable." }, 503);
+  await env.EVIDENCE.put(mapCardBaseKey(mapId), bytes, { httpMetadata: { contentType: "image/png" } });
+  mapBasesOf(env).delete(mapId);
+  return json({ ok: true, map: mapId, width: picture.width, height: picture.height, bytes: bytes.length });
+}
+
+// A file of the content release, as its public route serves it (with the older release's files behind it)
+async function releaseFile(env, relative) {
+  const response = await getReleaseContent(new Request(`https://content.invalid${CONTENT_PATH_PREFIX}${relative}`), env);
+  return response.ok ? response : null;
+}
+
+// Aniimo links (src/aniimo-links.js). Their index is made from aniilog_data.json once a release and kept in R2, so
+// only the first look after a new release reads that 3 MB file; the isolate keeps it after that.
+const ANIIMO_INDEX_KEY = `link-index/aniimo-v${ANIIMO_INDEX_VERSION}-${CONTENT_RELEASE}.json`;
+const aniimoIndexes = new WeakMap();                     // content binding -> the index (a promise), per isolate
+function aniimoIndexOf(env) {
+  if (!env.CONTENT) return Promise.resolve(null);
+  let aniimoIndex = aniimoIndexes.get(env.CONTENT);
+  if (!aniimoIndex) {
+    aniimoIndex = (async () => {
+      const kept = env.EVIDENCE ? await env.EVIDENCE.get(ANIIMO_INDEX_KEY) : null;
+      if (kept) return JSON.parse(await new Response(kept.body).text());
+      const data = await (await releaseFile(env, "data/aniilog_data.json"))?.json();
+      if (!data) return null;
+      const index = aniimoLinkIndex(data, CONTENT_RELEASE);
+      if (env.EVIDENCE && index.forms.length) {
+        const put = env.EVIDENCE.put(ANIIMO_INDEX_KEY, JSON.stringify(index), { httpMetadata: { contentType: "application/json" } });
+        if (env.waitUntil) env.waitUntil(put.catch((error) => console.error("Could not keep the Aniimo link index", error)));
+        else await put;
+      }
+      return index;
+    })().catch((error) => { console.error("Could not read the Aniimo link index", error); return null; })
+      .then((index) => { if (!index?.forms?.length) aniimoIndexes.delete(env.CONTENT); return index; });
+    aniimoIndexes.set(env.CONTENT, aniimoIndex);
+  }
+  return aniimoIndex;
+}
+const aniimoLinks = createAniimoLinks({
+  json, siteOrigin: configuredPublicSiteOrigin, loadIndex: aniimoIndexOf, page: linkPage, isCrawler: isLinkCrawler,
+  linkOrigin: linkOriginOf, pngResponse: cardPngResponse, escapeHtml: escapeLinkHtml,
+  loadArt: async (env, icon) => {
+    try {
+      const file = await releaseFile(env, icon);
+      return file ? await decodePng(new Uint8Array(await file.arrayBuffer())) : null;
+    } catch (error) {
+      console.error("Could not read an Aniimo's art", error);
+      return null;
+    }
+  },
+  drawCard: (card, art) => drawAniimoCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS }, art),
+});
+
+// Map pin links (src/map-links.js): the site's maps (map_site_data.json: name, world, shape), kept in the isolate, and
+// each map's card picture from R2 (putMapCardBase)
+const siteMapLists = new WeakMap();                      // content binding -> the maps (a promise), per isolate
+function siteMaps(env) {
+  if (!env.CONTENT) return Promise.resolve(null);
+  let siteMapList = siteMapLists.get(env.CONTENT);
+  if (!siteMapList) {
+    siteMapList = (async () => {
+      const data = await (await releaseFile(env, "data/map_site_data.json"))?.json();
+      if (!Array.isArray(data?.maps)) return null;
+      return new Map(data.maps.filter((map) => typeof map?.id === "string").map((map) => [map.id, {
+        label: String(map.label || map.id).slice(0, 120), world: String(map.world_label || "").slice(0, 60),
+        aspect: Number(map.width) > 0 && Number(map.height) > 0 ? Number(map.width) / Number(map.height) : 0,
+      }]));
+    })().catch((error) => { console.error("Could not read the site's maps", error); return null; })
+      .then((maps) => { if (!maps) siteMapLists.delete(env.CONTENT); return maps; });
+    siteMapLists.set(env.CONTENT, siteMapList);
+  }
+  return siteMapList;
+}
+const mapBaseSets = new WeakMap();                       // storage binding -> Map(map id -> decoded picture), per isolate
+const mapBasesOf = (env) => {
+  if (!mapBaseSets.has(env.EVIDENCE)) mapBaseSets.set(env.EVIDENCE, new Map());
+  return mapBaseSets.get(env.EVIDENCE);
+};
+async function mapCardBase(env, mapId, presenceOnly) {
+  if (!env.EVIDENCE || !/^[a-z0-9-]{1,80}$/u.test(String(mapId))) return null;
+  const mapBases = mapBasesOf(env);
+  if (mapBases.has(mapId)) return mapBases.get(mapId);
+  if (presenceOnly && typeof env.EVIDENCE.head === "function") return env.EVIDENCE.head(mapCardBaseKey(mapId));
+  const object = await env.EVIDENCE.get(mapCardBaseKey(mapId));
+  const picture = object ? await decodePng(new Uint8Array(await new Response(object.body).arrayBuffer())).catch(() => null) : null;
+  if (!picture?.indices) return null;
+  mapBases.set(mapId, picture);
+  return picture;
+}
+const mapLinks = createMapLinks({
+  json, browserWriteAllowed, readJsonBody, validSelection: validShareSelection, siteOrigin: configuredPublicSiteOrigin,
+  loadMaps: siteMaps, loadBase: mapCardBase, page: linkPage, isCrawler: isLinkCrawler, linkOrigin: linkOriginOf,
+  pngResponse: cardPngResponse, escapeHtml: escapeLinkHtml,
+  drawCard: (card, base) => drawMapCard(card, { atlas: CARD_ATLAS, atlasBytes: CARD_ATLAS_BYTES, fonts: CARD_FONTS }, base),
+});
+
 // Placement links (src/placement-links.js): the boards' own ranking, read as the boards page reads it
 const placementLinks = createPlacementLinks({
   boardData: (env, params) => interlinkBoards(new Request(`https://placement.invalid/api/leaderboard/interlink?${params}`), env, true),
@@ -8682,6 +8808,13 @@ async function handleRequest(request, env) {
   if (lb && !PLACEMENT_CODE.test(lbName)) {
     const to = `${configuredPublicSiteOrigin(env) || "https://aniilogs.app"}${LB_BOARDS[Object.hasOwn(LB_BOARDS, lbName) ? lbName : ""]}`;
     return new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store" } });
+  }
+  // /a/<slug>: an Aniimo's link; /m/<code>: a map pin link (both answer GET and HEAD only)
+  const aniimo = url.pathname.match(ANIIMO_PATH);
+  const mapLink = aniimo ? null : url.pathname.match(MAP_LINK_PATH);
+  if (aniimo || mapLink) {
+    if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Not found" }, 404);
+    return aniimo ? aniimoLinks.open(request, env, aniimo[1] || "") : mapLinks.open(request, env, mapLink[1] || "");
   }
   const placement = lb ? [url.pathname, lbName] : url.pathname.match(PLACEMENT_PATH);
   if (url.pathname.startsWith("/api/") || placement) {
