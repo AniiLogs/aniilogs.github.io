@@ -17,7 +17,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
     assert.ok(shared > 0 && shared < page.indexOf(`<script src="${script}`), script);
     assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=/u);
   }
-  assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete \}\)/u);
+  assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete, readLeads \}\)/u);
   // the viewer opens on a click only, never when the pointer passes over the icon; its check badge sits after the tabs
   assert.doesNotMatch(viewer, /pointerenter|HOVER_OPEN_MS|hoverTimer/u);
   assert.match(viewerStyles, /\.lb-proof-tabs \.lb-check \{[^}]*margin-left: 2px;/u);
@@ -27,9 +27,9 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   // which fight the run is, over the pictures, from the API's fight; every page loads this version of the viewer
   assert.match(viewer, /const fight = fightLine\(details\.fight \|\| run\?\.fight\);/u);
   for (const page of [home, boards]) {
-    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.6-fight-log">/u);
+    assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.7-proof-file">/u);
     // its Comments tab (comments.js) loads just before it
-    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.2-no-slot-no-lead" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.10-fight-log" defer><\/script>/u);
+    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.3-store-leads" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.12-store-leads" defer><\/script>/u);
   }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);
@@ -38,7 +38,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
 
 test("the viewer's Fight tab (staff only): one tab for all the fight's pictures, each opened full size on a click", () => {
   // the fight pictures the API lists (for staff alone) go together into one "Fight" tab with a count, after the others
-  assert.match(viewer, /label: "Fight", fight: fights\.map/u);
+  assert.match(viewer, /\? "Fight" : "Proof file",\s+fight: fights\.map/u);
   assert.match(viewer, /class: "lb-fight-count"/u);
   // the note, the strip of buttons with the time into the fight, the alt text, a click to open and a way back
   assert.match(viewer, /moments of the fight, each taken right after the biggest hit of that part\. The numbers are this player's own hits\./u);
@@ -50,11 +50,16 @@ test("the viewer's Fight tab (staff only): one tab for all the fight's pictures,
   assert.match(viewer, /const load = \(img, shot\) => proofImage\(picture\.id, shot\.shot\)/u);
   for (const rule of ["lb-fight-note", "lb-fight-strip", "lb-fight-shot", "lb-fight-time"]) assert.match(viewerStyles, new RegExp(`\\.${rule} \\{`, "u"));
   // the fight log: the tab also for a log alone, its figures, a note, the download through the signed-in fetch
-  assert.match(viewer, /fights\.length \|\| list\.fightLog \?/u);
   assert.match(viewer, /\["Game clock against real time", clockRate\]/u);
   assert.match(viewer, /text: "Download the fight log"/u);
   assert.match(viewer, /await apiFetch\(`\/leaderboard\/submissions\/\$\{encodeURIComponent\(id\)\}\/evidence\?shot=fightlog`\)/u);
   assert.match(viewerStyles, /\.lb-fight-log-figure dd \{[^}]*font-variant-numeric: tabular-nums;/u);
+  // the proof file (issue 129): the same tab once the pictures are gone, its summary and a download of the file
+  assert.match(viewer, /fights\.length \|\| list\.fightLog \|\| list\.record \?/u);
+  assert.match(viewer, /picture\.record \? proofRecordPanel\(picture\.id, picture\.record\) : null/u);
+  assert.match(viewer, /text: "Download the proof file"/u);
+  assert.match(viewer, /evidence\?shot=record`\)/u);
+  assert.match(viewer, /const download = stats && log\.download !== false \?/u);
 });
 
 test("My runs: search, mode filter, 20/30/50 per page (remembered), numbered pages, proof column, on your profile", () => {
@@ -107,4 +112,12 @@ test("every row that opens on the profile shows whether it is open: a turning ch
   assert.doesNotMatch(app, /"Team: "/u);
   // Battle Data in a narrow card: labelled figures, no sideways scroll
   assert.match(styles, /@container \(max-width: 459px\) \{\s*\.history-party, \.history-party tbody, \.history-party tr \{ display: block; \}/u);
+});
+
+test("the viewer sends a Party picture's reading to be stored only when signed in and not yet stored; a staff pass reads the rest", () => {
+  assert.match(viewer, /const store = shown\.leadsRead \|\| !sessionToken\(\) \|\| leadsRefused \? null :/u);
+  assert.match(viewer, /\/leaderboard\/submissions\/\$\{encodeURIComponent\(runId\)\}\/leads`/u);
+  assert.match(viewer, /if \(response\?\.status === 401 \|\| response\?\.status === 403\) leadsRefused = true;/u);
+  assert.match(viewer, /apiFetch\(`\/admin\/lead-reads\?limit=/u);
+  assert.match(viewer, /allowDelete, readLeads \}\);/u);
 });

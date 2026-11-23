@@ -1520,42 +1520,32 @@ export function collectionSummary(completedIds, checklist = null) {
 // The owner's best entry on each board (as the board shows it) and its position among every player on that board.
 // Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone. sort: another of the board's
 // sorts (Egg Heist matches by fastest escape), ranked as the board ranks it with that sort.
+// The rows and their order are the board's own (boardRowsSql, as leaderboardEntries lists them: linked players, a
+// teammate credited with a run, one row per player), ranked within each board the profile links to (a boss, an Egg
+// Heist season, a Sim season's trial and difficulty), so a profile never shows another place than the board.
 async function boardStandings(env, discordId, kind, sort = null) {
   const sortKey = sort && Object.hasOwn(LEADERBOARD_SORTS, sort) ? sort : LEADERBOARD_DEFAULT_SORT[kind];
-  const order = LEADERBOARD_SORTS[sortKey];
-  const orderBy = (prefix) => (sortKey === "standing"
-    ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
-    : `${prefix}${sortKey} ${order}`);
-  const where = ["s.kind = ?", "s.status = 'visible'", ON_BOARDS("s")];
-  if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
-  else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
+  const where = ["s.kind = ?", "s.status = 'visible'", onBoards(false)];
   if (kind === "eggheist_season") where.push("s.cycle IS NOT NULL");
   // a run whose boss wasn't recognised can't stand on a boss's board (it was a second row beside the real one)
   if (kind === "interlink_run" || kind === "interlink_best") where.push("s.boss_id IS NOT NULL");
+  const { filtered, orderBy } = boardRowsSql(kind, sortKey, LEADERBOARD_SORTS[sortKey], where,
+    { cycles: sortKey === "clear_time_s" && kind === "interlink_run" ? await interlinkCycles(env) : [] });
   const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle"
-    : kind === "sim_run" ? "cycle, trial, difficulty" : "";
-  const partition = group ? `s.discord_id, ${group.split(", ").map((column) => `s.${column}`).join(", ")}` : "s.discord_id";
+    : kind === "sim_run" ? "cycle, trial, difficulty" : "kind";
   const { results } = await env.DB.prepare(
-    `WITH best AS (
-       SELECT s.*, ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
-       FROM leaderboard_submissions s WHERE ${where.join(" AND ")}
-     ), ranked AS (
-       SELECT *, ROW_NUMBER() OVER (PARTITION BY ${group || "kind"} ORDER BY ${orderBy("")}, created_at ASC) AS position,
-         COUNT(*) OVER (PARTITION BY ${group || "kind"}) AS players
-       FROM best WHERE playerRank = 1
-     )
-     SELECT ranked.*, gc.character_name AS characterName FROM ranked
-     LEFT JOIN game_characters gc ON gc.game_uid = ranked.game_uid AND gc.discord_id = ranked.discord_id
-     WHERE ranked.discord_id = ?
-     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : kind === "sim_run" ? "cycle DESC, trial, difficulty" : group ? "boss_name, boss_id" : "position"}`,
+    `SELECT * FROM (SELECT f.*, ROW_NUMBER() OVER (PARTITION BY ${group} ORDER BY ${orderBy("")}, created_at ASC) AS position,
+         COUNT(*) OVER (PARTITION BY ${group}) AS players
+       FROM (${filtered}) f)
+     WHERE who = ?
+     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : kind === "sim_run" ? "cycle DESC, trial, difficulty" : group !== "kind" ? "boss_name, boss_id" : "position"}`,
   ).bind(kind, discordId).all();
   return (results || []).map((row) => ({
     position: Number(row.position),
     players: Number(row.players),
     submissionId: row.submission_id,
-    character: row.characterName || null,
-    gameUid: row.game_uid,
+    character: row.teammate || row.characterName || null,
+    gameUid: row.teammate ? row.teammate_uid : row.game_uid,
     cycle: row.cycle,
     boss: row.boss_id == null ? null : { id: row.boss_id, name: row.boss_name, level: row.boss_level },
     score: row.score,
@@ -1779,8 +1769,9 @@ async function profilesDirectory(env) {
 const HISTORY_PAGE = 20;
 const HISTORY_PAGE_SIZES = Object.freeze([20, 30, 50]);
 // My runs' search box (the owner's own view only): every word has to match something about the run - the boss, the
-// trial or rank, a teammate's name (Battle Data or the Party screen), the mode, or the day it was played (in the
-// viewer's time zone, ?tz= minutes east of UTC: "2026-11-03", "Nov", "November 3"). Never a UID.
+// trial or rank, a teammate's name (Battle Data or the Party screen), a lead Aniimo (as sent, or as the Party picture
+// showed it: extra.leads), the mode, or the day it was played (in the viewer's time zone, ?tz= minutes east of UTC:
+// "2026-11-03", "Nov", "November 3"). Never a UID.
 const HISTORY_MODE_WORDS = Object.freeze({ interlink: "holo-battle interlink", sim: "holo-battle sim simulation trial training", eggheist: "egg heist eggheist" });
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A two-boss fight is found by either boss: its runs are stored under the first one's name (list: the weeks).
@@ -1795,14 +1786,15 @@ function historySearch(params, binds, list = []) {
   const day = `strftime('%Y-%m-%d', ${local}) || ' ' || (CASE strftime('%m', ${local}) ${MONTH_NAMES.map((name, i) => `WHEN '${String(i + 1).padStart(2, "0")}' THEN '${name}'`).join(" ")} END)
     || ' ' || CAST(strftime('%d', ${local}) AS INTEGER)`;
   const like = (n) => `LIKE ?${n} ESCAPE '\\'`;
-  const names = (column, path, n) => `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${column}) THEN ${column} END, '${path}') item
-    WHERE json_extract(item.value, '$.name') ${like(n)})`;
+  const names = (column, path, n, field = "name") => `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${column}) THEN ${column} END, '${path}') item
+    WHERE json_extract(item.value, '$.${field}') ${like(n)})`;
   return words.map((word) => {
     const n = binds.push(`%${word.replace(/[\\%_]/gu, (c) => `\\${c}`)}%`);
     const modes = Object.entries(HISTORY_MODE_WORDS).filter(([, text]) => text.includes(word)).map(([mode]) => `'${mode}'`);
     const paired = [...new Set(pairs.filter((pair) => pair.second.includes(word)).map((pair) => `'${pair.id}'`))];
     return `(${["boss_name", "rank_name", "trial", "difficulty"].map((column) => `${column} ${like(n)}`).join(" OR ")}${paired.length ? ` OR boss_id IN (${paired.join(", ")})` : ""}
       OR ${names("players_json", "$", n)} OR ${names("extra_json", "$.lineup", n)}
+      OR ${names("extra_json", "$.lineup", n, "aniimo")} OR ${names("extra_json", "$.leads.cards", n)}
       OR (${day}) ${like(n)}${modes.length ? ` OR mode IN (${modes.join(", ")})` : ""}${"menu best".includes(word) ? " OR kind = 'interlink_best'" : ""})`;
   });
 }
@@ -2070,11 +2062,116 @@ function seatedLineup(merged, players, withDps = false) {
 // copy (mergedLineup), then seatedLineup (by seat on a four-card run; else each with their Avg DPS (lineupDps), and
 // players only the Battle Data cards had (lineupWithCards)). extra: the copy's parsed extra_json; playersJson its
 // players_json. Null when the copy has no Party read.
-async function runLineup(env, submissionId, extra, playersJson) {
+async function runLineup(env, submissionId, extra, playersJson, { leads = true } = {}) {
   const copies = extra?.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
   const players = parseJsonColumn(playersJson);
-  return seatedLineup(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
+  const lineup = seatedLineup(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
     players, true);
+  return leads ? lineupWithLeads(lineup, extra?.leads) : lineup;
+}
+
+// Each player's lead Aniimo as the run's Party picture shows it (issue 130). The site can't decode pictures, so the
+// reading is made in a browser (public/party-portraits.js, the run viewer's) and stored only when a staff member's
+// viewer sends it (POST /api/leaderboard/submissions/<id>/leads, logs.read): a reading anyone could post would let
+// anyone rewrite a run's lineup, and a look-alike rule can't tell a right reading from a wrong one here (a renamed
+// Aniimo's card prints a nickname, nothing like its species). extra.leads = { v, at, cards: [{ card, name, sent,
+// sentSpecies }] }: card is the Party screen's slot (0-3), name the species read, sent the lead this lineup had there
+// when it was read, sentSpecies whether that name is an Aniimo's (false: a nickname). The same rules as the viewer's
+// applyLeads: the picture decides, a nickname is kept beside the species, a card read twice keeps only the lead, an AI
+// teammate and a lead that changed since the reading stay as they are.
+export const LEAD_SURE = (r) => Boolean(r && Number.isFinite(r.score) && Number.isFinite(r.margin)
+  && ((r.score >= 0.55 && r.margin >= 0.15) || (r.score >= 0.68 && r.margin >= 0.10)));
+export function lineupWithLeads(lineup, leads) {
+  const cards = Array.isArray(leads?.cards) ? leads.cards : [];
+  if (!Array.isArray(lineup) || !cards.length) return lineup;
+  const fold = (value) => String(value ?? "").trim().toLowerCase();
+  const facts = (p) => JSON.stringify([fold(p.aniimo), p.aniimoLevel ?? null, p.cp ?? null, (p.team || []).map((m) => fold(m.aniimo))]);
+  return lineup.map((player) => {
+    if (!player || typeof player !== "object" || !Number.isInteger(player.slot) || player.ai) return player;
+    const read = cards.find((item) => item?.card === player.slot);
+    if (!read || typeof read.name !== "string" || !read.name) return player;
+    const sent = player.aniimo;
+    if (fold(sent) !== fold(read.sent)) return player;                       // the lineup changed since the reading
+    if (fold(sent) === fold(read.name)) return player;
+    const renamed = Boolean(sent) && read.sentSpecies === false;
+    const copied = !renamed && Boolean(sent) && lineup.some((other) => other !== player && other && facts(other) === facts(player));
+    const team = copied ? undefined : (player.team || []).map((member) => (fold(member.aniimo) === fold(sent) && sent
+      ? { ...member, aniimo: read.name, ...(renamed ? { nickname: sent } : {}) } : member));
+    const out = { ...player, aniimo: read.name, ...(renamed ? { nickname: sent } : {}), team };
+    if (copied) { delete out.aniimoLevel; delete out.cp; }
+    if (!out.team) delete out.team;
+    return out;
+  });
+}
+
+// The species the Party heads pack knows (data/party_heads.json's names), lower case; null when it isn't there
+let partyHeadNames = null;
+async function partyHeadSpecies(env) {
+  if (!partyHeadNames) {
+    partyHeadNames = (async () => {
+      const object = await env.CONTENT?.get(`releases/${CONTENT_RELEASE}/data/party_heads.json`);
+      if (!object) return null;
+      const meta = JSON.parse(await new Response(object.body).text());
+      return Array.isArray(meta?.names) ? new Map(meta.names.map((name) => [String(name).toLowerCase(), String(name)])) : null;
+    })().catch(() => null).then((names) => { if (!names) partyHeadNames = null; return names; });
+  }
+  return partyHeadNames;
+}
+
+// POST /api/leaderboard/submissions/<id>/leads { cards: [{ card, name, score, margin }] }: a staff member's viewer
+// stores what the run's Party picture shows (only cards the reading is sure of, the viewer's own rule checked again).
+// Replaces an earlier reading. Answers { ok, stored, lineup }.
+async function saveRunLeads(request, env, submissionId) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try { body = (await readJsonBody(request, 4096)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
+  if (!Array.isArray(body.cards) || body.cards.length > 4) return json({ error: "cards must be a list of at most 4." }, 400);
+  const species = await partyHeadSpecies(env);
+  if (!species) return json({ error: "The Party heads pack isn't available." }, 503);
+  const row = await env.DB.prepare("SELECT extra_json AS extraJson, players_json AS playersJson FROM leaderboard_submissions WHERE submission_id = ?")
+    .bind(submissionId).first();
+  const extra = parseJsonColumn(row?.extraJson) || {};
+  if (!row || !extra.proofParty) return json({ error: "No run with a Party picture." }, 404);
+  const seen = new Set();
+  const reads = [];
+  for (const item of body.cards) {
+    const card = item?.card;
+    if (!Number.isInteger(card) || card < 0 || card > 3 || seen.has(card)) return json({ error: "card must be 0-3, once each." }, 400);
+    seen.add(card);
+    const name = species.get(String(item?.name ?? "").toLowerCase());
+    if (!name) return json({ error: "name must be an Aniimo of the Party heads pack." }, 400);
+    if (!LEAD_SURE(item)) continue;                                          // not clear enough to count
+    reads.push({ card, name });
+  }
+  // what each card's lead was when read, against the lineup as shown without any earlier reading
+  const base = await runLineup(env, submissionId, extra, row.playersJson, { leads: false }) || [];
+  const cards = reads.map(({ card, name }) => {
+    const entry = base.find((item) => item?.slot === card);
+    const sent = typeof entry?.aniimo === "string" ? entry.aniimo : null;
+    return { card, name, sent, sentSpecies: sent ? species.has(sent.toLowerCase()) : null };
+  });
+  const leads = { v: 1, at: Math.floor(Date.now() / 1000), cards };
+  await env.DB.prepare(`UPDATE leaderboard_submissions SET extra_json = json_set(COALESCE(CASE WHEN json_valid(extra_json) THEN extra_json END, '{}'),
+    '$.leads', json(?)) WHERE submission_id = ?`).bind(JSON.stringify(leads), submissionId).run();
+  return json({ ok: true, stored: cards.length, lineup: lineupWithLeads(base, leads) });
+}
+
+// GET /api/admin/lead-reads?limit=: staff, the runs with a Party picture whose leads aren't stored yet, newest first,
+// for a pass that reads them in the browser: { runs: [{ submissionId, mode }], left }
+async function pendingLeadReads(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(new URL(request.url).searchParams.get("limit") || "20", 10) || 20));
+  const where = `json_valid(extra_json) AND json_extract(extra_json, '$.proofParty') IS NOT NULL AND json_extract(extra_json, '$.leads') IS NULL
+    AND json_extract(extra_json, '$.lineup') IS NOT NULL`;
+  const { results } = await env.DB.prepare(`SELECT submission_id AS submissionId, kind FROM leaderboard_submissions WHERE ${where}
+    ORDER BY created_at DESC LIMIT ?`).bind(limit).all();
+  const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM leaderboard_submissions WHERE ${where}`).first();
+  return json({ runs: (results || []).map((run) => ({ submissionId: run.submissionId, mode: LEADERBOARD_KINDS[run.kind] === "eggheist" ? "eggheist" : "interlink" })),
+    left: Number(left?.n) || 0 });
 }
 
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
@@ -2232,7 +2329,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles, extra.lineup) || [],
-        lineup: seatedLineup(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)),
+        lineup: lineupWithLeads(seatedLineup(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)), extra.leads),
         // the buffs the party went in with (the leader picks them on the Party screen)
         buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
@@ -2276,11 +2373,17 @@ async function publicBattleHistory(request, env, id) {
 // Picture retention. An Interlink run's pictures are replaced as soon as a better run of that boss and week comes in
 // from a result screen, once that run has its own pictures and isn't under review (the owner, 2 Nov: proof is
 // overwritten by a higher score). A best sent from the game's menu never replaces a run's pictures: it's shown beside
-// them (the owner, 7 Nov). Any other run that is nobody's current best keeps its full screens
-// 14 days and its crops 90 days; a current best (for its sender, or for a teammate it credits) and a run under review
+// them (the owner, 7 Nov). Any other run that is nobody's current best keeps its full screens and fight pictures
+// 7 days and its crops 90 days; a current best (for its sender, or for a teammate it credits) and a run under review
 // keep everything, and every run keeps its numbers. Pages has no scheduled runs, so a few go after each submission (pruneProofs(env, max)).
 // "Best" errs on keeping: a teammate's best is judged against the runs that teammate sent.
-const RETENTION = Object.freeze({ fullScreensS: 14 * 86400, cropsS: 90 * 86400 });
+// When the whole screens and fight pictures go, a small proof file takes their place (proofRecordOf, extra.proofRecord):
+// what they showed that matters, kept as long as the run (the owner, 23 Nov: "after a week, a json file ... that holds
+// the information for proof", issue 129).
+const RETENTION = Object.freeze({ fullScreensS: 7 * 86400, cropsS: 90 * 86400 });
+// A fight log up to this size (gzip, as sent; aLogs' logs are about 30-40 KB) is copied into the proof file, so it
+// outlives the 90-day crops; a bigger one is only named there.
+const PROOF_RECORD_LOG_BYTES = 64 * 1024;
 // A run's score: the one the app read, else the one the picture check read off its proof when that reading agreed with
 // it (match) and gave the same stars (2 Nov: Abzu's 15-star Scorchhowl came in without its score, 15,218 on the
 // picture, and the board showed his 13-star run).
@@ -2328,18 +2431,27 @@ async function pruneProofs(env, max) {
   const now = Math.floor(Date.now() / 1000);
   let pruned = 0;
   try {
-    // the whole screens and the fight's pictures after 14 days
+    // the whole screens and the fight's pictures after 7 days, a proof file in their place
     const full = (await env.DB.prepare(
-      `SELECT c.submission_id AS submissionId, c.extra_json AS extraJson FROM leaderboard_submissions c
+      `SELECT c.submission_id AS submissionId, c.discord_id AS discordId, c.extra_json AS extraJson, c.kind, c.cycle, c.boss_id AS bossId,
+         c.boss_name AS bossName, c.boss_level AS bossLevel, ${RUN_SCORE("c")} AS score, c.stars, c.clear_time_s AS clearTimeS, c.cleared,
+         c.difficulty, c.trial, c.rank_name AS rankName, c.team_dps AS teamDps, c.players_json AS playersJson, c.verify_state AS verifyState,
+         c.verify_json AS verifyJson, c.created_at AS createdAt, c.created_at < ? AS aged
+       FROM leaderboard_submissions c
        WHERE (json_extract(c.extra_json, '$.proofFull') IS NOT NULL OR json_extract(c.extra_json, '$.proofFight') IS NOT NULL)
          AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
-    ).bind(now - RETENTION.fullScreensS, max).all()).results || [];
+    ).bind(now - RETENTION.fullScreensS, now - RETENTION.fullScreensS, max).all()).results || [];
     for (const row of full) {
       const extra = parseJsonColumn(row.extraJson) || {};
-      for (const key of [...Object.values(extra.proofFull || {}), ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])]) await env.EVIDENCE.delete(key);
-      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_remove(extra_json, '$.proofFull', '$.proofFight') WHERE submission_id = ?")
-        .bind(row.submissionId).run();
+      const pictures = [...Object.values(extra.proofFull || {}), ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])];
+      // the proof file first: a picture is never gone before what it showed is kept
+      const recordKey = `evidence/${row.discordId}/${row.submissionId}-proof.json`;
+      const record = await proofRecordOf(env, row, extra, now);
+      await env.EVIDENCE.put(recordKey, JSON.stringify(record), { httpMetadata: { contentType: "application/json" } });
+      for (const key of pictures) await env.EVIDENCE.delete(key);
+      await env.DB.prepare(`UPDATE leaderboard_submissions SET extra_json = json_set(json_remove(extra_json, '$.proofFull', '$.proofFight'),
+        '$.proofRecord', ?) WHERE submission_id = ?`).bind(recordKey, row.submissionId).run();
       pruned += 1;
     }
     // the crops (and the fight log; its figures stay) after 90 days
@@ -2362,6 +2474,71 @@ async function pruneProofs(env, max) {
     throw error;
   }
   return pruned;
+}
+
+// A run's proof file (issue 129), written when its whole screens and fight pictures go: what they showed that matters,
+// in one small JSON, staff only. The run's numbers as stored (what the app read off the screens), the second reading of
+// the whole screens and the run check (verify_json), when each fight picture was taken, the fight log's figures, and of
+// each picture removed its size and R2 etag (its MD5 for a single upload: the picture can be matched to a copy later).
+// The fight log itself is copied in, gzip as sent and base64, when it is at most PROOF_RECORD_LOG_BYTES. The run's
+// numbers stay in D1 too; the file is the snapshot of what was proven, kept as long as the run.
+async function proofRecordOf(env, row, extra, now) {
+  const full = extra.proofFull || {};
+  const fights = Array.isArray(extra.proofFight) ? extra.proofFight : [];
+  const times = new Map((fightShots(extra.fightShots) || []).filter((item) => Number.isFinite(item.t)).map((item) => [item.n, item.t]));
+  const about = async (key) => {
+    const head = env.EVIDENCE.head ? await env.EVIDENCE.head(key).catch(() => null) : null;
+    return head ? { bytes: Number(head.size) || null, ...(head.etag ? { etag: String(head.etag) } : {}) } : { bytes: null };
+  };
+  const pictures = [];
+  for (const [name, shot] of [["evidence", "full"], ["battle", "battle_full"]]) {
+    if (full[name]) pictures.push({ shot, ...(await about(full[name])) });
+  }
+  for (const [i, key] of fights.entries()) {
+    pictures.push({ shot: `fight${i + 1}`, ...(times.has(i + 1) ? { t: times.get(i + 1) } : {}), ...(await about(key)) });
+  }
+  let fightLog = null;
+  if (typeof extra.proofFightLog === "string") {
+    const object = await env.EVIDENCE.get(extra.proofFightLog).catch(() => null);
+    const bytes = object ? new Uint8Array(await new Response(object.body).arrayBuffer()) : null;
+    fightLog = !bytes ? { bytes: null }
+      : bytes.length <= PROOF_RECORD_LOG_BYTES ? { bytes: bytes.length, gzipBase64: base64Of(bytes) } : { bytes: bytes.length };
+  }
+  const check = parseJsonColumn(row.verifyJson);
+  const record = {
+    version: 1,
+    submissionId: row.submissionId,
+    sentAt: row.createdAt,
+    keptAt: now,
+    why: row.aged ? "7 days" : "replaced by a better run",
+    fight: await proofFight(env, row),
+    run: { kind: row.kind, score: row.score ?? null, stars: row.stars ?? null, clearTimeS: row.clearTimeS ?? null,
+      cleared: row.cleared == null ? null : Boolean(row.cleared), teamDps: row.teamDps ?? null, players: parseJsonColumn(row.playersJson) || [] },
+    check: { state: row.verifyState || null, ...(check && typeof check === "object" && !Array.isArray(check) ? check : {}) },
+    pictures,
+    ...(extra.fightStats && typeof extra.fightStats === "object" && !Array.isArray(extra.fightStats) ? { fightStats: extra.fightStats } : {}),
+    ...(typeof extra.fightLogNote === "string" ? { fightLogNote: extra.fightLogNote } : {}),
+    ...(fightLog ? { fightLog } : {}),
+  };
+  return JSON.parse(JSON.stringify(record));
+}
+
+function base64Of(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+
+// A run's proof file (extra.proofRecord), or null
+async function storedProofRecord(env, extra) {
+  if (typeof extra?.proofRecord !== "string" || !env.EVIDENCE) return null;
+  const object = await env.EVIDENCE.get(extra.proofRecord).catch(() => null);
+  if (!object) return null;
+  try {
+    return JSON.parse(await new Response(object.body).text());
+  } catch {
+    return null;
+  }
 }
 
 // The profile's cards, as its owner arranged them: { order, hidden } of card ids, kept in profiles.preferences_json.
@@ -2701,10 +2878,10 @@ async function deleteOwnAccount(request, env) {
   if (env.EVIDENCE) {
     const { results } = await env.DB.prepare(
       `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt FROM leaderboard_submissions
-       WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL)`,
+       WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL OR json_extract(extra_json, '$.proofRecord') IS NOT NULL)`,
     ).bind(discordId).all();
     for (const row of results || []) {
-      for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
+      for (const key of runFileKeys(row)) await env.EVIDENCE.delete(key);
     }
     const photos = await env.DB.prepare("SELECT photo_key AS photoKey FROM profile_photos WHERE discord_id = ?").bind(discordId).all();
     for (const row of photos.results || []) {
@@ -4242,8 +4419,16 @@ async function submitLeaderboardRecord(request, env) {
       fightLogNote = log.note;
     }
   }
-  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote) {
+  // the proof file left when the whole screens and fight pictures went (pruneProofs): kept on a re-send
+  const proofRecord = typeof stored.proofRecord === "string" ? stored.proofRecord : null;
+  // the leads staff read off the Party picture (saveRunLeads): the app can't set them; kept on a re-send without a
+  // new Party picture, dropped with one (that picture hasn't been read)
+  const storedLeads = !parsed.party && stored.leads && typeof stored.leads === "object" ? stored.leads : null;
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote || proofRecord || storedLeads) {
     const extra = parseJsonColumn(record.extraJson) || {};
+    delete extra.proofRecord;
+    delete extra.leads;
+    if (storedLeads) extra.leads = storedLeads;
     delete extra.proofFull;
     delete extra.proofParty;
     delete extra.proofGizmos;
@@ -4265,6 +4450,7 @@ async function submitLeaderboardRecord(request, env) {
     if (proofFightLog) extra.proofFightLog = proofFightLog;
     if (storedFightStats) extra.fightStats = storedFightStats;
     if (fightLogNote) extra.fightLogNote = fightLogNote;
+    if (proofRecord) extra.proofRecord = proofRecord;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -7296,6 +7482,27 @@ async function leaderboardEntries(request, env) {
     : LEADERBOARD_DEFAULT_SORT[kind] || "score";
   const natural = LEADERBOARD_SORTS[sortKey];
   const order = params.get("order") === "asc" ? "ASC" : params.get("order") === "desc" ? "DESC" : natural;
+  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
+  const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
+  // One row per player (their best on each boss) unless every submission is requested.
+  const bestPerPlayer = params.get("best") !== "0";
+  const { filtered, orderBy } = boardRowsSql(kind, sortKey, order, where, { bestPerPlayer,
+    cycles: sortKey === "clear_time_s" && kind === "interlink_run" ? await interlinkCycles(env) : [] });
+  // updatedAt: when the newest run on this board (as filtered) reached AniiLogs, for the "Updated" line over it
+  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(created_at) AS updatedAt FROM (${filtered})`).bind(...binds).first();
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
+  ).bind(...binds, limit, offset).all();
+  return leaderboardEntriesAnswer(env, account, { kind, sortKey, order, bestPerPlayer, countRow, offset, limit, results });
+}
+
+// The rows a board lists and its order, for the board (leaderboardEntries) and the profile's places on it
+// (boardStandings), so the two never disagree (issue 131). where: the board's filters (aliased s, a CREDITED_COPIES
+// row); bestPerPlayer: one row per player (the run the board's main measure picks), else every run. Returns the SQL
+// of the rows (its binds are the filters') and orderBy(prefix), the board's order; rows equal on it go by when they
+// reached the site.
+function boardRowsSql(kind, sortKey, order, filters, { bestPerPlayer = true, cycles = [] } = {}) {
+  const where = [...filters];
   // Clear-time boards only rank finished runs; values the board sorts on must be present.
   // "standing" (Egg Heist season) orders by rank tier, then Emperor stars, then rank points.
   const sortBy = (key, direction) => (prefix) => {
@@ -7325,11 +7532,7 @@ async function leaderboardEntries(request, env) {
   if (sortKey === "standing" || (sortKey === "score" && kind === "eggheist_season")) where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
   else if (!DISPLAY_SORTS.has(sortKey)) where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
-  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
-  const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
-  // One row per player (their best on each boss) unless every submission is requested.
-  const bestPerPlayer = params.get("best") !== "0";
+  if (sortKey === "clear_time_s") where.push(clearedSql(kind, cycles));
   // one row per player: the sender, or a teammate credited with the run (see CREDITED_RUNS)
   const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.who, s.boss_id"
     : kind === "eggheist_season" ? "s.who, s.cycle"
@@ -7348,17 +7551,16 @@ async function leaderboardEntries(request, env) {
     LEFT JOIN profiles p ON p.discord_id = s.who
     LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id AND s.teammate IS NULL
     WHERE ${where.join(" AND ")}`;
-  const filtered = bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base;
-  // updatedAt: when the newest run on this board (as filtered) reached AniiLogs, for the "Updated" line over it
-  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(created_at) AS updatedAt FROM (${filtered})`).bind(...binds).first();
-  const { results } = await env.DB.prepare(
-    `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
-  ).bind(...binds, limit, offset).all();
+  return { filtered: bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base, orderBy };
+}
+
+async function leaderboardEntriesAnswer(env, account, { kind, sortKey, order, bestPerPlayer, countRow, offset, limit, results }) {
   const profiles = await partyProfiles(env, results || []);
   // a shared run's lineup from every copy of it (mergedLineup), as the history and the proof viewer show it
   const copiesOf = await sharedCopies(env, (results || []).map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
-  const lineupOf = (row, lineup) => seatedLineup(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
-    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup)), parseJsonColumn(row.players_json));
+  // each lead as the run's Party picture showed it, when staff stored that reading (extra.leads)
+  const lineupOf = (row, lineup) => lineupWithLeads(seatedLineup(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
+    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup)), parseJsonColumn(row.players_json)), parseJsonColumn(row.extra_json)?.leads);
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
   const weeks = kind === "interlink_run" || kind === "interlink_best" ? await interlinkCycles(env) : [];
   return json({
@@ -7414,7 +7616,7 @@ async function leaderboardEntries(request, env) {
       buffs: parseJsonColumn(row.buffs_json),
       // the fight's pictures and log are staff only: none of their entries is shown here
       extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, proofFight: _fight, fightShots: _fightShots, proofFightLog: _log, fightStats: _stats,
-        fightLogNote: _note, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
+        fightLogNote: _note, proofRecord: _record, leads: _leads, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
@@ -7513,6 +7715,11 @@ function proofKeys(row) {
   return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || []),
     ...(Array.isArray(extra.proofFight) ? extra.proofFight : []), extra.proofFightLog].filter(Boolean);
 }
+// ... and its proof file, which outlives them (pruneProofs): gone only with the run
+function runFileKeys(row) {
+  const record = (parseJsonColumn(row?.extraJson) || {}).proofRecord;
+  return [...proofKeys(row), ...(typeof record === "string" ? [record] : [])];
+}
 
 async function deleteSubmission(request, env, submissionId) {
   const account = await leaderboardAccount(request, env);
@@ -7525,7 +7732,7 @@ async function deleteSubmission(request, env, submissionId) {
   // the owner and administrators only (runs.delete), any run; players can't delete theirs (the owner, 13 Nov)
   if (!can(account, "runs.delete")) return json({ error: "Only the owner and administrators can delete runs." }, 403);
   await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
-  for (const key of proofKeys(row)) if (env.EVIDENCE) await env.EVIDENCE.delete(key);
+  for (const key of runFileKeys(row)) if (env.EVIDENCE) await env.EVIDENCE.delete(key);
   return json({ ok: true });
 }
 
@@ -7551,18 +7758,21 @@ async function submissionEvidence(request, env, submissionId) {
   // and so is the fight log (extra.proofFightLog, its figures extra.fightStats, extra.fightLogNote)
   const fightLog = typeof extra.proofFightLog === "string" ? extra.proofFightLog : null;
   const logNote = typeof extra.fightLogNote === "string" ? extra.fightLogNote : null;
-  const staffOnly = fights.length > 0 || Boolean(fightLog || logNote);
+  // and so is the proof file left when the whole screens and fight pictures went (extra.proofRecord, issue 129)
+  const recordKey = typeof extra.proofRecord === "string" ? extra.proofRecord : null;
+  const staffOnly = fights.length > 0 || Boolean(fightLog || logNote || recordKey);
   let viewer;
   const viewerAccount = async () => (viewer === undefined ? (viewer = await leaderboardAccount(request, env)) : viewer);
-  const staff = Boolean(row && staffOnly && (shot === "list" || fightShot || shot === "fightlog") && can(await viewerAccount(), "logs.read"));
+  const staff = Boolean(row && staffOnly && (shot === "list" || fightShot || shot === "fightlog" || shot === "record") && can(await viewerAccount(), "logs.read"));
   // ?shot=list: the run's pictures, in the order they were on screen (the viewer's tabs), with what each player went in
   // with (the Party screen's lineup: lead, level, CP, team) and the run's buffs - public on the boards already
   const shots = row ? [row.evidenceKey && "summary", row.battleKey && "battle", ...gizmos.map((_, i) => `gizmo${i + 1}`),
     extra.proofParty && "party", ...(staff ? fights.map((_, i) => `fight${i + 1}`) : [])].filter(Boolean) : [];
-  const key = shot === "list" ? (shots.length ? "list" : null)
+  const key = shot === "list" ? (shots.length || (staff && recordKey) ? "list" : null)
     : shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
     : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1]
-    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : shot === "fightlog" ? (staff ? fightLog : null) : row?.evidenceKey;
+    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : shot === "fightlog" ? (staff ? fightLog || recordKey : null)
+    : shot === "record" ? (staff ? recordKey : null) : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
@@ -7593,20 +7803,44 @@ async function submissionEvidence(request, env, submissionId) {
     // staff: when each fight picture was taken (extra.fightShots, for the viewer's labels)
     const times = staff ? fightShots(extra.fightShots) : null;
     const stats = extra.fightStats && typeof extra.fightStats === "object" && !Array.isArray(extra.fightStats) ? extra.fightStats : null;
-    const log = staff && (fightLog || logNote) ? { stats: fightLog ? stats : null, ...(logNote ? { note: logNote } : {}) } : null;
+    // staff: the proof file's summary once the pictures are gone (the file itself: ?shot=record)
+    const record = staff && recordKey ? await storedProofRecord(env, extra) : null;
+    const recordLog = Boolean(record?.fightLog?.gzipBase64);
+    const log = staff && (fightLog || logNote || (record?.fightLog && stats))
+      ? { stats: fightLog || record?.fightLog ? stats : null, ...(fightLog || recordLog ? {} : { download: false }), ...(logNote ? { note: logNote } : {}) } : null;
+    const reading = record?.check?.reading && typeof record.check.reading === "object" ? record.check.reading : null;
+    const summary = record ? { keptAt: record.keptAt ?? null, why: record.why || null, pictures: Array.isArray(record.pictures) ? record.pictures : [],
+      check: record.check?.state || null,
+      ...(reading ? { reading: { ...(reading.result ? { result: { score: readNumber(reading.result.score), stars: readNumber(reading.result.stars),
+        time: typeof reading.result.time === "string" ? reading.result.time : null } } : {}), ...(reading.via ? { via: reading.via } : {}) } } : {}),
+      ...(record.fightLog ? { fightLog: { bytes: record.fightLog.bytes ?? null, kept: recordLog } } : {}) } : null;
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
       ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}),
-      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}) });
+      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}), ...(summary ? { record: summary } : {}),
+      // the leads are already stored from the Party picture (saveRunLeads): the viewer needn't send its reading
+      ...(extra.leads ? { leadsRead: true } : {}) });
     // a list naming the fight's pictures is never cached; the list depends on who asks
     listed.headers.set("cache-control", visible && !staff ? "public, max-age=300" : "private, no-store");
     if (staffOnly) listed.headers.set("vary", "Authorization");
     return listed;
   }
+  // the fight log, once its own file has gone with the crops: the copy in the proof file
+  if (shot === "fightlog" && key === recordKey) {
+    const copy = (await storedProofRecord(env, extra))?.fightLog?.gzipBase64;
+    if (typeof copy !== "string") return json({ error: "Evidence not found." }, 404);
+    const bytes = Uint8Array.from(atob(copy), (ch) => ch.charCodeAt(0));
+    return new Response(bytes, { status: 200, headers: securityHeaders(new Headers({ "content-type": "application/gzip",
+      "cache-control": "private, no-store", "content-disposition": `attachment; filename="fight-${submissionId}.csv.gz"` })) });
+  }
   const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
-  headers.set("cache-control", visible && !fightShot && shot !== "fightlog" ? "public, max-age=86400" : "private, no-store");
+  headers.set("cache-control", visible && !fightShot && shot !== "fightlog" && shot !== "record" ? "public, max-age=86400" : "private, no-store");
+  if (shot === "record") {
+    headers.set("content-type", "application/json");
+    headers.set("content-disposition", `attachment; filename="proof-${submissionId}.json"`);
+  }
   if (shot === "fightlog") {
     headers.set("content-type", "application/gzip");
     headers.set("content-disposition", `attachment; filename="fight-${submissionId}.csv.gz"`);
@@ -8303,6 +8537,9 @@ async function api(request, env) {
   if (submissionMatch && !submissionMatch[2] && request.method === "PATCH") return moderateSubmission(request, env, submissionMatch[1]);
   if (submissionMatch && !submissionMatch[2] && request.method === "DELETE") return deleteSubmission(request, env, submissionMatch[1]);
   if (submissionMatch && submissionMatch[2] && request.method === "GET") return submissionEvidence(request, env, submissionMatch[1]);
+  const leadsMatch = url.pathname.match(/^\/api\/leaderboard\/submissions\/([A-Za-z0-9_-]{8,40})\/leads$/u);
+  if (leadsMatch && request.method === "POST") return saveRunLeads(request, env, leadsMatch[1]);
+  if (url.pathname === "/api/admin/lead-reads" && request.method === "GET") return pendingLeadReads(request, env);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "GET") return listCharacters(request, env);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "POST") return linkCharacter(request, env);
   if (url.pathname === "/api/leaderboard/characters/disputes" && request.method === "POST") return disputeCharacter(request, env);

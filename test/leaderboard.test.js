@@ -5,7 +5,7 @@ import { gzipSync } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, playedAtLocalAsUtc, playedAtShifts, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, LEAD_SURE, lineupDps, lineupWithLeads, mergedLineup, playedAtLocalAsUtc, playedAtShifts, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -67,6 +67,10 @@ function evidenceStore() {
     async get(key) {
       const object = objects.get(key);
       return object ? { body: object.bytes, writeHttpMetadata: (headers) => headers.set("content-type", object.type) } : null;
+    },
+    async head(key) {
+      const object = objects.get(key);
+      return object ? { size: object.bytes.length, etag: `etag-${object.bytes.length}` } : null;
     },
     async delete(key) {
       objects.delete(key);
@@ -545,33 +549,113 @@ test("the fight's pictures: stored in order, replaced or kept on a re-send, staf
   assert.deepEqual(keys(), []);
 });
 
-test("the fight's pictures go with the whole screens after 14 days; a current best and a run under review keep them", async () => {
+test("the fight's pictures go with the whole screens after 7 days, a proof file in their place; a current best and a run under review keep them", async () => {
   const EVIDENCE = evidenceStore();
-  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE, ADMIN_DISCORD_IDS: IDS.dev });
   const token = await namedToken(env, SESSIONS.dev);
   const sim = (id, clearTimeS) => ({ kind: "sim_run", clientRunId: id, trial: "Training of Fire", difficulty: "Hard", clearTimeS, cleared: true, partySize: 1,
     extra: { fightShots: [{ n: 1, t: 10 }] } });
-  const screens = ["evidence", "evidence_full", "fight1", "fight2"];
   const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
   const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
-    .map((key) => /-(full|fight\d)\.jpg$/u.exec(key)?.[1] || "crop").sort();
+    .map((key) => /-(full|fight\d|proof|fightlog)\.(jpg|json|csv\.gz)$/u.exec(key)?.[1] || "crop").sort();
   const extra = (client) => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = ?").get(client).e || "{}");
-  await sendRun(env, token, sim("slow", 500), screens);
-  await sendRun(env, token, sim("review", 450), screens);
-  await sendRun(env, token, sim("best", 300), screens);
-  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "full"]);
-  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 20 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
+  const send = (body, log = null) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(body));
+    for (const part of ["evidence", "evidence_full", "fight1", "fight2"]) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+    if (log) form.set("fightlog", log, "fight.csv.gz");
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  const log = gzipped(fightCsv(40));
+  const logBytes = new Uint8Array(await log.arrayBuffer());
+  await send(sim("slow", 500), log);
+  await send(sim("review", 450));
+  await send(sim("best", 300));
+  await send(sim("fresh", 600));
+  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "fightlog", "full"]);
+  // 6 days: nothing goes
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 6 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
+  await sendRun(env, token, run("trigger-a"));
+  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "fightlog", "full"]);
+  // 8 days
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 2 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
   sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch' WHERE client_run_id = 'review'").run();
   for (let i = 0; i < 2; i += 1) await sendRun(env, token, run(`trigger-${i}`));
-  // the slower run: its whole screen and fight pictures gone, the crop kept (90 days), proofFight cleared
-  assert.deepEqual(pictures("slow"), ["crop"]);
+  // the slower run: its whole screen and fight pictures gone, a proof file in their place, the crop and log kept (90 days)
+  assert.deepEqual(pictures("slow"), ["crop", "fightlog", "proof"]);
   assert.equal(extra("slow").proofFight, undefined);
   assert.equal(extra("slow").proofFull, undefined);
+  assert.equal(extra("slow").proofRecord, `evidence/${IDS.dev}/${id("slow")}-proof.json`);
   for (const kept of ["best", "review"]) assert.deepEqual(pictures(kept), ["crop", "fight1", "fight2", "full"], kept);
-  // after 90 days the crops go too, with anything left
+  assert.deepEqual(pictures("fresh"), ["crop", "fight1", "fight2", "full"]);             // under 7 days old
+  const file = EVIDENCE.objects.get(extra("slow").proofRecord);
+  assert.equal(file.type, "application/json");
+  const record = JSON.parse(new TextDecoder().decode(file.bytes));
+  assert.equal(record.version, 1);
+  assert.equal(record.why, "7 days");
+  assert.deepEqual(record.pictures, [{ shot: "full", bytes: 4, etag: "etag-4" }, { shot: "fight1", t: 10, bytes: 4, etag: "etag-4" }, { shot: "fight2", bytes: 4, etag: "etag-4" }]);
+  assert.equal(record.run.clearTimeS, 500);
+  assert.equal(record.fight.mode, "sim");
+  assert.equal(record.fightStats.rows, 40);
+  assert.deepEqual(Buffer.from(record.fightLog.gzipBase64, "base64"), Buffer.from(logBytes));
+  assert.ok(file.bytes.length < 8 * 1024, `${file.bytes.length} bytes`);
+
+  // staff see the proof file's summary in place of the pictures; nobody else is told it exists
+  const base = `/api/leaderboard/submissions/${id("slow")}/evidence`;
+  const staff = await (await call(env, `${base}?shot=list`, { session: SESSIONS.dev })).json();
+  assert.deepEqual(staff.shots, ["summary"]);
+  assert.equal(staff.record.why, "7 days");
+  assert.equal(staff.record.pictures.length, 3);
+  assert.deepEqual(staff.record.fightLog, { bytes: logBytes.length, kept: true });
+  assert.ok(!JSON.stringify(staff).includes("gzipBase64"));
+  for (const session of [SESSIONS.dev2, SESSIONS.user, undefined]) {
+    const details = await (await call(env, `${base}?shot=list`, { session })).json();
+    assert.equal(details.record, undefined);
+    assert.equal(details.fightLog, undefined);
+    assert.equal((await call(env, `${base}?shot=record`, { session })).status, 404);
+  }
+  const download = await call(env, `${base}?shot=record`, { session: SESSIONS.dev });
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("cache-control"), "private, no-store");
+  assert.equal((await download.json()).submissionId, id("slow"));
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=sim_run")).json()).entries.find((item) => item.extra);
+  assert.ok(!JSON.stringify(entry || {}).includes("-proof.json"));
+
+  // after 90 days the crops and the log file go; the proof file stays, and the fight log comes from it
   sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 100 * 86400 WHERE client_run_id = 'slow'").run();
   await sendRun(env, token, run("trigger-x"));
-  assert.deepEqual(pictures("slow"), []);
+  assert.deepEqual(pictures("slow"), ["proof"]);
+  const later = await (await call(env, `${base}?shot=list`, { session: SESSIONS.dev })).json();
+  assert.deepEqual(later.shots, []);
+  assert.equal(later.fightLog.download, undefined);                    // the copy in the proof file can be downloaded
+  assert.equal(later.fightLog.stats.rows, 40);
+  const copy = await call(env, `${base}?shot=fightlog`, { session: SESSIONS.dev });
+  assert.equal(copy.status, 200);
+  assert.deepEqual(new Uint8Array(await copy.arrayBuffer()), logBytes);
+  assert.equal((await call(env, `${base}?shot=fightlog`, { session: SESSIONS.user })).status, 404);
+
+  // a re-send keeps the proof file; deleting the run deletes it
+  assert.equal((await sendRun(env, token, { ...sim("slow", 500), extra: { proofRecord: "evidence/elsewhere.json" } })).status, 200);
+  assert.equal(extra("slow").proofRecord, `evidence/${IDS.dev}/${id("slow")}-proof.json`);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${id("slow")}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);
+  assert.equal([...EVIDENCE.objects.keys()].filter((key) => key.endsWith("-proof.json")).length, 0);
+});
+
+test("a run replaced by a better one at once gets its proof file too", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const token = await namedToken(env, SESSIONS.dev);
+  await sendRun(env, token, run("worse", { score: 15000, stars: 15 }), ["evidence", "evidence_full"]);
+  await sendRun(env, token, run("better"), ["evidence", "evidence_full"]);
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600").run();      // the better run held up
+  await sendRun(env, token, run("trigger"));
+  const row = sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
+  const extra = JSON.parse(row.e);
+  assert.equal(extra.proofFull, undefined);
+  const record = JSON.parse(new TextDecoder().decode(EVIDENCE.objects.get(extra.proofRecord).bytes));
+  assert.equal(record.why, "replaced by a better run");
+  assert.equal(record.run.score, 15000);
+  assert.deepEqual(record.pictures.map((p) => p.shot), ["full"]);
 });
 
 // A synthetic fight log (invented numbers): a look every 0.5 s, 1,000 damage a look, the game's countdown falling
@@ -1613,9 +1697,11 @@ test("the profile overview gathers the owner's characters, board positions and c
   assert.deepEqual(runs.map((row) => [row.boss.name, row.score, row.position, row.players, row.counts, row.character]),
     [["Omega Infergon", 22000, 1, 1, "teams", "MinMax"], ["Omega Tucking", 9000, 1, 1, "teams", null]]);
   assert.deepEqual(weeks, []);
-  assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 2]]);
+  // Sim and Egg Heist the same way: placed as their board places them, which lists linked players only, so DevTwo's
+  // runs (no character) don't count either
+  assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 1]]);
   assert.deepEqual(heists.map((row) => [row.cycle, row.seasonRank.name, row.stars, row.score, row.position, row.players]),
-    [["S1", "Egg Emperor", 475, 2900, 2, 2]]);
+    [["S1", "Egg Emperor", 475, 2900, 1, 1]]);
   // the profile's season progress: just these fields, nothing else from the app's extra
   assert.deepEqual(heists[0].seasonProgress, { nextRankAt: 2370, lastGain: 18, bar: [1337, 1350], barAt: 1793167625 });
   // ...and a match that lost points stays a loss
@@ -2339,7 +2425,7 @@ test("pictures: a better Interlink run replaces the older one's proof at once; b
   sqlite.prepare("UPDATE game_characters SET verified_at = 1").run();
   const screens = ["evidence", "battle", "evidence_full", "battle_full"];
   const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
-  const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
+  const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)) && !key.endsWith("-proof.json"))
     .map((key) => (/-(battle-)?full\./u.test(key) ? "full" : "crop")).sort();
   const state = (client, value) => sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = ? WHERE client_run_id = ?").run(value, client);
   let n = 0;
@@ -2354,12 +2440,13 @@ test("pictures: a better Interlink run replaces the older one's proof at once; b
   state("best", "pending");
   await prune();
   assert.equal(pictures("worse").length, 4);
-  // once it's through its check (and 5 minutes in), the older run's pictures go on the next submission (no 14 / 90
-  // day wait); its numbers stay
+  // once it's through its check (and 5 minutes in), the older run's pictures go on the next submission (no 7 / 90
+  // day wait); its numbers stay, and its proof file
   state("best", "match");
   sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id IN ('best', 'worse', 'review')").run();
   await prune();
   assert.deepEqual(pictures("worse"), []);
+  assert.ok(EVIDENCE.objects.has(`evidence/${IDS.dev}/${id("worse")}-proof.json`));
   const worse = sqlite.prepare("SELECT evidence_key, battle_evidence_key, proof_pruned_at, score FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
   assert.deepEqual([worse.evidence_key, worse.battle_evidence_key, worse.score], [null, null, 20000]);
   assert.ok(worse.proof_pruned_at > 0);
@@ -4557,4 +4644,137 @@ test("POST /api/admin/sim-levels: administrators only, a dry run by default, app
   assert.deepEqual([check().levels.verdict, check().levels.backed, check().levels.stretches, check().reviewOnly], ["verified", [5, 6], [{ from: 4, to: 7, areas: 3 }], undefined]);
   const twice = await (await recompute({ apply: true })).json();
   assert.deepEqual([twice.changed, twice.levels, twice.flags], [0, 0, 0]);
+});
+
+// The Party heads pack's list (made-up species), as the content bucket holds it
+function contentStore(names = ["Emberpup", "Chirpi", "Glameep", "Celestis"]) {
+  const meta = JSON.stringify({ size: 64, cols: 8, names, fade: names.length });
+  return { async get(key) { return key.endsWith("/data/party_heads.json") ? { body: new TextEncoder().encode(meta) } : null; } };
+}
+
+test("leads read off the Party picture: stored from staff only, then shown on the boards, the history and the viewer, and found by search", async () => {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), CONTENT: contentStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const lineup = [
+    { slot: 0, name: "UserOne", ai: false, self: true, aniimo: "Sparky", aniimoLevel: 60, cp: 20000, team: [{ aniimo: "Sparky" }, { aniimo: "Chirpi" }] },
+    { slot: 1, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
+    { slot: 2, name: "Friend", ai: false, aniimo: "Glameep", aniimoLevel: 58, cp: 9999 },
+  ];
+  // the app can't set the reading itself
+  const sent = await sendRun(env, token, run("leads", { extra: { lineup, leads: { v: 1, cards: [{ card: 2, name: "Emberpup", sent: "Glameep", sentSpecies: true }] } } }),
+    ["evidence", "party"]);
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  const stored = () => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE submission_id = ?").get(submissionId).e).leads;
+  assert.equal(stored(), undefined);
+  const post = (session, cards) => call(env, `/api/leaderboard/submissions/${submissionId}/leads`, { session, method: "POST", body: { cards } });
+  const sure = (card, name) => ({ card, name, score: 0.8, margin: 0.3 });
+  // anyone but staff is turned away
+  assert.equal((await post(undefined, [sure(0, "Emberpup")])).status, 401);
+  for (const session of [SESSIONS.user, SESSIONS.dev2]) assert.equal((await post(session, [sure(0, "Emberpup")])).status, 403);
+  assert.equal(stored(), undefined);
+  // only names in the pack, each card once
+  assert.equal((await post(SESSIONS.dev, [sure(0, "Notananiimo")])).status, 400);
+  assert.equal((await post(SESSIONS.dev, [sure(0, "Emberpup"), sure(0, "Chirpi")])).status, 400);
+  assert.equal((await post(SESSIONS.dev, [sure(5, "Emberpup")])).status, 400);
+  // staff: card 0 is a renamed Emberpup ("Sparky" is no Aniimo), card 1 an AI (left alone), card 2 read unsure (dropped)
+  const saved = await post(SESSIONS.dev, [sure(0, "emberpup"), sure(1, "Celestis"), { card: 2, name: "Celestis", score: 0.5, margin: 0.4 }]);
+  assert.equal(saved.status, 200);
+  const answer = await saved.json();
+  assert.equal(answer.stored, 2);
+  assert.deepEqual(stored().cards, [{ card: 0, name: "Emberpup", sent: "Sparky", sentSpecies: false }, { card: 1, name: "Celestis", sent: "Chirpi", sentSpecies: true }]);
+  const expectLead = (entries) => {
+    const bySlot = new Map(entries.map((entry) => [entry.slot, entry]));
+    assert.equal(bySlot.get(0).aniimo, "Emberpup");
+    assert.equal(bySlot.get(0).nickname, "Sparky");
+    assert.deepEqual(bySlot.get(0).team.map((m) => m.aniimo), ["Emberpup", "Chirpi"]);
+    assert.equal(bySlot.get(1).aniimo, "Chirpi");                       // AI: as sent
+    assert.equal(bySlot.get(2).aniimo, "Glameep");                      // unsure: as sent
+  };
+  expectLead(answer.lineup);
+  // the boards' rows, the history and the viewer show it
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries.find((item) => item.submissionId === submissionId);
+  expectLead(entry.extra.lineup);
+  assert.equal(entry.extra.leads, undefined);
+  expectLead((await historyOf(env, "/api/profile/history", SESSIONS.user)).runs.find((item) => item.submissionId === submissionId).lineup);
+  const list = await (await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=list`)).json();
+  expectLead(list.lineup);
+  assert.equal(list.leadsRead, true);
+  // search finds the run by the species the picture showed
+  const found = await historyOf(env, "/api/profile/history?q=emberpup", SESSIONS.user);
+  assert.deepEqual(found.runs.map((item) => item.submissionId), [submissionId]);
+  assert.equal((await historyOf(env, "/api/profile/history?q=celestis", SESSIONS.user)).runs.length, 1);   // stored for card 1, though not shown
+  // a re-send keeps the reading (and can't replace it); one with a new Party picture drops it
+  assert.equal((await sendRun(env, token, run("leads", { extra: { lineup, leads: { v: 1, cards: [] } } }), ["evidence"])).status, 200);
+  assert.equal(stored().cards.length, 2);
+  assert.equal((await sendRun(env, token, run("leads", { extra: { lineup } }), ["evidence", "party"])).status, 200);
+  assert.equal(stored(), undefined);
+});
+
+test("the staff pass: runs with a Party picture whose leads aren't read yet, staff only", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), CONTENT: contentStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const lineup = [{ slot: 0, name: "UserOne", ai: false, self: true, aniimo: "Chirpi" }];
+  const ids = [];
+  for (const id of ["p1", "p2"]) ids.push((await (await sendRun(env, token, run(id, { extra: { lineup } }), ["evidence", "party"])).json()).submissionId);
+  await sendRun(env, token, run("no-party", { extra: { lineup } }), ["evidence"]);
+  assert.equal((await call(env, "/api/admin/lead-reads", { session: SESSIONS.user })).status, 403);
+  const pending = await (await call(env, "/api/admin/lead-reads", { session: SESSIONS.dev })).json();
+  assert.deepEqual(pending.runs.map((item) => item.submissionId).sort(), [...ids].sort());
+  assert.equal(pending.left, 2);
+  assert.equal(pending.runs[0].mode, "interlink");
+  // a reading with nothing sure still counts as read
+  assert.equal((await call(env, `/api/leaderboard/submissions/${ids[0]}/leads`, { session: SESSIONS.dev, method: "POST", body: { cards: [] } })).status, 200);
+  assert.deepEqual((await (await call(env, "/api/admin/lead-reads", { session: SESSIONS.dev })).json()).runs.map((item) => item.submissionId), [ids[1]]);
+});
+
+test("stored leads: the viewer's rules (the picture decides, a nickname kept, a card read twice keeps only the lead); a lead changed since is left alone", () => {
+  const lineup = [
+    { slot: 0, name: "A", aniimo: "Chirpi", aniimoLevel: 60, cp: 100, team: [{ aniimo: "Chirpi" }] },
+    { slot: 1, name: "B", aniimo: "Chirpi", aniimoLevel: 60, cp: 100, team: [{ aniimo: "Chirpi" }] },
+    { slot: 2, name: "C", aniimo: "Glameep" },
+    { name: "D", aniimo: "Glameep" },
+  ];
+  const leads = { cards: [{ card: 1, name: "Celestis", sent: "Chirpi", sentSpecies: true }, { card: 2, name: "Celestis", sent: "Emberpup", sentSpecies: true }] };
+  const out = lineupWithLeads(lineup, leads);
+  assert.deepEqual(out[0], lineup[0]);
+  assert.deepEqual(out[1], { slot: 1, name: "B", aniimo: "Celestis" });   // read twice: level, CP and team were A's
+  assert.deepEqual(out[2], lineup[2]);                                      // read against another lead: stale
+  assert.deepEqual(out[3], lineup[3]);                                      // no slot: no card
+  assert.equal(lineupWithLeads(lineup, null), lineup);
+  // the same "sure" rule as public/party-portraits.js
+  const viewer = readFileSync(resolve(import.meta.dirname, "..", "public", "party-portraits.js"), "utf8");
+  assert.match(viewer, /r\.score >= 0\.55 && r\.margin >= 0\.15\) \|\| \(r\.score >= 0\.68 && r\.margin >= 0\.10/u);
+  assert.deepEqual([{ score: 0.56, margin: 0.15 }, { score: 0.7, margin: 0.1 }, { score: 0.6, margin: 0.1 }, { score: 0.9 }].map(LEAD_SURE), [true, true, false, false]);
+});
+
+test("a profile's Holo-Battle Sim and Egg Heist places are the boards' own (issue 131)", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const dev2 = await desktopToken(env, SESSIONS.dev2);                   // no character: on no board
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const sim = (id, clearTimeS, over = {}) => ({ kind: "sim_run", clientRunId: id, trial: "Training of Fire", difficulty: "Hard", clearTimeS, cleared: true, partySize: 1, ...over });
+  await send(dev, sim("d1", 500));
+  await send(dev, sim("d2", 450));
+  await send(user, sim("u1", 300));
+  await send(dev2, sim("x1", 100));
+  await send(user, sim("u2", 200, { difficulty: "Normal" }));            // another board
+  const match = (id, score) => ({ kind: "eggheist_match", clientRunId: id, cycle: "S1", score, clearTimeS: 224, cleared: true, difficulty: "Normal", defeats: 1 });
+  await send(dev, match("m1", 30000));
+  await send(user, match("m2", 31000));
+  await send(dev2, match("m3", 99000));
+  const board = async (query) => (await (await call(env, `/api/leaderboard/entries?${query}`)).json()).entries;
+  const profile = async (session) => (await (await call(env, "/api/profile/overview", { session })).json()).leaderboards;
+  const simBoard = await board("kind=sim_run&trial=Fire&difficulty=Hard");
+  const eggBoard = await board("kind=eggheist_match");
+  for (const [session, name] of [[SESSIONS.dev, "DevOne"], [SESSIONS.user, "UserOne"]]) {
+    const mine = await profile(session);
+    const onSim = simBoard.find((row) => row.player === name);
+    const placed = mine.sim_run.find((row) => row.difficulty === "Hard");
+    assert.deepEqual([placed.position, placed.players, placed.submissionId], [onSim.rank, simBoard.length, onSim.submissionId], name);
+    const onEgg = eggBoard.find((row) => row.player === name);
+    assert.deepEqual([mine.eggheist_match[0].position, mine.eggheist_match[0].players], [onEgg.rank, eggBoard.length], name);
+  }
+  assert.deepEqual(simBoard.map((row) => row.clearTimeS), [300, 450]);
 });
