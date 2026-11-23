@@ -419,7 +419,7 @@ test("links: the same placement gives one code, from either copy of the run; a r
   assert.equal(first.status, 200);
   const { code, url } = await first.json();
   assert.match(code, /^[23456789abcdefghjkmnpqrstuvwxyz]{5}$/u);
-  assert.equal(url, `${API}/${code}`);
+  assert.equal(url, `${API}/lb/${code}`);
   assert.equal((await (await createLink(env, { run: idOf(sqlite, "duo-b"), ladder: "score" })).json()).code, code);
   assert.equal((await (await createLink(env, { run: idOf(sqlite, "duo-c"), ladder: "score" })).json()).code, code);
   // another ladder is another placement
@@ -473,6 +473,36 @@ test("a link on a two-boss Center: the preview and the card name both bosses; a 
   assert.deepEqual([landed.name, landed.second?.name], ["Alpha Blazen", "Omega Tucking"]);
 });
 
+test("LINK_ORIGIN: links are made and named on the site's own domain; unset or not https, the host asked", async () => {
+  const { env, sqlite } = await board();
+  const duo = idOf(sqlite, "duo-c");
+  env.LINK_ORIGIN = "https://aniilogs.app";
+  const { code, url } = await (await createLink(env, { run: duo, ladder: "score" })).json();
+  assert.equal(url, `https://aniilogs.app/lb/${code}`);
+  const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
+  assert.match(html, new RegExp(`<meta property="og:url" content="https://aniilogs.app/lb/${code}">`, "u"));
+  env.LINK_ORIGIN = "javascript:alert(1)";
+  assert.equal((await (await createLink(env, { run: duo, ladder: "score" })).json()).url, `${API}/lb/${code}`);
+  env.LINK_ORIGIN = "";
+  assert.equal((await (await createLink(env, { run: duo, ladder: "score" })).json()).url, `${API}/lb/${code}`);
+});
+
+test("/lb/<code> opens the link like /<code>; /lb/<name> goes to the boards; anything else under /lb to the leaderboards", async () => {
+  const { env, sqlite } = await board();
+  const { code } = await (await createLink(env, { run: idOf(sqlite, "duo-c"), ladder: "score" })).json();
+  const viaLb = await call(env, `/lb/${code}`, { ua: DISCORD_UA });
+  assert.equal(viaLb.status, 200);
+  assert.match(await viaLb.text(), /og:title/u);
+  assert.equal((await call(env, `/lb/${code.toUpperCase()}`, { ua: DISCORD_UA })).status, 200);
+  const go = async (path) => { const r = await call(env, path); return [r.status, new URL(r.headers.get("location")).pathname + new URL(r.headers.get("location")).search]; };
+  assert.deepEqual(await go("/lb/home"), [302, "/leaderboard/"]);
+  assert.deepEqual(await go("/lb"), [302, "/leaderboard/"]);
+  assert.deepEqual(await go("/lb/sim"), [302, "/leaderboard/?mode=sim"]);
+  assert.deepEqual(await go("/lb/EGG/"), [302, "/leaderboard/?mode=eggheist"]);
+  assert.deepEqual(await go("/lb/interlink"), [302, "/leaderboard/?mode=interlink"]);
+  assert.deepEqual(await go("/lb/nonsense"), [302, "/leaderboard/"]);
+});
+
 test("opening a link: a crawler gets the preview tags with the overall place; a person goes to the boards with the run open", async () => {
   const { env, sqlite } = await board();
   const duo = idOf(sqlite, "duo-c");
@@ -486,7 +516,7 @@ test("opening a link: a crawler gets the preview tags with the overall place; a 
   assert.match(tag("og:title"), /^#2 on Score · Omega Tucking · Week of [A-Z][a-z]{2} \d{1,2} – [A-Z][a-z]{2} \d{1,2}$/u);
   assert.match(html, /<title>#2 on Score · Omega Tucking · .* · AniiLogs<\/title>/u);
   assert.equal(tag("og:description"), "Cobalt, Briar, Flora (AI) and Mario (AI): 25,000 with 30 stars. Duo: two players and two bots. Boss Killed: 2:50. Team DPS 60,000. Holo-Battle Interlink, Right boss.");
-  assert.equal(tag("og:url"), `${API}/${code}`);
+  assert.equal(tag("og:url"), `${API}/lb/${code}`);
   assert.equal(tag("twitter:card"), "summary_large_image");
   assert.equal(tag("theme-color"), "#f5eecb");
   assert.match(tag("og:image"), new RegExp(`^${API}/api/links/${code}\\.png\\?p=2&amp;v=[0-9a-f]{16}$`, "u"));

@@ -13,6 +13,11 @@ const CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
 const CODE_LENGTH = 5;
 export const PLACEMENT_CODE = /^[23456789abcdefghjkmnpqrstuvwxyz]{5}$/u;
 export const PLACEMENT_PATH = /^\/([23456789abcdefghjkmnpqrstuvwxyz]{5})\/?$/u;
+// The link as handed out: /lb/<code> (the form players know from aniilogs.github.io/lb/<code>), and /lb/<name> for the
+// boards: /lb or /lb/home the leaderboards, /lb/interlink, /lb/sim and /lb/egg one board each (public/short-link.js).
+export const LB_PATH = /^\/lb(?:\/([^/]*))?\/?$/iu;
+export const LB_BOARDS = Object.freeze({ "": "/leaderboard/", home: "/leaderboard/", interlink: "/leaderboard/?mode=interlink",
+  sim: "/leaderboard/?mode=sim", egg: "/leaderboard/?mode=eggheist" });
 export const PLACEMENT_CARD_PATH = /^\/api\/links\/([23456789abcdefghjkmnpqrstuvwxyz]{5})\.png$/u;
 const RUN_ID = /^[A-Za-z0-9_-]{8,40}$/u;
 const BOARDS_PATH = "/leaderboard/";
@@ -272,6 +277,11 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
   // Link-preview crawlers say who they are; anyone else is a person and goes straight to the run on the boards.
   const CRAWLER = /bot\b|bot\/|crawler|spider|facebookexternalhit|facebot|embedly|iframely|slack|discord|telegram|whatsapp|skypeuripreview|vkshare|mastodon|bluesky|cardyb|preview/iu;
 
+  // The address links are made on: LINK_ORIGIN (the site's own domain once it is attached to this project, e.g.
+  // https://aniilogs.app) or, unset, the host the request came to.
+  const linkOrigin = (request, env) => (/^https:\/\/[a-z0-9.-]+$/u.test(String(env.LINK_ORIGIN || ""))
+    ? String(env.LINK_ORIGIN) : new URL(request.url).origin);
+
   async function open(request, env, code) {
     const link = await linkOf(env, code);
     const found = link ? await placement(env, link) : null;
@@ -285,7 +295,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     const { card } = await withPacks(env, drawn);
     const { hash } = await cardKey(link.code, card);
     const image = `${origin}/api/links/${link.code}.png?p=${found.place}&v=${hash}`;
-    return page(200, { title, tabTitle: `${title} · AniiLogs`, description, url: `${origin}/${link.code}`, image,
+    return page(200, { title, tabTitle: `${title} · AniiLogs`, description, url: `${linkOrigin(request, env)}/lb/${link.code}`, image,
       imageAlt: `${title}: ${description}`,
       body: `<h1>${escapeHtml(title)}</h1>\n<p>${escapeHtml(description)}</p>\n<p><a href="${escapeHtml(target)}">Open it on AniiLogs</a></p>` });
   }
@@ -348,8 +358,8 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     if (!ladder || !RUN_ID.test(submissionId) || (ladder.one && !player)) {
       return json({ error: "Send run (a board run's id), ladder and, on a one-player ladder, player." }, 400);
     }
-    const origin = new URL(request.url).origin;
-    const answer = (code) => json({ code, url: `${origin}/${code}` });
+    const origin = linkOrigin(request, env);
+    const answer = (code) => json({ code, url: `${origin}/lb/${code}` });
     const run = await runOf(env, submissionId);
     if (!run) return json({ error: "This run isn't on a board." }, 404);
     const copies = [...run.copies].slice(0, 50);

@@ -3,7 +3,7 @@ import { commentsApi, commentsPath } from "./comments.js";
 import { CARD_ATLAS, CARD_ATLAS_BYTES, CARD_FONTS } from "./card-glyphs.js";
 import { drawPlacementCard, packBlocksFor } from "./placement-card.js";
 import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, NEAR_FLOOR, partyBySeat, realPlayersOf, seatKey, seatNameSimilarity, slotIsBot, withSeatCp } from "./bots.js";
-import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
+import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, LB_BOARDS, LB_PATH, PLACEMENT_CARD_PATH, PLACEMENT_CODE, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
 import { sanitizeStages, simLevelFlags, simLevels, simLevelsLogLine } from "./sim-levels.js";
@@ -8644,7 +8644,15 @@ const placementLinks = createPlacementLinks({
 
 async function handleRequest(request, env) {
   const url = new URL(request.url);
-  const placement = url.pathname.match(PLACEMENT_PATH);
+  // /lb/<name>: one of the boards on the site; /lb/<code>: the placement link (as /<code>); anything else under /lb:
+  // the leaderboards
+  const lb = url.pathname.match(LB_PATH);
+  const lbName = lb ? String(lb[1] || "").toLowerCase() : null;
+  if (lb && !PLACEMENT_CODE.test(lbName)) {
+    const to = `${configuredPublicSiteOrigin(env) || "https://aniilogs.github.io"}${LB_BOARDS[Object.hasOwn(LB_BOARDS, lbName) ? lbName : ""]}`;
+    return new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store" } });
+  }
+  const placement = lb ? [url.pathname, lbName] : url.pathname.match(PLACEMENT_PATH);
   if (url.pathname.startsWith("/api/") || placement) {
     try { await fillRunOutcomes(env); } catch (error) { if (env.DB) OUTCOMES_FILLED.add(env.DB); console.error("Run outcomes need migration 0033", error); }
     // a short link at the root: https://aniilogs-api.pages.dev/<code> (nothing else is served there but index.html)
