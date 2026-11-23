@@ -324,6 +324,44 @@
     } });
     dialog.append(el("div", { class: "lb-proof-actions" }, button));
   }
+  // Storing a Party picture's reading (POST .../leads, staff only): the cards it is sure of. Not staff: the first 403
+  // ends it for the page.
+  let leadsRefused = false;
+  async function saveLeads(runId, found) {
+    const portraits = window.AniilogsPartyPortraits;
+    if (leadsRefused || !portraits?.sureCards) return false;
+    const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(runId)}/leads`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cards: portraits.sureCards(found) }) }).catch(() => null);
+    if (response?.status === 401 || response?.status === 403) leadsRefused = true;
+    if (response?.ok) proofLists.delete(runId);
+    return Boolean(response?.ok);
+  }
+  // A staff pass over the runs whose Party picture isn't read yet (GET /api/admin/lead-reads), from the browser's
+  // console: AniilogsProof.readLeads({ max }). Reads and stores one run at a time; answers { read, stored, left }.
+  async function readLeads({ max = 50 } = {}) {
+    const portraits = window.AniilogsPartyPortraits;
+    if (!portraits?.readPicture) throw new Error("party-portraits.js isn't on this page.");
+    let read = 0;
+    let stored = 0;
+    let left = 0;
+    while (read < max) {
+      const response = await apiFetch(`/admin/lead-reads?limit=${Math.min(20, max - read)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const page = await response.json();
+      left = page.left;
+      if (!page.runs?.length) break;
+      for (const run of page.runs) {
+        read += 1;
+        const reading = await portraits.readPicture(async () => (await fetch(await proofImage(run.submissionId, "party"))).blob(), run.mode)
+          .catch(() => ({ found: [] }));
+        if (!reading) throw new Error("The Party heads pack isn't available.");
+        // a picture that can't be read is stored as read with nothing sure, so the pass moves on
+        if (await saveLeads(run.submissionId, reading?.found || [])) stored += 1;
+        else if (leadsRefused) throw new Error("Only staff can store readings.");
+      }
+    }
+    return { read, stored, left: Math.max(0, left - stored) };
+  }
   let proofOpenFor = null;                             // the run the viewer shows (a late picture of another is dropped)
   let openComments = null;                             // its Comments tab (comments.js), and what picks that tab
   let showCommentsTab = null;
@@ -382,7 +420,10 @@
     const portraits = window.AniilogsPartyPortraits;
     if (party && portraits?.lineupFromPicture && shown.lineup?.length && shown.shots?.includes("party")) {
       const mode = (shown.fight || details.fight)?.mode === "eggheist" ? "eggheist" : "interlink";
-      portraits.lineupFromPicture(shownId, shown.lineup, async () => (await fetch(await proofImage(shownId, "party"))).blob(), mode)
+      // a staff member's reading is stored, so the boards, search and the board row show it too (the API takes it from
+      // staff only; anyone else's viewer never sends it, and one 403 stops it trying for the page)
+      const store = shown.leadsRead || !sessionToken() || leadsRefused ? null : (found) => { saveLeads(shownId, found); };
+      portraits.lineupFromPicture(shownId, shown.lineup, async () => (await fetch(await proofImage(shownId, "party"))).blob(), mode, store)
         .then((lineup) => {
           if (proofOpenFor !== submissionId || lineup === shown.lineup) return;
           const fresh = partyPanel({ ...shown, lineup });
@@ -443,5 +484,5 @@
     const start = options?.shot ? pictures.findIndex((picture) => picture.id === submissionId && picture.shot === options.shot) : -1;
     await show(Math.max(0, start));
   }
-  window.AniilogsProof = Object.freeze({ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete });
+  window.AniilogsProof = Object.freeze({ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete, readLeads });
 })();

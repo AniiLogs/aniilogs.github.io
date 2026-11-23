@@ -1779,8 +1779,9 @@ async function profilesDirectory(env) {
 const HISTORY_PAGE = 20;
 const HISTORY_PAGE_SIZES = Object.freeze([20, 30, 50]);
 // My runs' search box (the owner's own view only): every word has to match something about the run - the boss, the
-// trial or rank, a teammate's name (Battle Data or the Party screen), the mode, or the day it was played (in the
-// viewer's time zone, ?tz= minutes east of UTC: "2026-11-03", "Nov", "November 3"). Never a UID.
+// trial or rank, a teammate's name (Battle Data or the Party screen), a lead Aniimo (as sent, or as the Party picture
+// showed it: extra.leads), the mode, or the day it was played (in the viewer's time zone, ?tz= minutes east of UTC:
+// "2026-11-03", "Nov", "November 3"). Never a UID.
 const HISTORY_MODE_WORDS = Object.freeze({ interlink: "holo-battle interlink", sim: "holo-battle sim simulation trial training", eggheist: "egg heist eggheist" });
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A two-boss fight is found by either boss: its runs are stored under the first one's name (list: the weeks).
@@ -1795,14 +1796,15 @@ function historySearch(params, binds, list = []) {
   const day = `strftime('%Y-%m-%d', ${local}) || ' ' || (CASE strftime('%m', ${local}) ${MONTH_NAMES.map((name, i) => `WHEN '${String(i + 1).padStart(2, "0")}' THEN '${name}'`).join(" ")} END)
     || ' ' || CAST(strftime('%d', ${local}) AS INTEGER)`;
   const like = (n) => `LIKE ?${n} ESCAPE '\\'`;
-  const names = (column, path, n) => `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${column}) THEN ${column} END, '${path}') item
-    WHERE json_extract(item.value, '$.name') ${like(n)})`;
+  const names = (column, path, n, field = "name") => `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${column}) THEN ${column} END, '${path}') item
+    WHERE json_extract(item.value, '$.${field}') ${like(n)})`;
   return words.map((word) => {
     const n = binds.push(`%${word.replace(/[\\%_]/gu, (c) => `\\${c}`)}%`);
     const modes = Object.entries(HISTORY_MODE_WORDS).filter(([, text]) => text.includes(word)).map(([mode]) => `'${mode}'`);
     const paired = [...new Set(pairs.filter((pair) => pair.second.includes(word)).map((pair) => `'${pair.id}'`))];
     return `(${["boss_name", "rank_name", "trial", "difficulty"].map((column) => `${column} ${like(n)}`).join(" OR ")}${paired.length ? ` OR boss_id IN (${paired.join(", ")})` : ""}
       OR ${names("players_json", "$", n)} OR ${names("extra_json", "$.lineup", n)}
+      OR ${names("extra_json", "$.lineup", n, "aniimo")} OR ${names("extra_json", "$.leads.cards", n)}
       OR (${day}) ${like(n)}${modes.length ? ` OR mode IN (${modes.join(", ")})` : ""}${"menu best".includes(word) ? " OR kind = 'interlink_best'" : ""})`;
   });
 }
@@ -2070,11 +2072,116 @@ function seatedLineup(merged, players, withDps = false) {
 // copy (mergedLineup), then seatedLineup (by seat on a four-card run; else each with their Avg DPS (lineupDps), and
 // players only the Battle Data cards had (lineupWithCards)). extra: the copy's parsed extra_json; playersJson its
 // players_json. Null when the copy has no Party read.
-async function runLineup(env, submissionId, extra, playersJson) {
+async function runLineup(env, submissionId, extra, playersJson, { leads = true } = {}) {
   const copies = extra?.sharedRun ? ((await sharedCopies(env, [extra.sharedRun])).get(extra.sharedRun) || []) : [];
   const players = parseJsonColumn(playersJson);
-  return seatedLineup(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
+  const lineup = seatedLineup(mergedLineup(publicLineup(extra?.lineup), copies.filter((copy) => copy.id !== submissionId).map((copy) => copy.lineup)),
     players, true);
+  return leads ? lineupWithLeads(lineup, extra?.leads) : lineup;
+}
+
+// Each player's lead Aniimo as the run's Party picture shows it (issue 130). The site can't decode pictures, so the
+// reading is made in a browser (public/party-portraits.js, the run viewer's) and stored only when a staff member's
+// viewer sends it (POST /api/leaderboard/submissions/<id>/leads, logs.read): a reading anyone could post would let
+// anyone rewrite a run's lineup, and a look-alike rule can't tell a right reading from a wrong one here (a renamed
+// Aniimo's card prints a nickname, nothing like its species). extra.leads = { v, at, cards: [{ card, name, sent,
+// sentSpecies }] }: card is the Party screen's slot (0-3), name the species read, sent the lead this lineup had there
+// when it was read, sentSpecies whether that name is an Aniimo's (false: a nickname). The same rules as the viewer's
+// applyLeads: the picture decides, a nickname is kept beside the species, a card read twice keeps only the lead, an AI
+// teammate and a lead that changed since the reading stay as they are.
+export const LEAD_SURE = (r) => Boolean(r && Number.isFinite(r.score) && Number.isFinite(r.margin)
+  && ((r.score >= 0.55 && r.margin >= 0.15) || (r.score >= 0.68 && r.margin >= 0.10)));
+export function lineupWithLeads(lineup, leads) {
+  const cards = Array.isArray(leads?.cards) ? leads.cards : [];
+  if (!Array.isArray(lineup) || !cards.length) return lineup;
+  const fold = (value) => String(value ?? "").trim().toLowerCase();
+  const facts = (p) => JSON.stringify([fold(p.aniimo), p.aniimoLevel ?? null, p.cp ?? null, (p.team || []).map((m) => fold(m.aniimo))]);
+  return lineup.map((player) => {
+    if (!player || typeof player !== "object" || !Number.isInteger(player.slot) || player.ai) return player;
+    const read = cards.find((item) => item?.card === player.slot);
+    if (!read || typeof read.name !== "string" || !read.name) return player;
+    const sent = player.aniimo;
+    if (fold(sent) !== fold(read.sent)) return player;                       // the lineup changed since the reading
+    if (fold(sent) === fold(read.name)) return player;
+    const renamed = Boolean(sent) && read.sentSpecies === false;
+    const copied = !renamed && Boolean(sent) && lineup.some((other) => other !== player && other && facts(other) === facts(player));
+    const team = copied ? undefined : (player.team || []).map((member) => (fold(member.aniimo) === fold(sent) && sent
+      ? { ...member, aniimo: read.name, ...(renamed ? { nickname: sent } : {}) } : member));
+    const out = { ...player, aniimo: read.name, ...(renamed ? { nickname: sent } : {}), team };
+    if (copied) { delete out.aniimoLevel; delete out.cp; }
+    if (!out.team) delete out.team;
+    return out;
+  });
+}
+
+// The species the Party heads pack knows (data/party_heads.json's names), lower case; null when it isn't there
+let partyHeadNames = null;
+async function partyHeadSpecies(env) {
+  if (!partyHeadNames) {
+    partyHeadNames = (async () => {
+      const object = await env.CONTENT?.get(`releases/${CONTENT_RELEASE}/data/party_heads.json`);
+      if (!object) return null;
+      const meta = JSON.parse(await new Response(object.body).text());
+      return Array.isArray(meta?.names) ? new Map(meta.names.map((name) => [String(name).toLowerCase(), String(name)])) : null;
+    })().catch(() => null).then((names) => { if (!names) partyHeadNames = null; return names; });
+  }
+  return partyHeadNames;
+}
+
+// POST /api/leaderboard/submissions/<id>/leads { cards: [{ card, name, score, margin }] }: a staff member's viewer
+// stores what the run's Party picture shows (only cards the reading is sure of, the viewer's own rule checked again).
+// Replaces an earlier reading. Answers { ok, stored, lineup }.
+async function saveRunLeads(request, env, submissionId) {
+  const account = await leaderboardAccount(request, env);
+  if (!account) return json({ error: "Authentication required." }, 401);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try { body = (await readJsonBody(request, 4096)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
+  if (!Array.isArray(body.cards) || body.cards.length > 4) return json({ error: "cards must be a list of at most 4." }, 400);
+  const species = await partyHeadSpecies(env);
+  if (!species) return json({ error: "The Party heads pack isn't available." }, 503);
+  const row = await env.DB.prepare("SELECT extra_json AS extraJson, players_json AS playersJson FROM leaderboard_submissions WHERE submission_id = ?")
+    .bind(submissionId).first();
+  const extra = parseJsonColumn(row?.extraJson) || {};
+  if (!row || !extra.proofParty) return json({ error: "No run with a Party picture." }, 404);
+  const seen = new Set();
+  const reads = [];
+  for (const item of body.cards) {
+    const card = item?.card;
+    if (!Number.isInteger(card) || card < 0 || card > 3 || seen.has(card)) return json({ error: "card must be 0-3, once each." }, 400);
+    seen.add(card);
+    const name = species.get(String(item?.name ?? "").toLowerCase());
+    if (!name) return json({ error: "name must be an Aniimo of the Party heads pack." }, 400);
+    if (!LEAD_SURE(item)) continue;                                          // not clear enough to count
+    reads.push({ card, name });
+  }
+  // what each card's lead was when read, against the lineup as shown without any earlier reading
+  const base = await runLineup(env, submissionId, extra, row.playersJson, { leads: false }) || [];
+  const cards = reads.map(({ card, name }) => {
+    const entry = base.find((item) => item?.slot === card);
+    const sent = typeof entry?.aniimo === "string" ? entry.aniimo : null;
+    return { card, name, sent, sentSpecies: sent ? species.has(sent.toLowerCase()) : null };
+  });
+  const leads = { v: 1, at: Math.floor(Date.now() / 1000), cards };
+  await env.DB.prepare(`UPDATE leaderboard_submissions SET extra_json = json_set(COALESCE(CASE WHEN json_valid(extra_json) THEN extra_json END, '{}'),
+    '$.leads', json(?)) WHERE submission_id = ?`).bind(JSON.stringify(leads), submissionId).run();
+  return json({ ok: true, stored: cards.length, lineup: lineupWithLeads(base, leads) });
+}
+
+// GET /api/admin/lead-reads?limit=: staff, the runs with a Party picture whose leads aren't stored yet, newest first,
+// for a pass that reads them in the browser: { runs: [{ submissionId, mode }], left }
+async function pendingLeadReads(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(new URL(request.url).searchParams.get("limit") || "20", 10) || 20));
+  const where = `json_valid(extra_json) AND json_extract(extra_json, '$.proofParty') IS NOT NULL AND json_extract(extra_json, '$.leads') IS NULL
+    AND json_extract(extra_json, '$.lineup') IS NOT NULL`;
+  const { results } = await env.DB.prepare(`SELECT submission_id AS submissionId, kind FROM leaderboard_submissions WHERE ${where}
+    ORDER BY created_at DESC LIMIT ?`).bind(limit).all();
+  const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM leaderboard_submissions WHERE ${where}`).first();
+  return json({ runs: (results || []).map((run) => ({ submissionId: run.submissionId, mode: LEADERBOARD_KINDS[run.kind] === "eggheist" ? "eggheist" : "interlink" })),
+    left: Number(left?.n) || 0 });
 }
 
 // My runs' sortable columns (?sort=&order=): Played (newest first, the default), Mode, Fight (the boss, trial or
@@ -2232,7 +2339,7 @@ async function battleHistory(env, discordId, params, { owner }) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         rank: row.rank_tier == null ? null : { tier: row.rank_tier, subtier: row.rank_subtier, name: row.rank_name },
         players: withProfiles(parseJsonColumn(row.players_json), profiles, extra.lineup) || [],
-        lineup: seatedLineup(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)),
+        lineup: lineupWithLeads(seatedLineup(mergedLineup(publicLineup(extra.lineup), copies), parseJsonColumn(row.players_json)), extra.leads),
         // the buffs the party went in with (the leader picks them on the Party screen)
         buffs: (parseJsonColumn(row.buffs_json) || []).slice(0, 12).map((buff) => ({ name: buff.name, ...(Number.isInteger(buff.level) ? { level: buff.level } : {}) })),
         newBests: Array.isArray(extra.newBests) ? extra.newBests.slice(0, 8) : null,
@@ -4324,9 +4431,14 @@ async function submitLeaderboardRecord(request, env) {
   }
   // the proof file left when the whole screens and fight pictures went (pruneProofs): kept on a re-send
   const proofRecord = typeof stored.proofRecord === "string" ? stored.proofRecord : null;
-  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote || proofRecord) {
+  // the leads staff read off the Party picture (saveRunLeads): the app can't set them; kept on a re-send without a
+  // new Party picture, dropped with one (that picture hasn't been read)
+  const storedLeads = !parsed.party && stored.leads && typeof stored.leads === "object" ? stored.leads : null;
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote || proofRecord || storedLeads) {
     const extra = parseJsonColumn(record.extraJson) || {};
     delete extra.proofRecord;
+    delete extra.leads;
+    if (storedLeads) extra.leads = storedLeads;
     delete extra.proofFull;
     delete extra.proofParty;
     delete extra.proofGizmos;
@@ -7441,8 +7553,9 @@ async function leaderboardEntries(request, env) {
   const profiles = await partyProfiles(env, results || []);
   // a shared run's lineup from every copy of it (mergedLineup), as the history and the proof viewer show it
   const copiesOf = await sharedCopies(env, (results || []).map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
-  const lineupOf = (row, lineup) => seatedLineup(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
-    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup)), parseJsonColumn(row.players_json));
+  // each lead as the run's Party picture showed it, when staff stored that reading (extra.leads)
+  const lineupOf = (row, lineup) => lineupWithLeads(seatedLineup(mergedLineup(publicLineup(lineup), (copiesOf.get(parseJsonColumn(row.extra_json)?.sharedRun) || [])
+    .filter((copy) => copy.id !== row.submission_id).map((copy) => copy.lineup)), parseJsonColumn(row.players_json)), parseJsonColumn(row.extra_json)?.leads);
   const teammates = await nameIdentities(env, (results || []).filter((row) => row.teammate).map((row) => row.teammate));
   const weeks = kind === "interlink_run" || kind === "interlink_best" ? await interlinkCycles(env) : [];
   return json({
@@ -7498,7 +7611,7 @@ async function leaderboardEntries(request, env) {
       buffs: parseJsonColumn(row.buffs_json),
       // the fight's pictures and log are staff only: none of their entries is shown here
       extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, proofFight: _fight, fightShots: _fightShots, proofFightLog: _log, fightStats: _stats,
-        fightLogNote: _note, proofRecord: _record, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
+        fightLogNote: _note, proofRecord: _record, leads: _leads, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
@@ -7698,7 +7811,9 @@ async function submissionEvidence(request, env, submissionId) {
       ...(record.fightLog ? { fightLog: { bytes: record.fightLog.bytes ?? null, kept: recordLog } } : {}) } : null;
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
       ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}),
-      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}), ...(summary ? { record: summary } : {}) });
+      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}), ...(summary ? { record: summary } : {}),
+      // the leads are already stored from the Party picture (saveRunLeads): the viewer needn't send its reading
+      ...(extra.leads ? { leadsRead: true } : {}) });
     // a list naming the fight's pictures is never cached; the list depends on who asks
     listed.headers.set("cache-control", visible && !staff ? "public, max-age=300" : "private, no-store");
     if (staffOnly) listed.headers.set("vary", "Authorization");
@@ -8417,6 +8532,9 @@ async function api(request, env) {
   if (submissionMatch && !submissionMatch[2] && request.method === "PATCH") return moderateSubmission(request, env, submissionMatch[1]);
   if (submissionMatch && !submissionMatch[2] && request.method === "DELETE") return deleteSubmission(request, env, submissionMatch[1]);
   if (submissionMatch && submissionMatch[2] && request.method === "GET") return submissionEvidence(request, env, submissionMatch[1]);
+  const leadsMatch = url.pathname.match(/^\/api\/leaderboard\/submissions\/([A-Za-z0-9_-]{8,40})\/leads$/u);
+  if (leadsMatch && request.method === "POST") return saveRunLeads(request, env, leadsMatch[1]);
+  if (url.pathname === "/api/admin/lead-reads" && request.method === "GET") return pendingLeadReads(request, env);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "GET") return listCharacters(request, env);
   if (url.pathname === "/api/leaderboard/characters" && request.method === "POST") return linkCharacter(request, env);
   if (url.pathname === "/api/leaderboard/characters/disputes" && request.method === "POST") return disputeCharacter(request, env);

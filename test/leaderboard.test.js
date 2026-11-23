@@ -5,7 +5,7 @@ import { gzipSync } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import worker, { clientVersionRank, leaderboardSubmission, lineupDps, mergedLineup, playedAtLocalAsUtc, playedAtShifts, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
+import worker, { clientVersionRank, leaderboardSubmission, LEAD_SURE, lineupDps, lineupWithLeads, mergedLineup, playedAtLocalAsUtc, playedAtShifts, settledRun, simCheckLimits, simRunChecks, simRunHeld } from "../src/index.js";
 
 const ORIGIN = "https://aniilogs.github.io";
 const IDS = { dev: "111111111111111111", dev2: "333333333333333333", user: "222222222222222222" };
@@ -4642,4 +4642,106 @@ test("POST /api/admin/sim-levels: administrators only, a dry run by default, app
   assert.deepEqual([check().levels.verdict, check().levels.backed, check().levels.stretches, check().reviewOnly], ["verified", [5, 6], [{ from: 4, to: 7, areas: 3 }], undefined]);
   const twice = await (await recompute({ apply: true })).json();
   assert.deepEqual([twice.changed, twice.levels, twice.flags], [0, 0, 0]);
+});
+
+// The Party heads pack's list (made-up species), as the content bucket holds it
+function contentStore(names = ["Emberpup", "Chirpi", "Glameep", "Celestis"]) {
+  const meta = JSON.stringify({ size: 64, cols: 8, names, fade: names.length });
+  return { async get(key) { return key.endsWith("/data/party_heads.json") ? { body: new TextEncoder().encode(meta) } : null; } };
+}
+
+test("leads read off the Party picture: stored from staff only, then shown on the boards, the history and the viewer, and found by search", async () => {
+  const { env, sqlite } = await setup({ EVIDENCE: evidenceStore(), CONTENT: contentStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const lineup = [
+    { slot: 0, name: "UserOne", ai: false, self: true, aniimo: "Sparky", aniimoLevel: 60, cp: 20000, team: [{ aniimo: "Sparky" }, { aniimo: "Chirpi" }] },
+    { slot: 1, name: "Mario", ai: true, aniimo: "Chirpi", aniimoLevel: 50 },
+    { slot: 2, name: "Friend", ai: false, aniimo: "Glameep", aniimoLevel: 58, cp: 9999 },
+  ];
+  // the app can't set the reading itself
+  const sent = await sendRun(env, token, run("leads", { extra: { lineup, leads: { v: 1, cards: [{ card: 2, name: "Emberpup", sent: "Glameep", sentSpecies: true }] } } }),
+    ["evidence", "party"]);
+  assert.equal(sent.status, 201);
+  const { submissionId } = await sent.json();
+  const stored = () => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE submission_id = ?").get(submissionId).e).leads;
+  assert.equal(stored(), undefined);
+  const post = (session, cards) => call(env, `/api/leaderboard/submissions/${submissionId}/leads`, { session, method: "POST", body: { cards } });
+  const sure = (card, name) => ({ card, name, score: 0.8, margin: 0.3 });
+  // anyone but staff is turned away
+  assert.equal((await post(undefined, [sure(0, "Emberpup")])).status, 401);
+  for (const session of [SESSIONS.user, SESSIONS.dev2]) assert.equal((await post(session, [sure(0, "Emberpup")])).status, 403);
+  assert.equal(stored(), undefined);
+  // only names in the pack, each card once
+  assert.equal((await post(SESSIONS.dev, [sure(0, "Notananiimo")])).status, 400);
+  assert.equal((await post(SESSIONS.dev, [sure(0, "Emberpup"), sure(0, "Chirpi")])).status, 400);
+  assert.equal((await post(SESSIONS.dev, [sure(5, "Emberpup")])).status, 400);
+  // staff: card 0 is a renamed Emberpup ("Sparky" is no Aniimo), card 1 an AI (left alone), card 2 read unsure (dropped)
+  const saved = await post(SESSIONS.dev, [sure(0, "emberpup"), sure(1, "Celestis"), { card: 2, name: "Celestis", score: 0.5, margin: 0.4 }]);
+  assert.equal(saved.status, 200);
+  const answer = await saved.json();
+  assert.equal(answer.stored, 2);
+  assert.deepEqual(stored().cards, [{ card: 0, name: "Emberpup", sent: "Sparky", sentSpecies: false }, { card: 1, name: "Celestis", sent: "Chirpi", sentSpecies: true }]);
+  const expectLead = (entries) => {
+    const bySlot = new Map(entries.map((entry) => [entry.slot, entry]));
+    assert.equal(bySlot.get(0).aniimo, "Emberpup");
+    assert.equal(bySlot.get(0).nickname, "Sparky");
+    assert.deepEqual(bySlot.get(0).team.map((m) => m.aniimo), ["Emberpup", "Chirpi"]);
+    assert.equal(bySlot.get(1).aniimo, "Chirpi");                       // AI: as sent
+    assert.equal(bySlot.get(2).aniimo, "Glameep");                      // unsure: as sent
+  };
+  expectLead(answer.lineup);
+  // the boards' rows, the history and the viewer show it
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=interlink_run")).json()).entries.find((item) => item.submissionId === submissionId);
+  expectLead(entry.extra.lineup);
+  assert.equal(entry.extra.leads, undefined);
+  expectLead((await historyOf(env, "/api/profile/history", SESSIONS.user)).runs.find((item) => item.submissionId === submissionId).lineup);
+  const list = await (await call(env, `/api/leaderboard/submissions/${submissionId}/evidence?shot=list`)).json();
+  expectLead(list.lineup);
+  assert.equal(list.leadsRead, true);
+  // search finds the run by the species the picture showed
+  const found = await historyOf(env, "/api/profile/history?q=emberpup", SESSIONS.user);
+  assert.deepEqual(found.runs.map((item) => item.submissionId), [submissionId]);
+  assert.equal((await historyOf(env, "/api/profile/history?q=celestis", SESSIONS.user)).runs.length, 1);   // stored for card 1, though not shown
+  // a re-send keeps the reading (and can't replace it); one with a new Party picture drops it
+  assert.equal((await sendRun(env, token, run("leads", { extra: { lineup, leads: { v: 1, cards: [] } } }), ["evidence"])).status, 200);
+  assert.equal(stored().cards.length, 2);
+  assert.equal((await sendRun(env, token, run("leads", { extra: { lineup } }), ["evidence", "party"])).status, 200);
+  assert.equal(stored(), undefined);
+});
+
+test("the staff pass: runs with a Party picture whose leads aren't read yet, staff only", async () => {
+  const { env } = await setup({ EVIDENCE: evidenceStore(), CONTENT: contentStore(), LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  const lineup = [{ slot: 0, name: "UserOne", ai: false, self: true, aniimo: "Chirpi" }];
+  const ids = [];
+  for (const id of ["p1", "p2"]) ids.push((await (await sendRun(env, token, run(id, { extra: { lineup } }), ["evidence", "party"])).json()).submissionId);
+  await sendRun(env, token, run("no-party", { extra: { lineup } }), ["evidence"]);
+  assert.equal((await call(env, "/api/admin/lead-reads", { session: SESSIONS.user })).status, 403);
+  const pending = await (await call(env, "/api/admin/lead-reads", { session: SESSIONS.dev })).json();
+  assert.deepEqual(pending.runs.map((item) => item.submissionId).sort(), [...ids].sort());
+  assert.equal(pending.left, 2);
+  assert.equal(pending.runs[0].mode, "interlink");
+  // a reading with nothing sure still counts as read
+  assert.equal((await call(env, `/api/leaderboard/submissions/${ids[0]}/leads`, { session: SESSIONS.dev, method: "POST", body: { cards: [] } })).status, 200);
+  assert.deepEqual((await (await call(env, "/api/admin/lead-reads", { session: SESSIONS.dev })).json()).runs.map((item) => item.submissionId), [ids[1]]);
+});
+
+test("stored leads: the viewer's rules (the picture decides, a nickname kept, a card read twice keeps only the lead); a lead changed since is left alone", () => {
+  const lineup = [
+    { slot: 0, name: "A", aniimo: "Chirpi", aniimoLevel: 60, cp: 100, team: [{ aniimo: "Chirpi" }] },
+    { slot: 1, name: "B", aniimo: "Chirpi", aniimoLevel: 60, cp: 100, team: [{ aniimo: "Chirpi" }] },
+    { slot: 2, name: "C", aniimo: "Glameep" },
+    { name: "D", aniimo: "Glameep" },
+  ];
+  const leads = { cards: [{ card: 1, name: "Celestis", sent: "Chirpi", sentSpecies: true }, { card: 2, name: "Celestis", sent: "Emberpup", sentSpecies: true }] };
+  const out = lineupWithLeads(lineup, leads);
+  assert.deepEqual(out[0], lineup[0]);
+  assert.deepEqual(out[1], { slot: 1, name: "B", aniimo: "Celestis" });   // read twice: level, CP and team were A's
+  assert.deepEqual(out[2], lineup[2]);                                      // read against another lead: stale
+  assert.deepEqual(out[3], lineup[3]);                                      // no slot: no card
+  assert.equal(lineupWithLeads(lineup, null), lineup);
+  // the same "sure" rule as public/party-portraits.js
+  const viewer = readFileSync(resolve(import.meta.dirname, "..", "public", "party-portraits.js"), "utf8");
+  assert.match(viewer, /r\.score >= 0\.55 && r\.margin >= 0\.15\) \|\| \(r\.score >= 0\.68 && r\.margin >= 0\.10/u);
+  assert.deepEqual([{ score: 0.56, margin: 0.15 }, { score: 0.7, margin: 0.1 }, { score: 0.6, margin: 0.1 }, { score: 0.9 }].map(LEAD_SURE), [true, true, false, false]);
 });

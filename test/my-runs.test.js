@@ -17,7 +17,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
     assert.ok(shared > 0 && shared < page.indexOf(`<script src="${script}`), script);
     assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=/u);
   }
-  assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete \}\)/u);
+  assert.match(viewer, /window\.AniilogsProof = Object\.freeze\(\{ open: openProof, button: proofButton, checkBadge, partyPanel, allowDelete, readLeads \}\)/u);
   // the viewer opens on a click only, never when the pointer passes over the icon; its check badge sits after the tabs
   assert.doesNotMatch(viewer, /pointerenter|HOVER_OPEN_MS|hoverTimer/u);
   assert.match(viewerStyles, /\.lb-proof-tabs \.lb-check \{[^}]*margin-left: 2px;/u);
@@ -29,7 +29,7 @@ test("My runs: one proof viewer, shared by the leaderboards and the profile, loa
   for (const page of [home, boards]) {
     assert.match(page, /<link rel="stylesheet" href="\/proof-viewer\.css\?v=0\.2\.7-proof-file">/u);
     // its Comments tab (comments.js) loads just before it
-    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.2-no-slot-no-lead" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.11-proof-file" defer><\/script>/u);
+    assert.match(page, /<script src="\/party-portraits\.js\?v=0\.1\.3-store-leads" defer><\/script>\s*<script src="\/comments\.js\?v=0\.1\.0" defer><\/script>\s*<script src="\/proof-viewer\.js\?v=0\.2\.12-store-leads" defer><\/script>/u);
   }
   // the leaderboards use it rather than a copy of their own
   assert.doesNotMatch(leaderboard, /async function openProof/u);
@@ -112,4 +112,12 @@ test("every row that opens on the profile shows whether it is open: a turning ch
   assert.doesNotMatch(app, /"Team: "/u);
   // Battle Data in a narrow card: labelled figures, no sideways scroll
   assert.match(styles, /@container \(max-width: 459px\) \{\s*\.history-party, \.history-party tbody, \.history-party tr \{ display: block; \}/u);
+});
+
+test("the viewer sends a Party picture's reading to be stored only when signed in and not yet stored; a staff pass reads the rest", () => {
+  assert.match(viewer, /const store = shown\.leadsRead \|\| !sessionToken\(\) \|\| leadsRefused \? null :/u);
+  assert.match(viewer, /\/leaderboard\/submissions\/\$\{encodeURIComponent\(runId\)\}\/leads`/u);
+  assert.match(viewer, /if \(response\?\.status === 401 \|\| response\?\.status === 403\) leadsRefused = true;/u);
+  assert.match(viewer, /apiFetch\(`\/admin\/lead-reads\?limit=/u);
+  assert.match(viewer, /allowDelete, readLeads \}\);/u);
 });

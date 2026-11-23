@@ -344,28 +344,42 @@
     return packLoading;
   }
 
-  // A run's leads from its Party picture (a Blob): the lineup with each lead as the picture shows it, or the lineup
-  // as it was when the pack or the picture can't be read. One card at a time, giving the page a moment between them.
+  // Every card's lead read off a Party picture (a Blob), one card at a time, giving the page a moment between them;
+  // null when the pack isn't there.
+  async function readPicture(loadPicture, mode = "interlink") {
+    const pack = await loadPack();
+    if (!pack) return null;
+    const bitmap = await createImageBitmap(await loadPicture());
+    const image = pixels(bitmap, bitmap.width, bitmap.height);
+    const cache = new Map();
+    const found = [];
+    for (let card = 0; card < (LAYOUTS[mode] || LAYOUTS.interlink).length; card += 1) {
+      found.push(lead(image, pack, mode, card, cache));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return { found, names: pack.names };
+  }
+
+  // A run's leads from its Party picture: the lineup with each lead as the picture shows it, or the lineup as it was
+  // when the pack or the picture can't be read. onFound(found) gets the reading itself (the viewer sends it to be
+  // stored when a staff member is signed in).
   const done = new Map();                                  // run id -> the corrected lineup's promise
-  function lineupFromPicture(runId, lineup, loadPicture, mode = "interlink") {
+  function lineupFromPicture(runId, lineup, loadPicture, mode = "interlink", onFound = null) {
     if (!Array.isArray(lineup) || !lineup.length) return Promise.resolve(lineup);
     if (!done.has(runId)) {
       done.set(runId, (async () => {
-        const pack = await loadPack();
-        if (!pack) return lineup;
-        const bitmap = await createImageBitmap(await loadPicture());
-        const image = pixels(bitmap, bitmap.width, bitmap.height);
-        const cache = new Map();
-        const found = [];
-        for (let card = 0; card < (LAYOUTS[mode] || LAYOUTS.interlink).length; card += 1) {
-          found.push(lead(image, pack, mode, card, cache));
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-        return applyLeads(lineup, found, pack.names);
+        const read = await readPicture(loadPicture, mode);
+        if (!read) return lineup;
+        try { onFound?.(read.found); } catch { /* the page's own business */ }
+        return applyLeads(lineup, read.found, read.names);
       })().catch(() => lineup));
     }
     return done.get(runId);
   }
 
-  root.AniilogsPartyPortraits = { core, lineupFromPicture };
+  // What a reading sends to be stored: the cards it is sure of (the API checks the rule again)
+  const sureCards = (found) => (Array.isArray(found) ? found : []).filter((item) => item?.sure && item.name)
+    .map(({ card, name, score, margin }) => ({ card, name, score, margin }));
+
+  root.AniilogsPartyPortraits = { core, lineupFromPicture, readPicture, sureCards };
 })();
