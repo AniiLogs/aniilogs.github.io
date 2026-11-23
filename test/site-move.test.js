@@ -129,6 +129,7 @@ test("no page names aniilogs.github.io any more (GitHub's own repository and rel
   };
   await walk(publicRoot);
   for (const file of files) {
+    if (file.pathname.endsWith("/carry-in.js")) continue;   // it accepts settings from the old address (test/carry.test.js)
     const text = (await readFile(file, "utf8")).replaceAll("github.com/AniiLogs/aniilogs.github.io", "").replaceAll("repos/AniiLogs/aniilogs.github.io", "");
     assert.doesNotMatch(text, /aniilogs\.github\.io/u, file.pathname);
   }
@@ -146,13 +147,19 @@ test("the github.io forwarder: one page per site page, 404.html for the rest, sa
       assert.ok(written.includes(path), path);
     }
     const page = (file) => readFile(join(output, file), "utf8");
+    const forwardJs = await page("forward.js");
+    // the page's <script src="/forward.js"> with nothing saved in this browser (test/carry.test.js: with settings)
     const forwardsTo = async (file, href) => {
       const url = new URL(href);
-      let replaced = null;
       const html = await page(file);
-      const script = /<script>([^<]+)<\/script>/u.exec(html)[1];
-      vm.runInNewContext(script, { location: { pathname: url.pathname, search: url.search, hash: url.hash, replace: (to) => { replaced = to; } } });
-      return replaced;
+      const tag = /<script src="\/forward\.js"( data-carry)?><\/script>/u.exec(html);
+      assert.ok(tag, file);
+      const storage = { length: 0, key: () => null, getItem: () => null, setItem() {} };
+      return new Promise((done) => vm.runInNewContext(forwardJs, {
+        window: { localStorage: storage, location: { pathname: url.pathname, search: url.search, hash: url.hash, replace: done } },
+        document: { currentScript: { hasAttribute: (name) => Boolean(tag[1]) && name === "data-carry" } },
+        TextEncoder, Blob, Response, CompressionStream, btoa, console,
+      }));
     };
     assert.equal(await forwardsTo("index.html", `${OLD}/?profile=abc#aniilogs_auth=xyz`), `${SITE}/?profile=abc#aniilogs_auth=xyz`);
     assert.equal(await forwardsTo("leaderboard/index.html", `${OLD}/leaderboard/?mode=sim`), `${SITE}/leaderboard/?mode=sim`);
@@ -160,12 +167,15 @@ test("the github.io forwarder: one page per site page, 404.html for the rest, sa
     assert.equal(await forwardsTo("404.html", `${OLD}/explorer/app-config.js?v=1`), `${SITE}/explorer/app-config.js?v=1`);
     const home = await page("index.html");
     assert.match(home, /<link rel="canonical" href="https:\/\/aniilogs\.app\/">/u);
-    assert.match(home, /<meta http-equiv="refresh" content="0; url=https:\/\/aniilogs\.app\/">/u);
+    assert.match(home, /<noscript><meta http-equiv="refresh" content="0; url=https:\/\/aniilogs\.app\/"><\/noscript>/u);
+    assert.match(home, /<script src="\/forward\.js" data-carry><\/script>/u);
+    assert.match(await page("404.html"), /<script src="\/forward\.js"><\/script>/u, "404.html (and /lb/<code>) carries nothing");
+    assert.match(forwardJs, /const SITE = "https:\/\/aniilogs\.app";/u);
     assert.match(home, /<meta property="og:title" content="AniiLogs/u);
     assert.match(home, /<meta property="og:image" content="https:\/\/aniilogs\.app\/icons\/og-card\.png">/u);
     assert.match(home, /<meta name="twitter:card" content="summary_large_image">/u);
     assert.match(home, /<meta property="og:url" content="https:\/\/aniilogs\.app\/">/u);
-    assert.ok(home.indexOf("<script>") < home.indexOf('http-equiv="refresh"'), "the script (keeps the query) comes before the refresh");
+    assert.ok(home.indexOf("<script") < home.indexOf('http-equiv="refresh"'), "the script (keeps the query) comes first");
     assert.match(await page("privacy.html"), /<link rel="canonical" href="https:\/\/aniilogs\.app\/privacy">/u);
     assert.match(await page("404.html"), /<meta name="robots" content="noindex">/u);
     // Search Console's ownership file for the old address stays as it is

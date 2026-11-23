@@ -30,6 +30,9 @@ test("every page loads theme-shell.js blocking, in <head>, before its stylesheet
     const firstStylesheet = html.indexOf('rel="stylesheet"');
     assert.ok(firstStylesheet < 0 || at < firstStylesheet, `${url.pathname}: before the stylesheets`);
     assert.ok(at > html.indexOf('<meta name="theme-color"'), `${url.pathname}: after the theme-color meta it updates`);
+    // carry-in.js (settings brought from the old address) right before it, blocking too, so a carried theme applies
+    const carry = /<script src="\/carry-in\.js\?v=[^"]+"><\/script>\s*<script[^>]*theme-shell\.js/u.exec(html);
+    assert.ok(carry, `${url.pathname}: carry-in.js right before theme-shell.js`);
   }
 });
 

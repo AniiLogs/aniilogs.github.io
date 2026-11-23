@@ -3,9 +3,11 @@
 // old address, https://aniilogs.github.io, as a forwarder: this writes .github-forwarder/, which pages.yml publishes
 // instead of public/. Every page public/ has gets a page at the same address (so GitHub answers 200 for it), and
 // 404.html answers every other address (/lb/<code> included); each one sends the visitor to the same path, query and
-// #fragment on the new domain (the #fragment carries aLogs' one-time sign-in hand-off). Without JavaScript a meta
-// refresh goes to the page itself. Each keeps its page's title, description and og/twitter tags, so a github.io link
-// pasted in Discord still gets the site's card, and names the new address as canonical.
+// #fragment on the new domain (the #fragment carries aLogs' one-time sign-in hand-off), through /forward.js
+// (scripts/forwarder/forward.js), which the first time also takes the visitor's saved site settings along (site pages
+// only, not 404.html). Without JavaScript a meta refresh goes to the page itself. Each keeps its page's title,
+// description and og/twitter tags, so a github.io link pasted in Discord still gets the site's card, and names the new
+// address as canonical.
 import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 
@@ -40,6 +42,7 @@ export function socialTags(html, target) {
 }
 
 export function forwardingPage({ tags = [], target = `${NEW_ORIGIN}/`, notFound = false } = {}) {
+  // only scripting-off browsers follow the refresh: forward.js may take a moment (packing what it carries)
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -47,9 +50,9 @@ export function forwardingPage({ tags = [], target = `${NEW_ORIGIN}/`, notFound 
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     // first, before anything else: the same path, query and #fragment on the new domain
-    `<script>location.replace(${JSON.stringify(NEW_ORIGIN)} + location.pathname + location.search + location.hash);</script>`,
+    `<script src="/forward.js"${notFound ? "" : " data-carry"}></script>`,
     ...(notFound ? ['<meta name="robots" content="noindex">', "<title>AniiLogs has moved to aniilogs.app</title>"]
-      : [`<link rel="canonical" href="${escapeHtml(target)}">`, `<meta http-equiv="refresh" content="0; url=${escapeHtml(target)}">`, ...tags]),
+      : [`<link rel="canonical" href="${escapeHtml(target)}">`, `<noscript><meta http-equiv="refresh" content="0; url=${escapeHtml(target)}"></noscript>`, ...tags]),
     "</head>",
     "<body>",
     `<p>AniiLogs has moved to <a href="${escapeHtml(target)}">${escapeHtml(target)}</a>.</p>`,
@@ -69,7 +72,8 @@ async function files(directory) {
   return out.sort();
 }
 
-export async function buildForwarder({ output = outputRoot } = {}) {
+// site: where it forwards to (a local preview's address for a test in a browser; the pages still name NEW_ORIGIN)
+export async function buildForwarder({ output = outputRoot, site = NEW_ORIGIN } = {}) {
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const written = [];
@@ -90,11 +94,19 @@ export async function buildForwarder({ output = outputRoot } = {}) {
     }
     written.push(publicPath(file));
   }
+  const forward = await readFile(resolve(root, "scripts", "forwarder", "forward.js"), "utf8");
+  const declaration = `const SITE = ${JSON.stringify(NEW_ORIGIN)};`;
+  if (!forward.includes(declaration)) throw new Error("scripts/forwarder/forward.js no longer names its SITE.");
+  await writeFile(resolve(output, "forward.js"), forward.replace(declaration, `const SITE = ${JSON.stringify(site)};`), "utf8");
   await writeFile(resolve(output, "robots.txt"), "User-agent: *\nAllow: /\n", "utf8");
   return written;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
-  const written = await buildForwarder();
-  console.log(JSON.stringify({ status: "built", output: outputRoot, forwardTo: NEW_ORIGIN, pages: written }));
+  // --site=<origin> --output=<dir>: a local copy forwarding to a local preview (for a test in a browser)
+  const option = (name) => process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const site = option("site") || NEW_ORIGIN;
+  const output = option("output") ? resolve(option("output")) : outputRoot;
+  const written = await buildForwarder({ output, site });
+  console.log(JSON.stringify({ status: "built", output, forwardTo: site, pages: written }));
 }
