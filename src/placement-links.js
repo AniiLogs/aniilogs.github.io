@@ -272,6 +272,11 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
   // Link-preview crawlers say who they are; anyone else is a person and goes straight to the run on the boards.
   const CRAWLER = /bot\b|bot\/|crawler|spider|facebookexternalhit|facebot|embedly|iframely|slack|discord|telegram|whatsapp|skypeuripreview|vkshare|mastodon|bluesky|cardyb|preview/iu;
 
+  // The address links are made on: LINK_ORIGIN (the site's own domain once it is attached to this project, e.g.
+  // https://aniilogs.app) or, unset, the host the request came to.
+  const linkOrigin = (request, env) => (/^https:\/\/[a-z0-9.-]+$/u.test(String(env.LINK_ORIGIN || ""))
+    ? String(env.LINK_ORIGIN) : new URL(request.url).origin);
+
   async function open(request, env, code) {
     const link = await linkOf(env, code);
     const found = link ? await placement(env, link) : null;
@@ -285,7 +290,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     const { card } = await withPacks(env, drawn);
     const { hash } = await cardKey(link.code, card);
     const image = `${origin}/api/links/${link.code}.png?p=${found.place}&v=${hash}`;
-    return page(200, { title, tabTitle: `${title} · AniiLogs`, description, url: `${origin}/${link.code}`, image,
+    return page(200, { title, tabTitle: `${title} · AniiLogs`, description, url: `${linkOrigin(request, env)}/${link.code}`, image,
       imageAlt: `${title}: ${description}`,
       body: `<h1>${escapeHtml(title)}</h1>\n<p>${escapeHtml(description)}</p>\n<p><a href="${escapeHtml(target)}">Open it on AniiLogs</a></p>` });
   }
@@ -348,7 +353,7 @@ export function createPlacementLinks({ boardData, copyGroupSql, json, browserWri
     if (!ladder || !RUN_ID.test(submissionId) || (ladder.one && !player)) {
       return json({ error: "Send run (a board run's id), ladder and, on a one-player ladder, player." }, 400);
     }
-    const origin = new URL(request.url).origin;
+    const origin = linkOrigin(request, env);
     const answer = (code) => json({ code, url: `${origin}/${code}` });
     const run = await runOf(env, submissionId);
     if (!run) return json({ error: "This run isn't on a board." }, 404);

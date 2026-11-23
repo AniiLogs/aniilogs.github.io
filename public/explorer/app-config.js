@@ -9,6 +9,9 @@
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
+    // The address share links are copied on (the API's own domain, e.g. "https://aniilogs.app", once it is attached
+    // to the API's Pages project: it draws the Discord card). Empty: aniilogs.github.io/lb/<code> (no card).
+    linkOrigin: "",
     // contentPackageVersion names the reviewed R2 release (releases/3535596/) and the live viewer's
     // approved package, so it stays put; gameBuild is only the game build shown to visitors.
     contentPackageVersion: 3535596,

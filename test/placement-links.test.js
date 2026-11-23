@@ -473,6 +473,20 @@ test("a link on a two-boss Center: the preview and the card name both bosses; a 
   assert.deepEqual([landed.name, landed.second?.name], ["Alpha Blazen", "Omega Tucking"]);
 });
 
+test("LINK_ORIGIN: links are made and named on the site's own domain; unset or not https, the host asked", async () => {
+  const { env, sqlite } = await board();
+  const duo = idOf(sqlite, "duo-c");
+  env.LINK_ORIGIN = "https://aniilogs.app";
+  const { code, url } = await (await createLink(env, { run: duo, ladder: "score" })).json();
+  assert.equal(url, `https://aniilogs.app/${code}`);
+  const html = await (await call(env, `/${code}`, { ua: DISCORD_UA })).text();
+  assert.match(html, new RegExp(`<meta property="og:url" content="https://aniilogs.app/${code}">`, "u"));
+  env.LINK_ORIGIN = "javascript:alert(1)";
+  assert.equal((await (await createLink(env, { run: duo, ladder: "score" })).json()).url, `${API}/${code}`);
+  env.LINK_ORIGIN = "";
+  assert.equal((await (await createLink(env, { run: duo, ladder: "score" })).json()).url, `${API}/${code}`);
+});
+
 test("opening a link: a crawler gets the preview tags with the overall place; a person goes to the boards with the run open", async () => {
   const { env, sqlite } = await board();
   const duo = idOf(sqlite, "duo-c");
