@@ -158,18 +158,163 @@
   }
   // A run's tabs from its ?shot=list: a tab per picture, and the fight's pictures ("fight1"...) and its fight log
   // (fightLog) together in one "Fight" tab after the others (staff only: the API lists them for staff alone)
+  // Holo-Battle Sim's Gizmo screen comes as several looks down one scrolling list ("gizmo1"...): they share ONE tab and
+  // are shown merged into one tall picture of the whole list (mergeGizmos); a single look stays a plain picture.
   function listPictures(id, list, label) {
     const fights = list.shots.filter((shot) => /^fight\d+$/u.test(shot));
     const times = new Map((Array.isArray(list.fightShots) ? list.fightShots : [])
       .filter((item) => Number.isInteger(item?.n) && Number.isFinite(item?.t)).map((item) => [item.n, item.t]));
+    const gizmos = list.shots.filter((shot) => /^gizmo\d+$/u.test(shot));
+    const merged = gizmos.length > 1 ? gizmos : [];
     return [
-      ...list.shots.filter((shot) => !fights.includes(shot)).map((shot) => ({ id, shot, label: label(shot) })),
+      ...list.shots.filter((shot) => !fights.includes(shot) && (!merged.includes(shot) || shot === merged[0]))
+        .map((shot) => (shot === merged[0] ? { id, shot: "gizmos", label: "Gizmos", gizmos: merged } : { id, shot, label: label(shot) })),
       ...(fights.length || list.fightLog || list.record ? [{ id, shot: "fight",
         label: fights.length || list.fightLog || list.record?.pictures?.some((p) => /^fight\d+$/u.test(p?.shot)) ? "Fight" : "Proof file",
         fight: fights.map((shot) => ({ shot, t: times.get(Number(shot.slice(5))) })),
         log: list.fightLog || null, record: list.record || null }] : []),
     ];
   }
+  // The Gizmo looks merged into one picture of the whole list. The list scrolls between fixed parts (the title and
+  // tabs above, the button prompts below, the categories on the left), so each look's list band is lined up with the
+  // one before by its text's edges (the blurred background behind them doesn't move with the list), then every row of
+  // the list is taken from the look where it sits furthest from the band's faded top and bottom. Null when the looks
+  // don't line up surely (any pair): the viewer then shows them one under another, as they are.
+  const GIZMO_BAND = Object.freeze({ top: 0.095, bottom: 0.915, left: 0.21, matchLeft: 0.3, matchRight: 0.97 });
+  const GIZMO_SURE = 0.6;                // a pair lines up when its text edges differ by under 60% of their strength
+  const mergedGizmos = new Map();        // submission id -> Promise of an object URL, or null
+  async function loadBitmap(url) {
+    const blob = await (await fetch(url)).blob();
+    return createImageBitmap(blob);
+  }
+  function edgeRows(bitmap, scale, x0f, x1f, top, rows) {
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const x0 = Math.round(w * x0f);
+    const x1 = Math.round(w * x1f);
+    const y0 = Math.round(top * scale);
+    const n = Math.round(rows * scale);
+    const data = ctx.getImageData(x0, y0, x1 - x0, n).data;
+    const cols = x1 - x0 - 1;
+    const out = new Float32Array(n * cols);
+    for (let y = 0; y < n; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        const a = (y * (cols + 1) + x) * 4;
+        const b = a + 4;
+        out[y * cols + x] = Math.abs((data[a] + data[a + 1] + data[a + 2]) - (data[b] + data[b + 1] + data[b + 2])) / 3;
+      }
+    }
+    return { rows: n, cols, data: out };
+  }
+  function pairScore(a, b, d) {
+    let diff = 0;
+    let sum = 0;
+    const span = (a.rows - d) * a.cols;
+    const from = d * a.cols;
+    for (let i = 0; i < span; i += 1) {
+      const p = a.data[from + i];
+      const q = b.data[i];
+      diff += Math.abs(p - q);
+      sum += p + q;
+    }
+    return span ? diff / (sum / 2 + 1e-3) : Infinity;
+  }
+  // the scroll (in band rows at full size) from look a to look b, or null when no line-up is sure
+  function gizmoScroll(fineA, fineB, coarseA, coarseB, scale) {
+    let best = { score: Infinity, d: 0 };
+    for (let d = 0; d < Math.floor(coarseA.rows * 0.75); d += 1) {
+      const score = pairScore(coarseA, coarseB, d);
+      if (score < best.score) best = { score, d };
+    }
+    let fine = { score: Infinity, d: 0 };
+    const centre = Math.round(best.d / scale);
+    for (let d = Math.max(0, centre - 6); d <= Math.min(Math.floor(fineA.rows * 0.75), centre + 6); d += 1) {
+      const score = pairScore(fineA, fineB, d);
+      if (score < fine.score) fine = { score, d };
+    }
+    return fine.score < GIZMO_SURE ? fine.d : null;
+  }
+  function mergeGizmos(id, shots) {
+    if (!mergedGizmos.has(id)) {
+      mergedGizmos.set(id, (async () => {
+        const looks = await Promise.all(shots.map(async (shot) => loadBitmap(await proofImage(id, shot))));
+        const { width: W, height: H } = looks[0];
+        if (looks.some((look) => look.width !== W || look.height !== H)) return null;
+        const top = Math.round(H * GIZMO_BAND.top);
+        const bottom = Math.round(H * GIZMO_BAND.bottom);
+        const rows = bottom - top;
+        const left = Math.round(W * GIZMO_BAND.left);
+        // edges on the text column only, full size (in a band 1080 px pictures' rows) and a quarter for the first search
+        const fine = looks.map((look) => edgeRows(look, 1, GIZMO_BAND.matchLeft, GIZMO_BAND.matchRight, top, rows));
+        const coarse = looks.map((look) => edgeRows(look, 0.25, GIZMO_BAND.matchLeft, GIZMO_BAND.matchRight, top, rows));
+        const at = [0];
+        for (let i = 1; i < looks.length; i += 1) {
+          const d = gizmoScroll(fine[i - 1], fine[i], coarse[i - 1], coarse[i], 0.25);
+          if (d === null) return null;
+          at.push(at[i - 1] + d);
+        }
+        const length = at[at.length - 1] + rows;
+        const canvas = document.createElement("canvas");
+        canvas.width = W;
+        canvas.height = top + length + (H - bottom);
+        const ctx = canvas.getContext("2d");
+        // above the list and its categories: the first look as it was; below the categories, their own background
+        ctx.drawImage(looks[0], 0, 0, W, bottom, 0, 0, W, bottom);
+        const strip = document.createElement("canvas");
+        strip.width = 1;
+        strip.height = 1;
+        const sctx = strip.getContext("2d", { willReadFrequently: true });
+        sctx.drawImage(looks[0], 0, bottom - 2, left, 1, 0, 0, 1, 1);
+        const [r, g, b] = sctx.getImageData(0, 0, 1, 1).data;
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(0, bottom, left, canvas.height - bottom);
+        // each list row from the look where it is most central
+        const pick = (y) => {
+          let best = 0;
+          let room = -Infinity;
+          at.forEach((start, i) => {
+            if (y < start || y >= start + rows) return;
+            const m = Math.min(y - start, start + rows - 1 - y);
+            if (m > room) { room = m; best = i; }
+          });
+          return best;
+        };
+        for (let y = 0; y < length;) {
+          const i = pick(y);
+          let end = y + 1;
+          while (end < length && pick(end) === i) end += 1;
+          const from = y - at[i];
+          ctx.drawImage(looks[i], left, top + from, W - left, end - y, left, top + y, W - left, end - y);
+          y = end;
+        }
+        ctx.drawImage(looks[looks.length - 1], 0, bottom, W, H - bottom, 0, top + length, W, H - bottom);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+        return blob ? URL.createObjectURL(blob) : null;
+      })().catch(() => null));
+    }
+    return mergedGizmos.get(id);
+  }
+  async function gizmoPanel(body, picture, still) {
+    body.replaceChildren(el("p", { class: "lb-empty", text: "Putting the gizmo list together…" }));
+    const separate = async () => {
+      const urls = await Promise.all(picture.gizmos.map((shot) => proofImage(picture.id, shot).catch(() => null)));
+      if (!still()) return;
+      body.replaceChildren(el("div", { class: "lb-gizmo-scroll" },
+        urls.filter(Boolean).map((url, i) => el("img", { class: "lb-gizmo-merged", src: url, alt: `Gizmo screen, look ${i + 1} of ${urls.length}` }))));
+    };
+    const url = await mergeGizmos(picture.id, picture.gizmos);
+    if (!still()) return;
+    if (!url) { await separate(); return; }
+    const toggle = el("button", { type: "button", class: "lb-gizmo-toggle", text: `Show the ${picture.gizmos.length} pictures as taken`, onclick: separate });
+    body.replaceChildren(el("div", { class: "lb-gizmo-scroll" },
+      el("img", { class: "lb-gizmo-merged", src: url, alt: "This run's Gizmo screen, the whole list" })), toggle);
+  }
+
   // The proof file (staff only), once a run's whole screens and fight pictures were removed after 7 days (or when a
   // better run replaced them): what they showed, in their place, and a download of the whole file
   const PICTURE_NAMES = Object.freeze({ full: "Whole result screen", battle_full: "Whole Battle Data screen" });
@@ -452,6 +597,7 @@
       if (!picture) { body.replaceChildren(el("p", { class: "lb-empty", text: "This run isn't available." })); return; }
       for (const tab of tabs.querySelectorAll("[data-proof-shot]")) tab.setAttribute("aria-selected", String(Number(tab.dataset.proofShot) === index));
       if (picture.fight) { fightPanel(body, picture, () => proofOpenFor === submissionId); return; }
+      if (picture.gizmos) { gizmoPanel(body, picture, () => proofOpenFor === submissionId); return; }
       body.replaceChildren(el("p", { class: "lb-empty", text: "Loading the screenshot…" }));
       try {
         const url = await proofImage(picture.id, picture.shot);
