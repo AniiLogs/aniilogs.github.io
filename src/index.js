@@ -8538,6 +8538,7 @@ async function api(request, env) {
   const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})\/history$/u);
   if (historyMatch && request.method === "GET") return publicBattleHistory(request, env, historyMatch[1]);
   if (url.pathname === "/api/sitemap/profiles.xml" && request.method === "GET") return profilesSitemap(env);
+  if (url.pathname === "/api/sitemap/aniimo.xml" && request.method === "GET") return aniimoLinks.sitemap(request, env);
   const publicProfileMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})$/u);
   if (publicProfileMatch && request.method === "GET") return publicProfile(request, env, publicProfileMatch[1]);
   if (url.pathname === "/api/account" && request.method === "DELETE") return deleteOwnAccount(request, env);
@@ -8727,6 +8728,8 @@ function aniimoIndexOf(env) {
 const aniimoLinks = createAniimoLinks({
   json, siteOrigin: configuredPublicSiteOrigin, loadIndex: aniimoIndexOf, page: linkPage, isCrawler: isLinkCrawler,
   linkOrigin: linkOriginOf, pngResponse: cardPngResponse, escapeHtml: escapeLinkHtml,
+  // the search page's picture: the release's own icon, from this host's content route
+  artUrl: (request, env, icon) => `${new URL(request.url).origin}${CONTENT_PATH_PREFIX}${icon}`,
   loadArt: async (env, icon) => {
     try {
       const file = await releaseFile(env, icon);

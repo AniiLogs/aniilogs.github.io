@@ -113,9 +113,10 @@ const PACK_RETRY_MS = 5 * 60 * 1000;
 
 // The small page a link-preview crawler is given: Open Graph and Twitter tags (a 1200x630 card when there is an image)
 // and a line or two for anyone who opens it without being sent on. Shared by every short link (/lb/, /a/, /m/).
-export function linkPage(status, { title, description = "", url = null, image = null, imageAlt = "", body, tabTitle = title }) {
+// indexable: a page meant for search results (an Aniimo's): no noindex, and its address as the canonical one.
+export function linkPage(status, { title, description = "", url = null, image = null, imageAlt = "", body, tabTitle = title, indexable = false }) {
   const meta = [
-    ["name", "description", description], ["name", "theme-color", "#f5eecb"], ["name", "robots", "noindex"],
+    ["name", "description", description], ["name", "theme-color", "#f5eecb"], !indexable && ["name", "robots", "noindex"],
     ["property", "og:site_name", "AniiLogs"], ["property", "og:type", "website"], ["property", "og:title", title],
     ["property", "og:description", description], url && ["property", "og:url", url],
     image && ["property", "og:image", image], image && ["property", "og:image:type", "image/png"],
@@ -125,9 +126,11 @@ export function linkPage(status, { title, description = "", url = null, image = 
   ].filter(Boolean).filter(([, , value]) => value !== "");
   const html = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n`
     + `<title>${escapeHtml(tabTitle)}</title>\n`
+    + (indexable && url ? `<link rel="canonical" href="${escapeHtml(url)}">\n` : "")
     + meta.map(([attr, name, value]) => `<meta ${attr}="${escapeHtml(name)}" content="${escapeHtml(value)}">`).join("\n")
     + `\n<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1215;color:#f4f4e9;font:16px/1.5 Inter,system-ui,sans-serif}`
-    + `main{max-width:32rem;padding:24px 16px}a{color:#62d9b3}p{color:#9bb5b2}</style>\n</head>\n<body>\n<main>\n${body}\n</main>\n</body>\n</html>\n`;
+    + `main{max-width:40rem;padding:24px 16px}a{color:#62d9b3}p,li{color:#9bb5b2}h2{font-size:1.1rem;margin:1.4em 0 .4em}`
+    + `ul{padding-left:1.2em}table{border-collapse:collapse}th,td{padding:2px 12px 2px 0;text-align:left}strong{color:#f4f4e9}</style>\n</head>\n<body>\n<main>\n${body}\n</main>\n</body>\n</html>\n`;
   return new Response(html, { status, headers: {
     "content-type": "text/html; charset=utf-8",
     "cache-control": status === 200 ? "public, max-age=60" : "no-store",
