@@ -43,7 +43,7 @@ test("a record that starts at 9/16: incomplete, levels 1..8 missing, not a skip"
 test("1, 2, 3, 7, 8 of 8 in one visit: a jump from 3 to 7", () => {
   const levels = simLevels(stages(8, visit([1, 2, 3, 7, 8], 8)));
   assert.equal(levels.verdict, "jump");
-  assert.deepEqual(levels.jumps, [{ from: 3, to: 7, visit: 1 }]);
+  assert.deepEqual(levels.jumps, [{ from: 3, to: 7, visit: 1, areas: 1 }]);                // one area start for 4 levels
   assert.deepEqual(levels.missing, [4, 5, 6]);
   assert.deepEqual(simLevelFlags(levels), [{ rule: "sim level jump", from: 3, to: 7, visit: 1, of: 8 }]);
 });
@@ -137,5 +137,79 @@ test("malformed and oversize records are bounded and never throw", () => {
 
 test("the log line: verdict, N, seen, jumps", () => {
   assert.equal(simLevelsLogLine(simLevels(stages(8, visit([1, 2, 3, 7, 8], 8)), 300)),
-    "Sim levels: jump, N=8, seen 5, jumps 3->7@v1, lastBefore 7, visits 1, areas 5, fights 5 (150 s), clear 300 s");
+    "Sim levels: jump, N=8, seen 5, backed 0, jumps 3->7@v1, lastBefore 7, visits 1, areas 5, fights 5 (150 s), clear 300 s");
+});
+
+// The first full run through the live verification (numbers only): played from level 1 with one save-and-quit; levels 5,
+// 6 and 15 never read (5 and 6 lasted 13 s and 6 s), but the game's log wrote an area start for every level.
+// Times are seconds from each visit's start.
+const V1 = 1795100000;
+const V2 = 1795110000;
+const firstRun = ({ drop = [] } = {}) => {
+  const at = (start) => (s) => start + s;
+  const reads2 = [[2, 6], [3, 802], [4, 826], [7, 914], [8, 947], [9, 966], [10, 1029], [11, 1062], [12, 1100], [13, 1115], [14, 1170], [16, 1214]];
+  const areas2 = [0, 795, 822, 895, 908, 914, 947, 963, 1028, 1060, 1099, 1112, 1169, 1189, 1211].filter((s) => !drop.includes(s));
+  return stages(16,
+    { enteredAt: V1, leftAt: V1 + 60, fromStart: true, levels: [{ n: 1, of: 16, t: V1 + 14 }], areas: [0, 12, 57].map(at(V1)).map((t) => ({ t })), fights: [] },
+    { enteredAt: V2, leftAt: V2 + 1230, fromStart: false, levels: reads2.map(([n, s]) => ({ n, of: 16, t: V2 + s })),
+      areas: areas2.map(at(V2)).map((t) => ({ t })), fights: [] });
+};
+
+test("the first full run: 5, 6 and 15 never read but backed by their area starts: verified, no flag", () => {
+  const levels = simLevels(firstRun(), 1250);
+  assert.equal(levels.verdict, "verified");
+  assert.deepEqual([levels.seen, levels.backed, levels.missing, levels.complete, levels.jumps], [[...range(1, 4), ...range(7, 14), 16], [5, 6, 15], [], true, []]);
+  assert.deepEqual(levels.stretches, [{ from: 4, to: 7, areas: 3 }, { from: 14, to: 16, areas: 2 }]);
+  assert.equal(levels.areas, 18);
+  assert.deepEqual(simLevelFlags(levels), []);
+  assert.match(simLevelsLogLine(levels), /^Sim levels: verified, N=16, seen 13, backed 3, jumps none,/u);
+});
+
+test("the first full run without the area starts of 5 and 6: a jump from 4 to 7", () => {
+  const levels = simLevels(firstRun({ drop: [895, 908] }));
+  assert.equal(levels.verdict, "jump");
+  assert.deepEqual(levels.jumps, [{ from: 4, to: 7, visit: 2, areas: 1 }]);
+  assert.deepEqual([levels.backed, levels.missing], [[15], [5, 6]]);
+  assert.deepEqual(simLevelFlags(levels), [{ rule: "sim level jump", from: 4, to: 7, visit: 2, of: 16 }]);
+});
+
+test("the first full run without the area start of 15: 14 to 16 unbacked, a skip", () => {
+  const levels = simLevels(firstRun({ drop: [1189] }));
+  assert.equal(levels.verdict, "skip");
+  assert.deepEqual(levels.jumps, [{ from: 14, to: 16, visit: 2, areas: 1 }]);
+  assert.deepEqual([levels.backed, levels.missing, levels.lastBefore], [[5, 6], [15], 14]);
+  assert.deepEqual(simLevelFlags(levels).map((flag) => flag.rule), ["sim levels skipped"]);
+});
+
+test("[1] then [16] in a later visit: backed by 15 area starts between, a skip with 2", () => {
+  const record = (areaCount) => stages(16,
+    { enteredAt: V1, fromStart: true, levels: [{ n: 1, of: 16, t: V1 + 20 }], areas: [{ t: V1 + 5 }, { t: V1 + 15 }], fights: [] },
+    { enteredAt: V2, fromStart: false, levels: [{ n: 16, of: 16, t: V2 + 60 * areaCount + 3 }],
+      areas: Array.from({ length: areaCount }, (_, i) => ({ t: V2 + 60 * (i + 1) })), fights: [] });
+  const backed = simLevels(record(15));
+  assert.equal(backed.verdict, "verified");
+  assert.deepEqual([backed.backed, backed.missing, backed.stretches], [range(2, 15), [], [{ from: 1, to: 16, areas: 15 }]]);
+  assert.deepEqual(simLevelFlags(backed), []);
+  const few = simLevels(record(2));
+  assert.equal(few.verdict, "skip");
+  assert.deepEqual([few.backed, few.missing, few.stretches], [[], range(2, 15), []]);
+  assert.deepEqual(simLevelFlags(few).map((flag) => flag.rule), ["sim levels skipped"]);
+});
+
+test("only [N]: backed by N area starts up to its read, a skip with fewer", () => {
+  const record = (areaCount) => stages(8, { enteredAt: V1, fromStart: true, levels: [{ n: 8, of: 8, t: V1 + 500 }],
+    areas: Array.from({ length: areaCount }, (_, i) => ({ t: V1 + 50 * i })), fights: [] });
+  assert.equal(simLevels(record(8)).verdict, "verified");
+  assert.deepEqual(simLevels(record(8)).stretches, [{ from: 0, to: 8, areas: 8 }]);
+  assert.equal(simLevels(record(7)).verdict, "skip");
+});
+
+test("area starts: only those after the earlier read and up to 5 s after the later one count; a read without a time backs nothing", () => {
+  const record = (areaTimes, t3 = V1 + 100) => stages(8, { enteredAt: V1, fromStart: true,
+    levels: [{ n: 1, of: 8, t: V1 + 10 }, { n: 3, of: 8, t: t3 }, ...range(4, 8).map((n) => ({ n, of: 8, t: V1 + 100 + n }))],
+    areas: areaTimes.map((s) => ({ t: V1 + s })), fights: [] });
+  assert.equal(simLevels(record([60, 105])).verdict, "verified");     // 105 is within 5 s of 3's read
+  assert.equal(simLevels(record([60, 106])).verdict, "jump");         // 6 s after: the next level's
+  assert.equal(simLevels(record([10, 100])).verdict, "jump");         // 10 is 1's own read: not after it
+  assert.equal(simLevels(record([60, 100], null)).verdict, "jump");
 });
