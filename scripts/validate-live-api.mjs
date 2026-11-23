@@ -38,7 +38,7 @@ async function jsonResponse(url, init, expectedStatus) {
 }
 
 const apiOrigin = origin(option("api-origin"), "--api-origin");
-const publicOrigin = origin(option("public-origin", "https://aniilogs.github.io"), "--public-origin");
+const publicOrigin = origin(option("public-origin", "https://aniilogs.app"), "--public-origin");
 const expectOauth = option("expect-oauth", "true") === "true";
 const skipPublicConfig = flag("skip-public-config");
 const reportPath = option("report");
@@ -55,6 +55,16 @@ if (allowedHealth.response.headers.get("access-control-allow-origin") !== public
   throw new Error("Health response did not return exact-origin CORS.");
 }
 checks.push("health_and_oauth_readiness", "exact_origin_get_cors");
+
+// the site's old address (aniilogs.github.io forwards to the site) stays accepted for pages left open and old aLogs builds
+const legacyOrigin = "https://aniilogs.github.io";
+if (publicOrigin !== legacyOrigin) {
+  const legacy = await jsonResponse(`${api}/health`, { headers: { origin: legacyOrigin } }, 200);
+  if (legacy.response.headers.get("access-control-allow-origin") !== legacyOrigin) {
+    throw new Error("The old site address (aniilogs.github.io) lost its CORS access.");
+  }
+  checks.push("legacy_site_origin_cors");
+}
 
 const allowedPreflight = await fetch(`${api}/progress`, {
   method: "OPTIONS",

@@ -279,7 +279,7 @@ const SHORT_SHARE_CODE_PATTERN = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkm
 const API_URL = String(
   SITE_CONFIG.apiUrl
   || SITE_CONFIG.shareApiUrl
-  || (window.location.hostname === "aniilogs.github.io" ? "" : `${window.location.origin}/api`),
+  || `${window.location.origin}/api`,
 ).replace(/\/+$/, "");
 const SHARE_API_URL = API_URL;
 const CLOUD_SYNC_ENABLED = Boolean(API_URL);

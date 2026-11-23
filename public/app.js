@@ -945,7 +945,7 @@ async function loadProfileOverview(publicId = "") {
       describeForSearch({
         title: `${who} — Aniimo player profile · AniiLogs`,
         description: `${who}'s Aniimo profile on AniiLogs: Holo-Battle Interlink, Holo-Battle Sim and Egg Heist leaderboard standing, characters and records.`,
-        canonical: `https://aniilogs.github.io/?profile=${encodeURIComponent(publicId)}`,
+        canonical: `https://aniilogs.app/?profile=${encodeURIComponent(publicId)}`,
         noindex: overview.profile?.listedInSearch === false,
       });
     }

@@ -14,8 +14,8 @@ if (!configText.includes('"name": "aniilogs-api"')) throw new Error("Pages proje
 if (!configText.includes('"pages_build_output_dir": "./.pages-api-dist"')) {
   throw new Error("Pages output directory is missing.");
 }
-if (!configText.includes('"PUBLIC_SITE_ORIGIN": "https://aniilogs.github.io"')) {
-  throw new Error("GitHub Pages origin is not pinned.");
+if (!configText.includes('"PUBLIC_SITE_ORIGIN": "https://aniilogs.app"')) {
+  throw new Error("The site's origin (https://aniilogs.app) is not pinned.");
 }
 if (!configText.includes('"DISCORD_CLIENT_ID": "1548899251655020634"')) {
   throw new Error("AniiLogs Discord client ID is not pinned.");
@@ -72,6 +72,6 @@ console.log(JSON.stringify({
   status: "pass",
   project: "aniilogs-api",
   intendedOrigin: "https://aniilogs-api.pages.dev",
-  publicSiteOrigin: "https://aniilogs.github.io",
+  publicSiteOrigin: "https://aniilogs.app",
   remoteDeploymentApproved: true,
 }));

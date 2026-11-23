@@ -82,11 +82,21 @@ function configuredPublicSiteOrigin(env) {
   }
 }
 
+// The site's old address (GitHub Pages, now a forwarder to PUBLIC_SITE_ORIGIN): its pages, still open in tabs, and
+// older aLogs builds call the API from there, so it is accepted like the site's own origin, and a sign-in started
+// there comes back to the same page on the new address.
+const LEGACY_SITE_ORIGINS = Object.freeze(["https://aniilogs.github.io"]);
+
+export function siteOriginAllowed(origin, env) {
+  return Boolean(origin && (origin === configuredPublicSiteOrigin(env) || LEGACY_SITE_ORIGINS.includes(origin)));
+}
+
 export function safeClientReturnTo(value, request, env) {
   const apiOrigin = new URL(request.url).origin;
   const publicOrigin = configuredPublicSiteOrigin(env) || apiOrigin;
   try {
     const parsed = new URL(String(value || "/"), publicOrigin);
+    if (LEGACY_SITE_ORIGINS.includes(parsed.origin)) return `${publicOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
     if (parsed.origin !== publicOrigin) return `${publicOrigin}/`;
     return `${parsed.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
@@ -216,6 +226,27 @@ async function redeemDeveloperPreviewTicket(request, env) {
   if (!developer) developer = DEVELOPER_MODE_ROLES.has(await storedDeveloperRole(discordId, env) || "player");   // not a tester
   if (!developer) return json({ error: "Developer access revoked." }, 403);
   return json({ ok: true, discordId, maxSessionSeconds: DEV_PREVIEW_COOKIE_SECONDS });
+}
+
+// The site's pages: public/_headers sends this policy with every static file (test/site-move.test.js keeps the two
+// the same); the worker sends it on the site's files it hands out itself (the asset fallback in handleRequest).
+// Not exported as a constant: workerd reads every named export of the worker module as an entrypoint.
+const SITE_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "connect-src 'self' blob: https://api.github.com https://aniilogs-api.pages.dev",
+  "font-src 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "frame-src https://aniilogs-renderer-qa-3634150.pages.dev",
+  "img-src 'self' data: blob: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com",
+  "media-src 'self' blob: https://aniilogs-api.pages.dev",
+  "object-src 'none'",
+  "script-src 'self' https://aniilogs-api.pages.dev",
+  "style-src 'self' 'unsafe-inline'",
+].join("; ");
+export function siteContentSecurityPolicy() {
+  return SITE_CONTENT_SECURITY_POLICY;
 }
 
 function securityHeaders(headers = new Headers(), localPreview = false) {
@@ -852,7 +883,7 @@ export function sameOriginWrite(request) {
 export function browserWriteAllowed(request, env) {
   if (sameOriginWrite(request)) return true;
   const origin = request.headers.get("origin") || "";
-  return Boolean(origin && origin === configuredPublicSiteOrigin(env));
+  return siteOriginAllowed(origin, env);
 }
 
 function corsResponse(request, env, response) {
@@ -886,7 +917,7 @@ function corsResponse(request, env, response) {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
   const origin = request.headers.get("origin") || "";
-  if (!origin || origin !== configuredPublicSiteOrigin(env)) return response;
+  if (!siteOriginAllowed(origin, env)) return response;
   const headers = new Headers(response.headers);
   headers.set("access-control-allow-origin", origin);
   headers.set("access-control-allow-headers", "authorization, content-type");
@@ -2643,7 +2674,7 @@ async function saveHiddenTrophies(request, env) {
 // Search engines: the site's robots.txt names this sitemap, listing the public profiles whose owners leave
 // "List my profile in search engines" on. Only the random public id is in it, never a Discord id or UID.
 async function profilesSitemap(env) {
-  const origin = configuredPublicSiteOrigin(env) || "https://aniilogs.github.io";
+  const origin = configuredPublicSiteOrigin(env) || "https://aniilogs.app";
   const rows = await env.DB.prepare(
     `SELECT p.public_id AS publicId, p.updated_at AS updatedAt FROM profiles p
      WHERE ${LISTED_PROFILE} AND p.listed_in_search = 1 ORDER BY p.updated_at DESC LIMIT 5000`,
@@ -8649,18 +8680,19 @@ async function handleRequest(request, env) {
   const lb = url.pathname.match(LB_PATH);
   const lbName = lb ? String(lb[1] || "").toLowerCase() : null;
   if (lb && !PLACEMENT_CODE.test(lbName)) {
-    const to = `${configuredPublicSiteOrigin(env) || "https://aniilogs.github.io"}${LB_BOARDS[Object.hasOwn(LB_BOARDS, lbName) ? lbName : ""]}`;
+    const to = `${configuredPublicSiteOrigin(env) || "https://aniilogs.app"}${LB_BOARDS[Object.hasOwn(LB_BOARDS, lbName) ? lbName : ""]}`;
     return new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store" } });
   }
   const placement = lb ? [url.pathname, lbName] : url.pathname.match(PLACEMENT_PATH);
   if (url.pathname.startsWith("/api/") || placement) {
     try { await fillRunOutcomes(env); } catch (error) { if (env.DB) OUTCOMES_FILLED.add(env.DB); console.error("Run outcomes need migration 0033", error); }
-    // a short link at the root: https://aniilogs-api.pages.dev/<code> (nothing else is served there but index.html)
+    // a short link at the root: https://aniilogs-api.pages.dev/<code> (_routes.json leaves no site file at such a path)
     if (placement) return request.method === "GET" || request.method === "HEAD" ? placementLinks.open(request, env, placement[1]) : json({ error: "Not found" }, 404);
     return corsResponse(request, env, await api(request, env));
   }
   const asset = await env.ASSETS.fetch(request);
   const headers = securityHeaders(new Headers(asset.headers), url.hostname === "127.0.0.1" || url.hostname === "localhost");
+  headers.set("content-security-policy", SITE_CONTENT_SECURITY_POLICY);
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
