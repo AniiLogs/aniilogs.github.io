@@ -108,6 +108,8 @@
 .lb-fight-log-note { margin: 10px 0 0; color: var(--ink-soft); }
 .lb-fight-download { margin-top: 10px; padding: 0; border: 0; background: none; color: var(--teal); font: inherit; text-decoration: underline; cursor: pointer; }
 .lb-fight-download:disabled { opacity: 0.6; cursor: progress; }
+.lb-proof-record-list { margin: 8px 0 0; padding-left: 1.2rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.lb-proof-record-list li { margin: 2px 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .lb-fight-log-figures { grid-template-columns: 1fr 1fr; } }
 /* the owner and administrators: delete the run, under its pictures */
 .lb-proof-actions { display: flex; justify-content: flex-end; padding: 0 12px 12px; }

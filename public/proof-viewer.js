@@ -164,9 +164,51 @@
       .filter((item) => Number.isInteger(item?.n) && Number.isFinite(item?.t)).map((item) => [item.n, item.t]));
     return [
       ...list.shots.filter((shot) => !fights.includes(shot)).map((shot) => ({ id, shot, label: label(shot) })),
-      ...(fights.length || list.fightLog ? [{ id, shot: "fight", label: "Fight", fight: fights.map((shot) => ({ shot, t: times.get(Number(shot.slice(5))) })),
-        log: list.fightLog || null }] : []),
+      ...(fights.length || list.fightLog || list.record ? [{ id, shot: "fight",
+        label: fights.length || list.fightLog || list.record?.pictures?.some((p) => /^fight\d+$/u.test(p?.shot)) ? "Fight" : "Proof file",
+        fight: fights.map((shot) => ({ shot, t: times.get(Number(shot.slice(5))) })),
+        log: list.fightLog || null, record: list.record || null }] : []),
     ];
+  }
+  // The proof file (staff only), once a run's whole screens and fight pictures were removed after 7 days (or when a
+  // better run replaced them): what they showed, in their place, and a download of the whole file
+  const PICTURE_NAMES = Object.freeze({ full: "Whole result screen", battle_full: "Whole Battle Data screen" });
+  function proofRecordPanel(id, record) {
+    const has = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
+    const size = (bytes) => (has(bytes) ? `${number(Math.max(1, Math.round(bytes / 1024)))} KB` : "");
+    const when = has(record.keptAt) ? new Date(record.keptAt * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+    const why = record.why === "replaced by a better run" ? "when a better run replaced them" : "after 7 days";
+    const pictures = (record.pictures || []).filter((p) => p && typeof p.shot === "string").map((p) => {
+      const fight = /^fight(\d+)$/u.exec(p.shot);
+      const name = fight ? `Fight picture ${fight[1]}${has(p.t) ? ` · ${clock(p.t)}` : ""}` : PICTURE_NAMES[p.shot] || p.shot;
+      return el("li", { text: [name, size(p.bytes)].filter(Boolean).join(" · ") });
+    });
+    const result = record.reading?.result && typeof record.reading.result === "object" ? record.reading.result : null;
+    const read = result ? [has(result.score) ? `${number(result.score)} pts` : "", has(result.stars) ? `${number(result.stars)} stars` : "",
+      typeof result.time === "string" ? result.time : ""].filter(Boolean).join(" · ") : "";
+    const download = el("button", { type: "button", class: "lb-fight-download", text: "Download the proof file", onclick: async () => {
+      download.disabled = true;
+      try {
+        const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(id)}/evidence?shot=record`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const url = URL.createObjectURL(await response.blob());
+        const link = el("a", { href: url, download: `proof-${id}.json` });
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch {
+        window.alert("Could not download the proof file.");
+      } finally {
+        download.disabled = false;
+      }
+    } });
+    return el("section", { class: "lb-fight-log lb-proof-record", "aria-label": "Proof file" },
+      el("h3", { class: "lb-fight-log-title", text: "Proof file" }),
+      el("p", { class: "lb-fight-log-note", text: `This run's pictures were removed ${why}${when ? ` (${when})` : ""}. What they showed is kept here: the run's numbers, the second reading, when each fight picture was taken, the fight log's figures${record.fightLog?.kept ? " and the fight log itself" : ""}.` }),
+      pictures.length ? el("ul", { class: "lb-proof-record-list" }, pictures) : null,
+      read ? el("p", { class: "lb-fight-log-note", text: `Second reading of the result screen: ${read}${record.check ? ` (${record.check})` : ""}.` }) : null,
+      download);
   }
   const COUNT_WORDS = ["One", "Two", "Three", "Four", "Five", "Six"];
   function clock(seconds) {
@@ -196,7 +238,7 @@
     const why = LOG_NOTES[log?.note] || (log?.note ? `it was left out (${log.note})` : "");
     const note = why ? (stats ? `The app's latest fight log for this run was left out: ${why}. The figures are from the one before.`
       : `The app sent a fight log for this run, but it was left out: ${why}.`) : "";
-    const download = stats ? el("button", { type: "button", class: "lb-fight-download", text: "Download the fight log", onclick: async () => {
+    const download = stats && log.download !== false ? el("button", { type: "button", class: "lb-fight-download", text: "Download the fight log", onclick: async () => {
       download.disabled = true;
       try {
         const response = await apiFetch(`/leaderboard/submissions/${encodeURIComponent(id)}/evidence?shot=fightlog`);
@@ -224,7 +266,8 @@
   // corner; a click (or Enter) opens one full size, with a way back to all of them. Never on hover. The fight log under them.
   function fightPanel(body, picture, current) {
     const shots = picture.fight;
-    const log = () => (picture.log ? fightLogPanel(picture.id, picture.log) : null);
+    const log = () => [picture.record ? proofRecordPanel(picture.id, picture.record) : null,
+      picture.log ? fightLogPanel(picture.id, picture.log) : null];
     const count = COUNT_WORDS[shots.length - 1] || String(shots.length);
     const note = shots.length === 1
       ? "One moment of the fight, taken right after the biggest hit of that part. The numbers are this player's own hits. Click the picture to open it full size."

@@ -68,6 +68,10 @@ function evidenceStore() {
       const object = objects.get(key);
       return object ? { body: object.bytes, writeHttpMetadata: (headers) => headers.set("content-type", object.type) } : null;
     },
+    async head(key) {
+      const object = objects.get(key);
+      return object ? { size: object.bytes.length, etag: `etag-${object.bytes.length}` } : null;
+    },
     async delete(key) {
       objects.delete(key);
     },
@@ -545,33 +549,113 @@ test("the fight's pictures: stored in order, replaced or kept on a re-send, staf
   assert.deepEqual(keys(), []);
 });
 
-test("the fight's pictures go with the whole screens after 14 days; a current best and a run under review keep them", async () => {
+test("the fight's pictures go with the whole screens after 7 days, a proof file in their place; a current best and a run under review keep them", async () => {
   const EVIDENCE = evidenceStore();
-  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE, ADMIN_DISCORD_IDS: IDS.dev });
   const token = await namedToken(env, SESSIONS.dev);
   const sim = (id, clearTimeS) => ({ kind: "sim_run", clientRunId: id, trial: "Training of Fire", difficulty: "Hard", clearTimeS, cleared: true, partySize: 1,
     extra: { fightShots: [{ n: 1, t: 10 }] } });
-  const screens = ["evidence", "evidence_full", "fight1", "fight2"];
   const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
   const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
-    .map((key) => /-(full|fight\d)\.jpg$/u.exec(key)?.[1] || "crop").sort();
+    .map((key) => /-(full|fight\d|proof|fightlog)\.(jpg|json|csv\.gz)$/u.exec(key)?.[1] || "crop").sort();
   const extra = (client) => JSON.parse(sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = ?").get(client).e || "{}");
-  await sendRun(env, token, sim("slow", 500), screens);
-  await sendRun(env, token, sim("review", 450), screens);
-  await sendRun(env, token, sim("best", 300), screens);
-  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "full"]);
-  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 20 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
+  const send = (body, log = null) => {
+    const form = new FormData();
+    form.set("submission", JSON.stringify(body));
+    for (const part of ["evidence", "evidence_full", "fight1", "fight2"]) form.set(part, new Blob([new Uint8Array([0xff, 0xd8, 0xff, 1])], { type: "image/jpeg" }), `${part}.jpg`);
+    if (log) form.set("fightlog", log, "fight.csv.gz");
+    return call(env, "/api/leaderboard/submissions", { token, method: "POST", form });
+  };
+  const log = gzipped(fightCsv(40));
+  const logBytes = new Uint8Array(await log.arrayBuffer());
+  await send(sim("slow", 500), log);
+  await send(sim("review", 450));
+  await send(sim("best", 300));
+  await send(sim("fresh", 600));
+  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "fightlog", "full"]);
+  // 6 days: nothing goes
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 6 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
+  await sendRun(env, token, run("trigger-a"));
+  assert.deepEqual(pictures("slow"), ["crop", "fight1", "fight2", "fightlog", "full"]);
+  // 8 days
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 2 * 86400 WHERE client_run_id IN ('slow', 'review', 'best')").run();
   sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = 'mismatch' WHERE client_run_id = 'review'").run();
   for (let i = 0; i < 2; i += 1) await sendRun(env, token, run(`trigger-${i}`));
-  // the slower run: its whole screen and fight pictures gone, the crop kept (90 days), proofFight cleared
-  assert.deepEqual(pictures("slow"), ["crop"]);
+  // the slower run: its whole screen and fight pictures gone, a proof file in their place, the crop and log kept (90 days)
+  assert.deepEqual(pictures("slow"), ["crop", "fightlog", "proof"]);
   assert.equal(extra("slow").proofFight, undefined);
   assert.equal(extra("slow").proofFull, undefined);
+  assert.equal(extra("slow").proofRecord, `evidence/${IDS.dev}/${id("slow")}-proof.json`);
   for (const kept of ["best", "review"]) assert.deepEqual(pictures(kept), ["crop", "fight1", "fight2", "full"], kept);
-  // after 90 days the crops go too, with anything left
+  assert.deepEqual(pictures("fresh"), ["crop", "fight1", "fight2", "full"]);             // under 7 days old
+  const file = EVIDENCE.objects.get(extra("slow").proofRecord);
+  assert.equal(file.type, "application/json");
+  const record = JSON.parse(new TextDecoder().decode(file.bytes));
+  assert.equal(record.version, 1);
+  assert.equal(record.why, "7 days");
+  assert.deepEqual(record.pictures, [{ shot: "full", bytes: 4, etag: "etag-4" }, { shot: "fight1", t: 10, bytes: 4, etag: "etag-4" }, { shot: "fight2", bytes: 4, etag: "etag-4" }]);
+  assert.equal(record.run.clearTimeS, 500);
+  assert.equal(record.fight.mode, "sim");
+  assert.equal(record.fightStats.rows, 40);
+  assert.deepEqual(Buffer.from(record.fightLog.gzipBase64, "base64"), Buffer.from(logBytes));
+  assert.ok(file.bytes.length < 8 * 1024, `${file.bytes.length} bytes`);
+
+  // staff see the proof file's summary in place of the pictures; nobody else is told it exists
+  const base = `/api/leaderboard/submissions/${id("slow")}/evidence`;
+  const staff = await (await call(env, `${base}?shot=list`, { session: SESSIONS.dev })).json();
+  assert.deepEqual(staff.shots, ["summary"]);
+  assert.equal(staff.record.why, "7 days");
+  assert.equal(staff.record.pictures.length, 3);
+  assert.deepEqual(staff.record.fightLog, { bytes: logBytes.length, kept: true });
+  assert.ok(!JSON.stringify(staff).includes("gzipBase64"));
+  for (const session of [SESSIONS.dev2, SESSIONS.user, undefined]) {
+    const details = await (await call(env, `${base}?shot=list`, { session })).json();
+    assert.equal(details.record, undefined);
+    assert.equal(details.fightLog, undefined);
+    assert.equal((await call(env, `${base}?shot=record`, { session })).status, 404);
+  }
+  const download = await call(env, `${base}?shot=record`, { session: SESSIONS.dev });
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("cache-control"), "private, no-store");
+  assert.equal((await download.json()).submissionId, id("slow"));
+  const entry = (await (await call(env, "/api/leaderboard/entries?kind=sim_run")).json()).entries.find((item) => item.extra);
+  assert.ok(!JSON.stringify(entry || {}).includes("-proof.json"));
+
+  // after 90 days the crops and the log file go; the proof file stays, and the fight log comes from it
   sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 100 * 86400 WHERE client_run_id = 'slow'").run();
   await sendRun(env, token, run("trigger-x"));
-  assert.deepEqual(pictures("slow"), []);
+  assert.deepEqual(pictures("slow"), ["proof"]);
+  const later = await (await call(env, `${base}?shot=list`, { session: SESSIONS.dev })).json();
+  assert.deepEqual(later.shots, []);
+  assert.equal(later.fightLog.download, undefined);                    // the copy in the proof file can be downloaded
+  assert.equal(later.fightLog.stats.rows, 40);
+  const copy = await call(env, `${base}?shot=fightlog`, { session: SESSIONS.dev });
+  assert.equal(copy.status, 200);
+  assert.deepEqual(new Uint8Array(await copy.arrayBuffer()), logBytes);
+  assert.equal((await call(env, `${base}?shot=fightlog`, { session: SESSIONS.user })).status, 404);
+
+  // a re-send keeps the proof file; deleting the run deletes it
+  assert.equal((await sendRun(env, token, { ...sim("slow", 500), extra: { proofRecord: "evidence/elsewhere.json" } })).status, 200);
+  assert.equal(extra("slow").proofRecord, `evidence/${IDS.dev}/${id("slow")}-proof.json`);
+  assert.equal((await call(env, `/api/leaderboard/submissions/${id("slow")}`, { session: SESSIONS.dev, method: "DELETE" })).status, 200);
+  assert.equal([...EVIDENCE.objects.keys()].filter((key) => key.endsWith("-proof.json")).length, 0);
+});
+
+test("a run replaced by a better one at once gets its proof file too", async () => {
+  const EVIDENCE = evidenceStore();
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", EVIDENCE });
+  const token = await namedToken(env, SESSIONS.dev);
+  await sendRun(env, token, run("worse", { score: 15000, stars: 15 }), ["evidence", "evidence_full"]);
+  await sendRun(env, token, run("better"), ["evidence", "evidence_full"]);
+  sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600").run();      // the better run held up
+  await sendRun(env, token, run("trigger"));
+  const row = sqlite.prepare("SELECT extra_json AS e FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
+  const extra = JSON.parse(row.e);
+  assert.equal(extra.proofFull, undefined);
+  const record = JSON.parse(new TextDecoder().decode(EVIDENCE.objects.get(extra.proofRecord).bytes));
+  assert.equal(record.why, "replaced by a better run");
+  assert.equal(record.run.score, 15000);
+  assert.deepEqual(record.pictures.map((p) => p.shot), ["full"]);
 });
 
 // A synthetic fight log (invented numbers): a look every 0.5 s, 1,000 damage a look, the game's countdown falling
@@ -2339,7 +2423,7 @@ test("pictures: a better Interlink run replaces the older one's proof at once; b
   sqlite.prepare("UPDATE game_characters SET verified_at = 1").run();
   const screens = ["evidence", "battle", "evidence_full", "battle_full"];
   const id = (client) => sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = ?").get(client).id;
-  const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)))
+  const pictures = (client) => [...EVIDENCE.objects.keys()].filter((key) => key.includes(id(client)) && !key.endsWith("-proof.json"))
     .map((key) => (/-(battle-)?full\./u.test(key) ? "full" : "crop")).sort();
   const state = (client, value) => sqlite.prepare("UPDATE leaderboard_submissions SET verify_state = ? WHERE client_run_id = ?").run(value, client);
   let n = 0;
@@ -2354,12 +2438,13 @@ test("pictures: a better Interlink run replaces the older one's proof at once; b
   state("best", "pending");
   await prune();
   assert.equal(pictures("worse").length, 4);
-  // once it's through its check (and 5 minutes in), the older run's pictures go on the next submission (no 14 / 90
-  // day wait); its numbers stay
+  // once it's through its check (and 5 minutes in), the older run's pictures go on the next submission (no 7 / 90
+  // day wait); its numbers stay, and its proof file
   state("best", "match");
   sqlite.prepare("UPDATE leaderboard_submissions SET created_at = created_at - 600 WHERE client_run_id IN ('best', 'worse', 'review')").run();
   await prune();
   assert.deepEqual(pictures("worse"), []);
+  assert.ok(EVIDENCE.objects.has(`evidence/${IDS.dev}/${id("worse")}-proof.json`));
   const worse = sqlite.prepare("SELECT evidence_key, battle_evidence_key, proof_pruned_at, score FROM leaderboard_submissions WHERE client_run_id = 'worse'").get();
   assert.deepEqual([worse.evidence_key, worse.battle_evidence_key, worse.score], [null, null, 20000]);
   assert.ok(worse.proof_pruned_at > 0);

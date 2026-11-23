@@ -2276,11 +2276,17 @@ async function publicBattleHistory(request, env, id) {
 // Picture retention. An Interlink run's pictures are replaced as soon as a better run of that boss and week comes in
 // from a result screen, once that run has its own pictures and isn't under review (the owner, 2 Nov: proof is
 // overwritten by a higher score). A best sent from the game's menu never replaces a run's pictures: it's shown beside
-// them (the owner, 7 Nov). Any other run that is nobody's current best keeps its full screens
-// 14 days and its crops 90 days; a current best (for its sender, or for a teammate it credits) and a run under review
+// them (the owner, 7 Nov). Any other run that is nobody's current best keeps its full screens and fight pictures
+// 7 days and its crops 90 days; a current best (for its sender, or for a teammate it credits) and a run under review
 // keep everything, and every run keeps its numbers. Pages has no scheduled runs, so a few go after each submission (pruneProofs(env, max)).
 // "Best" errs on keeping: a teammate's best is judged against the runs that teammate sent.
-const RETENTION = Object.freeze({ fullScreensS: 14 * 86400, cropsS: 90 * 86400 });
+// When the whole screens and fight pictures go, a small proof file takes their place (proofRecordOf, extra.proofRecord):
+// what they showed that matters, kept as long as the run (the owner, 23 Nov: "after a week, a json file ... that holds
+// the information for proof", issue 129).
+const RETENTION = Object.freeze({ fullScreensS: 7 * 86400, cropsS: 90 * 86400 });
+// A fight log up to this size (gzip, as sent; aLogs' logs are about 30-40 KB) is copied into the proof file, so it
+// outlives the 90-day crops; a bigger one is only named there.
+const PROOF_RECORD_LOG_BYTES = 64 * 1024;
 // A run's score: the one the app read, else the one the picture check read off its proof when that reading agreed with
 // it (match) and gave the same stars (2 Nov: Abzu's 15-star Scorchhowl came in without its score, 15,218 on the
 // picture, and the board showed his 13-star run).
@@ -2328,18 +2334,27 @@ async function pruneProofs(env, max) {
   const now = Math.floor(Date.now() / 1000);
   let pruned = 0;
   try {
-    // the whole screens and the fight's pictures after 14 days
+    // the whole screens and the fight's pictures after 7 days, a proof file in their place
     const full = (await env.DB.prepare(
-      `SELECT c.submission_id AS submissionId, c.extra_json AS extraJson FROM leaderboard_submissions c
+      `SELECT c.submission_id AS submissionId, c.discord_id AS discordId, c.extra_json AS extraJson, c.kind, c.cycle, c.boss_id AS bossId,
+         c.boss_name AS bossName, c.boss_level AS bossLevel, ${RUN_SCORE("c")} AS score, c.stars, c.clear_time_s AS clearTimeS, c.cleared,
+         c.difficulty, c.trial, c.rank_name AS rankName, c.team_dps AS teamDps, c.players_json AS playersJson, c.verify_state AS verifyState,
+         c.verify_json AS verifyJson, c.created_at AS createdAt, c.created_at < ? AS aged
+       FROM leaderboard_submissions c
        WHERE (json_extract(c.extra_json, '$.proofFull') IS NOT NULL OR json_extract(c.extra_json, '$.proofFight') IS NOT NULL)
          AND (c.created_at < ? OR ${REPLACED_AT_ONCE}) AND ${NOBODYS_BEST}
        ORDER BY c.created_at ASC LIMIT ?`,
-    ).bind(now - RETENTION.fullScreensS, max).all()).results || [];
+    ).bind(now - RETENTION.fullScreensS, now - RETENTION.fullScreensS, max).all()).results || [];
     for (const row of full) {
       const extra = parseJsonColumn(row.extraJson) || {};
-      for (const key of [...Object.values(extra.proofFull || {}), ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])]) await env.EVIDENCE.delete(key);
-      await env.DB.prepare("UPDATE leaderboard_submissions SET extra_json = json_remove(extra_json, '$.proofFull', '$.proofFight') WHERE submission_id = ?")
-        .bind(row.submissionId).run();
+      const pictures = [...Object.values(extra.proofFull || {}), ...(Array.isArray(extra.proofFight) ? extra.proofFight : [])];
+      // the proof file first: a picture is never gone before what it showed is kept
+      const recordKey = `evidence/${row.discordId}/${row.submissionId}-proof.json`;
+      const record = await proofRecordOf(env, row, extra, now);
+      await env.EVIDENCE.put(recordKey, JSON.stringify(record), { httpMetadata: { contentType: "application/json" } });
+      for (const key of pictures) await env.EVIDENCE.delete(key);
+      await env.DB.prepare(`UPDATE leaderboard_submissions SET extra_json = json_set(json_remove(extra_json, '$.proofFull', '$.proofFight'),
+        '$.proofRecord', ?) WHERE submission_id = ?`).bind(recordKey, row.submissionId).run();
       pruned += 1;
     }
     // the crops (and the fight log; its figures stay) after 90 days
@@ -2362,6 +2377,71 @@ async function pruneProofs(env, max) {
     throw error;
   }
   return pruned;
+}
+
+// A run's proof file (issue 129), written when its whole screens and fight pictures go: what they showed that matters,
+// in one small JSON, staff only. The run's numbers as stored (what the app read off the screens), the second reading of
+// the whole screens and the run check (verify_json), when each fight picture was taken, the fight log's figures, and of
+// each picture removed its size and R2 etag (its MD5 for a single upload: the picture can be matched to a copy later).
+// The fight log itself is copied in, gzip as sent and base64, when it is at most PROOF_RECORD_LOG_BYTES. The run's
+// numbers stay in D1 too; the file is the snapshot of what was proven, kept as long as the run.
+async function proofRecordOf(env, row, extra, now) {
+  const full = extra.proofFull || {};
+  const fights = Array.isArray(extra.proofFight) ? extra.proofFight : [];
+  const times = new Map((fightShots(extra.fightShots) || []).filter((item) => Number.isFinite(item.t)).map((item) => [item.n, item.t]));
+  const about = async (key) => {
+    const head = env.EVIDENCE.head ? await env.EVIDENCE.head(key).catch(() => null) : null;
+    return head ? { bytes: Number(head.size) || null, ...(head.etag ? { etag: String(head.etag) } : {}) } : { bytes: null };
+  };
+  const pictures = [];
+  for (const [name, shot] of [["evidence", "full"], ["battle", "battle_full"]]) {
+    if (full[name]) pictures.push({ shot, ...(await about(full[name])) });
+  }
+  for (const [i, key] of fights.entries()) {
+    pictures.push({ shot: `fight${i + 1}`, ...(times.has(i + 1) ? { t: times.get(i + 1) } : {}), ...(await about(key)) });
+  }
+  let fightLog = null;
+  if (typeof extra.proofFightLog === "string") {
+    const object = await env.EVIDENCE.get(extra.proofFightLog).catch(() => null);
+    const bytes = object ? new Uint8Array(await new Response(object.body).arrayBuffer()) : null;
+    fightLog = !bytes ? { bytes: null }
+      : bytes.length <= PROOF_RECORD_LOG_BYTES ? { bytes: bytes.length, gzipBase64: base64Of(bytes) } : { bytes: bytes.length };
+  }
+  const check = parseJsonColumn(row.verifyJson);
+  const record = {
+    version: 1,
+    submissionId: row.submissionId,
+    sentAt: row.createdAt,
+    keptAt: now,
+    why: row.aged ? "7 days" : "replaced by a better run",
+    fight: await proofFight(env, row),
+    run: { kind: row.kind, score: row.score ?? null, stars: row.stars ?? null, clearTimeS: row.clearTimeS ?? null,
+      cleared: row.cleared == null ? null : Boolean(row.cleared), teamDps: row.teamDps ?? null, players: parseJsonColumn(row.playersJson) || [] },
+    check: { state: row.verifyState || null, ...(check && typeof check === "object" && !Array.isArray(check) ? check : {}) },
+    pictures,
+    ...(extra.fightStats && typeof extra.fightStats === "object" && !Array.isArray(extra.fightStats) ? { fightStats: extra.fightStats } : {}),
+    ...(typeof extra.fightLogNote === "string" ? { fightLogNote: extra.fightLogNote } : {}),
+    ...(fightLog ? { fightLog } : {}),
+  };
+  return JSON.parse(JSON.stringify(record));
+}
+
+function base64Of(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+
+// A run's proof file (extra.proofRecord), or null
+async function storedProofRecord(env, extra) {
+  if (typeof extra?.proofRecord !== "string" || !env.EVIDENCE) return null;
+  const object = await env.EVIDENCE.get(extra.proofRecord).catch(() => null);
+  if (!object) return null;
+  try {
+    return JSON.parse(await new Response(object.body).text());
+  } catch {
+    return null;
+  }
 }
 
 // The profile's cards, as its owner arranged them: { order, hidden } of card ids, kept in profiles.preferences_json.
@@ -2701,10 +2781,10 @@ async function deleteOwnAccount(request, env) {
   if (env.EVIDENCE) {
     const { results } = await env.DB.prepare(
       `SELECT evidence_key AS evidenceKey, battle_evidence_key AS battleKey, extra_json AS extraJson, created_at AS createdAt FROM leaderboard_submissions
-       WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL)`,
+       WHERE discord_id = ? AND (evidence_key IS NOT NULL OR battle_evidence_key IS NOT NULL OR json_extract(extra_json, '$.proofRecord') IS NOT NULL)`,
     ).bind(discordId).all();
     for (const row of results || []) {
-      for (const key of proofKeys(row)) await env.EVIDENCE.delete(key);
+      for (const key of runFileKeys(row)) await env.EVIDENCE.delete(key);
     }
     const photos = await env.DB.prepare("SELECT photo_key AS photoKey FROM profile_photos WHERE discord_id = ?").bind(discordId).all();
     for (const row of photos.results || []) {
@@ -4242,8 +4322,11 @@ async function submitLeaderboardRecord(request, env) {
       fightLogNote = log.note;
     }
   }
-  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote) {
+  // the proof file left when the whole screens and fight pictures went (pruneProofs): kept on a re-send
+  const proofRecord = typeof stored.proofRecord === "string" ? stored.proofRecord : null;
+  if (record.extraJson || Object.keys(proofFull).length || proofParty || proofGizmos || proofFight?.length || proofFightLog || storedFightStats || fightLogNote || proofRecord) {
     const extra = parseJsonColumn(record.extraJson) || {};
+    delete extra.proofRecord;
     delete extra.proofFull;
     delete extra.proofParty;
     delete extra.proofGizmos;
@@ -4265,6 +4348,7 @@ async function submitLeaderboardRecord(request, env) {
     if (proofFightLog) extra.proofFightLog = proofFightLog;
     if (storedFightStats) extra.fightStats = storedFightStats;
     if (fightLogNote) extra.fightLogNote = fightLogNote;
+    if (proofRecord) extra.proofRecord = proofRecord;
     record.extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
   }
   if (parsed.battle && env.EVIDENCE) {
@@ -7414,7 +7498,7 @@ async function leaderboardEntries(request, env) {
       buffs: parseJsonColumn(row.buffs_json),
       // the fight's pictures and log are staff only: none of their entries is shown here
       extra: (({ instanceId: _instance, proofFull, proofParty, proofGizmos, proofFight: _fight, fightShots: _fightShots, proofFightLog: _log, fightStats: _stats,
-        fightLogNote: _note, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
+        fightLogNote: _note, proofRecord: _record, sharedRun: _shared, lineup, setup, ...extra }) => ({ ...extra, ...(lineup ? { lineup: lineupOf(row, lineup) } : {}),
         ...(Array.isArray(proofGizmos) && proofGizmos.length ? { gizmoShots: proofGizmos.length } : {}),
         ...(publicSimSetup(setup) ? { setup: publicSimSetup(setup) } : {}),
         ...(proofParty ? { hasPartyScreen: true } : {}),
@@ -7513,6 +7597,11 @@ function proofKeys(row) {
   return [row?.evidenceKey, row?.battleKey, full.evidence, full.battle, extra.proofParty, ...(extra.proofGizmos || []),
     ...(Array.isArray(extra.proofFight) ? extra.proofFight : []), extra.proofFightLog].filter(Boolean);
 }
+// ... and its proof file, which outlives them (pruneProofs): gone only with the run
+function runFileKeys(row) {
+  const record = (parseJsonColumn(row?.extraJson) || {}).proofRecord;
+  return [...proofKeys(row), ...(typeof record === "string" ? [record] : [])];
+}
 
 async function deleteSubmission(request, env, submissionId) {
   const account = await leaderboardAccount(request, env);
@@ -7525,7 +7614,7 @@ async function deleteSubmission(request, env, submissionId) {
   // the owner and administrators only (runs.delete), any run; players can't delete theirs (the owner, 13 Nov)
   if (!can(account, "runs.delete")) return json({ error: "Only the owner and administrators can delete runs." }, 403);
   await env.DB.prepare("DELETE FROM leaderboard_submissions WHERE submission_id = ?").bind(submissionId).run();
-  for (const key of proofKeys(row)) if (env.EVIDENCE) await env.EVIDENCE.delete(key);
+  for (const key of runFileKeys(row)) if (env.EVIDENCE) await env.EVIDENCE.delete(key);
   return json({ ok: true });
 }
 
@@ -7551,18 +7640,21 @@ async function submissionEvidence(request, env, submissionId) {
   // and so is the fight log (extra.proofFightLog, its figures extra.fightStats, extra.fightLogNote)
   const fightLog = typeof extra.proofFightLog === "string" ? extra.proofFightLog : null;
   const logNote = typeof extra.fightLogNote === "string" ? extra.fightLogNote : null;
-  const staffOnly = fights.length > 0 || Boolean(fightLog || logNote);
+  // and so is the proof file left when the whole screens and fight pictures went (extra.proofRecord, issue 129)
+  const recordKey = typeof extra.proofRecord === "string" ? extra.proofRecord : null;
+  const staffOnly = fights.length > 0 || Boolean(fightLog || logNote || recordKey);
   let viewer;
   const viewerAccount = async () => (viewer === undefined ? (viewer = await leaderboardAccount(request, env)) : viewer);
-  const staff = Boolean(row && staffOnly && (shot === "list" || fightShot || shot === "fightlog") && can(await viewerAccount(), "logs.read"));
+  const staff = Boolean(row && staffOnly && (shot === "list" || fightShot || shot === "fightlog" || shot === "record") && can(await viewerAccount(), "logs.read"));
   // ?shot=list: the run's pictures, in the order they were on screen (the viewer's tabs), with what each player went in
   // with (the Party screen's lineup: lead, level, CP, team) and the run's buffs - public on the boards already
   const shots = row ? [row.evidenceKey && "summary", row.battleKey && "battle", ...gizmos.map((_, i) => `gizmo${i + 1}`),
     extra.proofParty && "party", ...(staff ? fights.map((_, i) => `fight${i + 1}`) : [])].filter(Boolean) : [];
-  const key = shot === "list" ? (shots.length ? "list" : null)
+  const key = shot === "list" ? (shots.length || (staff && recordKey) ? "list" : null)
     : shot === "battle" ? row?.battleKey : shot === "full" ? full.evidence : shot === "battle_full" ? full.battle
     : shot === "party" ? extra.proofParty : gizmo ? gizmos[Number(gizmo[1]) - 1]
-    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : shot === "fightlog" ? (staff ? fightLog : null) : row?.evidenceKey;
+    : fightShot ? (staff ? fights[Number(fightShot[1]) - 1] : null) : shot === "fightlog" ? (staff ? fightLog || recordKey : null)
+    : shot === "record" ? (staff ? recordKey : null) : row?.evidenceKey;
   if (!key || !env.EVIDENCE) return json({ error: "Evidence not found." }, 404);
   const visible = row.status === "visible";
   if (!visible) {
@@ -7593,20 +7685,42 @@ async function submissionEvidence(request, env, submissionId) {
     // staff: when each fight picture was taken (extra.fightShots, for the viewer's labels)
     const times = staff ? fightShots(extra.fightShots) : null;
     const stats = extra.fightStats && typeof extra.fightStats === "object" && !Array.isArray(extra.fightStats) ? extra.fightStats : null;
-    const log = staff && (fightLog || logNote) ? { stats: fightLog ? stats : null, ...(logNote ? { note: logNote } : {}) } : null;
+    // staff: the proof file's summary once the pictures are gone (the file itself: ?shot=record)
+    const record = staff && recordKey ? await storedProofRecord(env, extra) : null;
+    const recordLog = Boolean(record?.fightLog?.gzipBase64);
+    const log = staff && (fightLog || logNote || (record?.fightLog && stats))
+      ? { stats: fightLog || record?.fightLog ? stats : null, ...(fightLog || recordLog ? {} : { download: false }), ...(logNote ? { note: logNote } : {}) } : null;
+    const reading = record?.check?.reading && typeof record.check.reading === "object" ? record.check.reading : null;
+    const summary = record ? { keptAt: record.keptAt ?? null, why: record.why || null, pictures: Array.isArray(record.pictures) ? record.pictures : [],
+      check: record.check?.state || null,
+      ...(reading ? { reading: { ...(reading.result ? { result: { score: readNumber(reading.result.score), stars: readNumber(reading.result.stars),
+        time: typeof reading.result.time === "string" ? reading.result.time : null } } : {}), ...(reading.via ? { via: reading.via } : {}) } } : {}),
+      ...(record.fightLog ? { fightLog: { bytes: record.fightLog.bytes ?? null, kept: recordLog } } : {}) } : null;
     const listed = json({ shots, ...(menu ? { menu: true } : {}), ...(run?.id ? { runProof: run.id } : {}),
       ...(fight ? { fight } : {}), ...(lineup?.length ? { lineup } : {}), ...(teamDps ? { teamDps } : {}), ...(buffs.length ? { buffs } : {}),
-      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}) });
+      ...(times ? { fightShots: times } : {}), ...(log ? { fightLog: log } : {}), ...(summary ? { record: summary } : {}) });
     // a list naming the fight's pictures is never cached; the list depends on who asks
     listed.headers.set("cache-control", visible && !staff ? "public, max-age=300" : "private, no-store");
     if (staffOnly) listed.headers.set("vary", "Authorization");
     return listed;
   }
+  // the fight log, once its own file has gone with the crops: the copy in the proof file
+  if (shot === "fightlog" && key === recordKey) {
+    const copy = (await storedProofRecord(env, extra))?.fightLog?.gzipBase64;
+    if (typeof copy !== "string") return json({ error: "Evidence not found." }, 404);
+    const bytes = Uint8Array.from(atob(copy), (ch) => ch.charCodeAt(0));
+    return new Response(bytes, { status: 200, headers: securityHeaders(new Headers({ "content-type": "application/gzip",
+      "cache-control": "private, no-store", "content-disposition": `attachment; filename="fight-${submissionId}.csv.gz"` })) });
+  }
   const object = await env.EVIDENCE.get(key);
   if (!object) return json({ error: "Evidence not found." }, 404);
   const headers = securityHeaders(new Headers());
   object.writeHttpMetadata?.(headers);
-  headers.set("cache-control", visible && !fightShot && shot !== "fightlog" ? "public, max-age=86400" : "private, no-store");
+  headers.set("cache-control", visible && !fightShot && shot !== "fightlog" && shot !== "record" ? "public, max-age=86400" : "private, no-store");
+  if (shot === "record") {
+    headers.set("content-type", "application/json");
+    headers.set("content-disposition", `attachment; filename="proof-${submissionId}.json"`);
+  }
   if (shot === "fightlog") {
     headers.set("content-type", "application/gzip");
     headers.set("content-disposition", `attachment; filename="fight-${submissionId}.csv.gz"`);
