@@ -53,6 +53,11 @@
 }
 .lb-proof-dialog { width: auto; max-width: min(1280px, 96vw); }
 .lb-proof-image { max-height: 78vh; width: auto; max-width: 100%; }
+/* Holo-Battle Sim's gizmo list merged into one tall picture: full width, scrolled inside the window */
+.lb-gizmo-scroll { max-height: 78vh; overflow-y: auto; border-radius: 14px; }
+.lb-gizmo-merged { display: block; width: 100%; height: auto; }
+.lb-gizmo-scroll .lb-gizmo-merged + .lb-gizmo-merged { margin-top: 6px; }
+.lb-gizmo-toggle { margin-top: 8px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 
 .lb-proof-tabs { display: flex; gap: 6px; padding: 8px 52px 8px 10px; }
 .lb-proof-tabs button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-soft); cursor: pointer; }
