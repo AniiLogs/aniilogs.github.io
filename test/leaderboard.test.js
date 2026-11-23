@@ -4404,3 +4404,68 @@ test("the app's board check (board_has) reads the same shape: every player's row
   assert.deepEqual([byUid("301000000002").stars, byUid("301000000002").score], [20, 25000]);
   assert.deepEqual([byUid("301000000003").stars, byUid("301000000003").score], [20, 25000]);   // credited from DevTwo's copy
 });
+
+test("a Sim win's level record: kept, verified at store time, a skip or jump listed for staff, nothing held", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  let t = 1794700000;
+  const visit = (ns, of = 16) => ({ enteredAt: t, fromStart: true, levels: ns.map((n) => ({ n, of, t: (t += 30) })), areas: ns.map(() => ({ t })),
+    fights: ns.map(() => ({ t, s: 25.5, damage: 50000, id: "90001", defeated: true, breaks: 1, note: "dropped" })), reads: { made: 40, counter: 39 } });
+  const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const sim = (id, time, stages) => ({ kind: "sim_run", clientRunId: id, trial: "Lightning Training", difficulty: "Trial", clearTimeS: time, cleared: true,
+    partySize: 1, playedAt: 1794700000, extra: { setup: { coins: 9000 }, ...(stages ? { stages } : {}) } });
+  const stored = (id) => {
+    const row = sqlite.prepare("SELECT status, verify_state AS state, extra_json AS extra, verify_json AS json FROM leaderboard_submissions WHERE client_run_id = ?").get(id);
+    return { status: row.status, state: row.state, extra: JSON.parse(row.extra || "{}"), check: JSON.parse(row.json || "{}") };
+  };
+  const board = async () => (await (await call(env, "/api/leaderboard/entries?kind=sim_run&sort=clear_time_s&cycle=2&trial=Lightning&difficulty=Trial&best=0")).json())
+    .entries.map((entry) => entry.clearTimeS);
+  const staff = async () => (await call(env, "/api/admin/run-checks/staff", { session: SESSIONS.dev })).json();
+  const logs = [];
+  const log = console.log;
+  console.log = (line) => logs.push(String(line));
+  try {
+    // a whole run in three visits, with a long record (over extra's own 8 KB once the fights are in): kept and verified
+    const many = { of: 16, visits: [visit(range(1, 5)), visit(range(6, 11)), visit(range(12, 16))] };
+    for (const item of many.visits) item.fights.push(...Array.from({ length: 40 }, () => ({ t, s: 1, damage: 1, id: "90002", defeated: false, breaks: 0 })));
+    assert.ok(JSON.stringify(many).length > 8192);
+    assert.equal((await sendRun(env, token, sim("whole", 700, many))).status, 201);
+    const whole = stored("whole");
+    assert.equal(whole.extra.stages.visits.length, 3);
+    assert.equal(whole.extra.stages.visits[0].fights[0].note, undefined);
+    assert.equal(whole.extra.setup.coins, 9000);
+    assert.deepEqual([whole.status, whole.state, whole.check.levels.verdict, whole.check.levels.clearTimeS, whole.check.reviewOnly], ["visible", null, "verified", 700, undefined]);
+    // a skip (1/16 then 16/16): listed for staff with what backs it, still on the boards
+    assert.equal((await sendRun(env, token, sim("skip", 90, { of: 16, visits: [visit([1, 16])] }))).status, 201);
+    const skip = stored("skip");
+    assert.deepEqual([skip.status, skip.state, skip.extra.autoHidden, skip.check.levels.verdict], ["visible", null, undefined, "skip"]);
+    assert.deepEqual(skip.check.reviewOnly.flags, [{ rule: "sim levels skipped", of: 16, seen: [1, 16], lastBefore: 1, fightsSeen: 2, fightSeconds: 51, clearTimeS: 90 }]);
+    // a jump inside one visit: listed, not held
+    assert.equal((await sendRun(env, token, sim("jump", 650, { of: 16, visits: [visit([...range(1, 3), ...range(7, 16)])] }))).status, 201);
+    assert.deepEqual(stored("jump").check.reviewOnly.flags.map((flag) => [flag.rule, flag.from, flag.to]), [["sim level jump", 3, 7]]);
+    assert.equal(stored("jump").status, "visible");
+    // an older app's run, without a record: as before (nothing listed, nothing in extra), the verdict "none" only stored
+    assert.equal((await sendRun(env, token, sim("old", 720))).status, 201);
+    const old = stored("old");
+    assert.deepEqual([old.status, old.state, old.extra, old.check], ["visible", null, { setup: { coins: 9000 } }, { levels: old.check.levels }]);
+    assert.equal(old.check.levels.verdict, "none");
+    assert.deepEqual(await board(), [90, 650, 700, 720]);
+    // staff read the verification with the run's reasons; others are refused
+    const listed = await staff();
+    assert.equal(listed.count, 2);
+    const skipRow = listed.runs.find((item) => item.clearTimeS === 90);
+    assert.equal(skipRow.levels.verdict, "skip");
+    assert.match(skipRow.reasons[0], /reached 16\/16 after level 1/u);
+    assert.equal(listed.runs.find((item) => item.clearTimeS === 650).levels.verdict, "jump");
+    assert.equal((await call(env, "/api/admin/run-checks/staff", { session: SESSIONS.user })).status, 403);
+    // re-sent read right: the flag goes, the new verdict is stored
+    await sendRun(env, token, sim("skip", 90, { of: 16, visits: [visit(range(1, 16))] }));
+    assert.deepEqual([stored("skip").check.levels.verdict, stored("skip").check.reviewOnly], ["verified", undefined]);
+    // one log line a stored run, no ids or names
+    const lines = logs.filter((line) => line.startsWith("Sim levels: "));
+    assert.equal(lines.length, 5);
+    assert.ok(lines.every((line) => !/90001|DevOne|UserOne/u.test(line)));
+  } finally {
+    console.log = log;
+  }
+});

@@ -347,6 +347,8 @@ function flagWords(flag) {
     case "clear time possible for the difficulty": return `Cleared in ${n(flag.sent)} s; the fastest possible at this difficulty is ${n(flag.expected)} s.`;
     case "coins of a full run": return `${n(flag.sent)} coins; a full run collects at least ${n(flag.expected)}.`;
     case "gizmos of a full run": return `${n(flag.sent)} gizmos; a full run has at least ${n(flag.expected)}.`;
+    case "sim levels skipped": return `The level counter reached ${n(flag.of)}/${n(flag.of)} after ${flag.lastBefore == null ? "no earlier level" : `level ${n(flag.lastBefore)}`} (levels seen: ${(flag.seen || []).join(", ")}); ${n(flag.fightsSeen)} fights seen, ${n(flag.fightSeconds)} s of fighting, cleared in ${n(flag.clearTimeS)} s.`;
+    case "sim level jump": return `The level counter went from ${n(flag.from)}/${n(flag.of)} to ${n(flag.to)}/${n(flag.of)} while aLogs was watching (visit ${n(flag.visit)}).`;
     case "egg loot": return `${n(flag.sent)} loot; a match at this difficulty gives at most ${n(flag.limit)}.`;
     case "egg time": return `Won in ${n(flag.sent)} s; the fastest possible at this difficulty is ${n(flag.limit)} s.`;
     case "egg defeats": return `${n(flag.sent)} defeats sent; that isn't a count a match can have.`;
