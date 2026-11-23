@@ -440,7 +440,7 @@ export async function drawPlacementCard(model, letters) {
 
 // ---------------------------------------------------------------- pictures on the cards (Aniimo art, map art)
 // A PNG read back into pixels: 8-bit greyscale, RGB, palette, grey+alpha or RGBA, not interlaced (what the content
-// release's icons are). Returns { width, height, rgba }; a
+// release's icons and the map bases of scripts/build-map-card-bases.mjs are). Returns { width, height, rgba }; a
 // palette picture gives { width, height, palette: [[r, g, b]...], indices } instead (one byte a pixel), so a picture
 // already cut to a few colours keeps them (and costs no more than its bytes). Throws on anything else. options: inflate (bytes -> bytes; default the runtime's
 // DecompressionStream) and maxPixels (default 4096 x 4096).
@@ -599,6 +599,24 @@ function placeArt(p, art, x, y, w, h, under, count) {
   }
 }
 
+// A palette picture (the map bases) copied in as it is: its colours become the card's, each pixel a scale x scale
+// square, at x, y. A row is drawn once and copied for the rest of its square.
+function placeIndexed(p, art, x, y, scale = 1) {
+  const map = art.palette.map((rgb) => p.color(rgb));
+  for (let row = 0; row < art.height; row += 1) {
+    const py = y + row * scale;
+    if (py < 0 || py + scale > p.height) continue;
+    const start = py * p.stride + 1;
+    for (let col = 0; col < art.width; col += 1) {
+      const px = x + col * scale;
+      if (px < 0 || px + scale > p.width) continue;
+      const c = map[art.indices[row * art.width + col]] ?? 0;
+      for (let k = 0; k < scale; k += 1) p.raw[start + px + k] = c;
+    }
+    for (let k = 1; k < scale; k += 1) p.raw.copyWithin(start + k * p.stride + x, start + x, start + x + art.width * scale);
+  }
+}
+
 // The card's letters lack a few marks game text uses: long dashes, curly quotes and the ellipsis become their plain kin
 export const cardText = (value) => String(value ?? "").replace(/[—―]/gu, "–").replace(/[‘’ʼ]/gu, "'").replace(/[“”]/gu, '"')
   .replace(/…/gu, "...").replace(/\s+/gu, " ").trim();
@@ -690,5 +708,84 @@ export async function drawAniimoCard(model, letters, art = null) {
     p.text(line, left, y, "small", COLORS.ink, { max: room });
     y += 36;
   }
+  return p.png();
+}
+
+// The map card's picture room. The map bases (scripts/build-map-card-bases.mjs) are made at half its size and drawn
+// doubled: a link preview shows the card at about a third of its size, so nothing is lost there, and a doubled picture
+// costs the API a quarter of the work to draw and about half to pack (every second row repeats the one above).
+export const MAP_CARD_BOX = Object.freeze({ x: 456, y: 56, width: 680, height: 518 });
+export const MAP_BASE_SCALE = 2;
+// A map pin link's card: how many pins and on which map on the left, the map with the pins on it on the right.
+// model: { count, map ("Breezy Plains"), world ("Idyll"), kinds (how many kinds of pin), aspect (map width / height),
+// points: [x0, y0, x1, y1, ...] each 0..9999 across the map }; base: the map's decoded palette picture, or null (a
+// plain plate in the map's shape then).
+export async function drawMapCard(model, letters, base = null) {
+  const p = background(await atlas(letters));
+  p.extra = letters.extra || null;
+  const PAD = 64; const BOX = MAP_CARD_BOX;
+  brand(p);
+  // the map, or a plate in its shape
+  let area;
+  const S = MAP_BASE_SCALE;
+  if (base?.indices && base.width * S <= BOX.width && base.height * S <= BOX.height) {
+    const w = base.width * S; const h = base.height * S;
+    area = { x: BOX.x + Math.round((BOX.width - w) / 2), y: BOX.y + Math.round((BOX.height - h) / 2), w, h };
+    p.fill(area.x - 2, area.y - 2, area.w + 4, area.h + 4, COLORS.line);
+    placeIndexed(p, base, area.x, area.y, S);
+  } else {
+    const aspect = Number(model.aspect) > 0 ? Number(model.aspect) : BOX.width / BOX.height;
+    const w = Math.round(Math.min(BOX.width, BOX.height * aspect)); const h = Math.round(Math.min(BOX.height, BOX.width / aspect));
+    area = { x: BOX.x + Math.round((BOX.width - w) / 2), y: BOX.y + Math.round((BOX.height - h) / 2), w, h };
+    p.round(area.x - 2, area.y - 2, area.w + 4, area.h + 4, 18, COLORS.line);
+    p.round(area.x, area.y, area.w, area.h, 16, COLORS.panel);
+    for (let gx = 1; gx < 8; gx += 1) p.fill(area.x + Math.round((area.w * gx) / 8), area.y + 12, 1, area.h - 24, COLORS.line);
+    for (let gy = 1; gy < 6; gy += 1) p.fill(area.x + 12, area.y + Math.round((area.h * gy) / 6), area.w - 24, 1, COLORS.line);
+  }
+  // the pins: a gold dot with a dark ring, smaller when there are many
+  const points = Array.isArray(model.points) ? model.points : [];
+  const dots = points.length / 2;
+  const r = dots > 600 ? 3 : dots > 150 ? 4 : dots > 40 ? 6 : 8;
+  const ring = p.color(COLORS.paper); const dot = p.color(COLORS.gold);
+  // a disc as [dx, dy, coverage 1..15] once, then stamped at every pin
+  const disc = (radius) => {
+    const out = [];
+    for (let dy = -radius - 1; dy <= radius; dy += 1) {
+      for (let dx = -radius - 1; dx <= radius; dx += 1) {
+        const level = Math.round(Math.max(0, Math.min(1, radius + 0.5 - Math.hypot(dx + 0.5, dy + 0.5))) * 15);
+        if (level) out.push(dx, dy, level);
+      }
+    }
+    return out;
+  };
+  const centres = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    const px = Number(points[i]); const py = Number(points[i + 1]);
+    if (!(px >= 0 && px <= 9999 && py >= 0 && py <= 9999)) continue;
+    centres.push(area.x + Math.round((px / 9999) * (area.w - 1)), area.y + Math.round((py / 9999) * (area.h - 1)));
+  }
+  for (const [stamp, colour] of [[disc(r + 2), ring], [disc(r), dot]]) {
+    for (let i = 0; i < centres.length; i += 2) {
+      for (let k = 0; k < stamp.length; k += 3) p.put(centres[i] + stamp[k], centres[i + 1] + stamp[k + 1], colour, stamp[k + 2]);
+    }
+  }
+  // the count, the map's name and where it is
+  const room = BOX.x - PAD - 40;
+  const count = Math.max(0, Math.floor(Number(model.count) || 0));
+  p.text(count.toLocaleString("en-US"), PAD - 4, 292, "figure", COLORS.gold, { max: room });
+  p.text(count === 1 ? "PIN ON" : "PINS ON", PAD, 336, "label", COLORS.soft, { spacing: 2 });
+  const mapName = cardText(model.map || "the AniiLogs map");
+  // the largest title size that shows the whole name on two lines; else three lines at the smallest, cut if need be
+  const fits = (name, lines) => wrapLines(p, mapName, name, room, lines).every((line) => p.measure(line, name) <= room);
+  const font = CARD_TITLE_FONTS.find((name) => fits(name, 2)) || "title36";
+  let y = 396;
+  const lineHeight = CARD_FONTS[font].size + 6;
+  for (const line of wrapLines(p, mapName, font, room, font === "title36" ? 3 : 2)) {
+    p.text(line, PAD, y, font, COLORS.ink, { max: room });
+    y += lineHeight;
+  }
+  const detail = [model.world ? cardText(model.world) : null, model.kinds > 1 ? `${model.kinds} kinds of pin` : null].filter(Boolean).join(" · ");
+  if (detail) p.text(detail, PAD, Math.max(y + 8, 520), "small", COLORS.soft, { max: room });
+  p.text("Interactive map", PAD, 566, "small", COLORS.mint, { max: room });
   return p.png();
 }

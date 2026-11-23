@@ -92,7 +92,8 @@
           <li>Discord sign-in requests expire after 10 minutes.</li>
           <li>One-time browser handoffs expire after 5 minutes and are consumed once.</li>
           <li>A signed-in AniiLogs session expires after 30 days.</li>
-          <li>Map share links expire after 3 hours and expose only the selected map pins, never the creator's Discord identity.</li>
+          <li>Older map share links (made while signed in) expire after 3 hours and expose only the selected map pins, never the creator's Discord identity.</li>
+          <li>Map pin links (aniilogs.app/m/…) are kept for good and hold only the selected map pins and where they sit; no account is stored with them. A one-way hash of the sharer's network address is kept for a day to limit how many links one network makes, then wiped.</li>
         </ul>
       </section>
 
