@@ -115,8 +115,9 @@ test("Aniimo without verified wild locations do not offer Locate on Map", () => 
 test("named and custom themes share one site-wide preference", () => {
   assert.match(landingHtml, /data-site-theme-select/u);
   assert.match(explorerHtml, /data-site-theme-select/u);
-  assert.match(landingHtml, /class="theme-picker-copy">Theme</u);
-  assert.match(explorerHtml, /class="theme-picker-copy">Theme</u);
+  // the picker sits in the header's menus (account menu; signed out, the gear's menu on the other pages)
+  assert.match(landingHtml, /<label class="menu-theme-picker">\s*<span>Theme<\/span>/u);
+  assert.match(explorerHtml, /<label class="menu-theme-picker">\s*<span>Theme<\/span>/u);
   assert.match(landingHtml, /theme-shell\.js/u);
   assert.match(explorerHtml, /theme-shell\.js/u);
   assert.match(themeShell, /aniilogs:explorer:preferences:v1/u);

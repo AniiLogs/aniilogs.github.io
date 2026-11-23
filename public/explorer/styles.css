@@ -15760,3 +15760,23 @@ button.catalog-ability-badge--type:focus-visible {
   background: rgba(83, 74, 116, 0.7);
   outline: none;
 }
+
+/* The Theme picker is in the account menu, not the bar (site-chrome.css has the same rules); signed out, the gear's
+   Settings panel has the themes. */
+.menu-theme-picker {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 11px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+.menu-theme-picker .theme-picker {
+  width: 100%;
+  max-width: none;
+  min-height: 32px;
+  font-size: 12px;
+}
+html[data-embed="app"] .menu-theme-picker { display: none !important; }

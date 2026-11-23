@@ -6,7 +6,7 @@
     <meta name="description" content="The Aniilog: turn every Aniimo and its forms around in 3D. Plus the AniiLogs map of Aniimo, with Lumin Amber and chests.">
     <meta name="theme-color" content="#1a1f22">
     <!-- Not deferred, and before the stylesheets: the saved theme is on <html> before the first paint. -->
-    <script src="/theme-shell.js?v=0.3.4-fresh-reload"></script>
+    <script src="/theme-shell.js?v=0.3.5-site-menu"></script>
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -43,15 +43,6 @@
         <a id="topNavProfiles" href="/?view=profile">Profiles</a>
       </nav>
       <div class="app-topbar-actions">
-        <label class="theme-picker-label">
-          <span class="theme-picker-copy">Theme</span>
-          <select class="theme-picker" data-site-theme-select aria-label="Website theme">
-            <option value="default">Night</option>
-            <option value="meadow">Meadow</option>
-            <option value="emberpup">Emberpup</option>
-            <option value="pawney">Pawney</option>
-          </select>
-        </label>
         <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
           <option value="en">🇺🇸</option>
           <option value="de-DE">🇩🇪</option>
@@ -85,6 +76,15 @@
             <span class="account-menu-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div class="account-menu-popover">
+            <label class="menu-theme-picker">
+              <span>Theme</span>
+              <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+                <option value="default">Night</option>
+                <option value="meadow">Meadow</option>
+                <option value="emberpup">Emberpup</option>
+                <option value="pawney">Pawney</option>
+              </select>
+            </label>
             <a id="topbarProfileLink" href="/?view=profile" hidden>My Profile</a>
             <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
             <button id="topbarDeveloperButton" type="button" hidden>Developer</button>

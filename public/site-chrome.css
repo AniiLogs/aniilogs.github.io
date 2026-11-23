@@ -537,3 +537,31 @@ html[data-embed="app"] .open-in-browser-link {
 html[data-embed="app"] .open-in-browser-link:hover,
 html[data-embed="app"] .open-in-browser-link:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
 html[data-embed="app"] .open-in-browser-link svg { width: 17px; height: 17px; }
+
+/* ---- The Theme picker lives in the header's menus, not the bar (it crowded the bar on phones): first in the account
+   menu once signed in, and in the gear's menu (.site-menu, with "All settings") when signed out. */
+.site-menu > summary.settings-gear-button { cursor: pointer; }
+.site-menu[open] > summary.settings-gear-button {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: color-mix(in srgb, var(--accent) 28%, var(--text));
+}
+.menu-theme-picker {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 11px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+.menu-theme-picker .theme-picker {
+  width: 100%;
+  max-width: none;
+  min-height: 32px;
+  font-size: 12px;
+}
+/* Inside aLogs the app's theme applies; its account menu is hidden, the gear's menu stays (All settings) */
+html[data-embed="app"] .menu-theme-picker { display: none !important; }
+html[data-embed="app"] .app-topbar .account-menu.site-menu:not([hidden]) { display: block !important; }

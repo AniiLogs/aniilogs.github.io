@@ -218,7 +218,8 @@
   }
 
   function bindAccountMenus() {
-    document.querySelectorAll("[data-account-menu]").forEach((menu) => {
+    // the account menu, and the signed-out settings menu (the gear) that holds the Theme picker
+    document.querySelectorAll("[data-account-menu], [data-site-menu]").forEach((menu) => {
       let closeTimer = 0;
       let openedByHover = false;
       const cancelClose = () => window.clearTimeout(closeTimer);
