@@ -6,6 +6,7 @@ import { botSql, botsOf, cardSeats, lineupBySeat, lineupSeats, nameSkeleton, NEA
 import { createPlacementLinks, GLYPH_PACK_BLOCK, glyphPackKey, PLACEMENT_CARD_PATH, PLACEMENT_PATH, readGlyphPack } from "./placement-links.js";
 import { copyAgreement, eggCheckLimits, eggMatchChecks, eggStandingChecks, fightLogChecks, interlinkCheckLimits, interlinkDpsChecks, interlinkVerdict, limitPreview, screenCheckLimits, screenChecks, staffReasons } from "./run-checks.js";
 import { fightStats, parseFightCsv } from "./fight-log.js";
+import { sanitizeStages, simLevelFlags, simLevels, simLevelsLogLine } from "./sim-levels.js";
 const DISCORD_API = "https://discord.com/api/v10";
 const SESSION_COOKIE = "__Host-aniilogs_session";
 const OAUTH_COOKIE = "__Host-aniilogs_oauth";
@@ -3104,8 +3105,13 @@ export function leaderboardSubmission(value) {
   let extraJson = null;
   if (value.extra !== undefined && value.extra !== null) {
     if (typeof value.extra !== "object" || Array.isArray(value.extra)) return { error: "extra must be an object." };
-    extraJson = JSON.stringify(value.extra);
-    if (encoder.encode(extraJson).byteLength > 8192) return { error: "extra is too large." };
+    // a Sim win's level record (extra.stages) is bounded on its own (sanitizeStages) and doesn't count towards the
+    // limit of the rest; the whole submission still has MAX_SUBMISSION_BYTES
+    const sim = record.kind === "sim_run";
+    const { stages, ...rest } = value.extra;
+    if (encoder.encode(JSON.stringify(sim ? rest : value.extra)).byteLength > 8192) return { error: "extra is too large." };
+    const simStages = sim && stages !== undefined ? sanitizeStages(stages) : null;
+    extraJson = JSON.stringify(sim ? { ...rest, ...(simStages ? { stages: simStages } : {}) } : value.extra);
   }
   record.playersJson = cleanPlayers.length ? JSON.stringify(cleanPlayers) : null;
   record.buffsJson = cleanBuffs.length ? JSON.stringify(cleanBuffs) : null;
@@ -4227,6 +4233,8 @@ async function submitLeaderboardRecord(request, env) {
   const checkHeld = record.kind === "sim_run"
     ? await checkSimRun(env, submissionId).catch((error) => { console.error("Sim run checks failed", error); return false; })
     : false;
+  // its level record's verification ($.levels; after checkSimRun, which can rewrite the check)
+  if (record.kind === "sim_run") await storeSimLevels(env, submissionId, record).catch((error) => { console.error("Sim level verification failed", error); });
   await corroborateRun(env, submissionId).catch((error) => { console.error("Settling the run's copies failed", error); });
   // the review-only checks (Egg Heist's figures, a result read off the screen, Interlink Avg DPS): listed for staff,
   // nothing else changes
@@ -4618,6 +4626,19 @@ async function checkSimRun(env, submissionId) {
   return held;
 }
 
+// A Sim win's level verification (sim-levels.js), stored in the check's JSON as $.levels on every send of the record,
+// next to what checkSimRun keeps there; verify_state, the boards and the badge never see it. "skip" and "jump" also
+// become review-only flags (reviewOnlyCheck). One log line a stored run.
+async function storeSimLevels(env, submissionId, record) {
+  const levels = simLevels((parseJsonColumn(record.extraJson) || {}).stages, record.clearTimeS);
+  console.log(simLevelsLogLine(levels));
+  await env.DB.prepare(
+    `UPDATE leaderboard_submissions SET verify_json = json_set(COALESCE(CASE WHEN json_valid(verify_json) THEN verify_json END, '{}'), '$.levels', json(?))
+     WHERE submission_id = ? AND kind = 'sim_run'`,
+  ).bind(JSON.stringify(levels), submissionId).run();
+  return levels;
+}
+
 // The second reading is for runs that matter and that no second copy confirms: a new personal best for that player,
 // boss and week (a Season Ladder total only changes through those), a run in the top VERIFY_TOP_RANK (default 25) of
 // its boss board, a run sent without its score - or copies of one run that disagree (interlinkVerdict).
@@ -4834,6 +4855,8 @@ async function reviewOnlyCheck(env, submissionId, record, previous) {
     // the fight log's figures (stored with this send, or kept from an earlier one)
     flags.push(...fightLogChecks(extra.fightStats, limits));
   }
+  // a Sim win whose level counter skipped (simLevels: "skip" or "jump")
+  if (record.kind === "sim_run") flags.push(...simLevelFlags(simLevels((parseJsonColumn(record.extraJson) || {}).stages, record.clearTimeS)));
   const egg = record.kind.startsWith("eggheist_") ? eggCheckLimits(env) : null;
   if (record.kind === "eggheist_match") {
     flags.push(...eggMatchChecks({ score: record.score, clearTimeS: record.clearTimeS, cleared: record.cleared == null ? null : Number(record.cleared),
@@ -4924,6 +4947,8 @@ async function staffRunChecks(request, env) {
         trialName: row.trial ? simStageName(row.trial, row.difficulty, row.cycle) : null,
         players: (parseJsonColumn(playersJson) || []).slice(0, 4).map((player, _i, all) => ({ name: player?.name ?? null, avgDps: player?.avgDps ?? null, ai: slotIsBot(player, all) })),
         reasons: staffReasons(check, state),
+        // a Sim win's level verification (storeSimLevels), what backs its verdict
+        ...(row.kind === "sim_run" ? { levels: check.levels || null } : {}),
         // what the reading read, where it was read
         read: read ? { score: readNumber(read.score), stars: readNumber(read.stars), time: read.time ?? null } : null,
         copies: check.copies?.senders || 1,
