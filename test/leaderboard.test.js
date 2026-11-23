@@ -1697,9 +1697,11 @@ test("the profile overview gathers the owner's characters, board positions and c
   assert.deepEqual(runs.map((row) => [row.boss.name, row.score, row.position, row.players, row.counts, row.character]),
     [["Omega Infergon", 22000, 1, 1, "teams", "MinMax"], ["Omega Tucking", 9000, 1, 1, "teams", null]]);
   assert.deepEqual(weeks, []);
-  assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 2]]);
+  // Sim and Egg Heist the same way: placed as their board places them, which lists linked players only, so DevTwo's
+  // runs (no character) don't count either
+  assert.deepEqual(sims.map((row) => [row.clearTimeS, row.position, row.players]), [[1800, 1, 1]]);
   assert.deepEqual(heists.map((row) => [row.cycle, row.seasonRank.name, row.stars, row.score, row.position, row.players]),
-    [["S1", "Egg Emperor", 475, 2900, 2, 2]]);
+    [["S1", "Egg Emperor", 475, 2900, 1, 1]]);
   // the profile's season progress: just these fields, nothing else from the app's extra
   assert.deepEqual(heists[0].seasonProgress, { nextRankAt: 2370, lastGain: 18, bar: [1337, 1350], barAt: 1793167625 });
   // ...and a match that lost points stays a loss
@@ -4744,4 +4746,35 @@ test("stored leads: the viewer's rules (the picture decides, a nickname kept, a 
   const viewer = readFileSync(resolve(import.meta.dirname, "..", "public", "party-portraits.js"), "utf8");
   assert.match(viewer, /r\.score >= 0\.55 && r\.margin >= 0\.15\) \|\| \(r\.score >= 0\.68 && r\.margin >= 0\.10/u);
   assert.deepEqual([{ score: 0.56, margin: 0.15 }, { score: 0.7, margin: 0.1 }, { score: 0.6, margin: 0.1 }, { score: 0.9 }].map(LEAD_SURE), [true, true, false, false]);
+});
+
+test("a profile's Holo-Battle Sim and Egg Heist places are the boards' own (issue 131)", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  const dev = await namedToken(env, SESSIONS.dev);
+  const user = await namedToken(env, SESSIONS.user);
+  const dev2 = await desktopToken(env, SESSIONS.dev2);                   // no character: on no board
+  const send = (token, body) => call(env, "/api/leaderboard/submissions", { token, method: "POST", body });
+  const sim = (id, clearTimeS, over = {}) => ({ kind: "sim_run", clientRunId: id, trial: "Training of Fire", difficulty: "Hard", clearTimeS, cleared: true, partySize: 1, ...over });
+  await send(dev, sim("d1", 500));
+  await send(dev, sim("d2", 450));
+  await send(user, sim("u1", 300));
+  await send(dev2, sim("x1", 100));
+  await send(user, sim("u2", 200, { difficulty: "Normal" }));            // another board
+  const match = (id, score) => ({ kind: "eggheist_match", clientRunId: id, cycle: "S1", score, clearTimeS: 224, cleared: true, difficulty: "Normal", defeats: 1 });
+  await send(dev, match("m1", 30000));
+  await send(user, match("m2", 31000));
+  await send(dev2, match("m3", 99000));
+  const board = async (query) => (await (await call(env, `/api/leaderboard/entries?${query}`)).json()).entries;
+  const profile = async (session) => (await (await call(env, "/api/profile/overview", { session })).json()).leaderboards;
+  const simBoard = await board("kind=sim_run&trial=Fire&difficulty=Hard");
+  const eggBoard = await board("kind=eggheist_match");
+  for (const [session, name] of [[SESSIONS.dev, "DevOne"], [SESSIONS.user, "UserOne"]]) {
+    const mine = await profile(session);
+    const onSim = simBoard.find((row) => row.player === name);
+    const placed = mine.sim_run.find((row) => row.difficulty === "Hard");
+    assert.deepEqual([placed.position, placed.players, placed.submissionId], [onSim.rank, simBoard.length, onSim.submissionId], name);
+    const onEgg = eggBoard.find((row) => row.player === name);
+    assert.deepEqual([mine.eggheist_match[0].position, mine.eggheist_match[0].players], [onEgg.rank, eggBoard.length], name);
+  }
+  assert.deepEqual(simBoard.map((row) => row.clearTimeS), [300, 450]);
 });

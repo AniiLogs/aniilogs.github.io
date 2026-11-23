@@ -1520,42 +1520,32 @@ export function collectionSummary(completedIds, checklist = null) {
 // The owner's best entry on each board (as the board shows it) and its position among every player on that board.
 // Interlink boss boards rank per boss, Egg Heist per season, the rest across everyone. sort: another of the board's
 // sorts (Egg Heist matches by fastest escape), ranked as the board ranks it with that sort.
+// The rows and their order are the board's own (boardRowsSql, as leaderboardEntries lists them: linked players, a
+// teammate credited with a run, one row per player), ranked within each board the profile links to (a boss, an Egg
+// Heist season, a Sim season's trial and difficulty), so a profile never shows another place than the board.
 async function boardStandings(env, discordId, kind, sort = null) {
   const sortKey = sort && Object.hasOwn(LEADERBOARD_SORTS, sort) ? sort : LEADERBOARD_DEFAULT_SORT[kind];
-  const order = LEADERBOARD_SORTS[sortKey];
-  const orderBy = (prefix) => (sortKey === "standing"
-    ? ["rank_tier", "stars", "score"].map((column) => `COALESCE(${prefix}${column}, 0) ${order}`).join(", ")
-    : `${prefix}${sortKey} ${order}`);
-  const where = ["s.kind = ?", "s.status = 'visible'", ON_BOARDS("s")];
-  if (sortKey === "standing") where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
-  else where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
+  const where = ["s.kind = ?", "s.status = 'visible'", onBoards(false)];
   if (kind === "eggheist_season") where.push("s.cycle IS NOT NULL");
   // a run whose boss wasn't recognised can't stand on a boss's board (it was a second row beside the real one)
   if (kind === "interlink_run" || kind === "interlink_best") where.push("s.boss_id IS NOT NULL");
+  const { filtered, orderBy } = boardRowsSql(kind, sortKey, LEADERBOARD_SORTS[sortKey], where,
+    { cycles: sortKey === "clear_time_s" && kind === "interlink_run" ? await interlinkCycles(env) : [] });
   const group = kind === "interlink_run" || kind === "interlink_best" ? "boss_id" : kind === "eggheist_season" ? "cycle"
-    : kind === "sim_run" ? "cycle, trial, difficulty" : "";
-  const partition = group ? `s.discord_id, ${group.split(", ").map((column) => `s.${column}`).join(", ")}` : "s.discord_id";
+    : kind === "sim_run" ? "cycle, trial, difficulty" : "kind";
   const { results } = await env.DB.prepare(
-    `WITH best AS (
-       SELECT s.*, ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY ${orderBy("s.")}, s.created_at ASC) AS playerRank
-       FROM leaderboard_submissions s WHERE ${where.join(" AND ")}
-     ), ranked AS (
-       SELECT *, ROW_NUMBER() OVER (PARTITION BY ${group || "kind"} ORDER BY ${orderBy("")}, created_at ASC) AS position,
-         COUNT(*) OVER (PARTITION BY ${group || "kind"}) AS players
-       FROM best WHERE playerRank = 1
-     )
-     SELECT ranked.*, gc.character_name AS characterName FROM ranked
-     LEFT JOIN game_characters gc ON gc.game_uid = ranked.game_uid AND gc.discord_id = ranked.discord_id
-     WHERE ranked.discord_id = ?
-     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : kind === "sim_run" ? "cycle DESC, trial, difficulty" : group ? "boss_name, boss_id" : "position"}`,
+    `SELECT * FROM (SELECT f.*, ROW_NUMBER() OVER (PARTITION BY ${group} ORDER BY ${orderBy("")}, created_at ASC) AS position,
+         COUNT(*) OVER (PARTITION BY ${group}) AS players
+       FROM (${filtered}) f)
+     WHERE who = ?
+     ORDER BY ${kind === "eggheist_season" ? "cycle DESC" : kind === "sim_run" ? "cycle DESC, trial, difficulty" : group !== "kind" ? "boss_name, boss_id" : "position"}`,
   ).bind(kind, discordId).all();
   return (results || []).map((row) => ({
     position: Number(row.position),
     players: Number(row.players),
     submissionId: row.submission_id,
-    character: row.characterName || null,
-    gameUid: row.game_uid,
+    character: row.teammate || row.characterName || null,
+    gameUid: row.teammate ? row.teammate_uid : row.game_uid,
     cycle: row.cycle,
     boss: row.boss_id == null ? null : { id: row.boss_id, name: row.boss_name, level: row.boss_level },
     score: row.score,
@@ -7492,6 +7482,27 @@ async function leaderboardEntries(request, env) {
     : LEADERBOARD_DEFAULT_SORT[kind] || "score";
   const natural = LEADERBOARD_SORTS[sortKey];
   const order = params.get("order") === "asc" ? "ASC" : params.get("order") === "desc" ? "DESC" : natural;
+  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
+  const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
+  // One row per player (their best on each boss) unless every submission is requested.
+  const bestPerPlayer = params.get("best") !== "0";
+  const { filtered, orderBy } = boardRowsSql(kind, sortKey, order, where, { bestPerPlayer,
+    cycles: sortKey === "clear_time_s" && kind === "interlink_run" ? await interlinkCycles(env) : [] });
+  // updatedAt: when the newest run on this board (as filtered) reached AniiLogs, for the "Updated" line over it
+  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(created_at) AS updatedAt FROM (${filtered})`).bind(...binds).first();
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
+  ).bind(...binds, limit, offset).all();
+  return leaderboardEntriesAnswer(env, account, { kind, sortKey, order, bestPerPlayer, countRow, offset, limit, results });
+}
+
+// The rows a board lists and its order, for the board (leaderboardEntries) and the profile's places on it
+// (boardStandings), so the two never disagree (issue 131). where: the board's filters (aliased s, a CREDITED_COPIES
+// row); bestPerPlayer: one row per player (the run the board's main measure picks), else every run. Returns the SQL
+// of the rows (its binds are the filters') and orderBy(prefix), the board's order; rows equal on it go by when they
+// reached the site.
+function boardRowsSql(kind, sortKey, order, filters, { bestPerPlayer = true, cycles = [] } = {}) {
+  const where = [...filters];
   // Clear-time boards only rank finished runs; values the board sorts on must be present.
   // "standing" (Egg Heist season) orders by rank tier, then Emperor stars, then rank points.
   const sortBy = (key, direction) => (prefix) => {
@@ -7521,11 +7532,7 @@ async function leaderboardEntries(request, env) {
   if (sortKey === "standing" || (sortKey === "score" && kind === "eggheist_season")) where.push("(s.rank_tier IS NOT NULL OR s.score IS NOT NULL)");
   else if (sortKey === "difficulty") where.push("s.difficulty IS NOT NULL");
   else if (!DISPLAY_SORTS.has(sortKey)) where.push(`s.${sortKey} IS NOT NULL`);
-  if (sortKey === "clear_time_s") where.push(clearedSql(kind, kind === "interlink_run" ? await interlinkCycles(env) : []));
-  const limit = Math.min(Math.max(Number.parseInt(params.get("limit") || "50", 10) || 50, 1), 200);
-  const offset = Math.min(Math.max(Number.parseInt(params.get("offset") || "0", 10) || 0, 0), 100000);
-  // One row per player (their best on each boss) unless every submission is requested.
-  const bestPerPlayer = params.get("best") !== "0";
+  if (sortKey === "clear_time_s") where.push(clearedSql(kind, cycles));
   // one row per player: the sender, or a teammate credited with the run (see CREDITED_RUNS)
   const partition = kind === "interlink_run" || kind === "interlink_best" ? "s.who, s.boss_id"
     : kind === "eggheist_season" ? "s.who, s.cycle"
@@ -7544,12 +7551,10 @@ async function leaderboardEntries(request, env) {
     LEFT JOIN profiles p ON p.discord_id = s.who
     LEFT JOIN game_characters gc ON gc.game_uid = s.game_uid AND gc.discord_id = s.discord_id AND s.teammate IS NULL
     WHERE ${where.join(" AND ")}`;
-  const filtered = bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base;
-  // updatedAt: when the newest run on this board (as filtered) reached AniiLogs, for the "Updated" line over it
-  const countRow = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(created_at) AS updatedAt FROM (${filtered})`).bind(...binds).first();
-  const { results } = await env.DB.prepare(
-    `SELECT * FROM (${filtered}) ORDER BY ${orderBy("")}, created_at ASC LIMIT ? OFFSET ?`,
-  ).bind(...binds, limit, offset).all();
+  return { filtered: bestPerPlayer ? `SELECT * FROM (${base}) WHERE playerRank = 1` : base, orderBy };
+}
+
+async function leaderboardEntriesAnswer(env, account, { kind, sortKey, order, bestPerPlayer, countRow, offset, limit, results }) {
   const profiles = await partyProfiles(env, results || []);
   // a shared run's lineup from every copy of it (mergedLineup), as the history and the proof viewer show it
   const copiesOf = await sharedCopies(env, (results || []).map((row) => parseJsonColumn(row.extra_json)?.sharedRun));
