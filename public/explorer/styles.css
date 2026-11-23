@@ -15141,8 +15141,17 @@ html[data-theme] .catalog-itemlog-record {
   flex: 1 1 0;
 }
 
-.catalog-itemlog-hero .catalog-identity-actions {
+/* The actions box is a div too, so it needs the same weight as the rule above, or it takes half the row and its
+   Locate button lands in the middle of the card. It sits at the card's right edge. */
+.catalog-itemlog-hero .catalog-identity > .catalog-identity-actions {
   flex: none;
+  margin-left: auto;
+}
+
+/* Where to find it: the Locate button is a button's width under its place, not a bar across the whole row. */
+.catalog-itemlog-record .catalog-obtain-row > .catalog-locate-button {
+  justify-self: start;
+  padding: 0 16px;
 }
 
 /* The chips sit in the page heading, under the item count, and use its full width. */
