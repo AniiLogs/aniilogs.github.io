@@ -3773,6 +3773,52 @@ test("POST /api/admin/run-names: administrators only, a dry run by default, appl
   assert.deepEqual([twice.changed, twice.linked, twice.renamed, twice.confirmed, twice.uidsRemoved, twice.unsettled, twice.settled], [0, 0, 0, 0, 0, 0, 0]);
 });
 
+test("POST /api/admin/run-card-name: staff only, a look-alike fix on every copy of the run and its Party entry, then settled; others need force; a dry run writes nothing", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const s = await threeSenders(env);
+  // the team-mate without the app misread on both copies (a 0 for an o)
+  const misread = [["DevOne", 0], ["DevTwo", 1], ["UserOne", 2], ["R0ok", 3]];
+  const lineup = misread.map(([name], slot) => ({ slot, name }));
+  assert.equal((await sendRun(env, s.tokens.DevOne, { ...s.body("DevOne", misread), extra: { lineup } })).status, 201);
+  assert.equal((await sendRun(env, s.tokens.UserOne, s.body("UserOne", misread, 10))).status, 201);
+  const id = sqlite.prepare("SELECT submission_id AS id FROM leaderboard_submissions WHERE client_run_id = 'copy-DevOne'").get().id;
+  const snapshot = () => JSON.stringify(sqlite.prepare("SELECT submission_id, players_json, extra_json FROM leaderboard_submissions ORDER BY submission_id").all());
+  const fix = (body, session = SESSIONS.dev) => call(env, "/api/admin/run-card-name", { session, method: "POST", body: { submissionId: id, seat: 4, ...body } });
+  const seat4 = () => storedCopies(sqlite).map((row) => [row.id, row.players[3].name, row.players[3].skel, row.extra.lineup?.[3]?.name ?? null]);
+  const logs = [];
+  const log = console.log;
+  console.log = (line) => logs.push(String(line));
+  try {
+    assert.equal((await fix({ name: "Rook" }, SESSIONS.user)).status, 403);
+    for (const name of ["", "x".repeat(41), "Ro\u0007ok", 7]) assert.equal((await fix({ name })).status, 400, JSON.stringify(name));
+    assert.equal((await fix({ name: "Rook", seat: 5 })).status, 400);
+    const before = snapshot();
+    const dry = await (await fix({ name: "Rook", dryRun: true })).json();
+    assert.deepEqual(dry, { ok: true, dryRun: true, forced: false, seat: 4, copies: 2, cards: 2, lineups: 1, skipped: 0, updated: 0, settled: null });
+    assert.equal(snapshot(), before);
+    // someone else's name: refused without force
+    const other = await fix({ name: "Bishop" });
+    assert.equal(other.status, 409);
+    assert.equal(snapshot(), before);
+    const applied = await (await fix({ name: "Rook" })).json();
+    assert.deepEqual([applied.dryRun, applied.forced, applied.copies, applied.cards, applied.lineups, applied.updated, typeof applied.settled], [false, false, 2, 2, 1, 2, "object"]);
+    assert.deepEqual(seat4(), [["copy-DevOne", "Rook", "rook", "Rook"], ["copy-UserOne", "Rook", "rook", null]]);
+    // still one settled run: the senders' slots linked, one sharedRun
+    await assertSettled(env, sqlite, ["DevOne", "UserOne"]);
+    const again = await (await fix({ name: "Rook" })).json();
+    assert.deepEqual([again.cards, again.lineups, again.updated, again.settled], [0, 0, 0, null]);
+    // with force any name: both copies, said to be forced
+    const forced = await (await fix({ name: "Bishop", force: true })).json();
+    assert.deepEqual([forced.forced, forced.cards, forced.lineups, forced.updated], [true, 2, 1, 2]);
+    assert.deepEqual(seat4().map((row) => row[1]), ["Bishop", "Bishop"]);
+  } finally {
+    console.log = log;
+  }
+  const lines = logs.filter((line) => line.startsWith("Run card name: "));
+  assert.equal(lines.length, 4);
+  assert.ok(lines.every((line) => !/R0ok|Rook|Bishop|DevOne|UserOne|3010000/u.test(line) && !line.includes(id)));
+});
+
 // two senders' copies of one run (DevOne, UserOne), each with its own played time as the app sent it
 async function copiesPlayedAt(env, devPlayedAt, userPlayedAt, { cards = true } = {}) {
   const dev = await namedToken(env, SESSIONS.dev);

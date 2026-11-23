@@ -3956,6 +3956,94 @@ async function adminRunSeat(request, env, method) {
   }
 }
 
+// Staff (logs.read: administrators and the owner, as /api/admin/run-seat): correct a player's name the app misread on a
+// stored Interlink run (a 0 read as O). The card at that seat (1P-4P, cardSeats) and the same seat's Party entry
+// (extra.lineup, partyBySeat as lineupBySeat finds it; a run with fewer than four cards: the entry on slot seat - 1) are
+// renamed on the submission and on every copy of the same run (runCopies) whose card at that seat is a look-alike of the
+// old or the new name; a copy with someone else there is left alone (skipped). Then the run is settled again as a new
+// copy settles it (corroborateRun), so team rows and unclaimed lines follow. Only a look-alike correction (the same
+// nameSkeleton as the card's name) is taken unless force is true; forced says it was. The name is checked as a sent
+// player's name is (at most 40 characters, trimmed) and may hold no control or format characters.
+// POST /api/admin/run-card-name { submissionId, seat: 1-4, name, force?, dryRun? }
+//   -> { ok, dryRun, forced, seat, copies, cards, lineups, skipped, updated, settled }
+// copies: the run's copies looked at; cards / lineups: card and Party names renamed (or that would be); skipped: copies
+// left alone; updated: copies written (0 on a dry run); settled: what settling the run changed (corroborateRun's counts;
+// null on a dry run). Counts and seat numbers only: no names, UIDs or ids, in the answer or the log.
+const CARD_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u;
+async function adminRunCardName(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try { body = (await readJsonBody(request, 1024)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
+  const submissionId = String(body.submissionId || "");
+  const seat = Number(body.seat);
+  if (!/^[A-Za-z0-9_-]{8,40}$/u.test(submissionId)) return json({ error: "submissionId is invalid." }, 400);
+  if (![1, 2, 3, 4].includes(seat)) return json({ error: "seat must be 1-4." }, 400);
+  const name = typeof body.name === "string" ? boundedText(body.name, 40, CARD_NAME) : undefined;
+  if (!name) return json({ error: "name must be 1-40 characters, without control characters." }, 400);
+  const force = body.force === true;
+  const dryRun = body.dryRun === true;
+  const run = await env.DB.prepare(
+    "SELECT submission_id AS id, kind, players_json AS playersJson, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!run || run.kind !== "interlink_run") return json({ error: "No such Interlink run." }, 404);
+  const players = parseJsonColumn(run.playersJson) || [];
+  const extra = parseJsonColumn(run.extraJson) || {};
+  const at = cardSeats(players, extra.lineup).indexOf(seat);
+  if (at < 0) return json({ error: "This run has no card at that seat." }, 409);
+  const oldName = typeof players[at]?.name === "string" && players[at].name.trim() ? players[at].name : null;
+  const alike = Boolean(oldName) && nameSkeleton(oldName) === nameSkeleton(name);
+  if (!alike && !force) return json({ error: "The new name isn't a look-alike of the card's name (force: true sets it anyway)." }, 409);
+  const group = (await runCopies(env, run.id)) || [{ row: run, copy: { id: run.id, players, lineup: Array.isArray(extra.lineup) ? extra.lineup : null } }];
+  const skeletons = new Set([nameSkeleton(name), ...(oldName ? [nameSkeleton(oldName)] : [])]);
+  const looksAlike = (value) => typeof value === "string" && skeletons.has(nameSkeleton(value));
+  const plans = [];
+  let skipped = 0;
+  let lineups = 0;
+  for (const entry of group) {
+    const list = entry.copy.players;
+    const lineup = entry.copy.lineup;
+    const primary = entry.copy.id === run.id;
+    const index = cardSeats(list, lineup).indexOf(seat);
+    const card = index >= 0 ? list[index] : null;
+    if (!card || typeof card !== "object" || (!primary && !looksAlike(card.name))) { skipped += 1; continue; }
+    const nextPlayers = card.name === name ? null : list.map((slot, i) => (i === index ? { ...slot, name, skel: nameSkeleton(name) } : slot));
+    let nextLineup = null;
+    if (Array.isArray(lineup)) {
+      const onSlot = lineup.filter((item) => item && typeof item === "object" && item.slot === seat - 1);
+      const party = list.length === 4 ? partyBySeat(list, lineup)?.[index] || null : onSlot.length === 1 ? onSlot[0] : null;
+      if (party && party.name !== name && (looksAlike(party.name) || (force && primary))) {
+        nextLineup = lineup.map((item) => (item === party ? { ...item, name } : item));
+        lineups += 1;
+      }
+    }
+    if (nextPlayers || nextLineup) plans.push({ entry, nextPlayers, nextLineup });
+  }
+  const cards = plans.filter((plan) => plan.nextPlayers).length;
+  let updated = 0;
+  let settled = null;
+  if (!dryRun) {
+    for (const { entry, nextPlayers, nextLineup } of plans) {
+      const result = await env.DB.prepare(
+        `UPDATE leaderboard_submissions SET players_json = COALESCE(?, players_json),
+           extra_json = CASE WHEN ? IS NULL THEN extra_json ELSE json_set(COALESCE(extra_json, '{}'), '$.lineup', json(?)) END
+         WHERE submission_id = ? AND players_json IS ?`,
+      ).bind(nextPlayers ? JSON.stringify(nextPlayers) : null, nextLineup ? 1 : null, nextLineup ? JSON.stringify(nextLineup) : null,
+        entry.copy.id, entry.row.playersJson).run();
+      if (Number(result?.meta?.changes)) updated += 1;
+    }
+    if (updated) {
+      const { members: _members, ...counts } = await corroborateRun(env, run.id);
+      settled = counts;
+    }
+  }
+  const forced = force && !alike;
+  console.log(`Run card name: seat ${seat}, ${dryRun ? "dry run" : "applied"}${forced ? ", forced" : ""}, copies ${group.length}, cards ${cards}, `
+    + `lineups ${lineups}, skipped ${skipped}, updated ${updated}`);
+  return json({ ok: true, dryRun, forced, seat, copies: group.length, cards, lineups, skipped, updated, settled });
+}
+
 // A player's Battle Data card in a run: the same four numbers in two copies of a run are the same player.
 const BATTLE_DATA_FIELDS = Object.freeze(["avgDps", "breakValue", "damageTaken", "heal"]);
 function hasBattleData(player) {
@@ -8177,6 +8265,7 @@ async function api(request, env) {
   if (url.pathname === "/api/admin/run-names" && request.method === "POST") return settleRunNames(request, env);
   if (url.pathname === "/api/admin/sim-levels" && request.method === "POST") return recomputeSimLevels(request, env);
   if (url.pathname === "/api/admin/run-seat" && (request.method === "POST" || request.method === "DELETE")) return adminRunSeat(request, env, request.method);
+  if (url.pathname === "/api/admin/run-card-name" && request.method === "POST") return adminRunCardName(request, env);
   if (url.pathname === "/api/admin/played-times" && request.method === "POST") return correctPlayedTimes(request, env);
   // a profile id or a game UID (resolveProfileId)
   const historyMatch = url.pathname.match(/^\/api\/profiles\/([A-Za-z0-9]{8,24}|\d{1,24})\/history$/u);
