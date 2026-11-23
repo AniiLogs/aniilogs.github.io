@@ -4469,3 +4469,46 @@ test("a Sim win's level record: kept, verified at store time, a skip or jump lis
     console.log = log;
   }
 });
+
+test("POST /api/admin/sim-levels: administrators only, a dry run by default, apply recomputes stored verdicts and flags, a second apply finds nothing", async () => {
+  const { env, sqlite } = await setup({ LEADERBOARD_PUBLIC: "true", ADMIN_DISCORD_IDS: IDS.dev });
+  const token = await namedToken(env, SESSIONS.user);
+  let t = 1794700000;
+  // levels 5 and 6 never read, their area starts there
+  const levels = [1, 2, 3, 4, 7, 8];
+  const visit = { enteredAt: t, fromStart: true, levels: levels.map((n) => ({ n, of: 8, t: (t += n === 7 ? 90 : 30) })),
+    areas: [...levels, 5, 6].map((n) => ({ t: 1794700000 + 30 * n - 2 })), fights: [] };
+  const sim = (id, time, stages) => ({ kind: "sim_run", clientRunId: id, trial: "Lightning Training", difficulty: "Trial", clearTimeS: time, cleared: true,
+    partySize: 1, playedAt: 1794700000, extra: { setup: { coins: 9000 }, ...(stages ? { stages } : {}) } });
+  const logs = [];
+  const log = console.log;
+  console.log = (line) => logs.push(String(line));
+  try {
+    assert.equal((await sendRun(env, token, sim("backed", 300, { of: 8, visits: [visit] }))).status, 201);
+    assert.equal((await sendRun(env, token, sim("old", 320))).status, 201);
+  } finally {
+    console.log = log;
+  }
+  const check = () => JSON.parse(sqlite.prepare("SELECT verify_json AS json FROM leaderboard_submissions WHERE client_run_id = 'backed'").get().json);
+  assert.deepEqual([check().levels.verdict, check().levels.backed, check().reviewOnly], ["verified", [5, 6], undefined]);
+  // stored the way the earlier rules left it: a jump, and its flag
+  sqlite.prepare(`UPDATE leaderboard_submissions SET verify_json = json_set(json_set(verify_json, '$.levels', json(?)), '$.reviewOnly', json(?)) WHERE client_run_id = 'backed'`)
+    .run(JSON.stringify({ of: 8, verdict: "jump", jumps: [{ from: 4, to: 7, visit: 1 }] }),
+      JSON.stringify({ flags: [{ rule: "sim level jump", from: 4, to: 7, visit: 1, of: 8 }], at: 1794700000 }));
+  const snapshot = () => JSON.stringify(sqlite.prepare("SELECT submission_id, verify_json, extra_json, status FROM leaderboard_submissions ORDER BY submission_id").all());
+  const before = snapshot();
+  const recompute = (body, session = SESSIONS.dev) => call(env, "/api/admin/sim-levels", { session, method: "POST", body });
+  assert.equal((await recompute({}, SESSIONS.user)).status, 403);
+  const dry = await (await recompute({})).json();
+  assert.deepEqual([dry.dryRun, dry.rows, dry.changed, dry.levels, dry.flags, dry.verdicts, dry.next], [true, 2, 1, 1, 1, { verified: 1, none: 1 }, null]);
+  assert.equal(snapshot(), before);
+  // a page at a time
+  const page = await (await recompute({ max: 1 })).json();
+  assert.deepEqual([page.rows, typeof page.next], [1, "string"]);
+  assert.equal((await (await recompute({ max: 5, after: page.next })).json()).rows, 1);
+  const applied = await (await recompute({ apply: true })).json();
+  assert.deepEqual([applied.dryRun, applied.changed, applied.levels, applied.flags], [false, 1, 1, 1]);
+  assert.deepEqual([check().levels.verdict, check().levels.backed, check().levels.stretches, check().reviewOnly], ["verified", [5, 6], [{ from: 4, to: 7, areas: 3 }], undefined]);
+  const twice = await (await recompute({ apply: true })).json();
+  assert.deepEqual([twice.changed, twice.levels, twice.flags], [0, 0, 0]);
+});

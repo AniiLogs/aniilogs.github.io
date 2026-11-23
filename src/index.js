@@ -5977,6 +5977,54 @@ async function settleRunNames(request, env) {
   return json({ dryRun: !apply, rows: rows.length, groups, ...totals, next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
 }
 
+// POST /api/admin/sim-levels {apply?, max?, after?} (administrators and the owner): works out stored Holo-Battle Sim
+// runs' level verification ($.levels, storeSimLevels) and its review-only flags (reviewOnlyCheck) again from the level
+// record each kept (extra.stages), as a new send would: for runs stored before the verification's rules last changed.
+// max runs a call (default 200, at most 500) in the order they were stored, after the cursor the last call answered. A
+// dry run unless apply is true: the counts say what would change. Idempotent: a run whose stored verification and flags
+// are already what the rules give is left alone, so a second apply changes nothing. A changed flag list replaces the
+// old one and any decision on it (as a re-send does). Counts only: no names, UIDs or ids.
+async function recomputeSimLevels(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body = {};
+  try { body = (await readJsonBody(request, 512)) || {}; } catch { /* the defaults */ }
+  const apply = body.apply === true;
+  const max = Math.min(500, Math.max(1, Number.parseInt(body.max ?? "200", 10) || 200));
+  const after = String(body.after || "").match(/^(\d{1,12})\.([A-Za-z0-9_-]{1,40})$/u);
+  const { results } = await env.DB.prepare(
+    `SELECT submission_id AS id, created_at AS at, clear_time_s AS clearTimeS, extra_json AS extraJson, verify_json AS verifyJson
+     FROM leaderboard_submissions
+     WHERE kind = 'sim_run' AND (? IS NULL OR created_at > ? OR (created_at = ? AND submission_id > ?))
+     ORDER BY created_at, submission_id LIMIT ?`,
+  ).bind(after ? 1 : null, after ? Number(after[1]) : 0, after ? Number(after[1]) : 0, after ? after[2] : "", max + 1).all();
+  const rows = (results || []).slice(0, max);
+  const verdicts = {};
+  const totals = { changed: 0, levels: 0, flags: 0 };
+  for (const row of rows) {
+    const levels = simLevels((parseJsonColumn(row.extraJson) || {}).stages, row.clearTimeS);
+    verdicts[levels.verdict] = (verdicts[levels.verdict] || 0) + 1;
+    const check = parseJsonColumn(row.verifyJson) || {};
+    const levelsDiffer = stableJson(check.levels) !== stableJson(levels);
+    const flagsDiffer = stableJson(check.reviewOnly?.flags || []) !== stableJson(simLevelFlags(levels));
+    if (!levelsDiffer && !flagsDiffer) continue;
+    totals.changed += 1;
+    if (levelsDiffer) totals.levels += 1;
+    if (flagsDiffer) totals.flags += 1;
+    if (!apply) continue;
+    if (levelsDiffer) {
+      await env.DB.prepare(
+        `UPDATE leaderboard_submissions SET verify_json = json_set(COALESCE(CASE WHEN json_valid(verify_json) THEN verify_json END, '{}'), '$.levels', json(?))
+         WHERE submission_id = ? AND kind = 'sim_run'`,
+      ).bind(JSON.stringify(levels), row.id).run();
+    }
+    if (flagsDiffer) await reviewOnlyCheck(env, row.id, { kind: "sim_run", extraJson: row.extraJson, clearTimeS: row.clearTimeS }, null);
+  }
+  const last = rows.at(-1);
+  return json({ dryRun: !apply, rows: rows.length, ...totals, verdicts, next: (results || []).length > max && last ? `${last.at}.${last.id}` : null });
+}
+
 // aLogs 0.1.37 betas B19 to B23 (RC26 to RC32, the first Rust builds, and the local RC33 and RC34) built an Interlink
 // run's played time (the run's start) from the PC's local wall time read as UTC: its played_at is off by the sender's UTC
 // offset (west of UTC earlier than the run, east of it later). Only interlink_run: those builds' other records use the
@@ -8127,6 +8175,7 @@ async function api(request, env) {
   if (url.pathname === "/api/profile/history" && request.method === "GET") return ownBattleHistory(request, env);
   if (url.pathname === "/api/admin/run-outcomes" && request.method === "POST") return backfillRunOutcomes(request, env);
   if (url.pathname === "/api/admin/run-names" && request.method === "POST") return settleRunNames(request, env);
+  if (url.pathname === "/api/admin/sim-levels" && request.method === "POST") return recomputeSimLevels(request, env);
   if (url.pathname === "/api/admin/run-seat" && (request.method === "POST" || request.method === "DELETE")) return adminRunSeat(request, env, request.method);
   if (url.pathname === "/api/admin/played-times" && request.method === "POST") return correctPlayedTimes(request, env);
   // a profile id or a game UID (resolveProfileId)
