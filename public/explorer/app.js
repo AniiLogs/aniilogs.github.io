@@ -1213,7 +1213,7 @@ function areaBordersEnabled() {
   }
 }
 
-// Hide Artwork: the moving Aniimo behind a normal Aniilog entry is turned off (Show Artwork still shows it). Per device.
+// Hide Artwork / Show Artwork: one button turns the moving Aniimo behind an Aniilog entry off and on. Per device.
 const ARTWORK_HIDDEN_STORAGE_KEY = "aniilogs:explorer:artwork-hidden:v1";
 
 function artworkHidden() {
@@ -1237,10 +1237,10 @@ function setArtworkHidden(hidden) {
 function applyArtworkHidden(hidden = artworkHidden()) {
   document.body.classList.toggle("aniilog-artwork-hidden", hidden);
   document.querySelectorAll(".catalog-hide-artwork-button").forEach((button) => {
-    button.textContent = hidden ? "Unhide Artwork" : "Hide Artwork";
+    button.textContent = hidden ? "Show Artwork" : "Hide Artwork";
     button.setAttribute("aria-pressed", String(hidden));
   });
-  // Nothing plays while it's hidden (Show Artwork and View Model still play theirs).
+  // Nothing plays while it's hidden (View Model still plays its own).
   const paused = hidden && !state.aniilogShowcaseMode && !state.aniilogModelMode;
   els.catalogPanel?.querySelectorAll(".catalog-aniimo-video-source").forEach((video) => {
     if (paused) video.pause();
@@ -8736,36 +8736,6 @@ function renderAfpFormPills(entry) {
   return row;
 }
 
-// An Aniimo's short link, https://aniilogs.app/a/<slug> (src/aniimo-links.js: a person lands here, Discord shows its
-// card). The slugs come from the Aniilog's own released forms, made the way the API makes them (aniimo-link.js).
-let aniimoShortSlugs = null;
-function aniimoShortLink(entry) {
-  const id = String(entry?.form_id || "");
-  const entries = state.aniilogData?.entries || [];
-  if (!aniimoShortSlugs || aniimoShortSlugs.entries !== entries) {
-    const released = entries.filter((item) => !item?.availability);   // Developer Mode's extra records get none
-    aniimoShortSlugs = { entries, slugs: window.AniilogsAniimoLink?.shortSlugs?.(released) || new Map() };
-  }
-  const slug = aniimoShortSlugs.slugs.get(id);
-  if (slug && LINK_ORIGIN) return `${LINK_ORIGIN}/a/${slug}`;
-  return new URL(`/explorer/?aniimo=${encodeURIComponent(id)}`, window.location.origin).href;
-}
-
-async function copyAniimoLink(button, link) {
-  const copied = await copyText(link);
-  if (!copied) {
-    window.prompt("Copy this link:", link);                 // no clipboard here: the link itself, to copy by hand
-    return;
-  }
-  window.clearTimeout(button.copyResetTimer);
-  button.textContent = "Link copied";
-  button.classList.add("copied");
-  button.copyResetTimer = window.setTimeout(() => {
-    button.textContent = "Copy link";
-    button.classList.remove("copied");
-  }, 1800);
-}
-
 function renderAniilogCatalogRecord(entry) {
   const record = document.createElement("article");
   record.className = "catalog-record catalog-aniilog-record";
@@ -8819,16 +8789,6 @@ function renderAniilogCatalogRecord(entry) {
     locate.textContent = "Locate on Map";
     locate.addEventListener("click", () => locateAniilogEntry(entry));
     actions.append(locate);
-  }
-  if (!entry.availability) {
-    const link = aniimoShortLink(entry);
-    const copyLink = document.createElement("button");
-    copyLink.type = "button";
-    copyLink.className = "catalog-copy-link-button";
-    copyLink.textContent = "Copy link";
-    copyLink.title = `Copy ${link}`;
-    copyLink.addEventListener("click", () => copyAniimoLink(copyLink, link));
-    actions.append(copyLink);
   }
   if (actions.childElementCount) identity.append(actions);
   record.append(identity);
@@ -10503,19 +10463,14 @@ function renderCatalogPreview(options = {}) {
   els.catalogPanel.append(view === "aniilog" ? renderAniilogCatalogRecord(selected) : renderItemLogCatalogRecord(selected));
   els.catalogPanel.classList.toggle("is-aniilog-form", view === "aniilog");
   if (view === "aniilog") {
-    const showcaseButton = document.createElement("button");
-    showcaseButton.type = "button";
-    showcaseButton.className = "catalog-showcase-button";
-    showcaseButton.textContent = state.aniilogShowcaseMode ? "Back to Aniilog UI" : "Show Artwork";
-    showcaseButton.setAttribute("aria-pressed", String(state.aniilogShowcaseMode));
-    showcaseButton.addEventListener("click", () => setAniilogShowcaseMode(!state.aniilogShowcaseMode));
+    // One row: View Model, Hide/Show Artwork (the background Aniimo), Locate on Map.
     const headingActions = document.createElement("div");
     headingActions.className = "catalog-heading-actions";
     const hideArtworkButton = document.createElement("button");
     hideArtworkButton.type = "button";
     hideArtworkButton.className = "catalog-hide-artwork-button";
     hideArtworkButton.addEventListener("click", () => setArtworkHidden(!artworkHidden()));
-    headingActions.append(showcaseButton, hideArtworkButton);
+    headingActions.append(hideArtworkButton);
     const modelAppearances = viewModelAppearances(selected);
     if (modelAppearances.length) {
       const modelButton = document.createElement("button");
@@ -10527,7 +10482,7 @@ function renderCatalogPreview(options = {}) {
       headingActions.prepend(modelButton);
       attachViewModel(els.catalogPanel.querySelector(".catalog-aniilog-record"), selected, modelAppearances);
     }
-    // View Model and Show Artwork sit in the form header beside Locate on Map (the page header row is then empty,
+    // View Model and Hide/Show Artwork sit in the form header beside Locate on Map (the page header row is then empty,
     // which gives the fixed grid more height).
     const identity = els.catalogPanel.querySelector(".catalog-aniilog-record > .catalog-identity");
     let identityActions = identity?.querySelector(".catalog-identity-actions");
@@ -10963,12 +10918,10 @@ function syncMobileCatalogStickyIdentity() {
     if (stickyLocate && sourceLocate) {
       stickyLocate.addEventListener("click", () => sourceLocate.click());
     }
-    // The cloned View Model / Show Artwork buttons press the real ones.
-    stickyIdentity.querySelectorAll(".catalog-showcase-button, .catalog-model-button, .catalog-hide-artwork-button").forEach((button) => {
+    // The cloned View Model / Hide-Show Artwork buttons press the real ones.
+    stickyIdentity.querySelectorAll(".catalog-model-button, .catalog-hide-artwork-button").forEach((button) => {
       button.addEventListener("click", () => identity.querySelector(`.${button.classList[0]}`)?.click());
     });
-    // and its Copy link the real one (which shows "Link copied")
-    stickyIdentity.querySelector(".catalog-copy-link-button")?.addEventListener("click", () => identity.querySelector(".catalog-copy-link-button")?.click());
     // So do its form chips (same order as the header's).
     const sourceForms = identity.querySelectorAll(".afp-form");
     stickyIdentity.querySelectorAll(".afp-form").forEach((button, index) => {
