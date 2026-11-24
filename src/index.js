@@ -236,7 +236,8 @@ async function redeemDeveloperPreviewTicket(request, env) {
 const SITE_CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'none'",
-  "connect-src 'self' blob: https://api.github.com https://aniilogs-api.pages.dev",
+  // Cloudflare Web Analytics: its script, and where it sends the visit (no cookies; on in the dashboard for aniilogs.app)
+  "connect-src 'self' blob: https://api.github.com https://aniilogs-api.pages.dev https://cloudflareinsights.com",
   "font-src 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
@@ -244,7 +245,7 @@ const SITE_CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: blob: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com",
   "media-src 'self' blob: https://aniilogs-api.pages.dev",
   "object-src 'none'",
-  "script-src 'self' https://aniilogs-api.pages.dev",
+  "script-src 'self' https://aniilogs-api.pages.dev https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline'",
 ].join("; ");
 export function siteContentSecurityPolicy() {
