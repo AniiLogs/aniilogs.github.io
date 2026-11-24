@@ -15794,3 +15794,25 @@ button.catalog-ability-badge--type:focus-visible {
   font-size: 12px;
 }
 html[data-embed="app"] .menu-theme-picker { display: none !important; }
+
+/* View Model: its Form menu (with each form's head) is the one place to switch forms, so the form chips go */
+body.aniilog-model-mode .catalog-aniilog-record .afp-forms,
+body.aniilog-model-mode .catalog-mobile-sticky-aniilog .afp-forms {
+  display: none;
+}
+
+.catalog-artwork-select-button,
+.catalog-artwork-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.catalog-artwork-select-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}

@@ -314,6 +314,10 @@ test("an Aniilog entry has one row of buttons: View Model, one Hide/Show Artwork
   // the narrowest phones keep the three on one row
   assert.match(css, /@media \(max-width: 400px\) \{\s+\.catalog-aniilog-record > \.catalog-identity > \.catalog-identity-actions,\s+\.catalog-mobile-sticky-aniilog\.is-stuck > \.catalog-identity-actions \{\s+grid-template-columns: repeat\(auto-fit, minmax\(0, 1fr\)\);/u);
   assert.doesNotMatch(css, /identity-actions > button:nth-child\(3\):last-child/u);
+  // View Model: one place to switch forms, its Form menu with each form's head; the form chips are hidden there
+  assert.match(css, /body\.aniilog-model-mode \.catalog-aniilog-record \.afp-forms,\s+body\.aniilog-model-mode \.catalog-mobile-sticky-aniilog \.afp-forms \{\s+display: none;/u);
+  assert.match(app, /options: modelVariants\.map\(\(candidate\) => \(\{ value: candidate\.id, label: [^}]+, icon: candidate\.icon \}\)\)/u);
+  assert.match(app, /const head = makeIcon\("catalog-artwork-select-icon", option\.icon\);/u);
   const html = readFileSync(new URL("../public/explorer/index.html", import.meta.url), "utf8");
   assert.match(html, /aniimo-link\.js\?v=0\.1\.2/u);
 });
