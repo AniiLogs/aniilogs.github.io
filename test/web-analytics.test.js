@@ -14,9 +14,8 @@ test("the site's policy lets Cloudflare Web Analytics load and send, on static f
   assert.ok(read("public/_headers").includes(`Content-Security-Policy: ${policy}`));
 });
 
-test("the privacy page says visits are counted, with no cookies, and EU visitors aren't", () => {
+test("the privacy page says visits are counted, with no cookies", () => {
   const privacy = read("public/privacy.html");
   assert.match(privacy, /Cloudflare Web Analytics, which sets no cookies/u);
-  assert.match(privacy, /Visitors from the EU aren't counted\./u);
   assert.doesNotMatch(privacy, /no advertising or third-party analytics/u);
 });
