@@ -276,7 +276,7 @@ function securityHeaders(headers = new Headers(), localPreview = false) {
 // A board the player just looked at is answered from their own browser for a few seconds, so clicking back and forth
 // between boards doesn't ask the API (and its database) again each time. Only that browser keeps it ("private": the
 // answer can carry the player's own marks), and never a player's own list (?mine=1), which changes as they send runs.
-export const BOARD_REUSE_SECONDS = 10;
+const BOARD_REUSE_SECONDS = 10;
 function reusedBriefly(response, url) {
   if (response?.status !== 200 || url.searchParams.get("mine") === "1") return response;
   response.headers.set("cache-control", `private, max-age=${BOARD_REUSE_SECONDS}`);
