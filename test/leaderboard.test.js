@@ -167,6 +167,19 @@ test("leaderboards are gated to developers until made public", async () => {
   assert.equal((await call(open.env, "/api/leaderboard/submissions", { token, method: "POST", body: run("u1") })).status, 201);
 });
 
+test("a board is reused from the player's own browser for 10 seconds; their own list, errors and sends never are", async () => {
+  const { env } = await setup({ LEADERBOARD_PUBLIC: "true" });
+  for (const path of ["/api/leaderboard/entries?kind=interlink_run", "/api/leaderboard/interlink", "/api/leaderboard/facets?kind=interlink_run"]) {
+    const response = await call(env, path);
+    assert.equal(response.status, 200, path);
+    assert.equal(response.headers.get("cache-control"), "private, max-age=10", path);
+  }
+  const token = await desktopToken(env, SESSIONS.user);
+  assert.equal((await call(env, "/api/leaderboard/entries?mine=1", { session: SESSIONS.user })).headers.get("cache-control"), "no-store");
+  assert.equal((await call((await setup()).env, "/api/leaderboard/entries")).headers.get("cache-control"), "no-store");
+  assert.equal((await call(env, "/api/leaderboard/submissions", { token, method: "POST", body: run("u2") })).headers.get("cache-control"), "no-store");
+});
+
 test("desktop tokens submit without an origin, upsert by run id, and stop working once revoked", async () => {
   const { env } = await setup();
   const token = await namedToken(env);
