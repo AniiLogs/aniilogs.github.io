@@ -10526,8 +10526,18 @@ function renderCatalogPreview(options = {}) {
         menu.hidden = true;
         wrapper.setAttribute("aria-expanded", "false");
       };
+      // an option with an icon (the Form menus: each form's head) shows it beside its name, in the list and once chosen
+      const fill = (target, option) => {
+        target.replaceChildren();
+        if (option.icon) {
+          const head = makeIcon("catalog-artwork-select-icon", option.icon);
+          head.alt = "";
+          target.append(head);
+        }
+        target.append(option.label);
+      };
       const choose = (option) => {
-        button.textContent = option.label;
+        fill(button, option);
         close();
         onChange(option.value);
       };
@@ -10536,12 +10546,12 @@ function renderCatalogPreview(options = {}) {
         item.type = "button";
         item.className = "catalog-artwork-select-option";
         item.setAttribute("role", "option");
-        item.textContent = option.label;
+        fill(item, option);
         item.disabled = Boolean(option.disabled);
         item.setAttribute("aria-selected", String(String(option.value) === String(value)));
         item.addEventListener("click", () => choose(option));
         menu.append(item);
-        if (String(option.value) === String(value)) button.textContent = option.label;
+        if (String(option.value) === String(value)) fill(button, option);
       });
       button.addEventListener("click", () => {
         if (disabled) return;
@@ -10556,7 +10566,7 @@ function renderCatalogPreview(options = {}) {
       addArtworkMenu("Form", createArtworkSelect({
         label: "Choose Aniimo variant",
         value: selected.id,
-        options: variants.map((candidate) => ({ value: candidate.id, label: candidate.form_label || candidate.form_name || "Variant" })),
+        options: variants.map((candidate) => ({ value: candidate.id, label: candidate.form_label || candidate.form_name || "Variant", icon: candidate.icon })),
         onChange: (value) => { state.catalogSelection.aniilog = value; renderCatalogPreview(); },
       }));
     } else {
@@ -10564,7 +10574,7 @@ function renderCatalogPreview(options = {}) {
         label: "Choose Aniimo form",
         value: selected.id,
         disabled: true,
-        options: [{ value: selected.id, label: selected.form_label || selected.form_name || "Current form" }],
+        options: [{ value: selected.id, label: selected.form_label || selected.form_name || "Current form", icon: selected.icon }],
         onChange: () => {},
       }));
     }
@@ -10623,7 +10633,7 @@ function renderCatalogPreview(options = {}) {
         label: "Choose Aniimo form for the 3D model",
         value: selected.id,
         disabled: modelVariants.length < 2,
-        options: modelVariants.map((candidate) => ({ value: candidate.id, label: candidate.form_label || candidate.form_name || "Variant" })),
+        options: modelVariants.map((candidate) => ({ value: candidate.id, label: candidate.form_label || candidate.form_name || "Variant", icon: candidate.icon })),
         onChange: (value) => { state.catalogSelection.aniilog = value; renderCatalogPreview(); },
       }));
       addModelMenu("Rarity / appearance", createArtworkSelect({
