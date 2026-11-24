@@ -1,0 +1,206 @@
+{
+  "aniimo-link.js": {
+    "tag": "0.1.2",
+    "sha256": "f9a6d4ce9d03c6bd9075ed625c2af6ccb6687f6da04a50fa6d4a51ac63460e41"
+  },
+  "app.js": {
+    "tag": "0.14.7-slot-0",
+    "sha256": "a61a5040723b0c3770ee90c35d80d65737a9622cc4af5fbbfa5417ff3de12b6b"
+  },
+  "carry-in.js": {
+    "tag": "0.1.0",
+    "sha256": "afd6f2c5ba082b55536721fe32f49f59bb9aaf90242ed7dffb95fa3e7d3420c5"
+  },
+  "comments.css": {
+    "tag": "0.1.0",
+    "sha256": "4f5f580d49ebc327514bd73274e6b634cf47c4bdaafd1fe12e8a0c21442970ad"
+  },
+  "comments.js": {
+    "tag": "0.1.0",
+    "sha256": "31a5d889cceef60d23d7579f8def6f349c9d0af9bd4b784975ba911da2f43ae1"
+  },
+  "companion/companion.css": {
+    "tag": "0.2.0-alogs",
+    "sha256": "38ea2b0d25111f0bc9cdea3a5522ca7e672f2e5315902c509a010abb6b438704"
+  },
+  "companion/companion.js": {
+    "tag": "1",
+    "sha256": "cf07f6e933765890982eddbf705c52303c516866ecbe4422b0a5bd0f3018e5a2"
+  },
+  "explorer/aniimo-picker.js": {
+    "tag": "0.1.5-row-rename",
+    "sha256": "cb5dff902e505e5de83d885edfdabcb1a2e5fc84adc24782479d9f897aa4da98"
+  },
+  "explorer/app-config.js": {
+    "tag": "20261119-build3989635-r96",
+    "sha256": "9b473f8112bb4d3f8488d93668b4e449419a1983a1ac7d302db00c5588e10fa3"
+  },
+  "explorer/app.js": {
+    "tag": "0.20.52-menus-fit",
+    "sha256": "e9eb8baa5eb39efbf29791f73c0b410b0ff109135d190909b0f1ffd98f775a9d"
+  },
+  "explorer/build-card.js": {
+    "tag": "0.2.7-enhanced",
+    "sha256": "129ea567b7df5334f89b410604b6da44a83c79a069f62c54eed6445a84e90c55"
+  },
+  "explorer/damage-guide.js": {
+    "tag": "0.1.14-bugged",
+    "sha256": "797351adc36a737d35024e91f96c66c5bd2714fdb2660e6192384ac193663f69"
+  },
+  "explorer/damage-model.js": {
+    "tag": "0.1.13-bugged",
+    "sha256": "7f401cab6927755e55f4f7f43670983f53a7bd242a3036033da1cab67174ab8a"
+  },
+  "explorer/duel.js": {
+    "tag": "0.6.11-pvp-matchups",
+    "sha256": "7ce0a168b09346bce454a4a48137b59e46816c4c041820d97a24c0f38de663df"
+  },
+  "explorer/guide-page.js": {
+    "tag": "0.3.1-basis-labels",
+    "sha256": "fefb35cf5ad69886521cfa14994721d0e3063a0343dc4ac778ec4b3145f72c6e"
+  },
+  "explorer/held-item-picker.js": {
+    "tag": "0.4.0-held-item-level",
+    "sha256": "332099bf6c10c0e61f2f56ad34c2f62a7f7af8a9367faeece8471dcd66630637"
+  },
+  "explorer/localization.js": {
+    "tag": "0.6.2-lumin-amber-element-search",
+    "sha256": "63f4285ce8db5bbee0f54ade37004eb625772dee87043b367cd13ceced92f9ab"
+  },
+  "explorer/lumin-routes.js": {
+    "tag": "0.5.4-unreleased-amber",
+    "sha256": "1d6d99ef8db606129e1b6e32856ff5be2e6c9e8d8ff351889c0df0a9ed1580b3"
+  },
+  "explorer/potential-editor.js": {
+    "tag": "0.1.8-held-item-level",
+    "sha256": "cfb2cb89ee512c711460b6ba00f611500a3f5e7de21b89c6b67ba4b9e14509e0"
+  },
+  "explorer/progress-storage.js": {
+    "tag": "0.2.0",
+    "sha256": "bd47000c39ae6c343956b4c37e988d8ac7d4c8a3c921c7f02d470de1f4076fae"
+  },
+  "explorer/skill-tags.js": {
+    "tag": "0.1.0",
+    "sha256": "2c433f87324bfb3b9e9c5a2552bec17267083d81e8f8f133f9e02ec0511df12b"
+  },
+  "explorer/styles.css": {
+    "tag": "0.21.41-menus-fit",
+    "sha256": "da8a7a3b00051303114ae159204c6d32f97885b328ccc8b9333e3d1063f3c7de"
+  },
+  "explorer/team-builder.js": {
+    "tag": "0.9.15-bugged-note",
+    "sha256": "de4d3e2b8eb2048ab395483fefe18809059d343c60fac9e951565e1c93fc6455"
+  },
+  "explorer/type-matchups.js": {
+    "tag": "0.2.0",
+    "sha256": "05c6f0b42b2c84a3ae3eea7bb7d2aa497ecaeb3e32f19cac5ac5c0af4886a142"
+  },
+  "explorer/view-model-catalog.js": {
+    "tag": "0.1.0-build3634150",
+    "sha256": "97ff618b3cbf3f9db8c053dbe854a6e08c13a9be4a88ca6f71562680c4eb8b47"
+  },
+  "guides/guides.css": {
+    "tag": "0.2.0-linked-guides",
+    "sha256": "1b85dc9f9ae6b3aabc66fefeb7b89530ea518a6d4060aa51920c65792effb68f"
+  },
+  "guides/guides.js": {
+    "tag": "0.2.0-linked-guides",
+    "sha256": "d19e9a112ec7296a19df3f536b79573834d3c2fe7e773b10e53fa7022f02ed7c"
+  },
+  "guides/interlink-guide.js": {
+    "tag": "0.1.3-coordinated-offensive",
+    "sha256": "8f27510565d1bc08069d428ab6a986c56afbb7f1c4d8450060fd4c133c954b3d"
+  },
+  "guides/linked-guides.js": {
+    "tag": "0.1.0",
+    "sha256": "edaa45e782084bff3a16fd60eed18941ef37af2a50b6fb9bd9337a941f55544c"
+  },
+  "icons/alogs-loader.js": {
+    "tag": "0.4.0",
+    "sha256": "9a0385da60ee3c982c7af04e7568c25ccac9e3030fcc63f09da8fb5003032986"
+  },
+  "leaderboard/leaderboard.css": {
+    "tag": "0.3.19-one-board-1200",
+    "sha256": "08dc78d88e09639a549fb7db55d589687e1035b47cc913ce3177b793e1012d14"
+  },
+  "leaderboard/leaderboard.js": {
+    "tag": "0.3.35-team-unlinked",
+    "sha256": "977937ba1269e97bbbe299d79be4d7f5dc6adf5383a01a7a920a35482feec8a1"
+  },
+  "leaderboard/share.css": {
+    "tag": "0.1.0",
+    "sha256": "0dcd09d9da6264b53de566d8e25102b043939457a72d1ff94b6d31422182f8c4"
+  },
+  "leaderboard/share.js": {
+    "tag": "0.2.0-lb-links",
+    "sha256": "32e871095eb04d94c6a864615ebe548ec4a7dd0a96f06ec17f9570fd68684ade"
+  },
+  "notifications.css": {
+    "tag": "0.1.0",
+    "sha256": "ad2b9b3bcbaaebc4a173e23bc86e86c9176afb53602d12ad65e027d3a20d33b9"
+  },
+  "notifications.js": {
+    "tag": "0.1.0",
+    "sha256": "e5be881db247caa69b6bd58a1ac9918a098a039add7e531fb9a0c0d12dbb0efb"
+  },
+  "party-portraits.js": {
+    "tag": "0.1.3-store-leads",
+    "sha256": "f6d72a9a315ca00d608fdca9793fb3aa0f610fe4a276a734de99c4c2b8df1a38"
+  },
+  "profile-cards.js": {
+    "tag": "0.1.0",
+    "sha256": "b8be926fe679fc50616b7ba4e56232bb0c685cf4b9639212ba48ce19b7849761"
+  },
+  "proof-viewer.css": {
+    "tag": "0.2.7-proof-file",
+    "sha256": "bd161672132ae6482e14efe3131cc5e9ba40ab6efd3e48537b257b290eb11f40"
+  },
+  "proof-viewer.js": {
+    "tag": "0.2.12-store-leads",
+    "sha256": "ba68c037930de676647456fbfe33dbff027ceee3e3e03a997d4ba796a12523b1"
+  },
+  "run-checks.css": {
+    "tag": "0.1.0",
+    "sha256": "1ae5f2c7ba14b03c9d2f76e5e66d9f035e69e5ea31d471c341cfe5021387095d"
+  },
+  "run-checks.js": {
+    "tag": "0.1.0",
+    "sha256": "9f0b14c54c9dd8171187bc1863b7b1ea0487ffaa1c875c337a6f78fbf9bac668"
+  },
+  "site-chrome.css": {
+    "tag": "0.1.6-site-menu",
+    "sha256": "9ffd7487fbc21a3b2c6176ff05aeb7f26d184dd18a73b9cb0d9c91643062549e"
+  },
+  "site-chrome.js": {
+    "tag": "0.1.0",
+    "sha256": "6bfb8a6ea5ca7a6a33d933a9515d95a31bca516ec18067be597cea169421ea20"
+  },
+  "site-sidebar.css": {
+    "tag": "0.1.1",
+    "sha256": "23f053228092b62d0592758b327a69d8a86c2f253aa699c623bfe5c90c9b5631"
+  },
+  "site-sidebar.js": {
+    "tag": "0.1.1",
+    "sha256": "9eb052024ed9e8355f5fbf3927f7e90a89433e944001a79f336e54354cd88177"
+  },
+  "styles.css": {
+    "tag": "0.17.6-update-details",
+    "sha256": "c4ed1ed0891941365e5160b661272b77ad61eee53377f7ddaca6f4703b54d9d8"
+  },
+  "table-sort.js": {
+    "tag": "0.1.0",
+    "sha256": "213290b10fe4592ba0bfdb47ba94c57ab93f242c75975f882aa4fbc3a08e5d2e"
+  },
+  "theme-shell.js": {
+    "tag": "0.3.5-site-menu",
+    "sha256": "c41234e3246ca49681f22dc4c0cee9a5d7dba6992ba2d2293163b9f754463ad5"
+  },
+  "updates/updates.css": {
+    "tag": "0.2.1",
+    "sha256": "aeb0ad211d09f2b77ee8b7892b7fb6176c2c0c4b5a9b1a3064f6ab76804c07c3"
+  },
+  "updates/updates.js": {
+    "tag": "0.1.0",
+    "sha256": "235bdad104879adcf5a14db32f16b9a86f646b62f2f64c0504820ef6b18fd2cf"
+  }
+}

@@ -273,6 +273,16 @@ function securityHeaders(headers = new Headers(), localPreview = false) {
   return headers;
 }
 
+// A board the player just looked at is answered from their own browser for a few seconds, so clicking back and forth
+// between boards doesn't ask the API (and its database) again each time. Only that browser keeps it ("private": the
+// answer can carry the player's own marks), and never a player's own list (?mine=1), which changes as they send runs.
+export const BOARD_REUSE_SECONDS = 10;
+function reusedBriefly(response, url) {
+  if (response?.status !== 200 || url.searchParams.get("mine") === "1") return response;
+  response.headers.set("cache-control", `private, max-age=${BOARD_REUSE_SECONDS}`);
+  return response;
+}
+
 function json(body, status = 200, headers = {}) {
   const responseHeaders = securityHeaders(new Headers(headers));
   responseHeaders.set("content-type", "application/json; charset=utf-8");
@@ -8553,8 +8563,8 @@ async function api(request, env) {
     return updateDeveloperRole(request, env, developerRoleMatch[1], false);
   }
   if (url.pathname === "/api/leaderboard/status" && request.method === "GET") return leaderboardStatus(request, env);
-  if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return leaderboardEntries(request, env);
-  if (url.pathname === "/api/leaderboard/interlink" && request.method === "GET") return interlinkBoards(request, env);
+  if (url.pathname === "/api/leaderboard/entries" && request.method === "GET") return reusedBriefly(await leaderboardEntries(request, env), url);
+  if (url.pathname === "/api/leaderboard/interlink" && request.method === "GET") return reusedBriefly(await interlinkBoards(request, env), url);
   if (url.pathname === "/api/links" && request.method === "POST") return placementLinks.create(request, env);
   const glyphPackMatch = url.pathname.match(/^\/api\/admin\/card-glyphs\/([0-9a-f]{4})$/u);
   if (glyphPackMatch && request.method === "PUT") return putGlyphPack(request, env, glyphPackMatch[1]);
@@ -8571,7 +8581,7 @@ async function api(request, env) {
   const mapBaseMatch = url.pathname.match(/^\/api\/admin\/map-card-bases\/([a-z0-9-]{1,80})$/u);
   if (mapBaseMatch && request.method === "PUT") return putMapCardBase(request, env, mapBaseMatch[1]);
   if (url.pathname === "/api/leaderboard/interlink/cycles" && request.method === "POST") return uploadInterlinkCycles(request, env);
-  if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return leaderboardFacets(request, env);
+  if (url.pathname === "/api/leaderboard/facets" && request.method === "GET") return reusedBriefly(await leaderboardFacets(request, env), url);
   if (url.pathname === "/api/leaderboard/submissions" && request.method === "POST") return submitLeaderboardRecord(request, env);
   if (url.pathname === "/api/leaderboard/tokens" && request.method === "GET") return listLeaderboardTokens(request, env);
   if (url.pathname === "/api/leaderboard/tokens" && request.method === "POST") return createLeaderboardToken(request, env);
