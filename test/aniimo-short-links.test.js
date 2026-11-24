@@ -1,5 +1,5 @@
 // Aniimo links: https://aniilogs.app/a/<slug> (src/aniimo-links.js), their cards (src/placement-card.js drawAniimoCard)
-// and the Aniilog's "Copy link" button (public/aniimo-link.js shortSlugs, public/explorer/app.js). Every Aniimo here
+// and the site's own "take me there" links (public/aniimo-link.js shortSlugs). Every Aniimo here
 // is made up.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -117,7 +117,7 @@ test("slugs: the name in lower case, a form adds its name, a taken slug its form
   for (const slug of slugs.values()) assert.match(slug, /^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
 });
 
-test("the Aniilog's Copy link makes the same slugs as the API (public/aniimo-link.js shortSlugs)", () => {
+test("aniimo-link.js makes the same slugs as the API (public/aniimo-link.js shortSlugs)", () => {
   const window = { location: { pathname: "/explorer/" } };
   const document = { head: { append() {} }, createElement: () => ({}), getElementById: () => null };
   vm.runInNewContext(readFileSync(new URL("../public/aniimo-link.js", import.meta.url), "utf8"), { window, document, encodeURIComponent });
@@ -304,14 +304,16 @@ test("the PNG reader: RGB, RGBA and palette pictures, every row filter; it refus
   await assert.rejects(decodePng(big), /too large/u);
 });
 
-test("the Aniilog page has a Copy link button that copies the /a/ link on aniilogs.app, with the clipboard fallback", () => {
+test("an Aniilog entry has one row of buttons: View Model, one Hide/Show Artwork switch, Locate on Map; no Copy link", () => {
   const app = readFileSync(new URL("../public/explorer/app.js", import.meta.url), "utf8");
-  assert.match(app, /copyLink\.className = "catalog-copy-link-button";/u);
-  assert.match(app, /copyLink\.textContent = "Copy link";/u);
-  assert.match(app, /return `\$\{LINK_ORIGIN\}\/a\/\$\{slug\}`;/u);
-  assert.match(app, /window\.AniilogsAniimoLink\?\.shortSlugs\?\.\(released\)/u);
-  assert.match(app, /async function copyAniimoLink\(button, link\) \{\s+const copied = await copyText\(link\);/u);
-  assert.match(app, /window\.prompt\("Copy this link:", link\)/u);
+  const css = readFileSync(new URL("../public/explorer/styles.css", import.meta.url), "utf8");
+  assert.doesNotMatch(app, /catalog-copy-link-button|copyAniimoLink|aniimoShortLink/u);
+  assert.doesNotMatch(app, /showcaseButton\.addEventListener|Unhide Artwork/u);
+  assert.match(app, /button\.textContent = hidden \? "Show Artwork" : "Hide Artwork";/u);
+  assert.match(app, /headingActions\.append\(hideArtworkButton\);/u);
+  // the narrowest phones keep the three on one row
+  assert.match(css, /@media \(max-width: 400px\) \{\s+\.catalog-aniilog-record > \.catalog-identity > \.catalog-identity-actions,\s+\.catalog-mobile-sticky-aniilog\.is-stuck > \.catalog-identity-actions \{\s+grid-template-columns: repeat\(auto-fit, minmax\(0, 1fr\)\);/u);
+  assert.doesNotMatch(css, /identity-actions > button:nth-child\(3\):last-child/u);
   const html = readFileSync(new URL("../public/explorer/index.html", import.meta.url), "utf8");
   assert.match(html, /aniimo-link\.js\?v=0\.1\.2/u);
 });

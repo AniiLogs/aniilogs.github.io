@@ -13095,16 +13095,18 @@ html[data-embed="app"] #topbarLogoutButton {
   }
 }
 
-/* The narrowest phones fit two buttons per row; a third takes the whole second row. */
+/* The narrowest phones keep the entry's three buttons (View Model, Hide/Show Artwork, Locate on Map) on one row. */
 @media (max-width: 400px) {
   .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions,
   .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 6px;
   }
 
-  .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions > button:nth-child(3):last-child,
-  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions > button:nth-child(3):last-child {
-    grid-column: 1 / -1;
+  .catalog-aniilog-record > .catalog-identity > .catalog-identity-actions > button,
+  .catalog-mobile-sticky-aniilog.is-stuck > .catalog-identity-actions > button {
+    padding: 0 4px;
+    font-size: 12px;
   }
 }
 
