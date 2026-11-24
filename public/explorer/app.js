@@ -10534,7 +10534,11 @@ function renderCatalogPreview(options = {}) {
           head.alt = "";
           target.append(head);
         }
-        target.append(option.label);
+        // the name in its own box, so a narrow menu shortens it with "…" instead of running into the arrow
+        const name = document.createElement("span");
+        name.className = "catalog-artwork-select-label";
+        name.textContent = option.label;
+        target.append(name);
       };
       const choose = (option) => {
         fill(button, option);

@@ -318,6 +318,9 @@ test("an Aniilog entry has one row of buttons: View Model, one Hide/Show Artwork
   assert.match(css, /body\.aniilog-model-mode \.catalog-aniilog-record \.afp-forms,\s+body\.aniilog-model-mode \.catalog-mobile-sticky-aniilog \.afp-forms \{\s+display: none;/u);
   assert.match(app, /options: modelVariants\.map\(\(candidate\) => \(\{ value: candidate\.id, label: [^}]+, icon: candidate\.icon \}\)\)/u);
   assert.match(app, /const head = makeIcon\("catalog-artwork-select-icon", option\.icon\);/u);
+  // a narrow menu shortens the name with "…" instead of running into its arrow
+  assert.match(app, /name\.className = "catalog-artwork-select-label";/u);
+  assert.match(css, /\.catalog-artwork-select-label \{\s+min-width: 0;\s+overflow: hidden;\s+text-overflow: ellipsis;/u);
   const html = readFileSync(new URL("../public/explorer/index.html", import.meta.url), "utf8");
   assert.match(html, /aniimo-link\.js\?v=0\.1\.2/u);
 });

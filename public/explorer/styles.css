@@ -15808,6 +15808,13 @@ body.aniilog-model-mode .catalog-mobile-sticky-aniilog .afp-forms {
   gap: 8px;
 }
 
+.catalog-artwork-select-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .catalog-artwork-select-icon {
   flex: none;
   width: 24px;
@@ -15815,4 +15822,16 @@ body.aniilog-model-mode .catalog-mobile-sticky-aniilog .afp-forms {
   border-radius: 50%;
   object-fit: cover;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* Phones: the closed menu's head is smaller, so the form's name keeps its room */
+@media (max-width: 760px) {
+  .catalog-artwork-select-button {
+    gap: 5px;
+  }
+
+  .catalog-artwork-select-button .catalog-artwork-select-icon {
+    width: 18px;
+    height: 18px;
+  }
 }
