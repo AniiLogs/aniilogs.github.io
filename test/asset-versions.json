@@ -32,8 +32,8 @@
     "sha256": "cb5dff902e505e5de83d885edfdabcb1a2e5fc84adc24782479d9f897aa4da98"
   },
   "explorer/app-config.js": {
-    "tag": "20261126-build4047363-r98",
-    "sha256": "38f4fd9bbd747145b214a3b6688987b274026a68a31889c675eb5e55f9bea5e3"
+    "tag": "20261126-build4047363-r99",
+    "sha256": "5303082422265966d336181165e54b41287de348f430cb674aa3ab8cc77517de"
   },
   "explorer/app.js": {
     "tag": "0.20.53-event-ends",
