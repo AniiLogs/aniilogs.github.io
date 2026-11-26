@@ -36,8 +36,8 @@
     "sha256": "38f4fd9bbd747145b214a3b6688987b274026a68a31889c675eb5e55f9bea5e3"
   },
   "explorer/app.js": {
-    "tag": "0.20.52-menus-fit",
-    "sha256": "e9eb8baa5eb39efbf29791f73c0b410b0ff109135d190909b0f1ffd98f775a9d"
+    "tag": "0.20.53-event-ends",
+    "sha256": "712c92d5f5250f1ec3068550fe68e39596d881542613c8a4502700d2b71ea438"
   },
   "explorer/build-card.js": {
     "tag": "0.2.7-enhanced",
