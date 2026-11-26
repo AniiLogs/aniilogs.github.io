@@ -1,0 +1,72 @@
+name: New guides from sargeeva
+
+# Once a day, looks for guides sargeeva has added to sargeeva/aniimo-guides that the Guides page doesn't list yet
+# (scripts/sarg-guides.mjs). For new ones it pushes a branch with their cards drafted, passing the site's checks, and
+# opens an issue that links it. Nothing goes live from here: someone rewrites the summary, adds `ends` for an event
+# guide, and opens the pull request once the owner says publish. GitHub Actions can't open pull requests in this
+# repository, and a branch it pushes starts no workflows, so the checks run when that pull request is opened.
+
+on:
+  schedule:
+    - cron: "17 15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sarg-guides
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Look for new guides
+        id: look
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/sarg-guides.mjs > "$RUNNER_TEMP/new.json"
+          ids=$(node -e 'const g=require(process.argv[1]); process.stdout.write(g.map((x)=>x.id).join(" "))' "$RUNNER_TEMP/new.json")
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          echo "New guides: ${ids:-none}"
+      - name: Draft their cards on a branch and open an issue
+        if: steps.look.outputs.ids != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IDS: ${{ steps.look.outputs.ids }}
+        run: |
+          branch="bot/sarg-guides-$(echo "$IDS" | tr ' ' '_')"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "$branch is there already; nothing to do"
+            exit 0
+          fi
+          node scripts/sarg-guides.mjs --write > "$RUNNER_TEMP/added.json"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add public/guides/linked-guides.js public/guides/index.html test/asset-versions.json release-review.json
+          git commit -m "Guides page: cards drafted for sargeeva's new guides ($IDS)"
+          git push origin "$branch"
+          node -e '
+            const added = require(process.argv[1]);
+            const lines = added.map((g) => `- **${g.title}**: ${g.url}\n  Drafted summary (from the page; rewrite it in our words): ${g.summary}`);
+            process.stdout.write([
+              "sargeeva added guides the Guides page does not list yet:",
+              "",
+              ...lines,
+              "",
+              `Their cards are drafted on branch \`${process.argv[2]}\`: ${process.argv[3]}`,
+              "",
+              "Before publishing: rewrite each summary, and give an event guide `ends` from the game's event table, then open the pull request from the branch.",
+            ].join("\n"));
+          ' "$RUNNER_TEMP/added.json" "$branch" "https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1" > "$RUNNER_TEMP/body.md"
+          gh issue create --title "New guides from sargeeva: $IDS" --body-file "$RUNNER_TEMP/body.md"
