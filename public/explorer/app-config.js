@@ -7,7 +7,7 @@
   const contentBaseUrl = isLocalPreview
     ? "http://127.0.0.1:8788/releases/3535596"
     : "https://aniilogs-api.pages.dev/api/content/releases/3535596";
-  const contentRevision = "20261119-build3989635-r96";
+  const contentRevision = "20261126-build4047363-r97";
   window.ANIILOGS_CONFIG = Object.freeze({
     apiUrl,
     shareApiUrl: apiUrl,
@@ -17,7 +17,7 @@
     // contentPackageVersion names the reviewed R2 release (releases/3535596/) and the live viewer's
     // approved package, so it stays put; gameBuild is only the game build shown to visitors.
     contentPackageVersion: 3535596,
-    gameBuild: 3989635,
+    gameBuild: 4047363,
     contentAvailable: true,
     aniilogAvailable: true,
     contentBaseUrl,

@@ -15,10 +15,12 @@ function load() {
 }
 
 const EVENT_END = "2026-12-09T23:59:59Z";
+// Resonance Fantasia ends latest on the Americas server (game_event_data 10000098)
+const FANTASIA_END = "2026-12-17T07:59:59Z";
 
-test("the Guides page links each of sargeeva's eight guides directly", () => {
+test("the Guides page links each of sargeeva's nine guides directly", () => {
   const { guides } = load();
-  assert.equal(guides.length, 8);
+  assert.equal(guides.length, 9);
   assert.equal(new Set(guides.map((guide) => guide.id)).size, guides.length);
   for (const guide of guides) {
     assert.ok(guide.url.startsWith("https://sargeeva.github.io/aniimo-guides/"), guide.url);
@@ -29,8 +31,8 @@ test("the Guides page links each of sargeeva's eight guides directly", () => {
     assert.equal(guide.host, "sargeeva.github.io");
   }
   const events = guides.filter((guide) => guide.ends);
-  assert.deepEqual(Array.from(events, (guide) => guide.id).sort(), ["night-parade", "nighttime-gathering"]);
-  for (const guide of events) assert.equal(guide.ends, EVENT_END);
+  assert.deepEqual(Array.from(events, (guide) => guide.id).sort(), ["night-parade", "nighttime-gathering", "resonance-fantasia"]);
+  for (const guide of events) assert.equal(guide.ends, guide.id === "resonance-fantasia" ? FANTASIA_END : EVENT_END);
 });
 
 test("an event guide is archived only after its end; a guide without an end never is", () => {

@@ -1,4 +1,4 @@
-// game-audit: 1.1.3989635 2026-11-21 the end of the Night Parade (game_event_data 10000080) and of the Nighttime Gathering (home_season_module_data 206), both common time 2026-12-09 23:59:59 UTC
+// game-audit: 1.1.4047363 2026-11-26 the end of the Night Parade (game_event_data 10000080) and of the Nighttime Gathering (home_season_module_data 206), both common time 2026-12-09 23:59:59 UTC; the end of Resonance Fantasia (game_event_data 10000098 tabEndDayTime), latest on the Americas server, 2026-12-17 07:59:59 UTC
 // Guides hosted elsewhere, listed on the Guides page (/guides/) as cards that open the guide itself in a new tab.
 // Adding a guide is one more entry: id, title, summary and the guide's direct url (never the site's index), plus by
 // and host. Give it `ends` (an ISO time in UTC) only when the guide is about a limited-time event: once that time has
@@ -58,6 +58,13 @@
       title: "Friendship & Illusory",
       url: "https://sargeeva.github.io/aniimo-guides/friendship/",
       summary: "Friend Affinity's six levels and what each unlocks, the fastest daily routine, and how Illusory Friends and their odds work.",
+    }),
+    guide({
+      id: "resonance-fantasia",
+      title: "Resonance Fantasia",
+      url: "https://sargeeva.github.io/aniimo-guides/resonance-fantasia/",
+      summary: "Jaguaraun's event: when it runs, each Fantasia Survey quest with its reward, how Friends' catches count in Companion Mode, and what the Thundercharge Cluster and Fantasia Marks are for.",
+      ends: "2026-12-17T07:59:59Z",
     }),
   ]);
 

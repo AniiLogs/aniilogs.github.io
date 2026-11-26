@@ -32,8 +32,8 @@
     "sha256": "cb5dff902e505e5de83d885edfdabcb1a2e5fc84adc24782479d9f897aa4da98"
   },
   "explorer/app-config.js": {
-    "tag": "20261119-build3989635-r96",
-    "sha256": "9b473f8112bb4d3f8488d93668b4e449419a1983a1ac7d302db00c5588e10fa3"
+    "tag": "20261126-build4047363-r97",
+    "sha256": "a88a40ce27e0c9b3c18f6104e817abd27f9b44f739b08408132a8e68f8376003"
   },
   "explorer/app.js": {
     "tag": "0.20.52-menus-fit",
@@ -44,16 +44,16 @@
     "sha256": "129ea567b7df5334f89b410604b6da44a83c79a069f62c54eed6445a84e90c55"
   },
   "explorer/damage-guide.js": {
-    "tag": "0.1.14-bugged",
-    "sha256": "797351adc36a737d35024e91f96c66c5bd2714fdb2660e6192384ac193663f69"
+    "tag": "0.1.15-build4047363",
+    "sha256": "8fd54c2811b599e6ebc80a242ce8f6a8c3ef3334740b81215e8b8b4fc10d0b5c"
   },
   "explorer/damage-model.js": {
-    "tag": "0.1.13-bugged",
-    "sha256": "7f401cab6927755e55f4f7f43670983f53a7bd242a3036033da1cab67174ab8a"
+    "tag": "0.1.14-build4047363",
+    "sha256": "163809a062ffc47a0b3f4939572153f5e95dc640a590170c60a2970b762aac1a"
   },
   "explorer/duel.js": {
-    "tag": "0.6.11-pvp-matchups",
-    "sha256": "7ce0a168b09346bce454a4a48137b59e46816c4c041820d97a24c0f38de663df"
+    "tag": "0.6.12-build4047363",
+    "sha256": "c833a776bb33a5b3a0879a8c66873a89f5183970502e574949bf0a729a8bb63b"
   },
   "explorer/guide-page.js": {
     "tag": "0.3.1-basis-labels",
@@ -92,8 +92,8 @@
     "sha256": "de4d3e2b8eb2048ab395483fefe18809059d343c60fac9e951565e1c93fc6455"
   },
   "explorer/type-matchups.js": {
-    "tag": "0.2.0",
-    "sha256": "05c6f0b42b2c84a3ae3eea7bb7d2aa497ecaeb3e32f19cac5ac5c0af4886a142"
+    "tag": "0.2.1-build4047363",
+    "sha256": "e23ab948bb9b12198bbfc0dd625bcbda85e11c9c6c310d2ff5a0c0e080a80f58"
   },
   "explorer/view-model-catalog.js": {
     "tag": "0.1.0-build3634150",
@@ -108,12 +108,12 @@
     "sha256": "d19e9a112ec7296a19df3f536b79573834d3c2fe7e773b10e53fa7022f02ed7c"
   },
   "guides/interlink-guide.js": {
-    "tag": "0.1.3-coordinated-offensive",
-    "sha256": "8f27510565d1bc08069d428ab6a986c56afbb7f1c4d8450060fd4c133c954b3d"
+    "tag": "0.1.4-build4047363",
+    "sha256": "9053de9f984cda9eaa756b55e80bf037e0baaf640e4ddc95b9948e9b9f8e41ac"
   },
   "guides/linked-guides.js": {
-    "tag": "0.1.0",
-    "sha256": "edaa45e782084bff3a16fd60eed18941ef37af2a50b6fb9bd9337a941f55544c"
+    "tag": "0.2.0-resonance-fantasia",
+    "sha256": "68d7083a9b671a5621e47e4e0972d229ef8162960bdea6fbbefa3e239f21b1c2"
   },
   "icons/alogs-loader.js": {
     "tag": "0.4.0",

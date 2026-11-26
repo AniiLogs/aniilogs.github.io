@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Everything Aniimo’s November 26 update changed (game build 4047363): the official notice checked against the game’s files, the balance changes with their skills and Aniimo, area levels and EXP, new events and story, renames, and how AniiLogs followed.">
+    <meta name="theme-color" content="#f5eecb">
+    <!-- Not deferred, and before the stylesheets: the saved theme is on <html> before the first paint (carry-in.js first: settings brought from the old address). -->
+    <script src="/carry-in.js?v=0.1.0"></script>
+    <script src="/theme-shell.js?v=0.3.5-site-menu"></script>
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/icons/alogs-icon-192.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <title>Game update: Departure with the Wind Part 2 (build 4047363) · AniiLogs</title>
+    <link rel="canonical" href="https://aniilogs.app/updates/4047363/">
+    <meta property="og:site_name" content="AniiLogs">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Game update: Departure with the Wind Part 2 (build 4047363) · AniiLogs">
+    <meta property="og:description" content="Everything Aniimo’s November 26 update changed (game build 4047363): the official notice checked against the game’s files, the balance changes with their skills and Aniimo, area levels and EXP, new events and story, renames, and how AniiLogs followed.">
+    <meta property="og:url" content="https://aniilogs.app/updates/4047363/">
+    <meta property="og:image" content="https://aniilogs.app/icons/og-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AniiLogs: competitive Aniimo leaderboards and an ad-free DPS meter">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="stylesheet" href="/styles.css?v=0.17.6-update-details">
+    <link rel="stylesheet" href="/updates/updates.css?v=0.2.1">
+    <link rel="stylesheet" href="/site-chrome.css?v=0.1.6-site-menu">
+    <link rel="stylesheet" href="/notifications.css?v=0.1.0">
+    <link rel="stylesheet" href="/run-checks.css?v=0.1.0">
+    <script src="/explorer/app-config.js?v=20261126-build4047363-r97" defer></script>
+    <script src="/site-chrome.js?v=0.1.0" defer></script>
+    <script src="/icons/alogs-loader.js?v=0.4.0" defer></script>
+    <script src="/notifications.js?v=0.1.0" defer></script>
+    <script src="/run-checks.js?v=0.1.0" defer></script>
+    <script src="/aniimo-link.js?v=0.1.2" defer></script>
+    <script src="/updates/updates.js?v=0.1.0" defer></script>
+  </head>
+  <body class="site-chrome-page">
+    <div class="sky-speckles" aria-hidden="true"></div>
+    <header class="app-topbar" data-chrome-page="home" data-chrome-account>
+      <a class="app-topbar-brand" href="/" aria-label="AniiLogs home">
+        <img class="app-topbar-brand-mark" src="/icons/alogs-icon-96.png" alt="" width="43" height="43">
+        <span class="app-topbar-brand-name">Anii<span>Logs</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/explorer/" data-chrome-link="map">Map</a>
+        <a href="/explorer/?view=aniilog" data-chrome-link="aniilog">Aniilog</a>
+        <a href="/explorer/?view=itemlog" data-chrome-link="itemlog">Item-log</a>
+        <a href="/explorer/?view=checklist" data-chrome-link="checklist">Checklists</a>
+        <a href="/explorer/?view=team" data-chrome-link="team">Team Builder</a>
+        <a href="/guides/" data-chrome-link="guides">Guides</a>
+        <a href="/leaderboard/" data-chrome-link="leaderboards">Leaderboards</a>
+        <a href="/companion/" data-chrome-link="companion">Companion App</a>
+        <a href="/?view=profile" data-chrome-link="profiles">Profiles</a>
+      </nav>
+      <div class="app-topbar-actions">
+        <select class="language-picker" data-site-language-select aria-label="Display language: English" title="Display language: English">
+          <option value="en">🇺🇸</option>
+          <option value="de-DE">🇩🇪</option>
+          <option value="es-ES">🇪🇸</option>
+          <option value="fr-FR">🇫🇷</option>
+          <option value="id-ID">🇮🇩</option>
+          <option value="ja">🇯🇵</option>
+          <option value="ko">🇰🇷</option>
+          <option value="pt-PT">🇵🇹</option>
+          <option value="ru-RU">🇷🇺</option>
+          <option value="th-TH">🇹🇭</option>
+          <option value="vi-VN">🇻🇳</option>
+          <option value="zh-CN">🇨🇳</option>
+          <option value="zh-TW">🇹🇼</option>
+        </select>
+        <details class="account-menu site-menu" data-site-menu data-settings-shortcut>
+          <summary class="settings-gear-button" aria-label="Settings and theme" title="Settings">
+          <svg class="settings-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+            <span class="settings-gear-label">Settings</span>
+          </summary>
+          <div class="account-menu-popover">
+            <label class="menu-theme-picker">
+              <span>Theme</span>
+              <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+                <option value="default">Night</option>
+                <option value="meadow">Meadow</option>
+                <option value="emberpup">Emberpup</option>
+                <option value="pawney">Pawney</option>
+              </select>
+            </label>
+            <a href="/explorer/?settings=1">All settings</a>
+          </div>
+        </details>
+        <a class="account-menu-trigger account-sign-in" href="/api/auth/discord/start" data-login data-account-sign-in aria-label="Sign in with Discord">
+          <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+          <span>Sign in</span>
+        </a>
+        <details class="account-menu" data-account-menu hidden>
+          <summary class="account-menu-trigger" aria-label="Discord sign in and account menu">
+            <svg class="discord-icon" data-discord-icon aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path fill="currentColor" d="M19.54 5.34A17.3 17.3 0 0 0 15.22 4l-.53 1.08a15.8 15.8 0 0 0-5.38 0L8.78 4a17.5 17.5 0 0 0-4.33 1.35C1.72 9.39.98 13.33 1.35 17.2a17.6 17.6 0 0 0 5.3 2.68l1.29-1.76a11 11 0 0 1-2.03-.98l.5-.38a12.4 12.4 0 0 0 11.18 0l.5.38c-.65.39-1.33.72-2.03.98l1.29 1.76a17.5 17.5 0 0 0 5.3-2.68c.44-4.48-.75-8.38-3.11-11.86ZM8.52 14.82c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.84 2.14-1.9 2.14Zm6.96 0c-1.04 0-1.9-.96-1.9-2.14s.84-2.14 1.9-2.14c1.07 0 1.92.97 1.9 2.14 0 1.18-.83 2.14-1.9 2.14Z"/></svg>
+            <span data-account hidden></span>
+            <span class="account-menu-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="account-menu-popover">
+            <label class="menu-theme-picker">
+              <span>Theme</span>
+              <select class="theme-picker" data-site-theme-select aria-label="Website theme">
+                <option value="default">Night</option>
+                <option value="meadow">Meadow</option>
+                <option value="emberpup">Emberpup</option>
+                <option value="pawney">Pawney</option>
+              </select>
+            </label>
+            <a href="/?view=profile" data-profile-link hidden>My Profile</a>
+            <a href="https://discord.gg/uMMbabh6k2" target="_blank" rel="noopener noreferrer">Join the Discord</a>
+            <a href="/explorer/?settings=1">Settings</a>
+            <button type="button" data-logout hidden>Log out</button>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="upd-main">
+      <a class="upd-back" href="/#patch-notes-title">← All updates</a>
+      <header class="upd-head">
+        <h1>Game update: Departure with the Wind Part 2</h1>
+        <p class="upd-meta"><span>Game build 4047363 (v1.1.4047363)</span><time datetime="2026-11-26">November 26, 2026</time></p>
+      </header>
+      <nav class="upd-toc" aria-label="On this page"><a href="#new">New content</a><a href="#balance">Balance</a><a href="#world">World and levels</a><a href="#events">Events</a><a href="#modes">Homeland and modes</a><a href="#items">Items</a><a href="#text">Text</a><a href="#ledger">Every file change</a><a href="#same">Unchanged</a><a href="#site">On the site</a></nav>
+      <div class="upd-card upd-summary"><h3>At a glance</h3><ul>
+<li>This page covers the November 26 update: the game’s official update notice, checked against the game’s files (build 3989635 to 4047363), plus everything the files show that the notice doesn’t.</li>
+<li><strong>New story:</strong> Tranquil Hymn (the notice calls it “Hymn of Calm”), three chapters with the Dewlops at the Sanctum.</li>
+<li><strong>New events:</strong> Resonance Fantasia with Jaguaraun (until December 17), Annual Carnival and Starlight Echoes (November 27 to December 1), Return to Idyll for returning Pathfinders, and double collectibles in Operation: Egg Heist (until December 9).</li>
+<li><strong>Balance:</strong> Hoptail’s Tail Flick Combo, Scrubbit’s Rain-Pond Leaf Strike, Gracewing’s Help! Gracewing!, Dazmand’s Spotlight Moment and Coraliz’s Coral Spike Growth fixed; Gracewing gets a Limited-Time Reset. <strong>Jaguaraun</strong> hits harder, which the notice doesn’t mention.</li>
+<li><strong>Levels:</strong> five areas are 2 to 5 levels lower, Lv. 41–54 needs 28.8% less EXP, the Whisperwake Isles main quest opens at Lv. 50 and Wayfarer III, and 16 Pathfinder Challenges are 3 to 8 levels lower.</li>
+<li><strong>Looks:</strong> Dawn Radiance and Moonshadow Starlight in Splendorweave, paid in the new Woven Radiance, and the Renewal Pigment.</li>
+<li><strong>Homeland and modes:</strong> the big RV and RV skins at RV Lv. 16, rain waters your crops, 4 new Aniimo Dash weekly quests and a Prismana Egg in the Racing Shop.</li>
+<li><strong>Text:</strong> 2,110 new English strings, 567 reworded and 40 removed. Three skills are renamed: Blooming Drift, Baa-bble Wave and Underflow Surge.</li>
+<li><strong>Still the same:</strong> the damage formulas, the element chart, Holo-Battle Interlink’s weeks, bosses and grades, and Holo-Battle Sim. Frenzied Assault still gives 0%.</li>
+</ul></div>
+      <section class="upd-part" id="game" aria-labelledby="game-title">
+        <h2 id="game-title">In the game</h2>
+        <p class="upd-small">Sources: the official <a href="https://aniimo.com/newslist/detail/100312">November 26 update notice</a>, set against the game’s own files. Where the notice and the files disagree, we go by the files, and say what still needs checking in the game. Times are in UTC; the game’s three servers are Apac (UTC+8), Europe (UTC+0) and Americas (UTC-4).</p>
+        <div class="upd-card" id="new"><h3>New content</h3>
+<h4>Story: Tranquil Hymn</h4>
+<p>A new story chapter, <strong>Tranquil Hymn</strong>. The notice calls it “Hymn of Calm”, which is what the quests call the song itself. The Sanctum has come back to life and the family of Dewlops born around it want to offer it the Hymn of Calm.</p>
+<ul>
+<li>Three chapters: <strong>Song of Reunion</strong>, <strong>Song of Waiting</strong> and <strong>Song of Memory</strong>, with a reward at a third, two thirds and all of the chapter.</li>
+<li>113 quests, 92 dialogues and two new scenes.</li>
+<li>Story items: Storm Song Score, Message Bottle on the Beach, Sea Shanty, Archival Chip - Della’s Song, Archival Chip - Music in the Bubble, Archival Chip - Ending 1: Offering the Song of Listening and Archival Chip - Ending 2: Singing the Answer.</li>
+<li>Home progression and Title Promotion quests now have voice-over.</li>
+</ul>
+<h4>Splendorweave: Dawn Radiance and Moonshadow Starlight</h4>
+<ul>
+<li>Two Prismatic outfits, <strong>Dawn Radiance</strong> (its item is named Dawnlight Splendor) and <strong>Moonshadow Starlight</strong>, each with its hairstyle, outfit pieces, crown and makeup. Both come with a <strong>Change Outfit</strong> action (10 s cooldown).</li>
+<li>Splendorweave uses a new currency, <strong>Woven Radiance</strong>: its shop prices are 2 to 25 Woven Radiance an item, and it also has the Swiftlight Scooter.</li>
+<li>Its listing runs until January 28, 2027, 23:59 (Europe).</li>
+</ul>
+<h4>Renewal Pigment</h4>
+<ul>
+<li>A new item: using it gives an Aniimo one Sparkling Pigment you don’t own yet. Shadow and Dazzling Sparkling are never picked. It comes from Starlight Echoes and the Annual Carnival bundles.</li>
+</ul>
+<h4>Also new</h4>
+<ul>
+<li><strong>Inventory:</strong> new tab icons and order, and an “Available” tab apart from Common Items. Items on cooldown show it, the purchase limit shows on the icon, and you can check and undo an item’s lock from the use screen.</li>
+<li><strong>Map:</strong> pick a teammate’s location on the map and teleport there. Better map zoom.</li>
+<li><strong>Profile:</strong> hide the interface and share your profile; separate counts for Aniimo with three and with six maxed attributes.</li>
+<li><strong>Appearance:</strong> “Apply Face Data” in Outfit Settings, a better camera, and Aniimo at your Home can be picked in Aniimo Accessories.</li>
+<li><strong>Network:</strong> the Function Menu shows your network status.</li>
+<li><strong>Nurture:</strong> Mark Sharing markers can no longer be placed in a Bloom’s range.</li>
+<li><strong>Research Console:</strong> prompts for other Pathfinders nearby are hidden so reports are easier to hand in.</li>
+<li><strong>Discount vouchers:</strong> the Limited-Time Appearance Discount Voucher (Annual Carnival) and the Event Discount Coupon (2,000 Lumin Crystals minimum, 500 off, for Season, Limited and Custom bundles).</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> the Limited-Time Appearance Discount Voucher’s text says 200 Lumin Crystals off a 680 minimum, but its data gives 300 off. Which one the shop takes.</p></div>
+        <div class="upd-card" id="balance"><h3>Balance</h3><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Aniimo</th><th scope="col">Skill or buff</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody>
+<tr><td data-label="Aniimo"><strong>Hoptail</strong></td><td data-label="Skill or buff">Tail Flick Combo (skill), its three hits, normal and enhanced</td><td data-label="Before">Damage rate <span class="upd-old">25% / 35% / 40%</span></td><td data-label="Now"><span class="upd-new">100%</span> on every hit</td></tr>
+<tr><td data-label="Aniimo"><strong>Scrubbit</strong></td><td data-label="Skill or buff">Rain-Pond Leaf Strike (skill): the healing debuff it puts on the target</td><td data-label="Before">Healing received <span class="upd-old">+70%</span> (it raised healing)</td><td data-label="Now">Healing received <span class="upd-new">−70%</span>, as its text says</td></tr>
+<tr><td data-label="Aniimo"><strong>Gracewing</strong> (Basic, Sea of Flowers, Nighttime and Mountain Woods Forms)</td><td data-label="Skill or buff">Help! Gracewing! (Ultimate)</td><td data-label="Before">Healed the <span class="upd-old">whole team</span>, at any distance</td><td data-label="Now">Heals <span class="upd-new">allies in range</span>: an 8.5 by 2 area around Gracewing, 2 s into the Ultimate. Still 30% of Gracewing’s max HP.</td></tr>
+<tr><td data-label="Aniimo"><strong>Dazmand</strong></td><td data-label="Skill or buff">Spotlight Moment (trait): the free first skill</td><td data-label="Before">A buff lasting <span class="upd-old">5 s</span> after entering the field</td><td data-label="Now">Lasts <span class="upd-new">until the first skill is used</span></td></tr>
+<tr><td data-label="Aniimo"><strong>Coraliz</strong></td><td data-label="Skill or buff">Coral Spike Growth (skill): the Energy back when its Coral Spike mark is removed</td><td data-label="Before">Sent to the Aniimo saved when the mark was placed</td><td data-label="Now">Sent to that Aniimo’s Pathfinder, so it no longer gets lost</td></tr>
+<tr><td data-label="Aniimo"><strong>Jaguaraun</strong></td><td data-label="Skill or buff">Basic Attack, hits 1–4: the thundercloud explosion value that Thundercloud Surge uses</td><td data-label="Before"><span class="upd-old">1.22 / 0.70 / 1.40 / 1.50</span></td><td data-label="Now"><span class="upd-new">1.83 / 1.05 / 2.10 / 2.25</span> (+50%). Hit 3 now reads its own value.</td></tr>
+<tr><td data-label="Aniimo"><strong>Jaguaraun</strong></td><td data-label="Skill or buff">Thunder Rush Claw (skill), normal and enhanced</td><td data-label="Before">Damage rate <span class="upd-old">0.5</span>, gives <span class="upd-old">4</span> Thunderstorm stacks</td><td data-label="Now">Damage rate <span class="upd-new">1.0</span>, gives <span class="upd-new">8</span> stacks</td></tr>
+<tr><td data-label="Aniimo"><strong>Jaguaraun</strong></td><td data-label="Skill or buff">Thundercloud Surge (trait): Energy each Overcharge explosion uses</td><td data-label="Before"><span class="upd-old">3</span></td><td data-label="Now"><span class="upd-new">2.5</span></td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>Gracewing Limited-Time Reset</strong> (all four forms, if you got it before this update): one reset, from the update until December 10, 20:00 UTC on every server (December 11, 04:00 Apac time). It refunds EXP items, Star Up, Capability Awakening and Capafruit.</li>
+<li><strong>Jaguaraun:</strong> Thunder Rush Call (Ultimate) now adds its Thunderstorm stacks a different way; its numbers are the same. These changes aren’t in the notice. Jaguaraun’s trait text also showed its explosion damage as a broken formula; it now shows a number.</li>
+<li><strong>Hoptail:</strong> the skill text didn’t change; the trait’s stack is now called [Bounce] (was [Elasticity]) and its state [Bounce Burst] (was [Elastic Burst]).</li>
+<li><strong>Baleetle:</strong> one buff was renumbered and now carries over when you switch Aniimo; the same numbers.</li>
+<li><strong>Bailite</strong> (boss): its fire attack is three timed waves over 9 s instead of one wave over 7.2 s.</li>
+<li><strong>Umbral Geoclaw:</strong> a new animation for its ice prison attack.</li>
+<li>A projectile that is told to disappear during its own hit now disappears after the hit is counted.</li>
+<li>Hypnyto’s Dazzling Prismglare text had the same broken formula as Jaguaraun’s; it now shows a number.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> Gracewing’s heal range in the game (the data gives an 8.5 by 2 area; the unit isn’t named).</p></div>
+        <div class="upd-card" id="world"><h3>World and levels</h3>
+<p>The notice: earlier access to the Whisperwake Isles and a gentler climb from Lv. 40 to 55.</p>
+<h4>Area levels</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Area</th><th scope="col">Before</th><th scope="col">Now, in the files</th><th scope="col">The notice says</th></tr></thead><tbody>
+<tr><td data-label="Area"><strong>Tideblossom Coast</strong> (Breezy Plains)</td><td data-label="Before" class="upd-old">53–60</td><td data-label="Now, in the files" class="upd-new">51–56</td><td data-label="The notice says">52–57</td></tr>
+<tr><td data-label="Area"><strong>Crescent Bay</strong> (Whisperwake Isles)</td><td data-label="Before" class="upd-old">54–59</td><td data-label="Now, in the files" class="upd-new">49–54</td><td data-label="The notice says">50–55</td></tr>
+<tr><td data-label="Area"><strong>Rosy Mirelands</strong></td><td data-label="Before" class="upd-old">60–62</td><td data-label="Now, in the files" class="upd-new">55–57</td><td data-label="The notice says">56–58</td></tr>
+<tr><td data-label="Area"><strong>Wildwater Gorge</strong></td><td data-label="Before" class="upd-old">61–63</td><td data-label="Now, in the files" class="upd-new">56–58</td><td data-label="The notice says">57–59</td></tr>
+<tr><td data-label="Area"><strong>Cloudreach Falls</strong></td><td data-label="Before" class="upd-old">62–64</td><td data-label="Now, in the files" class="upd-new">57–59</td><td data-label="The notice says">58–60</td></tr>
+</tbody></table></div>
+<p class="upd-small">Every range in the files is 1 below the notice’s at both ends.</p>
+<h4>Alphas and Omegas</h4>
+<p>The notice lowers six of them: Infergon Omega to Lv. 48, Luminelle Alpha to 57, Glameep Alpha to 55, Sugartini Alpha to 58, Jabster Alpha to 59 and Jeburst Omega to 60. Their levels aren’t in the game’s client files, so we can’t check these.</p>
+<h4>EXP to the next level (Safaris)</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Level</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody>
+<tr><td data-label="Level">41</td><td data-label="Before" class="upd-old">5,100</td><td data-label="Now" class="upd-new">4,800</td></tr>
+<tr><td data-label="Level">42</td><td data-label="Before" class="upd-old">5,500</td><td data-label="Now" class="upd-new">4,900</td></tr>
+<tr><td data-label="Level">43</td><td data-label="Before" class="upd-old">5,900</td><td data-label="Now" class="upd-new">5,000</td></tr>
+<tr><td data-label="Level">44</td><td data-label="Before" class="upd-old">6,350</td><td data-label="Now" class="upd-new">5,100</td></tr>
+<tr><td data-label="Level">45</td><td data-label="Before" class="upd-old">6,800</td><td data-label="Now" class="upd-new">5,200</td></tr>
+<tr><td data-label="Level">46</td><td data-label="Before" class="upd-old">7,250</td><td data-label="Now" class="upd-new">5,300</td></tr>
+<tr><td data-label="Level">47</td><td data-label="Before" class="upd-old">7,850</td><td data-label="Now" class="upd-new">5,400</td></tr>
+<tr><td data-label="Level">48</td><td data-label="Before" class="upd-old">8,450</td><td data-label="Now" class="upd-new">5,500</td></tr>
+<tr><td data-label="Level">49</td><td data-label="Before" class="upd-old">9,050</td><td data-label="Now" class="upd-new">5,600</td></tr>
+<tr><td data-label="Level">50</td><td data-label="Before" class="upd-old">9,650</td><td data-label="Now" class="upd-new">5,700</td></tr>
+<tr><td data-label="Level">51</td><td data-label="Before" class="upd-old">10,250</td><td data-label="Now" class="upd-new">7,200</td></tr>
+<tr><td data-label="Level">52</td><td data-label="Before" class="upd-old">10,850</td><td data-label="Now" class="upd-new">8,700</td></tr>
+<tr><td data-label="Level">53</td><td data-label="Before" class="upd-old">11,550</td><td data-label="Now" class="upd-new">10,200</td></tr>
+<tr><td data-label="Level">54</td><td data-label="Before" class="upd-old">12,350</td><td data-label="Now" class="upd-new">11,700</td></tr>
+<tr><td data-label="Level"><strong>Lv. 41 to 55 in all</strong></td><td data-label="Before" class="upd-old">124,000</td><td data-label="Now" class="upd-new">88,300 (−28.8%)</td></tr>
+</tbody></table></div>
+<p class="upd-small">Pathfinders this affects get compensation by in-game mail, the notice says.</p>
+<h4>Quests and titles</h4>
+<ul>
+<li><strong>A Tale of Tide and Song</strong> (Whisperwake Isles main quest): needs <span class="upd-new">Lv. 50 and Wayfarer III</span> (was <span class="upd-old">Lv. 55 and Trailblazer I</span>). If you’ve finished “A New Journey” and meet this, you get “A Song from the Sea” by itself.</li>
+<li><strong>Rainbow of the Ground</strong> (the last Breezy Plains main chapter): its step now says “Reach level <span class="upd-new">45</span>” (was <span class="upd-old">50</span>). The notice adds Wayfarer II.</li>
+<li><strong>Elite Training:</strong> Chapter 6 of “Chapter of Breezy” now leads on to “Chapter of Whisperwake” once you reach the Whisperwake Isles. Each chapter now goes by your current title; to keep promoting after Chapter 1 of Whisperwake, finish Chapter 6 of Breezy, and once you’re Trailblazer I carry on in Whisperwake.</li>
+</ul>
+<h4>Pathfinder Challenges: recommended level</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Pathfinder Challenge</th><th scope="col">Before</th><th scope="col">Now</th></tr></thead><tbody>
+<tr><td data-label="Pathfinder Challenge"><strong>Elegant Young Lord</strong> (Breezy Plains)</td><td data-label="Before" class="upd-old">59</td><td data-label="Now" class="upd-new">56</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Blossom Broadcaster</strong> (Breezy Plains)</td><td data-label="Before" class="upd-old">58</td><td data-label="Now" class="upd-new">55</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Rookie Island Patroller</strong></td><td data-label="Before" class="upd-old">61</td><td data-label="Now" class="upd-new">53, and its second stage no longer asks for a title</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Walking Map</strong></td><td data-label="Before" class="upd-old">64</td><td data-label="Now" class="upd-new">56, and its second stage no longer asks for a title</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Mischief Sprite</strong></td><td data-label="Before" class="upd-old">65</td><td data-label="Now" class="upd-new">57</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Treasure Seeker</strong></td><td data-label="Before" class="upd-old">63</td><td data-label="Now" class="upd-new">55</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Stormwatcher</strong></td><td data-label="Before" class="upd-old">68</td><td data-label="Now" class="upd-new">60</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Wavebreaker Champ</strong></td><td data-label="Before" class="upd-old">70</td><td data-label="Now" class="upd-new">65</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Wavehopper Kid</strong></td><td data-label="Before" class="upd-old">68</td><td data-label="Now" class="upd-new">63</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Captain Bug</strong></td><td data-label="Before" class="upd-old">66</td><td data-label="Now" class="upd-new">61</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Sweet Ice Cream</strong></td><td data-label="Before" class="upd-old">67</td><td data-label="Now" class="upd-new">62</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Waterfallwatcher</strong></td><td data-label="Before" class="upd-old">72</td><td data-label="Now" class="upd-new">67</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Challenge Robot 1</strong></td><td data-label="Before" class="upd-old">64</td><td data-label="Now" class="upd-new">56</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Challenge Robot 2</strong></td><td data-label="Before" class="upd-old">69</td><td data-label="Now" class="upd-new">61</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Brood Queen</strong></td><td data-label="Before" class="upd-old">64</td><td data-label="Now" class="upd-new">59</td></tr>
+<tr><td data-label="Pathfinder Challenge"><strong>Gacha Courier</strong></td><td data-label="Before" class="upd-old">67</td><td data-label="Now" class="upd-new">62</td></tr>
+</tbody></table></div>
+<p class="upd-small">The ones without a region are on the Whisperwake Isles. Their opponents’ levels went down by 5 to 8 too.</p>
+<h4>Also</h4>
+<ul>
+<li><strong>Research reports:</strong> Report Credit <span class="upd-old">1,200</span> → <span class="upd-new">1,600</span>.</li>
+<li><strong>Curio Corner:</strong> new goods, and the shop now stays until March 2, 2027 (was December 9).</li>
+<li><strong>The Sanctum:</strong> one map layout’s last three rooms changed (one level shallower, a new room design) and two of its rooms got new object sets. In another Sanctum scene one room has four new object sets, and a puzzle swaps which of its 26 objects are on and off.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> the area levels the game shows (the files are 1 below the notice), and the six Alpha and Omega levels, which only the server knows.</p></div>
+        <div class="upd-card" id="events"><h3>Events</h3>
+<h4>Resonance Fantasia (Jaguaraun)</h4>
+<p>Postponed from November 20, it now runs from the update to December 17, 03:59 server time: December 16, 19:59 UTC (Apac), December 17, 03:59 UTC (Europe) and 07:59 UTC (Americas). Needs Student I. The notice calls it “Fantasy Resonance”; the game says Resonance Fantasia.</p>
+<p>A group of Jaguaraun appears on the Continent of Idyll every day at 4:00. The Fantasia Survey quests:</p><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Fantasia Survey quest</th><th scope="col">Reward</th></tr></thead><tbody>
+<tr><td data-label="Fantasia Survey quest">Talk to Sorora</td><td data-label="Reward">Aniipod Track ×10</td></tr>
+<tr><td data-label="Fantasia Survey quest">Catch 1 Jaguaraun</td><td data-label="Reward"><span class="upd-new">Fantasia Mark ×1</span> and Growth Fruit ×5 (was Growth Fruit ×5 only)</td></tr>
+<tr><td data-label="Fantasia Survey quest">Catch 5</td><td data-label="Reward">Growth Fruit ×10</td></tr>
+<tr><td data-label="Fantasia Survey quest">Catch 10</td><td data-label="Reward">Psyche Fruit ×2</td></tr>
+<tr><td data-label="Fantasia Survey quest">Use Jaguaraun’s skills 3 times</td><td data-label="Reward">Growth Fruit ×10</td></tr>
+<tr><td data-label="Fantasia Survey quest">Use its Ultimate once</td><td data-label="Reward">Star Sand ×5</td></tr>
+<tr><td data-label="Fantasia Survey quest">Complete them all</td><td data-label="Reward">Formula: Thundercharge Cluster</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>Companion Mode:</strong> Jaguaraun your Friends catch count toward your catch quests.</li>
+<li><strong>Thundercharge Cluster</strong> is back in the Item Exchange for 1 Roar Stone once you have the formula. Use it at a Bloom to draw Jaguaraun in.</li>
+<li><strong>Fantasia Mark</strong> (new item): one per round of the event. Spend it at the Event Vendor on a past round’s Aniimo Offering Formula. The event’s rules text calls it a “Fantasy Token”.</li>
+<li>Unclaimed rewards are sent by mail.</li>
+</ul>
+<h4>Annual Carnival and Starlight Echoes</h4>
+<ul>
+<li><strong>Annual Carnival</strong> (Student I): November 27, 14:00 to December 1, 12:00 server time; its tab opens on November 26 as a preview. Daily rewards such as the Limited-Time Appearance Discount Voucher and a Surprise Giftbox (20 Sparkling Crystals or 30 Glimmer). In Shop › Pack, a free Aniimo Gratitude Gift Box: Departure with the Wind: Collectible Blind Box ×1, Wonder Sugar Crystal ×100 and Vein Essence ×5. Carnival bundles with Splendorweave items, Renewal Pigment and Prismatic Orb.</li>
+<li><strong>Starlight Echoes</strong> (Student I): Lumin Crystals you spend count. November 27, 06:00 / 14:00 / 18:00 UTC (Apac / Europe / Americas) to December 1, 04:00 / 12:00 / 16:00 UTC.</li>
+</ul><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Lumin Crystals spent</th><th scope="col">Starlight Reward</th></tr></thead><tbody>
+<tr><td data-label="Lumin Crystals spent">300</td><td data-label="Starlight Reward">Vein Essence ×2</td></tr>
+<tr><td data-label="Lumin Crystals spent">1,000</td><td data-label="Starlight Reward">Greenhorn Wrap</td></tr>
+<tr><td data-label="Lumin Crystals spent">2,000</td><td data-label="Starlight Reward">Woven Radiance ×1</td></tr>
+<tr><td data-label="Lumin Crystals spent">3,000</td><td data-label="Starlight Reward">Renewal Pigment ×1</td></tr>
+<tr><td data-label="Lumin Crystals spent">5,000</td><td data-label="Starlight Reward">Woven Radiance ×2</td></tr>
+<tr><td data-label="Lumin Crystals spent">8,000</td><td data-label="Starlight Reward">Woven Radiance ×3</td></tr>
+<tr><td data-label="Lumin Crystals spent">12,000</td><td data-label="Starlight Reward">Season 1 Premium Rewards Gift Box: Woven Radiance ×4 and a Season 1 Alpha Egg Selection Box</td></tr>
+<tr><td data-label="Lumin Crystals spent">Log in during the event</td><td data-label="Starlight Reward">Radiant Shuttle</td></tr>
+</tbody></table></div>
+<p>The <strong>Season 1 Alpha Egg Selection Box</strong> lets you choose one of 14 Alpha Eggs with a Perfect Innate Potential: Infergon, Fulmintis, Glacy, Cornet, Hexxin, Whirlbite, Ekrim, Hypnyto, Gachapus, Inferlupa, Melloblum, Waleetle, Royalby or Pouchwisp.</p>
+<h4>Return to Idyll</h4>
+<ul>
+<li>For Pathfinders with Student I who haven’t logged in for 14 days in a row, at most once every 42 days. It starts when you log in and ends at 04:00 on the 15th day.</li>
+<li><strong>7-Day Gift:</strong> daily login rewards, in two tiers for 14 or 30 days away.</li>
+<li><strong>Return Journey:</strong> quests give Reunion Marks (the notice: Reunion Tokens) and a Double-Cost Ticket (7 Days). Reunion Marks unlock Glimmer rewards; 1,350 give a Prismana Egg of your choice (14 to choose from).</li>
+<li><strong>Reunion Blessing:</strong> a returning Pathfinder and their team get +20% from Friends’ Companion Mode Reports, +20% from Friends’ shared Prismatic Energy and +10% catch chance in Companion Mode. It doesn’t stack.</li>
+</ul>
+<h4>Operation: Egg Heist</h4>
+<ul>
+<li><strong>Double collectibles:</strong> in Team Mode at any difficulty, common and prized collectibles from chests and Umbral Aniimo drop twice as often, until December 9, 23:59 server time (15:59 UTC Apac, 23:59 UTC Europe, December 10 03:59 UTC Americas). The mode screen shows a banner for it.</li>
+<li><strong>Prismatic Iris · Dark</strong> joins Chaos mode’s collectibles, the notice says. The item was already in the files and no client drop list changed, so it’s set on the server.</li>
+<li><strong>Map rotation:</strong> in two difficulties one random map leaves the pool and a new one comes in.</li>
+<li>Better pick-up and swapping with a full Inventory. You can’t use abilities while carrying an egg. Enemy HP bars show only once they’re damaged, your own only in combat. Better name display in Fair Arena.</li>
+</ul>
+<h4>Other events</h4>
+<ul>
+<li><strong>An Aniimo Is Born – Co-Dev Contest</strong> (round 2): back in the files, from the update to February 15, 2027, 03:59 UTC (Europe).</li>
+<li><strong>Limited-time Home Shop stock</strong>: see <a href="#modes">Homeland</a>.</li>
+<li>Unchanged and still coming: Glamour Star ends on November 27, 03:59 UTC (Europe); Who’s That Aniimo? and Idyll Ecological Investigation run November 27, 04:00 to December 4, 03:59 UTC (Europe); Prismana Snapshots ends November 30, 03:59 UTC (Europe); the Night Parade, the Nighttime Gathering and Season 1 end December 9, 23:59 UTC.</li>
+</ul><p class="upd-confirm"><strong>Needs verification:</strong> the Egg Emperor 200-star pick and the weekly Collectible Blind Box from the <a href="/updates/3989635/">last note</a>, and Prismatic Iris · Dark in Chaos: all decided by the server.</p></div>
+        <div class="upd-card" id="modes"><h3>Homeland and modes</h3>
+<h4>Homeland</h4>
+<ul>
+<li><strong>RV:</strong> the largest RV model and RV skins now come at RV <span class="upd-new">Lv. 16</span> (were Lv. <span class="upd-old">21</span>). Lv. 21 keeps its extra Home Aniimo slot.</li>
+<li><strong>Rain</strong> now waters crops at your Home by itself.</li>
+<li>Furniture snaps up to floor height when there’s flooring where it lands.</li>
+<li><strong>Limited-time Home Shop stock</strong> (Resource Exchange): swap Wood Block and Mineral Sand either way, in lots of 1,000, 5,000 and 10,000, 10 times each. The files end it on December 1, 19:59 UTC on every server; the notice says December 2, 03:59 server time, which is the same moment only for Apac.</li>
+</ul>
+<h4>Aniimo Dash</h4>
+<ul>
+<li><strong>4 new Weekly Quests:</strong> give 10 likes in Group Races, use items 10 times in Group Races, finish one Solo Race, and get an A grade or better once in a Solo Race.</li>
+<li><strong>Racing Shop:</strong> a Prismana Egg for 2,000 Racing Coin, limit 1.</li>
+<li><strong>Redrock Trail</strong> solo grade times: <span class="upd-old">120 / 150 / 180 s</span> → <span class="upd-new">90 / 120 / 150 s</span>.</li>
+<li>Group Race now records your best placement, from this update on.</li>
+</ul>
+<h4>Astra</h4>
+<ul>
+<li><strong>ChillBeanz</strong> sells Iced Coffee Fizz for 100,000 Credits: it restores 300 Ultimate Points to the Team, only while exploring the Continent of Idyll freely, with a 30 s cooldown.</li>
+</ul></div>
+        <div class="upd-card" id="items"><h3>Items</h3>
+<h4>New items</h4><div class="upd-table-wrap"><table class="upd-table"><thead><tr><th scope="col">Item</th><th scope="col">What it is</th><th scope="col">Where it comes from</th></tr></thead><tbody>
+<tr><td data-label="Item"><strong>Woven Radiance</strong></td><td data-label="What it is">Currency</td><td data-label="Where it comes from">Splendorweave, Starlight Echoes</td></tr>
+<tr><td data-label="Item"><strong>Renewal Pigment</strong></td><td data-label="What it is">An unowned Sparkling Pigment for an Aniimo</td><td data-label="Where it comes from">Starlight Echoes, Annual Carnival bundles</td></tr>
+<tr><td data-label="Item"><strong>Fantasia Mark</strong></td><td data-label="What it is">Buys a past round’s Offering Formula</td><td data-label="Where it comes from">Resonance Fantasia</td></tr>
+<tr><td data-label="Item"><strong>Reunion Mark</strong></td><td data-label="What it is">Event currency</td><td data-label="Where it comes from">Return to Idyll</td></tr>
+<tr><td data-label="Item"><strong>Double-Cost Ticket (7 Days)</strong></td><td data-label="What it is">Ticket</td><td data-label="Where it comes from">Return to Idyll</td></tr>
+<tr><td data-label="Item"><strong>Season 1 Premium Rewards Gift Box</strong></td><td data-label="What it is">Woven Radiance ×4 and the Alpha Egg Selection Box</td><td data-label="Where it comes from">Starlight Echoes (12,000)</td></tr>
+<tr><td data-label="Item"><strong>Season 1 Alpha Egg Selection Box</strong></td><td data-label="What it is">Choose 1 of 14 Alpha Eggs</td><td data-label="Where it comes from">The Premium Rewards Gift Box</td></tr>
+<tr><td data-label="Item"><strong>14 Alpha Eggs</strong></td><td data-label="What it is">Infergon, Fulmintis, Glacy, Cornet, Hexxin, Whirlbite, Ekrim, Hypnyto, Gachapus, Inferlupa, Melloblum, Waleetle, Royalby and Pouchwisp, each with a Perfect Innate Potential</td><td data-label="Where it comes from">The Alpha Egg Selection Box</td></tr>
+<tr><td data-label="Item"><strong>Surprise Giftbox</strong></td><td data-label="What it is">20 Sparkling Crystals or 30 Glimmer</td><td data-label="Where it comes from">Annual Carnival</td></tr>
+<tr><td data-label="Item"><strong>Limited-Time Appearance Discount Voucher</strong></td><td data-label="What it is">Lumin Crystals off a shop appearance</td><td data-label="Where it comes from">Annual Carnival (it was in the files before, renamed, and nothing gave it out)</td></tr>
+<tr><td data-label="Item"><strong>Dawn Radiance</strong> and <strong>Moonshadow Starlight</strong> sets</td><td data-label="What it is">Outfits, hair, makeup, crowns and other pieces, for both body types</td><td data-label="Where it comes from">Splendorweave</td></tr>
+<tr><td data-label="Item"><strong>Swiftlight Scooter</strong></td><td data-label="What it is">Vehicle</td><td data-label="Where it comes from">Splendorweave</td></tr>
+<tr><td data-label="Item"><strong>Greenhorn Wrap</strong> and <strong>Radiant Shuttle</strong></td><td data-label="What it is">An appearance item, and a Splendorweave item</td><td data-label="Where it comes from">Starlight Echoes</td></tr>
+<tr><td data-label="Item"><strong>Radiant Reflection</strong>, <strong>Grand Staircase</strong> and <strong>Furniture Blueprint: Grand Staircase</strong>, <strong>Mirrored Radiance</strong></td><td data-label="What it is">Furniture</td><td data-label="Where it comes from">The blueprint from the Shop; the files give no source for the rest</td></tr>
+<tr><td data-label="Item"><strong>Butterfly Dream Amber</strong> and <strong>Nightborn Allure</strong> (2 each)</td><td data-label="What it is">Photo Studio actions for those backgrounds</td><td data-label="Where it comes from">Owning the background (Lightweave)</td></tr>
+<tr><td data-label="Item"><strong>7 story items</strong></td><td data-label="What it is">See <a href="#new">Tranquil Hymn</a></td><td data-label="Where it comes from">The story</td></tr>
+</tbody></table></div>
+<h4>Renamed</h4>
+<ul>
+<li><span class="upd-old">Fresh-Baked Hazelnut Cookies</span> → <span class="upd-new">Freshly Baked Toughnut Cookie</span> (and “hazelnut” → “Toughnut” in its text and in Chompy’s cookie)</li>
+<li><span class="upd-old">Furniture Blueprint: Childlike Dream Fruit Coffee Table</span> → <span class="upd-new">Furniture Blueprint: Kid Fruit Core Table</span></li>
+<li><span class="upd-old">Light Form Duo Accessory</span> → <span class="upd-new">Gilded Starveil</span></li>
+<li><span class="upd-old">Event Discount Coupon</span> → <span class="upd-new">Limited-Time Appearance Discount Voucher</span> (the other coupon keeps the old name)</li>
+</ul>
+<h4>New text</h4>
+<ul>
+<li><strong>14 Prismana Eggs</strong> (Turbo, Thornblade, Blazen, Glacy, Hexxin, Ignitis, Cornet, Magmarex, Scorchhowl, Luminelle, Stellarys, Grizbo, Pawney and Panpanta): now “An Egg left behind by Prismana …”.</li>
+<li>Woodland and Farmland plots: the level goes on a second line.</li>
+<li>Processed goods: the Joy Wheel Loom’s goods now say Phonolfactory Table, and the Crafting Table’s say Joy Wheel Loom.</li>
+<li>The tanning aid is now from Rosina (was Javier); Dora’s Olive Pine Nut Shortbread is now Olive Nut Crisps; three magic pumpkin texts reworded.</li>
+<li>Items that say “Character Accessory” or “Aniimo Accessory” now say “Accessories”.</li>
+</ul></div>
+        <div class="upd-card" id="text"><h3>Text</h3>
+<p>2,110 new English strings, 567 reworded and 40 removed.</p>
+<h4>Skills</h4>
+<ul>
+<li><span class="upd-old">Ripples of Floating Duckweed</span> → <span class="upd-new">Blooming Drift</span> (Bubbeep, Glameep)</li>
+<li><span class="upd-old">Baa Bubble Wave</span> → <span class="upd-new">Baa-bble Wave</span> (Bubbeep, Glameep)</li>
+<li><span class="upd-old">Dark Tide Wave Assault</span> → <span class="upd-new">Underflow Surge</span> (Glameep)</li>
+<li><strong>Help! Gracewing!</strong>: “heals the whole team” → “heals all allies in range”.</li>
+<li><strong>Hoptail’s trait:</strong> [Elasticity] → [Bounce], [Elastic Burst] → [Bounce Burst], same meaning.</li>
+<li><strong>Royalby’s</strong> All Shall Bow to the Crown: “Twines up to 5 targets” → “links up to 5 targets”.</li>
+<li><strong>Jabster’s</strong> Lightning Spring Fist: reworded (“Each punch triggers its trait effect … Charged attacks have increased range”), same numbers.</li>
+<li><strong>Jaguaraun’s</strong> Thundercloud Surge and <strong>Hypnyto’s</strong> Dazzling Prismglare: the damage formula in the text is fixed so a number shows.</li>
+<li><strong>Bubble Energy</strong> and <strong>Energy Full</strong> (Bubbeep, Glameep): reworded.</li>
+</ul>
+<h4>Holo-Battle Interlink buffs: wording only</h4>
+<ul>
+<li>7 buff texts reworded: the Water Pressure Imbalance state is now <strong>Hydraulic Imbalance</strong>, “Energy Regen” is now “Energy Recharge”, and “BREAK” is “Break”. The numbers are the same.</li>
+</ul>
+<h4>Other names</h4>
+<ul>
+<li>The skill label “BREAK” is now “Break” in one place; 69 other strings still say BREAK.</li>
+<li><span class="upd-old">Treasures of the Heart</span> → <span class="upd-new">Heart’s Hidden Honey</span>, on 5 quest chapters (Gurgle Play, The Buzzing, Beyond Limits, Tale of Salabask Forest, The Canopy).</li>
+<li>Characters: Jett → Avi, Yama → Ben. In one dialogue line, Timmy → Demi.</li>
+<li>Video settings: Dynamic Resolution is now <strong>DLSS</strong>, and the list has MSAA, Turn On Depth of Field, Point Light Source Culling Distance, Max Fur Layers (Ultimate/Idle) and Atmosphere where other settings were.</li>
+<li>A Companion Handbook task now says “Nurture the Ecosystem at the Branch 60 Times” (was 50).</li>
+<li>Aniimo Dash quest texts, shop limit labels (“Weekly Limit: 3”), error messages (“Please try again later” instead of “Check server logs”) and 348 dialogue and interface lines.</li>
+</ul></div>
+        <div class="upd-card" id="ledger"><h3>Every change in the files</h3>
+<p>The complete list, build 3989635 to 4047363, by the game’s own version stamps.</p>
+<details class="upd-more"><summary>Data tables: 637 changed, 151 added, 3 removed</summary>
+<ul>
+<li><strong>Client tables:</strong> 287 changed, 110 added. <strong>Shared tables:</strong> 180 changed, 29 added, 3 removed. <strong>Server tables:</strong> 170 changed, 12 added.</li>
+<li><strong>Balance:</strong> ability_calc_value_data (Hoptail, Jaguaraun), buff_calc_value_data (Scrubbit, Jaguaraun), pet_balance_reset_data (Gracewing).</li>
+<li><strong>Progression:</strong> player_level_data (EXP), map_block_config_data (area levels, and every area’s weather list), npc_duel_data (Pathfinder Challenges), custom_trigger_data (quest gates), special_train_chapter_data (Elite Training), pet_capture_report_sort_data (Report Credit).</li>
+<li><strong>Events:</strong> game_event_data +5 (Resonance Fantasia, the Co-Dev Contest, Return to Idyll, Starlight Echoes, Annual Carnival), event_task_data +51, drop_data +140.</li>
+<li><strong>New tables:</strong> Egg Heist drop events (4), Return to Idyll (3), the featured-Aniimo event, discount coupons, style collections, outfit forms, Sparkling Pigment costs and Homeland weather.</li>
+<li><strong>Items and shops:</strong> item_data +141, shop_commodity_data +45, item_shop_data +37, the shop mall tables (+12 goods, +6 gifts, +13 linked gifts).</li>
+<li><strong>Story:</strong> quest_base +113, dialogue_graph_data +89, quest_chapter +1, puppet_data +52 (new characters, including a Glameep Phantom).</li>
+<li><strong>Looks:</strong> appearance_data +84, appearance_suit_data +10, makeup +19, hair +8.</li>
+<li>Tables whose version changed but whose rows read the same: formula_explict_data, egg_rank_reward_data, home_season_module_data, avatar_robot_data. bossrush_grade_data changed only in the last digits of its decimals.</li>
+</ul></details>
+<details class="upd-more"><summary>Scripts: 9,805 → 9,951 files, 528 changed</summary><ul>
+<li>New: Return to Idyll, the Annual Carnival and Starlight Echoes, discount coupons, the Co-Dev Contest, outfit sets and presets, map zoom and profile sharing.</li>
+<li>Drops now go through shared and personal drop modifiers (the Egg Heist double-drop event); the catch chance reads the Reunion Blessing.</li>
+<li>Holo-Battle Interlink: the result screen writes the clear time’s unit in your language (“s” in English); the Party screen loads its frame in the background.</li>
+<li>Operation: Egg Heist: carrying and dropping eggs fixed, no abilities while controlling an egg, HP bar rules.</li>
+<li>Combat: a projectile destroyed during its own hit goes after the hit is handled. No formula code changed.</li>
+</ul></details>
+<details class="upd-more"><summary>Scenes: 2 new, several changed</summary><ul>
+<li>Two new scenes for Tranquil Hymn.</li>
+<li>The Sanctum changes under <a href="#world">World and levels</a>.</li>
+<li>Object lists changed in five scenes, among them the open world and the new story’s scene.</li>
+</ul></details>
+<details class="upd-more"><summary>Art and models: 288,177 files listed, 4,582 added, 3,480 removed</summary><ul>
+<li>Added: 1,226 outfit files and 641 meshes for the new sets, the Glameep Phantom’s materials, quest props, and 306 interface files (event pages for the Carnival, Starlight Echoes and Return to Idyll, outfits, the shop, Egg Heist’s banner and the HUD).</li>
+<li>Removed: 3,433 editor source files of Aniimo models (not used by the game) and 29 meshes of one Sanctum map.</li>
+</ul></details>
+<details class="upd-more"><summary>Text: 2,110 new, 567 changed, 40 removed</summary><ul>
+<li>See <a href="#text">Text</a> above.</li>
+</ul></details></div>
+        <div class="upd-card" id="same"><h3>Unchanged</h3><ul>
+<li>The damage formulas, crit, the element chart, the duel rules, BREAK and Star-Up: the formula table has the same version stamp, and no formula code changed.</li>
+<li>Every Aniimo’s stats and elements, and every skill and buff value apart from the ones under <a href="#balance">Balance</a>.</li>
+<li>Holo-Battle Interlink: the same weeks (Tubster from November 26, Glameep from December 3, nothing after December 7 in the files), bosses, grades and buffs. Holo-Battle Sim: the same tables.</li>
+<li>Operation: Egg Heist’s ranks and rank rewards.</li>
+<li><strong>Frenzied Assault</strong> (Saws and Whirlbite) still gives 0% Water Boost instead of 25%.</li>
+</ul></div>
+      </section>
+      <section class="upd-part" id="site" aria-labelledby="site-title">
+        <h2 id="site-title">On the site</h2>
+        <div class="upd-card"><h3>Item-log <a class="upd-link" href="/explorer/?view=itemlog">Open →</a></h3><ul><li>This update’s new items added, with their sources; the “New in game build” filter shows them.</li><li>Renamed: Freshly Baked Toughnut Cookie, Furniture Blueprint: Kid Fruit Core Table and Gilded Starveil, on the item and in the recipes and chests that name it.</li><li>New text on the 14 Prismana Eggs, the Woodland and Farmland plots, the processed goods and the other reworded items.</li><li>New sources: Iced Coffee Fizz (ChillBeanz, 100,000 Credits) and the Prismana Egg (Racing Shop, 2,000 Racing Coin).</li></ul></div><div class="upd-card"><h3>Aniilog <a class="upd-link" href="/explorer/?view=aniilog">Open →</a></h3><ul><li>The new skill names Blooming Drift, Baa-bble Wave and Underflow Surge on Glameep (Basic, Tempest and Prismana Forms) and Bubbeep.</li><li>The reworded texts of Gracewing’s Help! Gracewing! (all four forms), Hoptail’s trait, Royalby, Jaguaraun’s trait, Jabster and Hypnyto.</li><li>Progression: “Reach level 45” on the Breezy Plains step.</li></ul></div><div class="upd-card"><h3>Team Builder <a class="upd-link" href="/explorer/?view=team">Open →</a></h3><ul><li>The new numbers: Hoptail’s Tail Flick Combo, Scrubbit’s Rain-Pond Leaf Strike, Dazmand’s Spotlight Moment and Jaguaraun’s Basic Attack, Thunder Rush Claw and Thundercloud Surge.</li><li>Help! Gracewing! now heals allies in range, not the whole party.</li><li>The same reworded skill and trait texts as the Aniilog.</li></ul></div><div class="upd-card"><h3>Translations</h3><ul><li>Japanese, Korean and Simplified Chinese follow for the same skills, traits and items, matched by the game’s text ids.</li></ul></div><div class="upd-card"><h3>Guides <a class="upd-link" href="/guides/">Open →</a></h3><ul><li><strong>New card:</strong> sargeeva’s Resonance Fantasia guide. It moves to Archived by itself when the event ends.</li><li>The Damage Guide, duels, type matchups and the Interlink guide re-checked against this build: no changes needed. None of the changed skills is in them.</li></ul></div><div class="upd-card"><h3>Map and Checklists <a class="upd-link" href="/explorer/">Open →</a></h3><ul><li>Not changed in this update. The new area levels and the story’s new objects are still to be checked against the map.</li></ul></div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="footer-brand" href="/">AniiLogs <span>✦</span></a>
+      <span>An unofficial, independent community project. Not affiliated with Aniimo or its developers.</span>
+      <span class="footer-links"><a href="/privacy.html">Privacy</a><a href="https://github.com/AniiLogs/aniilogs.github.io">GitHub</a></span>
+    </footer>
+  </body>
+</html>

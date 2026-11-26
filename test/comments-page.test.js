@@ -6,7 +6,8 @@ import test from "node:test";
 
 const read = (path) => readFileSync(new URL(`../public/${path}`, import.meta.url), "utf8");
 const PAGES = ["index.html", "companion/index.html", "guides/index.html", "leaderboard/index.html", "explorer/index.html",
-  "updates/3934365/index.html", "updates/3973445/index.html", "updates/3989635/index.html"];
+  "updates/3934365/index.html", "updates/3973445/index.html", "updates/3989635/index.html",
+  "updates/4047363/index.html"];
 
 test("every page with the account menu loads notifications.js and its styles once", () => {
   for (const page of PAGES) {
