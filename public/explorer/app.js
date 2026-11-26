@@ -15929,12 +15929,24 @@ function withUnreleasedMapRecords(spawns) {
   });
 }
 
+// Limited-time event pins carry `event_ends_at` (ISO time, UTC: the event's end on the last server, from the game's
+// event table). Once it has passed the pin leaves the map by itself, and so does an item whose every pin is an
+// event pin (the data gives that item the same field). A missing or unreadable time never hides anything.
+function mapEventHasEnded(record, now = Date.now()) {
+  const endsAt = Date.parse(typeof record?.event_ends_at === "string" ? record.event_ends_at : "");
+  return Number.isFinite(endsAt) && endsAt <= now;
+}
+function withoutEndedMapEvents(records, now = Date.now()) {
+  return records.filter((record) => !mapEventHasEnded(record, now));
+}
+
 function useMapDatasetNow(mapId, dataset) {
   if (!state.bootstrap || state.activeMapId !== mapId) return;
+  const now = Date.now();
   state.data = prepareData({
     ...state.bootstrap,
-    items: dataset?.items || [],
-    spawns: withUnreleasedMapRecords(dataset?.spawns || []),
+    items: withoutEndedMapEvents(dataset?.items || [], now),
+    spawns: withUnreleasedMapRecords(withoutEndedMapEvents(dataset?.spawns || [], now)),
   });
   state.mapAreas = Array.isArray(dataset?.areas) ? dataset.areas : [];
   renderAreaBorders();
