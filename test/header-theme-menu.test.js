@@ -5,7 +5,8 @@ import test from "node:test";
 // The Theme picker moved out of the header bar (it crowded the bar on phones) into the header's menus.
 const read = async (path) => (await readFile(new URL(`../public/${path}`, import.meta.url), "utf8")).replaceAll("\r\n", "\n");
 const STATIC = ["index.html", "companion/index.html", "guides/index.html", "leaderboard/index.html",
-  "updates/3934365/index.html", "updates/3973445/index.html", "updates/3989635/index.html"];
+  "updates/3934365/index.html", "updates/3973445/index.html", "updates/3989635/index.html",
+  "updates/4047363/index.html"];
 const between = (html, start, end) => html.slice(html.indexOf(start), html.indexOf(end, html.indexOf(start)));
 
 test("the bar holds no Theme picker; the account menu has it first", async () => {
