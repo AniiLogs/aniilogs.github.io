@@ -239,7 +239,8 @@ const SITE_CONTENT_SECURITY_POLICY = [
   // Cloudflare Web Analytics: its script, and where it sends the visit (no cookies; on in the dashboard for aniilogs.app)
   "connect-src 'self' blob: https://api.github.com https://aniilogs-api.pages.dev https://cloudflareinsights.com",
   "font-src 'self'",
-  "form-action 'self'",
+  // the settings hand-off to the in-progress Aniimo viewer posts its one-use ticket there (submitDeveloperPreviewHandoff)
+  "form-action 'self' https://aniilogs-renderer-qa-3634150.pages.dev",
   "frame-ancestors 'none'",
   "frame-src https://aniilogs-renderer-qa-3634150.pages.dev",
   "img-src 'self' data: blob: https://aniilogs-api.pages.dev https://cdn.discordapp.com https://worldx-website-cdn.aniimo.com",
@@ -3906,365 +3907,365 @@ export function settledRun(input) {
   return result;
 }
 
-// ---------------------------------------------------------------- "I was in this run" notes (interlink_presence)
-// A player whose app followed an Interlink fight to its end but read no result screen has no copy of the run; their
-// app sends a note instead (table interlink_presence, migration 0038), and staff can add one by hand (/api/admin/run-seat).
-// A note is never a record: nothing here touches a board, a count or a public answer. Its sender is treated, in every
-// copy of that fight, like a sender whose own copy is missing (settledRun rule 5): their seat gets their UID, confirmed
-// and their character's name. Applied right after settledRun on every pass of corroborateRun, so it follows the copies'
-// rules (and the same order-independence) whether the note or the copies came first.
-//
-// Whether a card is a note-sender's by its name: the same skeleton as one of their names, or near it (bots.js
-// nameSimilarity at NEAR_FLOOR); the app's own read counts too. A card the boards keep unnamed (unsettled), or one with
-// no name, fits anyone.
-function presenceAlike(card, names) {
-  if (!card || typeof card !== "object") return false;
-  if (card.unsettled === true || typeof card.name !== "string" || !card.name.trim()) return true;
-  const own = [card.name, card.read && typeof card.read === "object" ? card.read.name : null].filter((name) => typeof name === "string" && name.trim());
-  return names.some((name) => own.some((read) => nameSkeleton(read) === nameSkeleton(name) || seatNameSimilarity(read, name) >= NEAR_FLOOR));
-}
-// The card a note stands for in one copy (its index), or -1. note: { slot (0-3 or null), names, forced, addedBy }.
-// (a) a slot given and four cards: the card at that seat (cardSeats: by position), only when its name is alike (or the
-//     note is a staff note forced past the check); a staff note on fewer cards: the card whose seat it is, if one is;
-// (b) else (no slot, or no card at that seat on a shorter run) the one card whose name is alike.
-export function presenceCard(players, note, lineup = null) {
-  const list = Array.isArray(players) ? players : [];
-  const names = (Array.isArray(note?.names) ? note.names : []).filter((name) => typeof name === "string" && name.trim());
+// ---------------------------------------------------------------- "I was in this run" notes (interlink_presence)
+// A player whose app followed an Interlink fight to its end but read no result screen has no copy of the run; their
+// app sends a note instead (table interlink_presence, migration 0038), and staff can add one by hand (/api/admin/run-seat).
+// A note is never a record: nothing here touches a board, a count or a public answer. Its sender is treated, in every
+// copy of that fight, like a sender whose own copy is missing (settledRun rule 5): their seat gets their UID, confirmed
+// and their character's name. Applied right after settledRun on every pass of corroborateRun, so it follows the copies'
+// rules (and the same order-independence) whether the note or the copies came first.
+//
+// Whether a card is a note-sender's by its name: the same skeleton as one of their names, or near it (bots.js
+// nameSimilarity at NEAR_FLOOR); the app's own read counts too. A card the boards keep unnamed (unsettled), or one with
+// no name, fits anyone.
+function presenceAlike(card, names) {
+  if (!card || typeof card !== "object") return false;
+  if (card.unsettled === true || typeof card.name !== "string" || !card.name.trim()) return true;
+  const own = [card.name, card.read && typeof card.read === "object" ? card.read.name : null].filter((name) => typeof name === "string" && name.trim());
+  return names.some((name) => own.some((read) => nameSkeleton(read) === nameSkeleton(name) || seatNameSimilarity(read, name) >= NEAR_FLOOR));
+}
+// The card a note stands for in one copy (its index), or -1. note: { slot (0-3 or null), names, forced, addedBy }.
+// (a) a slot given and four cards: the card at that seat (cardSeats: by position), only when its name is alike (or the
+//     note is a staff note forced past the check); a staff note on fewer cards: the card whose seat it is, if one is;
+// (b) else (no slot, or no card at that seat on a shorter run) the one card whose name is alike.
+export function presenceCard(players, note, lineup = null) {
+  const list = Array.isArray(players) ? players : [];
+  const names = (Array.isArray(note?.names) ? note.names : []).filter((name) => typeof name === "string" && name.trim());
   // the copy's own sender's card is theirs, never a note's
   const open = (card) => Boolean(card && typeof card === "object" && card.self !== true);
-  if (Number.isInteger(note?.slot) && note.slot >= 0 && note.slot <= 3 && (list.length === 4 || note.addedBy)) {
-    const at = cardSeats(list, lineup).indexOf(note.slot + 1);
-    if (at >= 0) return open(list[at]) && (note.forced || presenceAlike(list[at], names)) ? at : -1;
-    if (list.length === 4) return -1;
-  }
-  if (!names.length) return -1;
-  const alike = list.map((_, index) => index).filter((index) => {
-    const card = list[index];
-    return open(card) && typeof card.name === "string" && card.name.trim() && card.unsettled !== true && presenceAlike(card, names);
-  });
-  return alike.length === 1 ? alike[0] : -1;
-}
-// One copy's players with its notes applied (a new list; settledRun's answer for that copy goes in). notes: [{ gameUid,
-// name (the name to give: their character's, else the note's), names, slot, forced, addedBy }]; copyUids: the UIDs of
-// the senders who have a copy of this run (their own copy links them: a note of theirs does nothing). A slot a note gave
-// its UID to is marked `noted` (server-only); when no note gives that UID any more it is taken back, and when a real copy
-// of that sender gives it, the mark goes. A slot holding another UID (another account's, or one the game showed) is
-// never taken. The app's reads (slot.read) are kept as settledRun keeps them, so every pass gives the same answer.
-export function presencePlayers(players, notes, { copyUids = new Set(), lineup = null } = {}) {
-  if (!Array.isArray(players)) return players;
-  const out = players.map((slot) => (slot && typeof slot === "object" ? { ...slot, ...(slot.read ? { read: { ...slot.read } } : {}) } : slot));
-  const active = (Array.isArray(notes) ? notes : []).filter((note) => note && note.gameUid && !copyUids.has(String(note.gameUid)))
-    .sort((a, b) => (String(a.gameUid) < String(b.gameUid) ? -1 : String(a.gameUid) > String(b.gameUid) ? 1 : 0));
-  for (const slot of out) {
-    if (!slot || typeof slot !== "object" || slot.noted !== true) continue;
-    if (slot.uid && copyUids.has(String(slot.uid))) { delete slot.noted; continue; }
-    if (!active.some((note) => String(note.gameUid) === String(slot.uid))) { delete slot.uid; delete slot.confirmed; delete slot.noted; }
-  }
-  const setRead = (slot, key, value) => {
-    const read = slot.read && typeof slot.read === "object" ? slot.read : {};
-    const raw = Object.hasOwn(read, key) ? read[key] : (slot[key] ?? null);
-    slot[key] = value;
-    if ((value ?? null) === raw) delete read[key]; else read[key] = raw;
-    if (Object.keys(read).length) slot.read = read; else delete slot.read;
-  };
-  for (const note of active) {
-    const uid = String(note.gameUid);
-    const holder = out.findIndex((slot) => slot && typeof slot === "object" && slot.uid && String(slot.uid) === uid);
-    if (holder >= 0 && out[holder].noted !== true) continue;                  // already theirs by a copy or the game
-    const index = holder >= 0 ? holder : presenceCard(out, note, lineup);
-    if (index < 0) continue;
-    const slot = out[index];
-    if (slot.uid && String(slot.uid) !== uid) continue;                      // another player's UID: never taken
-    if (typeof note.name === "string" && note.name && note.name !== slot.name) {
-      setRead(slot, "name", note.name);
-      slot.skel = nameSkeleton(note.name);
-    }
-    if (slot.ai !== false) setRead(slot, "ai", false);
-    delete slot.unsettled;
-    Object.assign(slot, { uid, confirmed: true, noted: true });
-  }
-  return out;
-}
-// The notes that may apply to a group of copies (runCopies), as a function entry -> its notes: a note on an instance id
-// is for the copies of that instance on its cycle and boss; a note staff added to a run without one ("run:<id>") is for
-// the whole group that copy is in. Null when there are none, or the table isn't there yet (before migration 0038).
-async function presenceNotesFor(env, group) {
-  const keys = new Set();
-  for (const entry of group) {
-    if (entry.instanceId) keys.add(entry.instanceId);
-    keys.add(`run:${entry.copy.id}`);
-    if (entry.sharedRun) keys.add(`run:${entry.sharedRun}`);
-  }
-  const list = [...keys].slice(0, 90);
-  let results;
-  try {
-    ({ results } = await env.DB.prepare(
-      `SELECT p.instance_id AS instanceId, p.game_uid AS gameUid, p.cycle, p.boss_id AS bossId, p.slot, p.name, p.added_by AS addedBy,
-         p.forced, c.character_name AS characterName
-       FROM interlink_presence p LEFT JOIN game_characters c ON c.game_uid = p.game_uid
-       WHERE p.instance_id IN (${list.map(() => "?").join(", ")}) ORDER BY p.discord_id`,
-    ).bind(...list).all());
-  } catch (error) {
-    if (/no such table/iu.test(String(error?.message || error))) return null;
-    throw error;
-  }
-  if (!results?.length) return null;
-  const notes = results.map((row) => ({
-    instanceId: row.instanceId, cycle: row.cycle ?? null, bossId: row.bossId ?? null, gameUid: String(row.gameUid),
-    slot: Number.isInteger(row.slot) ? row.slot : null, forced: Boolean(row.forced), addedBy: row.addedBy || null,
-    name: row.characterName || row.name || null, names: [row.characterName, row.name].filter((name) => typeof name === "string" && name),
-  }));
-  const groupKeys = new Set(group.flatMap((entry) => [`run:${entry.copy.id}`, ...(entry.sharedRun ? [`run:${entry.sharedRun}`] : [])]));
-  return (entry) => notes.filter((note) => (note.instanceId.startsWith("run:") ? groupKeys.has(note.instanceId)
-    : note.instanceId === entry.instanceId && (note.cycle == null || String(note.cycle) === String(entry.cycle))
-      && (note.bossId == null || String(note.bossId) === String(entry.bossId))));
-}
-// Settles every stored copy a note may concern: the copies of its instance (or its run), group by group. -> the ids.
-async function settleNoteCopies(env, instanceId, cycle, bossId) {
-  const { results } = instanceId.startsWith("run:")
-    ? await env.DB.prepare(
-      "SELECT submission_id AS id FROM leaderboard_submissions WHERE kind = 'interlink_run' AND (submission_id = ? OR json_extract(extra_json, '$.sharedRun') = ?) ORDER BY submission_id LIMIT 40",
-    ).bind(instanceId.slice(4), instanceId.slice(4)).all()
-    : await env.DB.prepare(
-      `SELECT submission_id AS id FROM leaderboard_submissions WHERE kind = 'interlink_run' AND json_extract(extra_json, '$.instanceId') = ?
-         AND (? IS NULL OR cycle = ?) AND (? IS NULL OR boss_id = ?) ORDER BY submission_id LIMIT 40`,
-    ).bind(instanceId, cycle, cycle, bossId, bossId).all();
-  const done = new Set();
-  for (const { id } of results || []) {
-    if (done.has(id)) continue;
-    const { members = [] } = await corroborateRun(env, id);
-    for (const member of [id, ...members]) done.add(member);
-  }
-  return [...done];
-}
-// The note sent by the app: POST /api/leaderboard/submissions, kind interlink_presence, with the run's own fields
-// (clientRunId, gameUid, server, cycle, boss { id, name, level }, playedAt, clientVersion) and extra { instanceId
-// (required), slot? 0-3, name?, game? }. Never a record. Answer: 201 { ok: true }, never anything about other players.
-async function submitPresenceNote(env, account, body) {
-  const extra = body.extra && typeof body.extra === "object" && !Array.isArray(body.extra) ? body.extra : {};
-  const boss = body.boss && typeof body.boss === "object" && !Array.isArray(body.boss) ? body.boss : {};
-  const note = {
-    clientRunId: boundedText(body.clientRunId, 120, /^[A-Za-z0-9_.:-]+$/u),
-    gameUid: boundedText(body.gameUid, 24, /^\d+$/u),
-    server: boundedText(body.server, 40),
-    cycle: boundedText(body.cycle, 24, /^[A-Za-z0-9_.-]+$/u),
-    bossId: boundedText(boss.id ?? body.bossId, 24, /^[A-Za-z0-9_-]+$/u),
-    bossName: boundedText(boss.name ?? body.bossName, 80),
-    bossLevel: boundedInteger(boss.level ?? body.bossLevel, 1, 200),
-    playedAt: boundedInteger(body.playedAt, 1.5e9, 4e9),
-    clientVersion: boundedText(body.clientVersion, 40),
-    instanceId: boundedText(extra.instanceId, 120, /^(?!run:)[\x21-\x7e]+$/u),
-    slot: extra.slot == null ? null : Number.isInteger(extra.slot) && extra.slot >= 0 && extra.slot <= 3 ? extra.slot : undefined,
-    name: boundedText(extra.name, 40),
-  };
-  const bad = Object.entries(note).find(([, field]) => field === undefined);
-  if (bad) return json({ error: `Field ${bad[0]} is invalid.` }, 400);
-  if (!note.instanceId) return json({ error: "extra.instanceId is required." }, 400);
-  if (!note.gameUid) return json({ error: "gameUid is required." }, 400);
-  const game = extra.game && typeof extra.game === "object" && !Array.isArray(extra.game) ? extra.game : null;
-  if (note.cycle != null) {
-    const week = interlinkCycle(await interlinkCycles(env), note.cycle);
-    if (week && note.bossId != null) {
-      const middle = interlinkSecondMiddle(week, note.bossId);
-      if (middle) note.bossId = middle.id;
-      const listed = week.bosses.find((item) => String(item.id) === String(note.bossId));
-      if (!listed) return json({ error: "That boss isn't one of this week's Interlink bosses." }, 400);
-      note.bossName = listed.name;
-    }
-  }
-  const owner = await env.DB.prepare("SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1").bind(note.gameUid).first();
-  if (owner && owner.discordId !== account.discordId) return json({ error: "This character is linked to another account." }, 409);
-  const now = Math.floor(Date.now() / 1000);
-  const existing = await env.DB.prepare("SELECT 1 AS found FROM interlink_presence WHERE discord_id = ? AND instance_id = ?")
-    .bind(account.discordId, note.instanceId).first();
-  if (!existing) {                                            // the records' daily limit, notes and records together
-    const limit = Math.max(1, Number.parseInt(env.DAILY_RUN_LIMIT || "300", 10) || 300);
-    const since = Math.floor(Date.now() / 86400000) * 86400;
-    const records = await env.DB.prepare("SELECT COUNT(*) AS sent FROM leaderboard_submissions WHERE discord_id = ? AND created_at >= ?").bind(account.discordId, since).first();
-    const notes = await env.DB.prepare("SELECT COUNT(*) AS sent FROM interlink_presence WHERE discord_id = ? AND created_at >= ?").bind(account.discordId, since).first();
-    if (Number(records?.sent || 0) + Number(notes?.sent || 0) >= limit) return json({ error: `At most ${limit} records a day; try again after 00:00 UTC.` }, 429);
-  }
-  await env.DB.prepare(
-    `INSERT INTO interlink_presence (discord_id, instance_id, game_uid, client_run_id, server, cycle, boss_id, boss_name, boss_level, played_at,
-       client_version, slot, name, extra_json, added_by, forced, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)
-     ON CONFLICT (discord_id, instance_id) DO UPDATE SET game_uid = excluded.game_uid, client_run_id = excluded.client_run_id,
-       server = excluded.server, cycle = excluded.cycle, boss_id = excluded.boss_id, boss_name = excluded.boss_name, boss_level = excluded.boss_level,
-       played_at = excluded.played_at, client_version = excluded.client_version, slot = excluded.slot, name = excluded.name,
-       extra_json = excluded.extra_json, added_by = NULL, forced = 0, updated_at = excluded.updated_at`,
-  ).bind(account.discordId, note.instanceId, note.gameUid, note.clientRunId, note.server, note.cycle, note.bossId, note.bossName, note.bossLevel,
-    note.playedAt, note.clientVersion, note.slot, note.name, game ? JSON.stringify({ game }).slice(0, 4000) : null, now, now).run();
-  await settleNoteCopies(env, note.instanceId, note.cycle, note.bossId).catch((error) => { console.error("Applying a presence note failed", error); });
-  return json({ ok: true }, 201);
-}
-// Staff (logs.read: administrators and the owner, as the run-check decisions): link one seat of a run to an account by
-// hand (a note marked as added by them, applied at once), or take it back.
-// POST /api/admin/run-seat { submissionId, seat: 1-4, profileId | "me", force? } -> { ok, seat, copies } (copies: how many
-// copies of the run now carry the account's UID by a note); { ..., undo: true } or DELETE -> { ok, undone, seat, copies }
-// (copies: how many the UID was taken off). No names in either.
-async function adminRunSeat(request, env, method) {
-  const account = await leaderboardAccount(request, env);
-  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
-  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
-  let body;
-  try { body = (await readJsonBody(request, 1024)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
-  const submissionId = String(body.submissionId || "");
-  const seat = Number(body.seat);
-  const undo = method === "DELETE" || body.undo === true;
-  if (!/^[A-Za-z0-9_-]{8,40}$/u.test(submissionId)) return json({ error: "submissionId is invalid." }, 400);
-  if (![1, 2, 3, 4].includes(seat)) return json({ error: "seat must be 1-4." }, 400);
-  const profileId = String(body.profileId || "");
-  let target = null;
-  if (profileId === "me") target = account.discordId;
-  else if (/^[A-Za-z0-9_-]{1,64}$/u.test(profileId)) {
-    target = (await env.DB.prepare("SELECT discord_id AS discordId FROM profiles WHERE public_id = ?").bind(profileId).first())?.discordId || null;
-  }
-  if (!target) return json({ error: "No such profile." }, 404);
-  const run = await env.DB.prepare(
-    "SELECT submission_id AS id, kind, cycle, boss_id AS bossId, players_json AS playersJson, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
-  ).bind(submissionId).first();
-  if (!run || run.kind !== "interlink_run") return json({ error: "No such Interlink run." }, 404);
-  const extra = parseJsonColumn(run.extraJson) || {};
-  const instanceId = typeof extra.instanceId === "string" && extra.instanceId ? extra.instanceId
-    : `run:${typeof extra.sharedRun === "string" ? extra.sharedRun : run.id}`;
-  const characters = (await env.DB.prepare("SELECT game_uid AS gameUid, character_name AS name FROM game_characters WHERE discord_id = ? ORDER BY game_uid")
-    .bind(target).all()).results || [];
-  const uids = new Set(characters.map((row) => String(row.gameUid)));
-  const notedCopies = async (ids) => {
-    if (!ids.length) return 0;
-    const { results } = await env.DB.prepare(`SELECT players_json AS p FROM leaderboard_submissions WHERE submission_id IN (${ids.map(() => "?").join(", ")})`).bind(...ids).all();
-    return (results || []).filter((row) => (parseJsonColumn(row.p) || []).some((slot) => slot?.noted === true && uids.has(String(slot.uid)))).length;
-  };
-  try {
-    if (undo) {
-      const held = await env.DB.prepare("SELECT added_by AS addedBy FROM interlink_presence WHERE discord_id = ? AND instance_id = ?").bind(target, instanceId).first();
-      if (!held) return json({ ok: true, undone: false, seat, copies: 0 });
-      if (!held.addedBy) return json({ error: "That seat was linked by the player's own app, not by hand." }, 409);
-      const before = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
-      const had = await notedCopies(before);
-      await env.DB.prepare("DELETE FROM interlink_presence WHERE discord_id = ? AND instance_id = ?").bind(target, instanceId).run();
-      const ids = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
-      return json({ ok: true, undone: true, seat, copies: had - await notedCopies(ids) });
-    }
-    if (!characters.length) return json({ error: "That account has no linked character." }, 409);
-    const players = parseJsonColumn(run.playersJson) || [];
-    const at = cardSeats(players, extra.lineup).indexOf(seat);
-    if (at < 0) return json({ error: "This run has no card at that seat." }, 409);
-    const card = players[at];
-    if (card?.uid && !uids.has(String(card.uid))) return json({ error: "That seat is already linked to another account." }, 409);
-    const fitting = characters.filter((row) => (card?.uid ? String(card.uid) === String(row.gameUid)
-      : typeof row.name === "string" && row.name && presenceAlike(card, [row.name])));
-    const force = body.force === true;
-    const chosen = fitting.length === 1 ? fitting[0] : !fitting.length && force && characters.length === 1 ? characters[0] : null;
-    if (!chosen) {
-      return json({ error: fitting.length > 1 ? "Several of that account's characters fit that seat."
-        : force ? "That account has several characters and none fits that seat."
-          : "The card at that seat isn't one of that account's characters (force: true links it anyway)." }, 409);
-    }
-    const now = Math.floor(Date.now() / 1000);
-    await env.DB.prepare(
-      `INSERT INTO interlink_presence (discord_id, instance_id, game_uid, cycle, boss_id, slot, name, added_by, forced, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (discord_id, instance_id) DO UPDATE SET game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
-         slot = excluded.slot, name = excluded.name, added_by = excluded.added_by, forced = excluded.forced, updated_at = excluded.updated_at`,
-    ).bind(target, instanceId, String(chosen.gameUid), run.cycle, run.bossId, seat - 1, chosen.name || null, account.discordId,
-      force && !fitting.length ? 1 : 0, now, now).run();
-    const ids = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
-    return json({ ok: true, seat, copies: await notedCopies(ids) });
-  } catch (error) {
-    if (/no such table/iu.test(String(error?.message || error))) return json({ error: "Seat links need migration 0038." }, 503);
-    throw error;
-  }
-}
-
-// Staff (logs.read: administrators and the owner, as /api/admin/run-seat): correct a player's name the app misread on a
-// stored Interlink run (a 0 read as O). The card at that seat (1P-4P, cardSeats) and the same seat's Party entry
-// (extra.lineup, partyBySeat as lineupBySeat finds it; a run with fewer than four cards: the entry on slot seat - 1) are
-// renamed on the submission and on every copy of the same run (runCopies) whose card at that seat is a look-alike of the
-// old or the new name; a copy with someone else there is left alone (skipped). Then the run is settled again as a new
-// copy settles it (corroborateRun), so team rows and unclaimed lines follow. Only a look-alike correction (the same
-// nameSkeleton as the card's name) is taken unless force is true; forced says it was. The name is checked as a sent
-// player's name is (at most 40 characters, trimmed) and may hold no control or format characters.
-// POST /api/admin/run-card-name { submissionId, seat: 1-4, name, force?, dryRun? }
-//   -> { ok, dryRun, forced, seat, copies, cards, lineups, skipped, updated, settled }
-// copies: the run's copies looked at; cards / lineups: card and Party names renamed (or that would be); skipped: copies
-// left alone; updated: copies written (0 on a dry run); settled: what settling the run changed (corroborateRun's counts;
-// null on a dry run). Counts and seat numbers only: no names, UIDs or ids, in the answer or the log.
-const CARD_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u;
-async function adminRunCardName(request, env) {
-  const account = await leaderboardAccount(request, env);
-  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
-  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
-  let body;
-  try { body = (await readJsonBody(request, 1024)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
-  const submissionId = String(body.submissionId || "");
-  const seat = Number(body.seat);
-  if (!/^[A-Za-z0-9_-]{8,40}$/u.test(submissionId)) return json({ error: "submissionId is invalid." }, 400);
-  if (![1, 2, 3, 4].includes(seat)) return json({ error: "seat must be 1-4." }, 400);
-  const name = typeof body.name === "string" ? boundedText(body.name, 40, CARD_NAME) : undefined;
-  if (!name) return json({ error: "name must be 1-40 characters, without control characters." }, 400);
-  const force = body.force === true;
-  const dryRun = body.dryRun === true;
-  const run = await env.DB.prepare(
-    "SELECT submission_id AS id, kind, players_json AS playersJson, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
-  ).bind(submissionId).first();
-  if (!run || run.kind !== "interlink_run") return json({ error: "No such Interlink run." }, 404);
-  const players = parseJsonColumn(run.playersJson) || [];
-  const extra = parseJsonColumn(run.extraJson) || {};
-  const at = cardSeats(players, extra.lineup).indexOf(seat);
-  if (at < 0) return json({ error: "This run has no card at that seat." }, 409);
-  const oldName = typeof players[at]?.name === "string" && players[at].name.trim() ? players[at].name : null;
-  const alike = Boolean(oldName) && nameSkeleton(oldName) === nameSkeleton(name);
-  if (!alike && !force) return json({ error: "The new name isn't a look-alike of the card's name (force: true sets it anyway)." }, 409);
-  const group = (await runCopies(env, run.id)) || [{ row: run, copy: { id: run.id, players, lineup: Array.isArray(extra.lineup) ? extra.lineup : null } }];
-  const skeletons = new Set([nameSkeleton(name), ...(oldName ? [nameSkeleton(oldName)] : [])]);
-  const looksAlike = (value) => typeof value === "string" && skeletons.has(nameSkeleton(value));
-  const plans = [];
-  let skipped = 0;
-  let lineups = 0;
-  for (const entry of group) {
-    const list = entry.copy.players;
-    const lineup = entry.copy.lineup;
-    const primary = entry.copy.id === run.id;
-    const index = cardSeats(list, lineup).indexOf(seat);
-    const card = index >= 0 ? list[index] : null;
-    if (!card || typeof card !== "object" || (!primary && !looksAlike(card.name))) { skipped += 1; continue; }
-    const nextPlayers = card.name === name ? null : list.map((slot, i) => (i === index ? { ...slot, name, skel: nameSkeleton(name) } : slot));
-    let nextLineup = null;
-    if (Array.isArray(lineup)) {
-      const onSlot = lineup.filter((item) => item && typeof item === "object" && item.slot === seat - 1);
-      const party = list.length === 4 ? partyBySeat(list, lineup)?.[index] || null : onSlot.length === 1 ? onSlot[0] : null;
-      if (party && party.name !== name && (looksAlike(party.name) || (force && primary))) {
-        nextLineup = lineup.map((item) => (item === party ? { ...item, name } : item));
-        lineups += 1;
-      }
-    }
-    if (nextPlayers || nextLineup) plans.push({ entry, nextPlayers, nextLineup });
-  }
-  const cards = plans.filter((plan) => plan.nextPlayers).length;
-  let updated = 0;
-  let settled = null;
-  if (!dryRun) {
-    for (const { entry, nextPlayers, nextLineup } of plans) {
-      const result = await env.DB.prepare(
-        `UPDATE leaderboard_submissions SET players_json = COALESCE(?, players_json),
-           extra_json = CASE WHEN ? IS NULL THEN extra_json ELSE json_set(COALESCE(extra_json, '{}'), '$.lineup', json(?)) END
-         WHERE submission_id = ? AND players_json IS ?`,
-      ).bind(nextPlayers ? JSON.stringify(nextPlayers) : null, nextLineup ? 1 : null, nextLineup ? JSON.stringify(nextLineup) : null,
-        entry.copy.id, entry.row.playersJson).run();
-      if (Number(result?.meta?.changes)) updated += 1;
-    }
-    if (updated) {
-      const { members: _members, ...counts } = await corroborateRun(env, run.id);
-      settled = counts;
-    }
-  }
-  const forced = force && !alike;
-  console.log(`Run card name: seat ${seat}, ${dryRun ? "dry run" : "applied"}${forced ? ", forced" : ""}, copies ${group.length}, cards ${cards}, `
-    + `lineups ${lineups}, skipped ${skipped}, updated ${updated}`);
-  return json({ ok: true, dryRun, forced, seat, copies: group.length, cards, lineups, skipped, updated, settled });
-}
-
+  if (Number.isInteger(note?.slot) && note.slot >= 0 && note.slot <= 3 && (list.length === 4 || note.addedBy)) {
+    const at = cardSeats(list, lineup).indexOf(note.slot + 1);
+    if (at >= 0) return open(list[at]) && (note.forced || presenceAlike(list[at], names)) ? at : -1;
+    if (list.length === 4) return -1;
+  }
+  if (!names.length) return -1;
+  const alike = list.map((_, index) => index).filter((index) => {
+    const card = list[index];
+    return open(card) && typeof card.name === "string" && card.name.trim() && card.unsettled !== true && presenceAlike(card, names);
+  });
+  return alike.length === 1 ? alike[0] : -1;
+}
+// One copy's players with its notes applied (a new list; settledRun's answer for that copy goes in). notes: [{ gameUid,
+// name (the name to give: their character's, else the note's), names, slot, forced, addedBy }]; copyUids: the UIDs of
+// the senders who have a copy of this run (their own copy links them: a note of theirs does nothing). A slot a note gave
+// its UID to is marked `noted` (server-only); when no note gives that UID any more it is taken back, and when a real copy
+// of that sender gives it, the mark goes. A slot holding another UID (another account's, or one the game showed) is
+// never taken. The app's reads (slot.read) are kept as settledRun keeps them, so every pass gives the same answer.
+export function presencePlayers(players, notes, { copyUids = new Set(), lineup = null } = {}) {
+  if (!Array.isArray(players)) return players;
+  const out = players.map((slot) => (slot && typeof slot === "object" ? { ...slot, ...(slot.read ? { read: { ...slot.read } } : {}) } : slot));
+  const active = (Array.isArray(notes) ? notes : []).filter((note) => note && note.gameUid && !copyUids.has(String(note.gameUid)))
+    .sort((a, b) => (String(a.gameUid) < String(b.gameUid) ? -1 : String(a.gameUid) > String(b.gameUid) ? 1 : 0));
+  for (const slot of out) {
+    if (!slot || typeof slot !== "object" || slot.noted !== true) continue;
+    if (slot.uid && copyUids.has(String(slot.uid))) { delete slot.noted; continue; }
+    if (!active.some((note) => String(note.gameUid) === String(slot.uid))) { delete slot.uid; delete slot.confirmed; delete slot.noted; }
+  }
+  const setRead = (slot, key, value) => {
+    const read = slot.read && typeof slot.read === "object" ? slot.read : {};
+    const raw = Object.hasOwn(read, key) ? read[key] : (slot[key] ?? null);
+    slot[key] = value;
+    if ((value ?? null) === raw) delete read[key]; else read[key] = raw;
+    if (Object.keys(read).length) slot.read = read; else delete slot.read;
+  };
+  for (const note of active) {
+    const uid = String(note.gameUid);
+    const holder = out.findIndex((slot) => slot && typeof slot === "object" && slot.uid && String(slot.uid) === uid);
+    if (holder >= 0 && out[holder].noted !== true) continue;                  // already theirs by a copy or the game
+    const index = holder >= 0 ? holder : presenceCard(out, note, lineup);
+    if (index < 0) continue;
+    const slot = out[index];
+    if (slot.uid && String(slot.uid) !== uid) continue;                      // another player's UID: never taken
+    if (typeof note.name === "string" && note.name && note.name !== slot.name) {
+      setRead(slot, "name", note.name);
+      slot.skel = nameSkeleton(note.name);
+    }
+    if (slot.ai !== false) setRead(slot, "ai", false);
+    delete slot.unsettled;
+    Object.assign(slot, { uid, confirmed: true, noted: true });
+  }
+  return out;
+}
+// The notes that may apply to a group of copies (runCopies), as a function entry -> its notes: a note on an instance id
+// is for the copies of that instance on its cycle and boss; a note staff added to a run without one ("run:<id>") is for
+// the whole group that copy is in. Null when there are none, or the table isn't there yet (before migration 0038).
+async function presenceNotesFor(env, group) {
+  const keys = new Set();
+  for (const entry of group) {
+    if (entry.instanceId) keys.add(entry.instanceId);
+    keys.add(`run:${entry.copy.id}`);
+    if (entry.sharedRun) keys.add(`run:${entry.sharedRun}`);
+  }
+  const list = [...keys].slice(0, 90);
+  let results;
+  try {
+    ({ results } = await env.DB.prepare(
+      `SELECT p.instance_id AS instanceId, p.game_uid AS gameUid, p.cycle, p.boss_id AS bossId, p.slot, p.name, p.added_by AS addedBy,
+         p.forced, c.character_name AS characterName
+       FROM interlink_presence p LEFT JOIN game_characters c ON c.game_uid = p.game_uid
+       WHERE p.instance_id IN (${list.map(() => "?").join(", ")}) ORDER BY p.discord_id`,
+    ).bind(...list).all());
+  } catch (error) {
+    if (/no such table/iu.test(String(error?.message || error))) return null;
+    throw error;
+  }
+  if (!results?.length) return null;
+  const notes = results.map((row) => ({
+    instanceId: row.instanceId, cycle: row.cycle ?? null, bossId: row.bossId ?? null, gameUid: String(row.gameUid),
+    slot: Number.isInteger(row.slot) ? row.slot : null, forced: Boolean(row.forced), addedBy: row.addedBy || null,
+    name: row.characterName || row.name || null, names: [row.characterName, row.name].filter((name) => typeof name === "string" && name),
+  }));
+  const groupKeys = new Set(group.flatMap((entry) => [`run:${entry.copy.id}`, ...(entry.sharedRun ? [`run:${entry.sharedRun}`] : [])]));
+  return (entry) => notes.filter((note) => (note.instanceId.startsWith("run:") ? groupKeys.has(note.instanceId)
+    : note.instanceId === entry.instanceId && (note.cycle == null || String(note.cycle) === String(entry.cycle))
+      && (note.bossId == null || String(note.bossId) === String(entry.bossId))));
+}
+// Settles every stored copy a note may concern: the copies of its instance (or its run), group by group. -> the ids.
+async function settleNoteCopies(env, instanceId, cycle, bossId) {
+  const { results } = instanceId.startsWith("run:")
+    ? await env.DB.prepare(
+      "SELECT submission_id AS id FROM leaderboard_submissions WHERE kind = 'interlink_run' AND (submission_id = ? OR json_extract(extra_json, '$.sharedRun') = ?) ORDER BY submission_id LIMIT 40",
+    ).bind(instanceId.slice(4), instanceId.slice(4)).all()
+    : await env.DB.prepare(
+      `SELECT submission_id AS id FROM leaderboard_submissions WHERE kind = 'interlink_run' AND json_extract(extra_json, '$.instanceId') = ?
+         AND (? IS NULL OR cycle = ?) AND (? IS NULL OR boss_id = ?) ORDER BY submission_id LIMIT 40`,
+    ).bind(instanceId, cycle, cycle, bossId, bossId).all();
+  const done = new Set();
+  for (const { id } of results || []) {
+    if (done.has(id)) continue;
+    const { members = [] } = await corroborateRun(env, id);
+    for (const member of [id, ...members]) done.add(member);
+  }
+  return [...done];
+}
+// The note sent by the app: POST /api/leaderboard/submissions, kind interlink_presence, with the run's own fields
+// (clientRunId, gameUid, server, cycle, boss { id, name, level }, playedAt, clientVersion) and extra { instanceId
+// (required), slot? 0-3, name?, game? }. Never a record. Answer: 201 { ok: true }, never anything about other players.
+async function submitPresenceNote(env, account, body) {
+  const extra = body.extra && typeof body.extra === "object" && !Array.isArray(body.extra) ? body.extra : {};
+  const boss = body.boss && typeof body.boss === "object" && !Array.isArray(body.boss) ? body.boss : {};
+  const note = {
+    clientRunId: boundedText(body.clientRunId, 120, /^[A-Za-z0-9_.:-]+$/u),
+    gameUid: boundedText(body.gameUid, 24, /^\d+$/u),
+    server: boundedText(body.server, 40),
+    cycle: boundedText(body.cycle, 24, /^[A-Za-z0-9_.-]+$/u),
+    bossId: boundedText(boss.id ?? body.bossId, 24, /^[A-Za-z0-9_-]+$/u),
+    bossName: boundedText(boss.name ?? body.bossName, 80),
+    bossLevel: boundedInteger(boss.level ?? body.bossLevel, 1, 200),
+    playedAt: boundedInteger(body.playedAt, 1.5e9, 4e9),
+    clientVersion: boundedText(body.clientVersion, 40),
+    instanceId: boundedText(extra.instanceId, 120, /^(?!run:)[\x21-\x7e]+$/u),
+    slot: extra.slot == null ? null : Number.isInteger(extra.slot) && extra.slot >= 0 && extra.slot <= 3 ? extra.slot : undefined,
+    name: boundedText(extra.name, 40),
+  };
+  const bad = Object.entries(note).find(([, field]) => field === undefined);
+  if (bad) return json({ error: `Field ${bad[0]} is invalid.` }, 400);
+  if (!note.instanceId) return json({ error: "extra.instanceId is required." }, 400);
+  if (!note.gameUid) return json({ error: "gameUid is required." }, 400);
+  const game = extra.game && typeof extra.game === "object" && !Array.isArray(extra.game) ? extra.game : null;
+  if (note.cycle != null) {
+    const week = interlinkCycle(await interlinkCycles(env), note.cycle);
+    if (week && note.bossId != null) {
+      const middle = interlinkSecondMiddle(week, note.bossId);
+      if (middle) note.bossId = middle.id;
+      const listed = week.bosses.find((item) => String(item.id) === String(note.bossId));
+      if (!listed) return json({ error: "That boss isn't one of this week's Interlink bosses." }, 400);
+      note.bossName = listed.name;
+    }
+  }
+  const owner = await env.DB.prepare("SELECT discord_id AS discordId FROM game_characters WHERE game_uid = ? LIMIT 1").bind(note.gameUid).first();
+  if (owner && owner.discordId !== account.discordId) return json({ error: "This character is linked to another account." }, 409);
+  const now = Math.floor(Date.now() / 1000);
+  const existing = await env.DB.prepare("SELECT 1 AS found FROM interlink_presence WHERE discord_id = ? AND instance_id = ?")
+    .bind(account.discordId, note.instanceId).first();
+  if (!existing) {                                            // the records' daily limit, notes and records together
+    const limit = Math.max(1, Number.parseInt(env.DAILY_RUN_LIMIT || "300", 10) || 300);
+    const since = Math.floor(Date.now() / 86400000) * 86400;
+    const records = await env.DB.prepare("SELECT COUNT(*) AS sent FROM leaderboard_submissions WHERE discord_id = ? AND created_at >= ?").bind(account.discordId, since).first();
+    const notes = await env.DB.prepare("SELECT COUNT(*) AS sent FROM interlink_presence WHERE discord_id = ? AND created_at >= ?").bind(account.discordId, since).first();
+    if (Number(records?.sent || 0) + Number(notes?.sent || 0) >= limit) return json({ error: `At most ${limit} records a day; try again after 00:00 UTC.` }, 429);
+  }
+  await env.DB.prepare(
+    `INSERT INTO interlink_presence (discord_id, instance_id, game_uid, client_run_id, server, cycle, boss_id, boss_name, boss_level, played_at,
+       client_version, slot, name, extra_json, added_by, forced, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)
+     ON CONFLICT (discord_id, instance_id) DO UPDATE SET game_uid = excluded.game_uid, client_run_id = excluded.client_run_id,
+       server = excluded.server, cycle = excluded.cycle, boss_id = excluded.boss_id, boss_name = excluded.boss_name, boss_level = excluded.boss_level,
+       played_at = excluded.played_at, client_version = excluded.client_version, slot = excluded.slot, name = excluded.name,
+       extra_json = excluded.extra_json, added_by = NULL, forced = 0, updated_at = excluded.updated_at`,
+  ).bind(account.discordId, note.instanceId, note.gameUid, note.clientRunId, note.server, note.cycle, note.bossId, note.bossName, note.bossLevel,
+    note.playedAt, note.clientVersion, note.slot, note.name, game ? JSON.stringify({ game }).slice(0, 4000) : null, now, now).run();
+  await settleNoteCopies(env, note.instanceId, note.cycle, note.bossId).catch((error) => { console.error("Applying a presence note failed", error); });
+  return json({ ok: true }, 201);
+}
+// Staff (logs.read: administrators and the owner, as the run-check decisions): link one seat of a run to an account by
+// hand (a note marked as added by them, applied at once), or take it back.
+// POST /api/admin/run-seat { submissionId, seat: 1-4, profileId | "me", force? } -> { ok, seat, copies } (copies: how many
+// copies of the run now carry the account's UID by a note); { ..., undo: true } or DELETE -> { ok, undone, seat, copies }
+// (copies: how many the UID was taken off). No names in either.
+async function adminRunSeat(request, env, method) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try { body = (await readJsonBody(request, 1024)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
+  const submissionId = String(body.submissionId || "");
+  const seat = Number(body.seat);
+  const undo = method === "DELETE" || body.undo === true;
+  if (!/^[A-Za-z0-9_-]{8,40}$/u.test(submissionId)) return json({ error: "submissionId is invalid." }, 400);
+  if (![1, 2, 3, 4].includes(seat)) return json({ error: "seat must be 1-4." }, 400);
+  const profileId = String(body.profileId || "");
+  let target = null;
+  if (profileId === "me") target = account.discordId;
+  else if (/^[A-Za-z0-9_-]{1,64}$/u.test(profileId)) {
+    target = (await env.DB.prepare("SELECT discord_id AS discordId FROM profiles WHERE public_id = ?").bind(profileId).first())?.discordId || null;
+  }
+  if (!target) return json({ error: "No such profile." }, 404);
+  const run = await env.DB.prepare(
+    "SELECT submission_id AS id, kind, cycle, boss_id AS bossId, players_json AS playersJson, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!run || run.kind !== "interlink_run") return json({ error: "No such Interlink run." }, 404);
+  const extra = parseJsonColumn(run.extraJson) || {};
+  const instanceId = typeof extra.instanceId === "string" && extra.instanceId ? extra.instanceId
+    : `run:${typeof extra.sharedRun === "string" ? extra.sharedRun : run.id}`;
+  const characters = (await env.DB.prepare("SELECT game_uid AS gameUid, character_name AS name FROM game_characters WHERE discord_id = ? ORDER BY game_uid")
+    .bind(target).all()).results || [];
+  const uids = new Set(characters.map((row) => String(row.gameUid)));
+  const notedCopies = async (ids) => {
+    if (!ids.length) return 0;
+    const { results } = await env.DB.prepare(`SELECT players_json AS p FROM leaderboard_submissions WHERE submission_id IN (${ids.map(() => "?").join(", ")})`).bind(...ids).all();
+    return (results || []).filter((row) => (parseJsonColumn(row.p) || []).some((slot) => slot?.noted === true && uids.has(String(slot.uid)))).length;
+  };
+  try {
+    if (undo) {
+      const held = await env.DB.prepare("SELECT added_by AS addedBy FROM interlink_presence WHERE discord_id = ? AND instance_id = ?").bind(target, instanceId).first();
+      if (!held) return json({ ok: true, undone: false, seat, copies: 0 });
+      if (!held.addedBy) return json({ error: "That seat was linked by the player's own app, not by hand." }, 409);
+      const before = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
+      const had = await notedCopies(before);
+      await env.DB.prepare("DELETE FROM interlink_presence WHERE discord_id = ? AND instance_id = ?").bind(target, instanceId).run();
+      const ids = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
+      return json({ ok: true, undone: true, seat, copies: had - await notedCopies(ids) });
+    }
+    if (!characters.length) return json({ error: "That account has no linked character." }, 409);
+    const players = parseJsonColumn(run.playersJson) || [];
+    const at = cardSeats(players, extra.lineup).indexOf(seat);
+    if (at < 0) return json({ error: "This run has no card at that seat." }, 409);
+    const card = players[at];
+    if (card?.uid && !uids.has(String(card.uid))) return json({ error: "That seat is already linked to another account." }, 409);
+    const fitting = characters.filter((row) => (card?.uid ? String(card.uid) === String(row.gameUid)
+      : typeof row.name === "string" && row.name && presenceAlike(card, [row.name])));
+    const force = body.force === true;
+    const chosen = fitting.length === 1 ? fitting[0] : !fitting.length && force && characters.length === 1 ? characters[0] : null;
+    if (!chosen) {
+      return json({ error: fitting.length > 1 ? "Several of that account's characters fit that seat."
+        : force ? "That account has several characters and none fits that seat."
+          : "The card at that seat isn't one of that account's characters (force: true links it anyway)." }, 409);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO interlink_presence (discord_id, instance_id, game_uid, cycle, boss_id, slot, name, added_by, forced, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (discord_id, instance_id) DO UPDATE SET game_uid = excluded.game_uid, cycle = excluded.cycle, boss_id = excluded.boss_id,
+         slot = excluded.slot, name = excluded.name, added_by = excluded.added_by, forced = excluded.forced, updated_at = excluded.updated_at`,
+    ).bind(target, instanceId, String(chosen.gameUid), run.cycle, run.bossId, seat - 1, chosen.name || null, account.discordId,
+      force && !fitting.length ? 1 : 0, now, now).run();
+    const ids = await settleNoteCopies(env, instanceId, run.cycle, run.bossId);
+    return json({ ok: true, seat, copies: await notedCopies(ids) });
+  } catch (error) {
+    if (/no such table/iu.test(String(error?.message || error))) return json({ error: "Seat links need migration 0038." }, 503);
+    throw error;
+  }
+}
+
+// Staff (logs.read: administrators and the owner, as /api/admin/run-seat): correct a player's name the app misread on a
+// stored Interlink run (a 0 read as O). The card at that seat (1P-4P, cardSeats) and the same seat's Party entry
+// (extra.lineup, partyBySeat as lineupBySeat finds it; a run with fewer than four cards: the entry on slot seat - 1) are
+// renamed on the submission and on every copy of the same run (runCopies) whose card at that seat is a look-alike of the
+// old or the new name; a copy with someone else there is left alone (skipped). Then the run is settled again as a new
+// copy settles it (corroborateRun), so team rows and unclaimed lines follow. Only a look-alike correction (the same
+// nameSkeleton as the card's name) is taken unless force is true; forced says it was. The name is checked as a sent
+// player's name is (at most 40 characters, trimmed) and may hold no control or format characters.
+// POST /api/admin/run-card-name { submissionId, seat: 1-4, name, force?, dryRun? }
+//   -> { ok, dryRun, forced, seat, copies, cards, lineups, skipped, updated, settled }
+// copies: the run's copies looked at; cards / lineups: card and Party names renamed (or that would be); skipped: copies
+// left alone; updated: copies written (0 on a dry run); settled: what settling the run changed (corroborateRun's counts;
+// null on a dry run). Counts and seat numbers only: no names, UIDs or ids, in the answer or the log.
+const CARD_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u;
+async function adminRunCardName(request, env) {
+  const account = await leaderboardAccount(request, env);
+  if (!can(account, "logs.read")) return json({ error: "Access denied." }, 403);
+  if (!bearerToken(request) && !browserWriteAllowed(request, env)) return json({ error: "Cross-origin request denied." }, 403);
+  let body;
+  try { body = (await readJsonBody(request, 1024)) || {}; } catch (error) { return json({ error: error.message }, error instanceof RangeError ? 413 : 400); }
+  const submissionId = String(body.submissionId || "");
+  const seat = Number(body.seat);
+  if (!/^[A-Za-z0-9_-]{8,40}$/u.test(submissionId)) return json({ error: "submissionId is invalid." }, 400);
+  if (![1, 2, 3, 4].includes(seat)) return json({ error: "seat must be 1-4." }, 400);
+  const name = typeof body.name === "string" ? boundedText(body.name, 40, CARD_NAME) : undefined;
+  if (!name) return json({ error: "name must be 1-40 characters, without control characters." }, 400);
+  const force = body.force === true;
+  const dryRun = body.dryRun === true;
+  const run = await env.DB.prepare(
+    "SELECT submission_id AS id, kind, players_json AS playersJson, extra_json AS extraJson FROM leaderboard_submissions WHERE submission_id = ?",
+  ).bind(submissionId).first();
+  if (!run || run.kind !== "interlink_run") return json({ error: "No such Interlink run." }, 404);
+  const players = parseJsonColumn(run.playersJson) || [];
+  const extra = parseJsonColumn(run.extraJson) || {};
+  const at = cardSeats(players, extra.lineup).indexOf(seat);
+  if (at < 0) return json({ error: "This run has no card at that seat." }, 409);
+  const oldName = typeof players[at]?.name === "string" && players[at].name.trim() ? players[at].name : null;
+  const alike = Boolean(oldName) && nameSkeleton(oldName) === nameSkeleton(name);
+  if (!alike && !force) return json({ error: "The new name isn't a look-alike of the card's name (force: true sets it anyway)." }, 409);
+  const group = (await runCopies(env, run.id)) || [{ row: run, copy: { id: run.id, players, lineup: Array.isArray(extra.lineup) ? extra.lineup : null } }];
+  const skeletons = new Set([nameSkeleton(name), ...(oldName ? [nameSkeleton(oldName)] : [])]);
+  const looksAlike = (value) => typeof value === "string" && skeletons.has(nameSkeleton(value));
+  const plans = [];
+  let skipped = 0;
+  let lineups = 0;
+  for (const entry of group) {
+    const list = entry.copy.players;
+    const lineup = entry.copy.lineup;
+    const primary = entry.copy.id === run.id;
+    const index = cardSeats(list, lineup).indexOf(seat);
+    const card = index >= 0 ? list[index] : null;
+    if (!card || typeof card !== "object" || (!primary && !looksAlike(card.name))) { skipped += 1; continue; }
+    const nextPlayers = card.name === name ? null : list.map((slot, i) => (i === index ? { ...slot, name, skel: nameSkeleton(name) } : slot));
+    let nextLineup = null;
+    if (Array.isArray(lineup)) {
+      const onSlot = lineup.filter((item) => item && typeof item === "object" && item.slot === seat - 1);
+      const party = list.length === 4 ? partyBySeat(list, lineup)?.[index] || null : onSlot.length === 1 ? onSlot[0] : null;
+      if (party && party.name !== name && (looksAlike(party.name) || (force && primary))) {
+        nextLineup = lineup.map((item) => (item === party ? { ...item, name } : item));
+        lineups += 1;
+      }
+    }
+    if (nextPlayers || nextLineup) plans.push({ entry, nextPlayers, nextLineup });
+  }
+  const cards = plans.filter((plan) => plan.nextPlayers).length;
+  let updated = 0;
+  let settled = null;
+  if (!dryRun) {
+    for (const { entry, nextPlayers, nextLineup } of plans) {
+      const result = await env.DB.prepare(
+        `UPDATE leaderboard_submissions SET players_json = COALESCE(?, players_json),
+           extra_json = CASE WHEN ? IS NULL THEN extra_json ELSE json_set(COALESCE(extra_json, '{}'), '$.lineup', json(?)) END
+         WHERE submission_id = ? AND players_json IS ?`,
+      ).bind(nextPlayers ? JSON.stringify(nextPlayers) : null, nextLineup ? 1 : null, nextLineup ? JSON.stringify(nextLineup) : null,
+        entry.copy.id, entry.row.playersJson).run();
+      if (Number(result?.meta?.changes)) updated += 1;
+    }
+    if (updated) {
+      const { members: _members, ...counts } = await corroborateRun(env, run.id);
+      settled = counts;
+    }
+  }
+  const forced = force && !alike;
+  console.log(`Run card name: seat ${seat}, ${dryRun ? "dry run" : "applied"}${forced ? ", forced" : ""}, copies ${group.length}, cards ${cards}, `
+    + `lineups ${lineups}, skipped ${skipped}, updated ${updated}`);
+  return json({ ok: true, dryRun, forced, seat, copies: group.length, cards, lineups, skipped, updated, settled });
+}
+
 // A player's Battle Data card in a run: the same four numbers in two copies of a run are the same player.
 const BATTLE_DATA_FIELDS = Object.freeze(["avgDps", "breakValue", "damageTaken", "heal"]);
 function hasBattleData(player) {
