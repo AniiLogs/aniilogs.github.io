@@ -32,8 +32,8 @@
     "sha256": "cb5dff902e505e5de83d885edfdabcb1a2e5fc84adc24782479d9f897aa4da98"
   },
   "explorer/app-config.js": {
-    "tag": "20261126-build4047363-r97",
-    "sha256": "a88a40ce27e0c9b3c18f6104e817abd27f9b44f739b08408132a8e68f8376003"
+    "tag": "20261126-build4047363-r98",
+    "sha256": "38f4fd9bbd747145b214a3b6688987b274026a68a31889c675eb5e55f9bea5e3"
   },
   "explorer/app.js": {
     "tag": "0.20.52-menus-fit",
