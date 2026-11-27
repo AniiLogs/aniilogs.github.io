@@ -84,8 +84,8 @@
     "sha256": "2c433f87324bfb3b9e9c5a2552bec17267083d81e8f8f133f9e02ec0511df12b"
   },
   "explorer/styles.css": {
-    "tag": "0.21.41-menus-fit",
-    "sha256": "da8a7a3b00051303114ae159204c6d32f97885b328ccc8b9333e3d1063f3c7de"
+    "tag": "0.21.42-model-frame",
+    "sha256": "928d664a8044cbfb087ee3745bf01b497f6bbb22bed5a1adaeff536c05ad4f89"
   },
   "explorer/team-builder.js": {
     "tag": "0.9.15-bugged-note",

@@ -9205,6 +9205,9 @@ body.aniilog-model-mode .catalog-aniilog-record.is-model-view > .catalog-model-v
   height: 100%;
   border: 0;
   background: transparent;
+  /* The viewer page sets no color-scheme; when it differs from this page's (dark), browsers paint a white backing
+     behind a cross-site frame. Matching it keeps the frame see-through, so the page's background shows. */
+  color-scheme: normal;
 }
 
 .catalog-model-loading {
