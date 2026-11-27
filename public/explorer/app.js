@@ -3,6 +3,7 @@ const SITE_CONFIG = window.ANIILOGS_CONFIG || window.ANIIPEDIA_CONFIG || {};
 // View Model: live 3D viewer origin and the released forms/appearances it shows.
 const VIEW_MODEL_ORIGIN = String(SITE_CONFIG.modelViewerOrigin || "").replace(/\/+$/u, "");
 const VIEW_MODEL_CATALOG = window.ANIILOGS_VIEW_MODEL_CATALOG ?? null;
+const VIEW_MODEL_PATH = "/v/stage4/player-3846247/frame-player.html";
 const CONTENT_AVAILABLE = SITE_CONFIG.contentAvailable !== false;
 const CONTENT_BASE_URL = String(SITE_CONFIG.contentBaseUrl || ".").replace(/\/+$/u, "");
 const CONTENT_REVISION = String(SITE_CONFIG.contentRevision || "");
@@ -10750,8 +10751,9 @@ function viewModelAppearanceFor(entry, appearances = viewModelAppearances(entry)
   return appearances.some(([value]) => value === fromArtwork) ? fromArtwork : appearances[0]?.[0] ?? "common";
 }
 
-// The 3D viewer's loading stages, in order, with the percentage each one ends at
-// (from its loading meter; it reports {type: "progress", stage, pct, bytes}).
+// The 3D viewer's loading stages, in order, with the percentage each one ends at, for a viewer that
+// reports {type: "progress", stage, pct, bytes}. The stage 4 viewer sends none, so the loader just loops
+// from "loading" until "shown".
 const VIEW_MODEL_STAGES = [
   ["Downloading model data", 70],
   ["Compiling shaders", 75],
@@ -10784,6 +10786,7 @@ function attachViewModel(record, entry, appearances) {
   host.append(status, loading);
   record.append(host);
   let frame = null;
+  let carryPending = false;
   const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
   let lastProgress = null;
   const resetLoading = () => { lastProgress = null; loader?.loop(); loadingText.textContent = "Loading model"; };
@@ -10805,23 +10808,34 @@ function attachViewModel(record, entry, appearances) {
     const message = event.data;
     if (!frame || event.origin !== VIEW_MODEL_ORIGIN || event.source !== frame.contentWindow || message?.source !== "aniilogs-viewer") return;
     if (message.type === "state") {
+      // The viewer says "ready" once, before its first model; the page is already showing the loader then.
+      if (message.state === "ready") return;
       if (message.state === "loading" && host.dataset.state !== "loading") resetLoading();
       host.dataset.state = message.state;
-      setStatus(message.state === "failed" ? "This model could not be loaded right now." : "");
+      // still: a browser without WebGPU gets the model's picture instead of the 3D view; that is not a failure.
+      setStatus(message.state === "failed" ? "This model could not be loaded right now."
+        : message.state === "shown" && message.still ? "A still picture: the 3D view needs a browser with WebGPU (recent Chrome, Edge, or Safari)." : "");
     } else if (message.type === "progress") {
       showProgress(message);
     } else if (message.type === "options") {
       els.catalogPanel.querySelector(".catalog-model-controls")?.updateViewerOptions?.(message);
+      // The gender and animation picked earlier carry over to the next model when it has them: once per
+      // model, on its first options (a motion change sends options again, first with the motion reset).
+      if (!carryPending) return;
+      carryPending = false;
+      const wantGender = state.aniilogModelGender;
+      if (wantGender && wantGender !== message.gender && (message.genders || []).some((g) => g.value === wantGender)) host.control({ gender: wantGender });
+      const wantMotion = state.aniilogModelMotion;
+      if (wantMotion && wantMotion !== message.motion && (message.motions || []).some((m) => m.value === wantMotion)) host.control({ motion: wantMotion });
     }
   };
   host.start = () => {
     if (frame || !record.isConnected) return;
+    carryPending = true;
     const appearance = viewModelAppearanceFor(entry, appearances);
-    const url = new URL(`${VIEW_MODEL_ORIGIN}/qa/current3634150/source-v21/index.html`);
+    // The stage 4 viewer (released looks only, no sign-in); it picks desktop or phone lighting itself.
+    const url = new URL(`${VIEW_MODEL_ORIGIN}${VIEW_MODEL_PATH}`);
     url.searchParams.set("choice", `${formId}:${appearance}`);
-    url.searchParams.set("mode", "lit");
-    if (state.aniilogModelGender) url.searchParams.set("gender", state.aniilogModelGender);
-    if (state.aniilogModelMotion) url.searchParams.set("motion", state.aniilogModelMotion);
     url.searchParams.set("embed", "1");
     frame = document.createElement("iframe");
     frame.className = "catalog-model-frame";
@@ -10834,10 +10848,6 @@ function attachViewModel(record, entry, appearances) {
     host.dataset.state = "loading";
     window.addEventListener("message", onMessage);
     host.prepend(frame);
-    if (!("gpu" in navigator)) {
-      host.dataset.state = "failed";
-      setStatus("3D models need a browser with WebGPU (recent Chrome, Edge, or Safari).");
-    }
   };
   host.stop = () => {
     window.removeEventListener("message", onMessage);
