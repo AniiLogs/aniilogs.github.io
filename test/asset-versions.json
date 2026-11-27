@@ -96,8 +96,8 @@
     "sha256": "e23ab948bb9b12198bbfc0dd625bcbda85e11c9c6c310d2ff5a0c0e080a80f58"
   },
   "explorer/view-model-catalog.js": {
-    "tag": "0.1.0-build3634150",
-    "sha256": "97ff618b3cbf3f9db8c053dbe854a6e08c13a9be4a88ca6f71562680c4eb8b47"
+    "tag": "0.2.0-build4047363",
+    "sha256": "398f3f11f3eea0569ec361067c4d4b5f47b75e9ea7bffe641b42ef2975cbb658"
   },
   "guides/guides.css": {
     "tag": "0.2.0-linked-guides",
