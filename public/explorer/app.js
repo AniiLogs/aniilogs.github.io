@@ -636,7 +636,7 @@ const state = {
     itemlog: "",
   },
   catalogSort: {
-    aniilog: "aniilog-number",
+    aniilog: "uid",
   },
   catalogIndexScroll: {
     aniilog: 0,
@@ -4653,8 +4653,12 @@ function aniilogElementSearch(query) {
   return "";
 }
 
+// The default: by UID, the game's form id (1001100, 1001200, ...), low to high.
+const ANIILOG_UID_SORT_OPTION = Object.freeze({ id: "uid", label: "UID (low to high)" });
+
 function aniilogSortOptions() {
   return [
+    ANIILOG_UID_SORT_OPTION,
     { id: "aniilog-number", label: "Aniilog number" },
     {
       ...ANIILOG_BASE_STAT_TOTAL_OPTION,
@@ -4669,9 +4673,8 @@ function aniilogSortOptions() {
 }
 
 function aniilogSortOption() {
-  const activeId = state.catalogSort.aniilog || "aniilog-number";
-  return aniilogSortOptions().find((option) => option.id === activeId)
-    || { id: "aniilog-number", label: "Aniilog number" };
+  const activeId = state.catalogSort.aniilog || ANIILOG_UID_SORT_OPTION.id;
+  return aniilogSortOptions().find((option) => option.id === activeId) || ANIILOG_UID_SORT_OPTION;
 }
 
 function aniilogStatValue(entry, sourceLabel) {
@@ -4740,6 +4743,11 @@ function sortAniilogEntries(entries) {
   const sort = aniilogSortOption();
   const sorted = [...entries];
   if (sort.id === "aniilog-number") return sorted.sort(compareAniilogEntries);
+  if (sort.id === ANIILOG_UID_SORT_OPTION.id) {
+    // An entry without a numeric form id goes last, in Aniilog order.
+    const uid = (entry) => (/^\d+$/u.test(String(entry?.form_id ?? "")) ? Number(entry.form_id) : Infinity);
+    return sorted.sort((left, right) => (uid(left) - uid(right)) || compareAniilogEntries(left, right));
+  }
 
   return sorted.sort((left, right) => {
     const leftValue = aniilogSortValue(left, sort);
